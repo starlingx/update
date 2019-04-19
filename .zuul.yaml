@@ -22,6 +22,6 @@
     name: stx-updates-pylint
     parent: openstack-tox-pylint
     required-projects:
-      - openstack/stx-config
-      - openstack/stx-fault
-      - openstack/stx-integ
+      - starlingx/config
+      - starlingx/fault
+      - starlingx/integ
