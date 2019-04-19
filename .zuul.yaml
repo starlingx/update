@@ -31,15 +31,15 @@
     name: stx-updates-pylint
     parent: openstack-tox-pylint
     required-projects:
-      - openstack/stx-config
-      - openstack/stx-fault
-      - openstack/stx-integ
+      - starlingx/config
+      - starlingx/fault
+      - starlingx/integ
 
 - job:
     name: flock-devstack-update
     parent: flock-devstack-base-min
     required-projects:
-      - openstack/stx-integ
+      - starlingx/integ
     vars:
       tox_envlist: functional
       devstack_services:
