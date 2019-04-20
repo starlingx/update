@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# lib/stx-update
+# lib/update
 
 # ``stack.sh`` calls the entry points in this order:
 #
@@ -18,7 +18,7 @@ set -o xtrace
 # Defaults
 # --------
 
-STXUPDATE_REPO=${STXUPDATE_REPO:-${GIT_BASE}/openstack/stx-update.git}
+STXUPDATE_REPO=${STXUPDATE_REPO:-${GIT_BASE}/starlingx/update.git}
 STXUPDATE_DIR=${GITDIR[$STX_UPDATE_NAME]}
 
 STX_PATCH_DIR=$STXUPDATE_DIR/cgcs-patch/

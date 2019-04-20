@@ -6,7 +6,7 @@
 echo_summary "stx-update devstack plugin.sh called: $1/$2"
 
 # check for service enabled
-if is_service_enabled stx-update; then
+if is_service_enabled update; then
     if [[ "$1" == "stack" && "$2" == "install" ]]; then
         # Perform installation of source
         echo_summary "Install stx-update"

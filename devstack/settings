@@ -12,15 +12,15 @@
 # Defaults
 # --------
 
-STX_UPDATE_NAME=stx-update
+STX_UPDATE_NAME=update
 
 ######### Plugin Specific ##########
 enable_service $STX_UPDATE_NAME
 
 # This must not use any variables to work properly in OpenStack's DevStack playbook
-define_plugin stx-update
+define_plugin update
 # This works for Zuul jobs using OpenStack's DevStack roles
-#plugin_requires stx-update stx-xxxx
+#plugin_requires update xxxx
 
 # Initial source of lib script
-source $DEST/stx-update/devstack/lib/stx-update
+source $DEST/update/devstack/lib/update

@@ -47,5 +47,5 @@
         sw-patch: true
         tsconfig: true
       devstack_plugins:
-        stx-integ: https://git.starlingx.io/stx-integ
-        stx-update: https://git.starlingx.io/stx-update
+        # integ: https://opendev.org/starlingx/integ
+        update: https://opendev.org/starlingx/update
