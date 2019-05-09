@@ -54,7 +54,7 @@ apilogfile = "/var/log/patching-api.log"
 
 LOG = logging.getLogger('main_logger')
 auditLOG = logging.getLogger('audit_logger')
-audit_log_msg_prefix = 'User: wrsroot/admin Action: '
+audit_log_msg_prefix = 'User: sysadmin/admin Action: '
 
 detached_signature_file = "signature.v2"
 
