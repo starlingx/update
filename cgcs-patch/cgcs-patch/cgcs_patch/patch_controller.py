@@ -230,9 +230,10 @@ class PatchMessageHello(messages.PatchMessage):
         resp.send(sock)
 
     def send(self, sock):
+        global pc
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(message, (cfg.controller_mcast_group, cfg.controller_port))
+        sock.sendto(message, (pc.controller_address, cfg.controller_port))
 
 
 class PatchMessageHelloAck(messages.PatchMessage):
@@ -254,9 +255,10 @@ class PatchMessageHelloAck(messages.PatchMessage):
         pc.controller_neighbours_lock.release()
 
     def send(self, sock):
+        global pc
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(message, (cfg.controller_mcast_group, cfg.controller_port))
+        sock.sendto(message, (pc.controller_address, cfg.controller_port))
 
 
 class PatchMessageSyncReq(messages.PatchMessage):
@@ -283,10 +285,11 @@ class PatchMessageSyncReq(messages.PatchMessage):
         resp.send(sock)
 
     def send(self, sock):
+        global pc
         LOG.info("sending sync req")
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(message, (cfg.controller_mcast_group, cfg.controller_port))
+        sock.sendto(message, (pc.controller_address, cfg.controller_port))
 
 
 class PatchMessageSyncComplete(messages.PatchMessage):
@@ -309,10 +312,11 @@ class PatchMessageSyncComplete(messages.PatchMessage):
         pc.controller_neighbours_lock.release()
 
     def send(self, sock):
+        global pc
         LOG.info("sending sync complete")
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(message, (cfg.controller_mcast_group, cfg.controller_port))
+        sock.sendto(message, (pc.controller_address, cfg.controller_port))
 
 
 class PatchMessageHelloAgent(messages.PatchMessage):
@@ -328,10 +332,11 @@ class PatchMessageHelloAgent(messages.PatchMessage):
         LOG.error("Should not get here")
 
     def send(self, sock):
+        global pc
         self.encode()
         message = json.dumps(self.message)
         local_hostname = utils.ip_to_versioned_localhost(cfg.agent_mcast_group)
-        sock.sendto(message, (cfg.agent_mcast_group, cfg.agent_port))
+        sock.sendto(message, (pc.agent_address, cfg.agent_port))
         sock.sendto(message, (local_hostname, cfg.agent_port))
 
 
@@ -549,9 +554,10 @@ class PatchMessageDropHostReq(messages.PatchMessage):
         return
 
     def send(self, sock):
+        global pc
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(message, (cfg.controller_mcast_group, cfg.controller_port))
+        sock.sendto(message, (pc.controller_address, cfg.controller_port))
 
 
 class PatchController(PatchService):
@@ -577,6 +583,8 @@ class PatchController(PatchService):
 
         self.sock_out = None
         self.sock_in = None
+        self.controller_address = None
+        self.agent_address = None
         self.patch_op_counter = 1
         self.patch_data = PatchData()
         self.patch_data.load_all()
@@ -605,8 +613,18 @@ class PatchController(PatchService):
         if self.port != cfg.controller_port:
             self.port = cfg.controller_port
 
-        if self.mcast_addr != cfg.controller_mcast_group:
+        # Loopback interface does not support multicast messaging, therefore
+        # revert to using unicast messaging when configured against the
+        # loopback device
+        if cfg.get_mgmt_iface() == constants.LOOPBACK_INTERFACE_NAME:
+            mgmt_ip = cfg.get_mgmt_ip()
+            self.mcast_addr = None
+            self.controller_address = mgmt_ip
+            self.agent_address = mgmt_ip
+        else:
             self.mcast_addr = cfg.controller_mcast_group
+            self.controller_address = cfg.controller_mcast_group
+            self.agent_address = cfg.agent_mcast_group
 
     def socket_lock_acquire(self):
         self.socket_lock.acquire()

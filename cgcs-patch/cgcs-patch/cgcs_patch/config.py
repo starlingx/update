@@ -114,7 +114,6 @@ def get_mgmt_iface():
     try:
         value = str(config.get('platform_conf', 'management_interface'))
 
-        global nodetype
         mgmt_if = value
 
         platform_conf_mtime = os.stat(tsc.PLATFORM_CONF_FILE).st_mtime

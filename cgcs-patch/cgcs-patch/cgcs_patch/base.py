@@ -64,18 +64,19 @@ class PatchService:
         self.sock_out.bind((mgmt_ip, 0))
         self.sock_in.bind(('', self.port))
 
-        # These options are for outgoing multicast messages
-        self.sock_out.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, interface_addr)
-        self.sock_out.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
-        # Since only the controllers are sending to this address,
-        # we want the loopback so the local agent can receive it
-        self.sock_out.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
+        if self.mcast_addr:
+            # These options are for outgoing multicast messages
+            self.sock_out.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, interface_addr)
+            self.sock_out.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
+            # Since only the controllers are sending to this address,
+            # we want the loopback so the local agent can receive it
+            self.sock_out.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
 
-        # Register the multicast group
-        group = socket.inet_pton(socket.AF_INET, self.mcast_addr)
-        mreq = struct.pack('=4s4s', group, interface_addr)
+            # Register the multicast group
+            group = socket.inet_pton(socket.AF_INET, self.mcast_addr)
+            mreq = struct.pack('=4s4s', group, interface_addr)
 
-        self.sock_in.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            self.sock_in.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
         return self.sock_in
 
@@ -106,18 +107,19 @@ class PatchService:
         self.sock_out.bind((mgmt_ip, 0))
         self.sock_in.bind(('', self.port))
 
-        # These options are for outgoing multicast messages
-        mgmt_ifindex = utils.if_nametoindex(cfg.get_mgmt_iface())
-        self.sock_out.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_IF, mgmt_ifindex)
-        self.sock_out.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, 1)
-        # Since only the controllers are sending to this address,
-        # we want the loopback so the local agent can receive it
-        self.sock_out.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_LOOP, 1)
+        if self.mcast_addr:
+            # These options are for outgoing multicast messages
+            mgmt_ifindex = utils.if_nametoindex(cfg.get_mgmt_iface())
+            self.sock_out.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_IF, mgmt_ifindex)
+            self.sock_out.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, 1)
+            # Since only the controllers are sending to this address,
+            # we want the loopback so the local agent can receive it
+            self.sock_out.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_LOOP, 1)
 
-        # Register the multicast group
-        if_index_packed = struct.pack('I', mgmt_ifindex)
-        group = socket.inet_pton(socket.AF_INET6, self.mcast_addr) + if_index_packed
-        self.sock_in.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, group)
+            # Register the multicast group
+            if_index_packed = struct.pack('I', mgmt_ifindex)
+            group = socket.inet_pton(socket.AF_INET6, self.mcast_addr) + if_index_packed
+            self.sock_in.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, group)
 
         return self.sock_in
 
@@ -145,6 +147,10 @@ class PatchService:
         return None
 
     def audit_socket(self):
+        if not self.mcast_addr:
+            # Multicast address not configured, therefore nothing to do
+            return
+
         # Ensure multicast address is still allocated
         cmd = "ip maddr show %s | awk 'BEGIN {ORS=\"\"}; {if ($2 == \"%s\") print $2}'" % \
               (cfg.get_mgmt_iface(), self.mcast_addr)

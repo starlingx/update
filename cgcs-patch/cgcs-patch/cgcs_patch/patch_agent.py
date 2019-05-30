@@ -172,9 +172,10 @@ class PatchMessageHelloAgentAck(messages.PatchMessage):
         LOG.error("Should not get here")
 
     def send(self, sock):
+        global pa
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(message, (cfg.controller_mcast_group, cfg.controller_port))
+        sock.sendto(message, (pa.controller_address, cfg.controller_port))
 
 
 class PatchMessageQueryDetailed(messages.PatchMessage):
@@ -292,6 +293,7 @@ class PatchAgent(PatchService):
         PatchService.__init__(self)
         self.sock_out = None
         self.sock_in = None
+        self.controller_address = None
         self.listener = None
         self.changes = False
         self.installed = {}
@@ -323,8 +325,15 @@ class PatchAgent(PatchService):
         if self.port != cfg.agent_port:
             self.port = cfg.agent_port
 
-        if self.mcast_addr != cfg.agent_mcast_group:
+        # Loopback interface does not support multicast messaging, therefore
+        # revert to using unicast messaging when configured against the
+        # loopback device
+        if cfg.get_mgmt_iface() == constants.LOOPBACK_INTERFACE_NAME:
+            self.mcast_addr = None
+            self.controller_address = cfg.get_mgmt_ip()
+        else:
             self.mcast_addr = cfg.agent_mcast_group
+            self.controller_address = cfg.controller_mcast_group
 
     def setup_tcp_socket(self):
         address_family = utils.get_management_family()
