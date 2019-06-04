@@ -58,7 +58,7 @@ function install_tsconfig {
     setup_dev_lib "tsconfig"
 
     $STX_SUDO install -d -m 755 $STX_BIN_DIR
-    $STX_SUDO install -p -D -m 700 $TSCONFIG_DIR/scripts/tsconfig $STX_BIN_DIR/tsconfig
+    $STX_SUDO install -p -D -m 700 $TSCONFIG_DIR/tsconfig/scripts/tsconfig $STX_BIN_DIR/tsconfig
 }
 
 function install_update {
