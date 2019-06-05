@@ -210,7 +210,7 @@ class PackageVersion(object):
         return "%s%s-%s-%s.%s.rpm" % (prefix, pkgname, self.version, self.release, arch)
 
 
-class BasePackageData:
+class BasePackageData(object):
     """
     Information about the base package data provided by the load
     """
@@ -265,7 +265,7 @@ class BasePackageData:
         return self.pkgs[sw_rel][pkgname][arch]
 
 
-class PatchData:
+class PatchData(object):
     """
     Aggregated patch data
     """
@@ -623,7 +623,7 @@ class PatchData:
         return value
 
 
-class PatchMetadata:
+class PatchMetadata(object):
     """
     Creating metadata for a single patch
     """
@@ -713,7 +713,7 @@ class PatchMetadata:
         write_xml_file(top, fname)
 
 
-class PatchFile:
+class PatchFile(object):
     """
     Patch file
     """

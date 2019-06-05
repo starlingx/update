@@ -42,7 +42,7 @@ def start_polling():
 ###################
 # CLASSES
 ###################
-class PatchAlarmDaemon():
+class PatchAlarmDaemon(object):
     """ Daemon process representation of
         the patch monitoring program
     """

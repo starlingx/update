@@ -6,7 +6,7 @@
 #
 
 
-import posixfile
+import fcntl
 import string
 import time
 
@@ -18,14 +18,14 @@ def get_unique_id(filename, digits=4):
     path = "%s/%s" % (directory, filename)
     try:
         # open for update
-        file = posixfile.open(path, "r+")
-        file.lock("w|", digits)
+        file = open(path, "r+")
+        fcntl.lockf(file, fcntl.LOCK_EX, digits)
         counter = int(file.read(digits)) + 1
     except IOError:
         # create it
         try:
-            file = posixfile.open(path, "w")
-            file.lock("w|", digits)
+            file = open(path, "w")
+            fcntl.lockf(file, fcntl.LOCK_EX, digits)
         except IOError:
             print("creation of file '%s' failed" % path)
             return -1

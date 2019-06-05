@@ -191,7 +191,7 @@ class PatchRecipeCmdFail(PatchRecipeError):
     pass
 
 
-class PatchList:
+class PatchList(object):
     """
     Patch List
     """
@@ -571,7 +571,7 @@ class PatchList:
         print("All patches built.")
 
 
-class PackageData:
+class PackageData(object):
     """
     Package data
     """
@@ -792,7 +792,7 @@ class PackageData:
                     sys.exit(2)
 
 
-class RecipeData:
+class RecipeData(object):
     """
     Recipe data
     """
@@ -912,7 +912,7 @@ class RecipeData:
         return self.prebuilt
 
 
-class PatchRecipeData:
+class PatchRecipeData(object):
     """
     Patch recipe data
     """

@@ -16,7 +16,7 @@ import cgcs_patch.constants as constants
 from cgcs_patch.patch_functions import LOG
 
 
-class PatchService:
+class PatchService(object):
     def __init__(self):
         self.sock_out = None
         self.sock_in = None

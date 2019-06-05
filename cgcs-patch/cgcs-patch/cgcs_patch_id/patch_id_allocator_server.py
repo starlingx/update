@@ -18,7 +18,7 @@ urls = (
 )
 
 
-class get_patch_id:
+class get_patch_id(object):
     def GET(self):
         data = web.input(sw_version=None, prefix="CGCS")
         output = pida.get_patch_id(data.sw_version, data.prefix)
