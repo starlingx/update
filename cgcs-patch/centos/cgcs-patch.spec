@@ -15,6 +15,7 @@ BuildRequires: python2-wheel
 BuildRequires: systemd-units
 BuildRequires: systemd-devel
 Requires: python-devel
+Requires: python-crypto
 Requires: /bin/bash
 
 %description
