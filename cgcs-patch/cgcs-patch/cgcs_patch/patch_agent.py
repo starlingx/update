@@ -993,7 +993,7 @@ class PatchAgent(PatchService):
                                 break
 
                             try:
-                                datachk = json.loads(data)
+                                json.loads(data)
                                 break
                             except ValueError:
                                 # Message is incomplete

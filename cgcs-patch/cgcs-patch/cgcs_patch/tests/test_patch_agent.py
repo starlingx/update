@@ -19,4 +19,5 @@ import cgcs_patch.patch_agent  # noqa: E402
 class CgcsPatchAgentTestCase(testtools.TestCase):
 
     def test_cgcs_patch_agent_instantiate(self):
-        pc = cgcs_patch.patch_agent.PatchAgent()
+        # pylint: disable=unused-variable
+        pc = cgcs_patch.patch_agent.PatchAgent()  # noqa: F841

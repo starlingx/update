@@ -994,8 +994,6 @@ def host_install_async(debug, args):
 
 
 def drop_host(debug, args):
-    force = False
-
     if len(args) != 1:
         print_help()
 

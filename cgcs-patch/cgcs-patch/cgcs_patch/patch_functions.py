@@ -154,7 +154,7 @@ def write_xml_file(top,
 def parse_rpm_filename(filename):
 
     # Drop the extension
-    (basename, ext) = os.path.splitext(os.path.basename(filename))
+    basename = os.path.splitext(os.path.basename(filename))[0]
 
     # RPM name format is:
     # [<epoch>:]<pkgname>-<version>-<release>.<arch>
@@ -244,7 +244,7 @@ class BasePackageData(object):
                 continue
 
             self.pkgs[sw_rel] = {}
-            for root, dirs, files in os.walk("%s/Packages" % reldir):
+            for root, dirs, files in os.walk("%s/Packages" % reldir):  # pylint: disable=unused-variable
                 for name in files:
                     if name.endswith(".rpm"):
                         try:
@@ -612,7 +612,7 @@ class PatchData(object):
         write_xml_file(top, fname)
 
     def gen_groups_xml(self):
-        for ver, rdir in repo_dir.items():
+        for ver in repo_dir:
             self.gen_release_groups_xml(ver)
 
     def query_line(self,

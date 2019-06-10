@@ -743,12 +743,9 @@ class PatchController(PatchService):
                 self.patch_data.metadata[patch_id]["patchstate"] = \
                     self.patch_data.metadata[patch_id]["repostate"]
 
-        any_out_of_date = False
         for ip in self.hosts.keys():
             if not self.hosts[ip].out_of_date:
                 continue
-
-            any_out_of_date = True
 
             for pkg in self.hosts[ip].installed.keys():
                 for patch_id in self.patch_data.content_versions.keys():
@@ -920,8 +917,6 @@ class PatchController(PatchService):
         LOG.info(msg)
         audit_log_info(msg)
 
-        repo_changed = False
-
         for patch in patch_list:
             msg = "Importing patch: %s" % patch
             LOG.info(msg)
@@ -977,8 +972,6 @@ class PatchController(PatchService):
                 LOG.exception(msg)
                 msg_error += msg + "\n"
                 continue
-
-            repo_changed = True
 
             try:
                 thispatch = PatchFile.extract_patch(patch,
@@ -1804,8 +1797,6 @@ class PatchController(PatchService):
             LOG.exception(msg)
             raise PatchFail(msg)
 
-        release = None
-        patch_added = False
         failure = False
         recursive = True
 
@@ -2007,7 +1998,7 @@ class PatchController(PatchService):
         rc = False
 
         self.hosts_lock.acquire()
-        for ip, host in self.hosts.items():
+        for host in self.hosts.values():
             if host.state == constants.PATCH_AGENT_STATE_INSTALLING:
                 rc = True
                 break
@@ -2467,7 +2458,7 @@ class PatchControllerMainThread(threading.Thread):
                                 if data == '':
                                     break
                                 try:
-                                    datachk = json.loads(data)
+                                    json.loads(data)
                                     break
                                 except ValueError:
                                     # Message is incomplete

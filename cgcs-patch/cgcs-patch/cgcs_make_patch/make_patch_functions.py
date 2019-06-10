@@ -471,7 +471,6 @@ class PatchList(object):
                     sys.exit(2)
                 if fix and (rc2 > MINOR_DIFF):
                     new_status = self.get_status()
-                    old_status = prd.get_status()
                     # TODO should we update status
                     prd.set_status(new_status)
                     rc2 = prd.compare(self.patch_data[prd.patch_id])
@@ -897,7 +896,7 @@ class RecipeData(object):
             extra_arg = "--prebuilt"
 
         if os.path.isfile(path):
-            rc = issue_cmd_rc("%s %s %s >> %s/%s.log" % (path, self.name, extra_arg, os.environ['DEST'], os.environ['PREFIX']))
+            issue_cmd_rc("%s %s %s >> %s/%s.log" % (path, self.name, extra_arg, os.environ['DEST'], os.environ['PREFIX']))
 
     def build_patch(self, pf, fatal=True):
         for package in self.packages:
@@ -1265,13 +1264,11 @@ class PatchRecipeData(object):
 
     def _read_rpm_db(self, patch_id):
         release_map = {}
-        rpm_db_dir = "export/patch_data"
         rpm_db = self._get_rpm_db_path(patch_id)
         with open(rpm_db) as f:
             for line in f:
                 words = line.split()
                 if len(words) == 3:
-                    arch = words[0]
                     rpm = words[1]
                     release = words[2]
                     release_map[rpm] = release[1:]
@@ -1933,45 +1930,31 @@ def make_patch():
             print("invalid patch file path: '%s'" % patch)
             make_patch_usage()
 
-    if 'MY_REPO' in os.environ:
-        MY_REPO = os.path.normpath(os.path.join(cwd, os.path.expanduser(os.environ['MY_REPO'])))
-    else:
+    if 'MY_REPO' not in os.environ:
         print("ERROR: environment variable 'MY_REPO' is not defined")
         sys.exit(1)
 
-    if 'MY_WORKSPACE' in os.environ:
-        MY_WORKSPACE = os.path.normpath(os.path.join(cwd, os.path.expanduser(os.environ['MY_WORKSPACE'])))
-    else:
+    if 'MY_WORKSPACE' not in os.environ:
         print("ERROR: environment variable 'MY_REPO' is not defined")
         sys.exit(1)
 
-    if 'PROJECT' in os.environ:
-        PROJECT = os.path.normpath(os.path.join(cwd, os.path.expanduser(os.environ['PROJECT'])))
-    else:
+    if 'PROJECT' not in os.environ:
         print("ERROR: environment variable 'PROJECT' is not defined")
         sys.exit(1)
 
-    if 'SRC_BUILD_ENVIRONMENT' in os.environ:
-        SRC_BUILD_ENVIRONMENT = os.path.normpath(os.path.join(cwd, os.path.expanduser(os.environ['SRC_BUILD_ENVIRONMENT'])))
-    else:
+    if 'SRC_BUILD_ENVIRONMENT' not in os.environ:
         print("ERROR: environment variable 'SRC_BUILD_ENVIRONMENT' is not defined")
         sys.exit(1)
 
-    if 'MY_SRC_RPM_BUILD_DIR' in os.environ:
-        MY_SRC_RPM_BUILD_DIR = os.path.normpath(os.path.join(cwd, os.path.expanduser(os.environ['MY_SRC_RPM_BUILD_DIR'])))
-    else:
+    if 'MY_SRC_RPM_BUILD_DIR' not in os.environ:
         print("ERROR: environment variable 'MY_SRC_RPM_BUILD_DIR' is not defined")
         sys.exit(1)
 
-    if 'MY_BUILD_CFG' in os.environ:
-        MY_BUILD_CFG = os.path.normpath(os.path.join(cwd, os.path.expanduser(os.environ['MY_BUILD_CFG'])))
-    else:
+    if 'MY_BUILD_CFG' not in os.environ:
         print("ERROR: environment variable 'MY_BUILD_CFG' is not defined")
         sys.exit(1)
 
-    if 'MY_BUILD_DIR' in os.environ:
-        MY_BUILD_DIR = os.path.normpath(os.path.join(cwd, os.path.expanduser(os.environ['MY_BUILD_DIR'])))
-    else:
+    if 'MY_BUILD_DIR' not in os.environ:
         print("ERROR: environment variable 'MY_BUILD_DIR' is not defined")
         sys.exit(1)
 

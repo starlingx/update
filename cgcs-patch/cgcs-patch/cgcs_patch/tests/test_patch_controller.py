@@ -20,4 +20,5 @@ class CgcsPatchControllerTestCase(testtools.TestCase):
 
     @mock.patch('six.moves.builtins.open')
     def test_cgcs_patch_controller_instantiate(self, mock_open):
-        pc = cgcs_patch.patch_controller.PatchController()
+        # pylint: disable=unused-variable
+        pc = cgcs_patch.patch_controller.PatchController()  # noqa: F841

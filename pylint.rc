@@ -27,12 +27,11 @@ load-plugins=
 # multiple time (only on the command line, not in the configuration file where
 # it should appear only once).
 # W0603 Using the global statement warning
-# W0612 Unused variable warning
 # W0613 Unused argument warning
 # W0702 bare-except
 # W0703 broad except warning
 # W1201 logging-not-lazy
-disable=C, R, W0603, W0612, W0613, W0702, W0703, W1201
+disable=C, R, W0603, W0613, W0702, W0703, W1201
 
 
 [REPORTS]

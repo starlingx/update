@@ -33,12 +33,12 @@ cert_type_all = [cert_type_dev_str, cert_type_formal_str]
 
 def verify_hash(data_hash, signature_bytes, certificate_list):
     """
-    Checkes that a hash's signature can be validates against an approved
+    Checks that a hash's signature can be validated against an approved
     certificate
     :param data_hash: A hash of the data to be validated
     :param signature_bytes: A pre-generated signature (typically, the hash
                             encrypted with a private key)
-    :param certifcate_list: A list of approved certificates or public keys
+    :param certificate_list: A list of approved certificates or public keys
                             which the signature is validated against
     :return: True if the signature was validated against a certificate
     """
@@ -47,7 +47,7 @@ def verify_hash(data_hash, signature_bytes, certificate_list):
         if verified:
             break
         pub_key = read_RSA_key(cert)
-        x = pub_key.exportKey()
+        pub_key.exportKey()
 
         # PSS is the recommended signature scheme, but some tools (like OpenSSL)
         # use the older v1_5 scheme.  We try to validate against both.
@@ -58,14 +58,14 @@ def verify_hash(data_hash, signature_bytes, certificate_list):
         verifier = PKCS1_PSS.new(pub_key)
         try:
             verified = verifier.verify(data_hash, signature_bytes)  # pylint: disable=not-callable
-        except ValueError as e:
+        except ValueError:
             verified = False
 
         if not verified:
             verifier = PKCS1_v1_5.new(pub_key)
             try:
                 verified = verifier.verify(data_hash, signature_bytes)
-            except ValueError as e:
+            except ValueError:
                 verified = False
 
     return verified
