@@ -4,9 +4,19 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# CGCS Patching Controller setup
+# StarlingX Patching Controller setup
 # chkconfig: 345 20 24
 # description: CGCS Patching Controller init script
+
+### BEGIN INIT INFO
+# Provides:          sw-patch-controller
+# Required-Start:    $syslog
+# Required-Stop:     $syslog
+# Default-Start:     2 3 5
+# Default-Stop:      0 1 6
+# Short-Description: sw-patch-controller
+# Description:       Provides the StarlingX Patch Controller Daemon
+### END INIT INFO
 
 . /usr/bin/tsconfig
 

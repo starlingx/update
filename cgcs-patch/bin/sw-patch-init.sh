@@ -4,9 +4,19 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# CGCS Patching
+# StarlingX Patching
 # chkconfig: 345 20 23
 # description: CGCS Patching init script
+
+### BEGIN INIT INFO
+# Provides:          sw-patch
+# Required-Start:    $syslog
+# Required-Stop:     $syslog
+# Default-Start:     2 3 5
+# Default-Stop:      0 1 6
+# Short-Description: sw-patch
+# Description:       Provides the StarlingX Patching
+### END INIT INFO
 
 NAME=$(basename $0)
 
