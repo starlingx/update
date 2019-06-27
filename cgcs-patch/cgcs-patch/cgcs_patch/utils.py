@@ -1,5 +1,5 @@
 """
-Copyright (c) 2016-2017 Wind River Systems, Inc.
+Copyright (c) 2016-2019 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -9,14 +9,23 @@ from netaddr import IPAddress
 import cgcs_patch.constants as constants
 import socket
 
-import ctypes
-import ctypes.util
+try:
+    # Python3
+    from socket import if_nametoindex as if_nametoindex_func
+except ImportError:
+    # Python2
+    import ctypes
+    import ctypes.util
 
-libc = ctypes.CDLL(ctypes.util.find_library('c'))
+    libc = ctypes.CDLL(ctypes.util.find_library('c'))
+    if_nametoindex_func = libc.if_nametoindex
 
 
 def if_nametoindex(name):
-    return libc.if_nametoindex(name)
+    try:
+        return if_nametoindex_func(name)
+    except Exception:
+        return 0
 
 
 def gethostbyname(hostname):
