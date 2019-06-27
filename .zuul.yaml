@@ -9,8 +9,10 @@
         - flock-devstack-update
         - openstack-tox-linters
         - openstack-tox-pep8
-        - openstack-tox-py27
-        - openstack-tox-py37
+        - tsconfig-tox-py27
+        - tsconfig-tox-py36
+        - patch-tox-py27
+        - patch-tox-py36
         - stx-updates-pylint
     gate:
       jobs:
@@ -19,13 +21,56 @@
         - flock-devstack-update
         - openstack-tox-linters
         - openstack-tox-pep8
-        - openstack-tox-py27
-        - openstack-tox-py37
+        - tsconfig-tox-py27
+        - tsconfig-tox-py36
+        - patch-tox-py27
+        - patch-tox-py36
+        - stx-updates-pylint
     post:
       jobs:
         - publish-stx-api-ref
         - publish-stx-tox
         - publish-stx-releasenotes
+
+- job:
+    name: tsconfig-tox-py27
+    parent: tox
+    files:
+      - tsconfig/tsconfig/*
+    vars:
+      tox_envlist: py27
+      tox_extra_args: -c tsconfig/tsconfig/tox.ini
+
+- job:
+    name: tsconfig-tox-py36
+    parent: tox
+    files:
+      - tsconfig/tsconfig/*
+    vars:
+      tox_envlist: py36
+      tox_extra_args: -c tsconfig/tsconfig/tox.ini
+
+- job:
+    name: patch-tox-py27
+    parent: tox
+    required-projects:
+      - starlingx/config
+    files:
+      - cgcs-patch/cgcs-patch/*
+    vars:
+      tox_envlist: py27
+      tox_extra_args: -c cgcs-patch/cgcs-patch/tox.ini
+
+- job:
+    name: patch-tox-py36
+    parent: tox
+    required-projects:
+      - starlingx/config
+    files:
+      - cgcs-patch/cgcs-patch/*
+    vars:
+      tox_envlist: py36
+      tox_extra_args: -c cgcs-patch/cgcs-patch/tox.ini
 
 - job:
     name: stx-updates-pylint

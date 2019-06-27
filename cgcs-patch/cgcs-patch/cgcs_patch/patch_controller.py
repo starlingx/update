@@ -641,7 +641,7 @@ class PatchController(PatchService):
         cfgfile = open(state_file, 'w')
 
         config.add_section('runtime')
-        config.set('runtime', 'patch_op_counter', self.patch_op_counter)
+        config.set('runtime', 'patch_op_counter', str(self.patch_op_counter))
         config.write(cfgfile)
         cfgfile.close()
 
