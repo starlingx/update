@@ -11,7 +11,7 @@ import testtools
 
 sys.modules['rpm'] = mock.Mock()
 
-import cgcs_patch.patch_functions
+import cgcs_patch.patch_functions  # noqa: E402
 
 
 class CgcsPatchTestCase(testtools.TestCase):

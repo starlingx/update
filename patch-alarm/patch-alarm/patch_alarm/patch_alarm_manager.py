@@ -160,7 +160,7 @@ class PatchAlarmDaemon(object):
                                  severity=fm_constants.FM_ALARM_SEVERITY_CRITICAL,
                                  reason_text='Developer patch certificate is enabled',
                                  probable_cause=fm_constants.ALARM_PROBABLE_CAUSE_65,
-                                 proposed_repair_action='Reinstall system to disable certificate and remove untrusted patches',
+                                 proposed_repair_action='Reinstall system to disable certificate and remove untrusted patches',  # noqa: E501
                                  suppression=False,
                                  service_affecting=False)
 

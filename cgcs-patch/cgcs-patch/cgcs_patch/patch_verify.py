@@ -57,7 +57,7 @@ def verify_hash(data_hash, signature_bytes, certificate_list):
         # OpenSSL
         verifier = PKCS1_PSS.new(pub_key)
         try:
-            verified = verifier.verify(data_hash, signature_bytes)
+            verified = verifier.verify(data_hash, signature_bytes)  # pylint: disable=not-callable
         except ValueError as e:
             verified = False
 

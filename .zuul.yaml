@@ -8,29 +8,59 @@
         - build-openstack-releasenotes
         - flock-devstack-update
         - openstack-tox-linters
-        - openstack-tox-pep8
+        - tsconfig-tox-flake8
+        - tsconfig-tox-pylint
         - tsconfig-tox-py27
         - tsconfig-tox-py36
+        - patch-tox-flake8
+        - patch-tox-pylint
         - patch-tox-py27
         - patch-tox-py36
-        - stx-updates-pylint
+        - patch-alarm-tox-flake8
+        - patch-alarm-tox-pylint
+        - patch-alarm-tox-py27
+        - patch-alarm-tox-py36
     gate:
       jobs:
         - build-openstack-api-ref
         - build-openstack-releasenotes
         - flock-devstack-update
         - openstack-tox-linters
-        - openstack-tox-pep8
+        - tsconfig-tox-flake8
+        - tsconfig-tox-pylint
         - tsconfig-tox-py27
         - tsconfig-tox-py36
+        - patch-tox-flake8
+        - patch-tox-pylint
         - patch-tox-py27
         - patch-tox-py36
-        - stx-updates-pylint
+        - patch-alarm-tox-flake8
+        - patch-alarm-tox-pylint
+        - patch-alarm-tox-py27
+        - patch-alarm-tox-py36
     post:
       jobs:
         - publish-stx-api-ref
         - publish-stx-tox
         - publish-stx-releasenotes
+
+- job:
+    name: tsconfig-tox-flake8
+    parent: tox
+    files:
+      - tsconfig/tsconfig/*
+    vars:
+      tox_envlist: flake8
+      tox_extra_args: -c tsconfig/tsconfig/tox.ini
+
+- job:
+    name: tsconfig-tox-pylint
+    parent: tox
+    files:
+      - tsconfig/tsconfig/*
+    vars:
+      tox_envlist: pylint
+      tox_extra_args: -c tsconfig/tsconfig/tox.ini
 
 - job:
     name: tsconfig-tox-py27
@@ -49,6 +79,28 @@
     vars:
       tox_envlist: py36
       tox_extra_args: -c tsconfig/tsconfig/tox.ini
+
+- job:
+    name: patch-tox-flake8
+    parent: tox
+    required-projects:
+      - starlingx/config
+    files:
+      - cgcs-patch/cgcs-patch/*
+    vars:
+      tox_envlist: flake8
+      tox_extra_args: -c cgcs-patch/cgcs-patch/tox.ini
+
+- job:
+    name: patch-tox-pylint
+    parent: tox
+    required-projects:
+      - starlingx/config
+    files:
+      - cgcs-patch/cgcs-patch/*
+    vars:
+      tox_envlist: pylint
+      tox_extra_args: -c cgcs-patch/cgcs-patch/tox.ini
 
 - job:
     name: patch-tox-py27
@@ -73,12 +125,52 @@
       tox_extra_args: -c cgcs-patch/cgcs-patch/tox.ini
 
 - job:
-    name: stx-updates-pylint
-    parent: openstack-tox-pylint
+    name: patch-alarm-tox-flake8
+    parent: tox
     required-projects:
       - starlingx/config
       - starlingx/fault
-      - starlingx/integ
+    files:
+      - patch-alarm/patch-alarm/*
+    vars:
+      tox_envlist: flake8
+      tox_extra_args: -c patch-alarm/patch-alarm/tox.ini
+
+- job:
+    name: patch-alarm-tox-pylint
+    parent: tox
+    required-projects:
+      - starlingx/config
+      - starlingx/fault
+    files:
+      - patch-alarm/patch-alarm/*
+    vars:
+      tox_envlist: pylint
+      tox_extra_args: -c patch-alarm/patch-alarm/tox.ini
+
+- job:
+    name: patch-alarm-tox-py27
+    parent: tox
+    required-projects:
+      - starlingx/config
+      - starlingx/fault
+    files:
+      - patch-alarm/patch-alarm/*
+    vars:
+      tox_envlist: py27
+      tox_extra_args: -c patch-alarm/patch-alarm/tox.ini
+
+- job:
+    name: patch-alarm-tox-py36
+    parent: tox
+    required-projects:
+      - starlingx/config
+      - starlingx/fault
+    files:
+      - patch-alarm/patch-alarm/*
+    vars:
+      tox_envlist: py36
+      tox_extra_args: -c patch-alarm/patch-alarm/tox.ini
 
 - job:
     name: flock-devstack-update

@@ -13,7 +13,7 @@ sys.modules['rpm'] = mock.Mock()
 sys.modules['rpmUtils'] = mock.Mock()
 sys.modules['rpmUtils.miscutils'] = mock.Mock()
 
-import cgcs_patch.patch_controller
+import cgcs_patch.patch_controller  # noqa: E402
 
 
 class CgcsPatchControllerTestCase(testtools.TestCase):
