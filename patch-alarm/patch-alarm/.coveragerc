@@ -1,0 +1,7 @@
+[run]
+branch = True
+source = patch_alarm
+omit = patch_alarm/tests/*
+
+[report]
+ignore_errors = True
