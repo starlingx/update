@@ -29,6 +29,6 @@ Links
 * Code Review: `Gerrit`_
 * Bugs: `Storyboard`_
 
-.. _stx-update: https://git.starlingx.io/cgit/stx-update/
-.. _Gerrit: https://review.openstack.org/#/q/project:openstack/stx-update
-.. _Storyboard: https://storyboard.openstack.org/#!/project/openstack/stx-update
+.. _stx-update: https://opendev.org/starlingx/update
+.. _Gerrit: https://review.opendev.org/#/q/project:starlingx/update
+.. _Storyboard: https://storyboard.openstack.org/#!/project/starlingx/update
