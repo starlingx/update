@@ -16,6 +16,7 @@ BuildRequires: systemd-units
 BuildRequires: systemd-devel
 Requires: python-devel
 Requires: python-crypto
+Requires: python-smartpm
 Requires: /bin/bash
 
 %description
