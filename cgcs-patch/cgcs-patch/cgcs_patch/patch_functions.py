@@ -83,11 +83,19 @@ def configure_logging(logtofile=True, level=logging.INFO):
         main_log_handler = logging.FileHandler(logfile)
         main_log_handler.setFormatter(formatter)
         LOG.addHandler(main_log_handler)
+        try:
+            os.chmod(logfile, 0o640)
+        except Exception:
+            pass
 
         auditLOG.setLevel(level)
         api_log_handler = logging.FileHandler(apilogfile)
         api_log_handler.setFormatter(formatter)
         auditLOG.addHandler(api_log_handler)
+        try:
+            os.chmod(apilogfile, 0o640)
+        except Exception:
+            pass
 
         # Log uncaught exceptions to file
         sys.excepthook = handle_exception
