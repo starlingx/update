@@ -1,11 +1,11 @@
 ---
 - project:
     templates:
-      - build-openstack-docs-pti
+      - publish-stx-docs
+      - stx-api-ref-jobs
+      - stx-release-notes-jobs
     check:
       jobs:
-        - build-openstack-api-ref
-        - build-openstack-releasenotes
         - flock-devstack-update
         - openstack-tox-linters
         - tsconfig-tox-flake8
@@ -22,8 +22,6 @@
         - patch-alarm-tox-py36
     gate:
       jobs:
-        - build-openstack-api-ref
-        - build-openstack-releasenotes
         - flock-devstack-update
         - openstack-tox-linters
         - tsconfig-tox-flake8
@@ -38,11 +36,6 @@
         - patch-alarm-tox-pylint
         - patch-alarm-tox-py27
         - patch-alarm-tox-py36
-    post:
-      jobs:
-        - publish-stx-api-ref
-        - publish-stx-tox
-        - publish-stx-releasenotes
 
 - job:
     name: tsconfig-tox-flake8
