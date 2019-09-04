@@ -2,8 +2,6 @@
 # If these have dependencies, they will be pulled in automatically
 #
 
-# tsconfig
-tsconfig
 
 # cgcs-patch
 cgcs-patch
