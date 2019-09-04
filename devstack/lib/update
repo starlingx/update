@@ -24,9 +24,6 @@ STXUPDATE_DIR=${GITDIR[$STX_UPDATE_NAME]}
 STX_PATCH_DIR=$STXUPDATE_DIR/cgcs-patch
 GITDIR["sw-patch"]=$STX_PATCH_DIR/cgcs-patch
 
-TSCONFIG_DIR=$STXUPDATE_DIR/tsconfig
-GITDIR["tsconfig"]=$TSCONFIG_DIR/tsconfig
-
 # STX_INST_DIR should be a non-root-writable place to install build artifacts
 STX_INST_DIR=${STX_INST_DIR:-/usr/local}
 STX_BIN_DIR=${STX_BIN_DIR:-$STX_INST_DIR/bin}
@@ -54,19 +51,9 @@ function install_sw_patch {
     $STX_SUDO install -m 500 $STX_PATCH_DIR/bin/sw-patch-agent ${stx_patch_sbindir}/sw-patch-agent
 }
 
-function install_tsconfig {
-    setup_dev_lib "tsconfig"
-
-    $STX_SUDO install -d -m 755 $STX_BIN_DIR
-    $STX_SUDO install -p -D -m 700 $TSCONFIG_DIR/tsconfig/scripts/tsconfig $STX_BIN_DIR/tsconfig
-}
-
 function install_update {
     if is_service_enabled sw-patch; then
         install_sw_patch
-    fi
-    if is_service_enabled tsconfig; then
-        install_tsconfig
     fi
 }
 

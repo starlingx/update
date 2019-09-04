@@ -8,10 +8,6 @@
       jobs:
         - flock-devstack-update
         - openstack-tox-linters
-        - tsconfig-tox-flake8
-        - tsconfig-tox-pylint
-        - tsconfig-tox-py27
-        - tsconfig-tox-py36
         - patch-tox-flake8
         - patch-tox-pylint
         - patch-tox-py27
@@ -24,10 +20,6 @@
       jobs:
         - flock-devstack-update
         - openstack-tox-linters
-        - tsconfig-tox-flake8
-        - tsconfig-tox-pylint
-        - tsconfig-tox-py27
-        - tsconfig-tox-py36
         - patch-tox-flake8
         - patch-tox-pylint
         - patch-tox-py27
@@ -36,42 +28,6 @@
         - patch-alarm-tox-pylint
         - patch-alarm-tox-py27
         - patch-alarm-tox-py36
-
-- job:
-    name: tsconfig-tox-flake8
-    parent: tox
-    files:
-      - tsconfig/tsconfig/*
-    vars:
-      tox_envlist: flake8
-      tox_extra_args: -c tsconfig/tsconfig/tox.ini
-
-- job:
-    name: tsconfig-tox-pylint
-    parent: tox
-    files:
-      - tsconfig/tsconfig/*
-    vars:
-      tox_envlist: pylint
-      tox_extra_args: -c tsconfig/tsconfig/tox.ini
-
-- job:
-    name: tsconfig-tox-py27
-    parent: tox
-    files:
-      - tsconfig/tsconfig/*
-    vars:
-      tox_envlist: py27
-      tox_extra_args: -c tsconfig/tsconfig/tox.ini
-
-- job:
-    name: tsconfig-tox-py36
-    parent: tox
-    files:
-      - tsconfig/tsconfig/*
-    vars:
-      tox_envlist: py36
-      tox_extra_args: -c tsconfig/tsconfig/tox.ini
 
 - job:
     name: patch-tox-flake8
@@ -175,7 +131,6 @@
       devstack_services:
         # StarlingX services
         sw-patch: true
-        tsconfig: true
       devstack_plugins:
         # integ: https://opendev.org/starlingx/integ
         update: https://opendev.org/starlingx/update
