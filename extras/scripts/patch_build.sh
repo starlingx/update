@@ -7,7 +7,7 @@ popd > /dev/null
 CGCSPATCH_DIR=$SCRIPTPATH/../../cgcs-patch
 
 # Source release-info
-. $SCRIPTPATH/../../../stx-integ/utilities/build-info/release-info.inc
+. $SCRIPTPATH/../../../utilities/utilities/build-info/release-info.inc
 export PLATFORM_RELEASE
 
 # Set environment variables for python
