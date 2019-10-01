@@ -34,6 +34,7 @@
     parent: tox
     required-projects:
       - starlingx/config
+      - starlingx/fault
     files:
       - cgcs-patch/cgcs-patch/*
     vars:
@@ -45,6 +46,7 @@
     parent: tox
     required-projects:
       - starlingx/config
+      - starlingx/fault
     files:
       - cgcs-patch/cgcs-patch/*
     vars:
@@ -56,6 +58,7 @@
     parent: tox
     required-projects:
       - starlingx/config
+      - starlingx/fault
     files:
       - cgcs-patch/cgcs-patch/*
     vars:
@@ -67,6 +70,7 @@
     parent: tox
     required-projects:
       - starlingx/config
+      - starlingx/fault
     files:
       - cgcs-patch/cgcs-patch/*
     vars:
