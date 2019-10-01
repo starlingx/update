@@ -42,6 +42,7 @@ patch_dir = constants.PATCH_STORAGE_DIR
 avail_dir = "%s/metadata/available" % patch_dir
 applied_dir = "%s/metadata/applied" % patch_dir
 committed_dir = "%s/metadata/committed" % patch_dir
+semantics_dir = "%s/semantics" % patch_dir
 
 repo_root_dir = "/www/pages/updates"
 repo_dir = {SW_VERSION: "%s/rel-%s" % (repo_root_dir, SW_VERSION)}
@@ -322,11 +323,18 @@ class PatchData(object):
         #           -> patch_id
         self.package_versions = {}
 
+        #
+        # The semantics dict stores the lists of semantic actions provided by each patch,
+        # indexed by patch_id.
+        #
+        self.semantics = {}
+
     def add_patch(self, patch_id, new_patch):
         # We can just use "update" on these dicts because they are indexed by patch_id
         self.metadata.update(new_patch.metadata)
         self.contents.update(new_patch.contents)
         self.content_versions.update(new_patch.content_versions)
+        self.semantics.update(new_patch.semantics)
 
         # Need to recursively update package_version and keys dicts
         for patch_sw_version in new_patch.package_versions.keys():
@@ -381,6 +389,7 @@ class PatchData(object):
 
         del self.content_versions[patch_id]
         del self.contents[patch_id]
+        del self.semantics[patch_id]
         del self.metadata[patch_id]
 
     @staticmethod
@@ -539,6 +548,11 @@ class PatchData(object):
 
                 self.package_versions[patch_sw_version][pkgname][arch][pkgver] = patch_id
 
+        self.semantics[patch_id] = list()
+        for semantics in root.findall("semantics"):
+            for action in semantics.findall("action"):
+                self.semantics[patch_id].append(action.text)
+
         return patch_id
 
     def find_patch_with_pkgver(self, sw_ver, pkgname, arch, pkgver):
@@ -648,6 +662,7 @@ class PatchMetadata(object):
         self.requires = []
         self.groups = {}
         self.contents = {}
+        self.semantics = []
 
     def add_package(self,
                     groupname,
@@ -672,6 +687,15 @@ class PatchMetadata(object):
         """
         rpmname = os.path.basename(fname)
         self.contents[rpmname] = True
+
+    def add_semantic(self,
+                     action):
+        """
+        Add a semantic check to the patch
+        :param action: semantic action
+        :return:
+        """
+        self.semantics.append(action)
 
     def gen_xml(self,
                 fname="metadata.xml"):
@@ -718,6 +742,10 @@ class PatchMetadata(object):
         for req_patch in sorted(self.requires):
             add_text_tag_to_xml(req, 'req_patch_id', req_patch)
 
+        semantics = ElementTree.SubElement(top, 'semantics')
+        for action in sorted(self.semantics):
+            add_text_tag_to_xml(semantics, 'action', action)
+
         write_xml_file(top, fname)
 
 
@@ -728,6 +756,7 @@ class PatchFile(object):
     def __init__(self):
         self.meta = PatchMetadata()
         self.rpmlist = {}
+        self.semantics = {}
 
     def add_rpm(self,
                 fname,
@@ -760,6 +789,20 @@ class PatchFile(object):
                     self.meta.add_package(p, pkgname)
             elif isinstance(personality, str):
                 self.meta.add_package(personality, pkgname)
+
+    def add_semantic(self,
+                     action,
+                     fname):
+        """
+        Add a semantic check to the patch
+        :param action: Semantic check type
+        :param fname: Path to semantic check
+        :return:
+        """
+        # Add the semantic to the metadata
+        self.meta.add_semantic(action)
+
+        self.semantics[action] = os.path.abspath(fname)
 
     def gen_patch(self,
                   outdir=os.getcwd()):
@@ -804,6 +847,16 @@ class PatchFile(object):
             tar.add(os.path.basename(rpmfile))
         tar.close()
 
+        # Copy semantics to tmpdir, if any
+        if len(self.semantics) > 0:
+            tar = tarfile.open("semantics.tar", "w")
+            for action in self.semantics.keys():
+                os.mkdir(action, 0o755)
+                sname = os.path.join(action, self.meta.id)
+                shutil.copy(self.semantics[action], sname)
+                tar.add(sname)
+            tar.close()
+
         # Generate the metadata xml file
         self.meta.gen_xml("metadata.xml")
 
@@ -826,11 +879,15 @@ class PatchFile(object):
         tar.add("metadata.xml")
         tar.close()
 
+        filelist = ["metadata.tar", "software.tar"]
+        if os.path.exists("semantics.tar"):
+            filelist.append("semantics.tar")
+
         # Generate the signature file
-        md_md5 = get_md5("metadata.tar")
-        sw_md5 = get_md5("software.tar")
-        ff = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-        sig = (md_md5 ^ sw_md5) ^ ff
+        sig = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+        for f in filelist:
+            sig ^= get_md5(f)
+
         sigfile = open("signature", "w")
         sigfile.write("%x" % sig)
         sigfile.close()
@@ -841,14 +898,14 @@ class PatchFile(object):
         #    is not found, we'll instead sign with the 'dev' key and
         #    need_resign_with_formal is set to True.
         need_resign_with_formal = sign_files(
-            ['metadata.tar', 'software.tar'],
+            filelist,
             detached_signature_file,
             cert_type=cert_type)
 
         # Create the patch
         tar = tarfile.open(patchfile, "w:gz")
-        tar.add("metadata.tar")
-        tar.add("software.tar")
+        for f in filelist:
+            tar.add(f)
         tar.add("signature")
         tar.add(detached_signature_file)
         tar.close()
@@ -871,12 +928,17 @@ class PatchFile(object):
     def read_patch(path, metadata_only=False, cert_type=None):
         # We want to enable signature checking by default
         # Note: cert_type=None is required if we are to enforce 'no dev patches on a formal load' rule.
-        verify_signature = True
 
         # Open the patch file and extract the contents to the current dir
         tar = tarfile.open(path, "r:gz")
-        tar.extract("metadata.tar")
-        tar.extract("software.tar")
+
+        filelist = ["metadata.tar", "software.tar"]
+        if "semantics.tar" in [f.name for f in tar.getmembers()]:
+            filelist.append("semantics.tar")
+
+        for f in filelist:
+            tar.extract(f)
+
         tar.extract("signature")
         try:
             tar.extract(detached_signature_file)
@@ -889,50 +951,35 @@ class PatchFile(object):
         sig = int(sigfile.read(), 16)
         sigfile.close()
 
-        md_md5 = get_md5("metadata.tar")
-        sw_md5 = get_md5("software.tar")
-        ff = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-        expected_sig = (md_md5 ^ sw_md5) ^ ff
+        expected_sig = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+        for f in filelist:
+            sig ^= get_md5(f)
 
         if sig != expected_sig:
             msg = "Patch failed verification"
             LOG.error(msg)
             raise PatchValidationFailure(msg)
 
-        # Lookahead into metadata to get patch sw_version -- if older than
-        # 18.03, don't do the check
-        tar = tarfile.open("metadata.tar")
-        tar.extractall()
-        xml_root = ElementTree.parse('metadata.xml').getroot()
-        sw_version = xml_root.find('sw_version')
-        if str(sw_version) == '17.06':
-            verify_signature = False
-
-        # Clean up lookahead
-        os.unlink('metadata.xml')
-
-        if verify_signature:
-            # If there should be a detached signature, verify it
-            if os.path.exists(detached_signature_file):
-                filenames = ["metadata.tar", "software.tar"]
-                sig_valid = verify_files(
-                    filenames,
-                    detached_signature_file,
-                    cert_type=cert_type)
-                if sig_valid is True:
-                    msg = "Signature verified, patch has been signed"
-                    if cert_type is None:
-                        LOG.info(msg)
-                else:
-                    msg = "Signature check failed"
-                    if cert_type is None:
-                        LOG.error(msg)
-                    raise PatchValidationFailure(msg)
+        # Verify detached signature
+        if os.path.exists(detached_signature_file):
+            sig_valid = verify_files(
+                filelist,
+                detached_signature_file,
+                cert_type=cert_type)
+            if sig_valid is True:
+                msg = "Signature verified, patch has been signed"
+                if cert_type is None:
+                    LOG.info(msg)
             else:
-                msg = "Patch has not been signed"
+                msg = "Signature check failed"
                 if cert_type is None:
                     LOG.error(msg)
                 raise PatchValidationFailure(msg)
+        else:
+            msg = "Patch has not been signed"
+            if cert_type is None:
+                LOG.error(msg)
+            raise PatchValidationFailure(msg)
 
         tar = tarfile.open("metadata.tar")
         tar.extractall()
@@ -940,6 +987,10 @@ class PatchFile(object):
         if not metadata_only:
             tar = tarfile.open("software.tar")
             tar.extractall()
+
+            if os.path.exists("semantics.tar"):
+                tar = tarfile.open("semantics.tar")
+                tar.extractall()
 
     @staticmethod
     def query_patch(patch, field=None):
@@ -1151,6 +1202,19 @@ class PatchFile(object):
                     if not os.path.exists(rpm_dir):
                         os.makedirs(rpm_dir)
                     shutil.move(rpmname, "%s/" % rpm_dir)
+
+                for action in constants.SEMANTIC_ACTIONS:
+                    action_file = os.path.join(action, patch_id)
+                    if not os.path.exists(action_file):
+                        continue
+
+                    action_dir = os.path.join(semantics_dir, action)
+                    if not os.path.exists(action_dir):
+                        os.makedirs(action_dir)
+
+                    os.chmod(action_file, 0o544)
+                    shutil.move(action_file, action_dir)
+
         except PatchValidationFailure as e:
             raise e
         except PatchMismatchFailure as e:
@@ -1201,7 +1265,9 @@ def patch_build():
                                          'worker=',
                                          'worker-lowlatency=',
                                          'storage=',
-                                         'all-nodes='])
+                                         'all-nodes=',
+                                         'pre-apply=',
+                                         'pre-remove='])
     except getopt.GetoptError:
         print("Usage: %s [ <args> ] ... <rpm list>"
               % os.path.basename(sys.argv[0]))
@@ -1269,6 +1335,10 @@ def patch_build():
                      "--controller-worker",
                      "--controller-worker-lowlatency"):
             pf.add_rpm(arg, personality=opt[2:])
+        elif opt == "--pre-apply":
+            pf.add_semantic(constants.SEMANTIC_PREAPPLY, arg)
+        elif opt == "--pre-remove":
+            pf.add_semantic(constants.SEMANTIC_PREREMOVE, arg)
 
     if pf.meta.id is None:
         print("The --id argument is mandatory.")

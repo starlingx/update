@@ -27,6 +27,11 @@ class RpmFail(PatchError):
     pass
 
 
+class SemanticFail(PatchError):
+    """Semantic check error."""
+    pass
+
+
 class RepoFail(PatchError):
     """Repo error."""
     pass

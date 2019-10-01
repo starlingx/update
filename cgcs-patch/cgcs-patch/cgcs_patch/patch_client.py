@@ -432,9 +432,24 @@ def patch_apply_req(debug, args):
     # Ignore interrupts during this function
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
-    patches = "/".join(args)
+    extra_opts = []
 
-    url = "http://%s/patch/apply/%s" % (api_addr, patches)
+    if "--skip-semantic" in args:
+        idx = args.index("--skip-semantic")
+
+        # Get rid of the --skip-semantic
+        args.pop(idx)
+
+        # Append the extra opts
+        extra_opts.append("skip-semantic=yes")
+
+    if len(extra_opts) == 0:
+        extra_opts_str = ''
+    else:
+        extra_opts_str = '?%s' % '&'.join(extra_opts)
+
+    patches = "/".join(args)
+    url = "http://%s/patch/apply/%s%s" % (api_addr, patches, extra_opts_str)
 
     headers = {}
     append_auth_token_if_required(headers)
@@ -477,6 +492,15 @@ def patch_remove_req(debug, args):
 
         # Append the extra opts
         extra_opts.append("skipappcheck=yes")
+
+    if "--skip-semantic" in args:
+        idx = args.index("--skip-semantic")
+
+        # Get rid of the --skip-semantic
+        args.pop(idx)
+
+        # Append the extra opts
+        extra_opts.append("skip-semantic=yes")
 
     if len(extra_opts) == 0:
         extra_opts_str = ''

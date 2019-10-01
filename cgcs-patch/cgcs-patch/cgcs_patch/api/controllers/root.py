@@ -46,12 +46,12 @@ class PatchAPIController(object):
 
     @expose('json')
     @expose('query.xml', content_type='application/xml')
-    def apply(self, *args):
+    def apply(self, *args, **kwargs):
         if pc.any_patch_host_installing():
             return dict(error="Rejected: One or more nodes are installing patches.")
 
         try:
-            result = pc.patch_apply_api(list(args))
+            result = pc.patch_apply_api(list(args), **kwargs)
         except PatchError as e:
             return dict(error="Error: %s" % e.message)
 

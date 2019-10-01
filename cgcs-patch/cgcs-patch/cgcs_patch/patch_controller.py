@@ -31,10 +31,12 @@ from cgcs_patch.patch_functions import PatchFile
 from cgcs_patch.patch_functions import parse_rpm_filename
 from cgcs_patch.patch_functions import package_dir
 from cgcs_patch.patch_functions import repo_dir
+from cgcs_patch.patch_functions import semantics_dir
 from cgcs_patch.patch_functions import SW_VERSION
 from cgcs_patch.patch_functions import root_package_dir
 from cgcs_patch.exceptions import MetadataFail
 from cgcs_patch.exceptions import RpmFail
+from cgcs_patch.exceptions import SemanticFail
 from cgcs_patch.exceptions import PatchError
 from cgcs_patch.exceptions import PatchFail
 from cgcs_patch.exceptions import PatchInvalidRequest
@@ -54,6 +56,8 @@ from oslo_config import cfg as oslo_cfg
 
 import cgcs_patch.messages as messages
 import cgcs_patch.constants as constants
+
+from tsconfig.tsconfig import INITIAL_CONFIG_COMPLETE_FLAG
 
 CONF = oslo_cfg.CONF
 
@@ -881,6 +885,32 @@ class PatchController(PatchService):
 
         return repo_filename
 
+    def run_semantic_check(self, action, patch_list):
+        if not os.path.exists(INITIAL_CONFIG_COMPLETE_FLAG):
+            # Skip semantic checks if initial configuration isn't complete
+            return
+
+        # Pass the current patch state to the semantic check as a series of args
+        patch_state_args = []
+        for patch_id in self.patch_data.metadata.keys():
+            patch_state = '%s=%s' % (patch_id, self.patch_data.metadata[patch_id]["patchstate"])
+            patch_state_args += ['-p', patch_state]
+
+        # Run semantic checks, if any
+        for patch_id in patch_list:
+            semchk = os.path.join(semantics_dir, action, patch_id)
+
+            if os.path.exists(semchk):
+                try:
+                    LOG.info("Running semantic check: %s" % semchk)
+                    subprocess.check_output([semchk] + patch_state_args,
+                                            stderr=subprocess.STDOUT)
+                    LOG.info("Semantic check %s passed" % semchk)
+                except subprocess.CalledProcessError as e:
+                    msg = "Semantic check failed for %s:\n%s" % (patch_id, e.output)
+                    LOG.exception(msg)
+                    raise PatchFail(msg)
+
     def patch_import_api(self, patches):
         """
         Import patches
@@ -1002,7 +1032,7 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-    def patch_apply_api(self, patch_ids):
+    def patch_apply_api(self, patch_ids, **kwargs):
         """
         Apply patches, moving patches from available to applied and updating repo
         :return:
@@ -1070,6 +1100,9 @@ class PatchController(PatchService):
 
         if not req_verification:
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        if kwargs.get("skip-semantic") != "yes":
+            self.run_semantic_check(constants.SEMANTIC_PREAPPLY, patch_list)
 
         # Start applying the patches
         for patch_id in patch_list:
@@ -1273,6 +1306,9 @@ class PatchController(PatchService):
 
                 return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
+        if kwargs.get("skip-semantic") != "yes":
+            self.run_semantic_check(constants.SEMANTIC_PREREMOVE, patch_list)
+
         for patch_id in patch_list:
             msg = "Removing patch: %s" % patch_id
             LOG.info(msg)
@@ -1407,6 +1443,18 @@ class PatchController(PatchService):
                     LOG.exception(msg)
                     raise RpmFail(msg)
 
+            for action in constants.SEMANTIC_ACTIONS:
+                action_file = os.path.join(semantics_dir, action, patch_id)
+                if not os.path.isfile(action_file):
+                    continue
+
+                try:
+                    os.remove(action_file)
+                except OSError:
+                    msg = "Failed to remove semantic %s" % action_file
+                    LOG.exception(msg)
+                    raise SemanticFail(msg)
+
             try:
                 # Delete the metadata
                 os.remove("%s/%s-metadata.xml" % (avail_dir, patch_id))
@@ -1511,6 +1559,18 @@ class PatchController(PatchService):
                 mdir = committed_dir
             else:
                 mdir = avail_dir
+
+            for action in constants.SEMANTIC_ACTIONS:
+                action_file = os.path.join(semantics_dir, action, patch_id)
+                if not os.path.isfile(action_file):
+                    continue
+
+                try:
+                    os.remove(action_file)
+                except OSError:
+                    msg = "Failed to remove semantic %s" % action_file
+                    LOG.exception(msg)
+                    raise SemanticFail(msg)
 
             try:
                 # Delete the metadata
