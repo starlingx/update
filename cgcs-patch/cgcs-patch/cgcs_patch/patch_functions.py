@@ -485,7 +485,8 @@ class PatchData(object):
                     "summary",
                     "description",
                     "install_instructions",
-                    "warnings"]:
+                    "warnings",
+                    "apply_active_release_only"]:
             value = root.findtext(key)
             if value is not None:
                 self.metadata[patch_id][key] = value
@@ -659,6 +660,7 @@ class PatchMetadata(object):
         self.status = None
         self.unremovable = None
         self.reboot_required = None
+        self.apply_active_release_only = None
         self.requires = []
         self.groups = {}
         self.contents = {}
@@ -724,6 +726,8 @@ class PatchMetadata(object):
                             self.unremovable)
         add_text_tag_to_xml(top, 'reboot_required',
                             self.reboot_required)
+        add_text_tag_to_xml(top, 'apply_active_release_only',
+                            self.apply_active_release_only)
 
         for groupname in sorted(self.groups.keys()):
             if self.groups[groupname]:
@@ -1038,7 +1042,7 @@ class PatchFile(object):
             if field is None:
                 for f in ["status", "sw_version", "unremovable", "summary",
                           "description", "install_instructions",
-                          "warnings", "reboot_required"]:
+                          "warnings", "reboot_required", "apply_active_release_only"]:
                     r[f] = thispatch.query_line(patch_id, f)
             else:
                 if field not in ['id', 'cert']:
@@ -1267,7 +1271,8 @@ def patch_build():
                                          'storage=',
                                          'all-nodes=',
                                          'pre-apply=',
-                                         'pre-remove='])
+                                         'pre-remove=',
+                                         'apply-active-release-only'])
     except getopt.GetoptError:
         print("Usage: %s [ <args> ] ... <rpm list>"
               % os.path.basename(sys.argv[0]))
@@ -1289,6 +1294,11 @@ def patch_build():
         print("\t--controller-worker <rpm>   New package for combined node")
         print("\t--controller-worker-lowlatency <rpm>   New package for lowlatency combined node")
         print("\t--all-nodes <rpm>       New package for all node types")
+        print("\t--pre-apply <script>    Add pre-apply semantic check")
+        print("\t--pre-remove <script>   Add pre-remove semantic check")
+        print("\t--apply-active-release-only   Patch can only be applied if corresponding")
+        print("\t                              release is active")
+
         exit(1)
 
     pf = PatchFile()
@@ -1339,6 +1349,8 @@ def patch_build():
             pf.add_semantic(constants.SEMANTIC_PREAPPLY, arg)
         elif opt == "--pre-remove":
             pf.add_semantic(constants.SEMANTIC_PREREMOVE, arg)
+        elif opt == "--apply-active-release-only":
+            pf.meta.apply_active_release_only = "Y"
 
     if pf.meta.id is None:
         print("The --id argument is mandatory.")

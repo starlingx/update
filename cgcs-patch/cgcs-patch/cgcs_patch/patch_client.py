@@ -324,6 +324,10 @@ def print_patch_show_result(req):
                     print(textwrap.fill("    {0:<15} ".format("RR:") + pd[patch_id]["reboot_required"],
                                         width=TERM_WIDTH, subsequent_indent=' ' * 20))
 
+                if "apply_active_release_only" in pd[patch_id] and pd[patch_id]["apply_active_release_only"] != "":
+                    print(textwrap.fill("    {0:<15} ".format("Apply Active Release Only:") + pd[patch_id]["apply_active_release_only"],
+                                        width=TERM_WIDTH, subsequent_indent=' ' * 20))
+
                 if "summary" in pd[patch_id] and pd[patch_id]["summary"] != "":
                     print(textwrap.fill("    {0:<15} ".format("Summary:") + pd[patch_id]["summary"],
                                         width=TERM_WIDTH, subsequent_indent=' ' * 20))

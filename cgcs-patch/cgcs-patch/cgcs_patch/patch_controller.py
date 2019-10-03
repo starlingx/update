@@ -1074,6 +1074,19 @@ class PatchController(PatchService):
         if not id_verification:
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
+        # Check for patches that can't be applied during an upgrade
+        upgrade_check = True
+        for patch_id in patch_list:
+            if self.patch_data.metadata[patch_id]["sw_version"] != SW_VERSION \
+                    and self.patch_data.metadata[patch_id].get("apply_active_release_only") == "Y":
+                msg = "%s cannot be applied in an upgrade" % patch_id
+                LOG.error(msg)
+                msg_error += msg + "\n"
+                upgrade_check = False
+
+        if not upgrade_check:
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
         # Next, check the patch dependencies
         # required_patches will map the required patch to the patches that need it
         required_patches = {}
