@@ -44,17 +44,24 @@ symbols=no
 # --enable=similarities". If you want to run only the classes checker, but have
 # no Warning level messages displayed, use"--disable=all --enable=classes
 # --disable=W"
-# E1111 assignment-from-no-return
+# The following are suppressed due to pylint warnings in cgcs_make_patch
+# fixme Use of fixme, todo, etc..
+# E1101 no-member
+# W0101 unreachable
+# W0104 pointless-statement
 # W0107 unnecessary-pass
+# W0212 protected-access
+# W0231 super-init-not-called
 # W0603 global-statement
 # W0612 unused-variable
 # W0613 unused-argument
+# W0622 redefined-builtin
 # W0703 broad-except
-# W0705 duplicate-except
-# W1201 logging-not-lazy
+# W1401 anomalous-backslash-in-string
 # W1505, deprecated-method
-disable=C, R, E1111, W0107, W0603, W0612, W0613, W0703, W0705, W1201, W1505
-
+disable=C, R, fixme, E1101,
+        W0101, W0104, W0107, W0212, W0231, W0603, W0612, W0613, W0622, W0703,
+        W1401, W1505
 
 [REPORTS]
 
