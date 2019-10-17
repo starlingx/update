@@ -6,7 +6,6 @@
       - stx-release-notes-jobs
     check:
       jobs:
-        - flock-devstack-update
         - openstack-tox-linters
         - patch-tox-flake8
         - patch-tox-pylint
@@ -18,7 +17,6 @@
         - patch-alarm-tox-py36
     gate:
       jobs:
-        - flock-devstack-update
         - openstack-tox-linters
         - patch-tox-flake8
         - patch-tox-pylint
