@@ -32,6 +32,7 @@ function _swpatch()
         what-requires
         drop-host
         is-applied
+        is-available
         report-app-dependencies
         query-app-dependencies
     "
@@ -51,7 +52,7 @@ function _swpatch()
         #  Complete the arguments to the subcommands.
         #
         case "$subcommand" in
-            apply|delete|show|what-requires|is-applied)
+            apply|delete|show|what-requires|is-applied|is-available)
                 # Query the list of known patches
                 local patches=$(sw-patch completion patches 2>/dev/null)
                 COMPREPLY=( $(compgen -W "${patches}" -- ${cur}) )

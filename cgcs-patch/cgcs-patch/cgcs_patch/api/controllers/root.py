@@ -263,6 +263,10 @@ class PatchAPIController(object):
         return pc.is_applied(list(args))
 
     @expose('json')
+    def is_available(self, *args):
+        return pc.is_available(list(args))
+
+    @expose('json')
     def report_app_dependencies(self, *args, **kwargs):
         try:
             result = pc.report_app_dependencies(list(args), **kwargs)

@@ -62,6 +62,8 @@ help_query_dependencies = "List dependencies for specified patch. Use " + \
     constants.CLI_OPT_RECURSIVE + " for recursive query."
 help_is_applied = "Query Applied state for list of patches. " + \
     "Returns True if all are Applied, False otherwise."
+help_is_available = "Query Available state for list of patches. " + \
+    "Returns True if all are Available, False otherwise."
 help_report_app_dependencies = "Report application patch dependencies, " + \
     "specifying application name with --app option, plus a list of patches. " + \
     "Reported dependencies can be dropped by specifying app with no patch list."
@@ -140,6 +142,9 @@ def print_help():
                         width=TERM_WIDTH, subsequent_indent=' ' * 20))
     print("")
     print(textwrap.fill("    {0:<15} ".format("is-applied:") + help_is_applied,
+                        width=TERM_WIDTH, subsequent_indent=' ' * 20))
+    print("")
+    print(textwrap.fill("    {0:<15} ".format("is-available:") + help_is_available,
                         width=TERM_WIDTH, subsequent_indent=' ' * 20))
     print("")
     print(textwrap.fill("    {0:<15} ".format("report-app-dependencies:") + help_report_app_dependencies,
@@ -1176,6 +1181,30 @@ def patch_is_applied_req(args):
     return rc
 
 
+def patch_is_available_req(args):
+    if len(args) == 0:
+        print_help()
+
+    patches = "/".join(args)
+    url = "http://%s/patch/is_available/%s" % (api_addr, patches)
+
+    headers = {}
+    append_auth_token_if_required(headers)
+    req = requests.post(url, headers=headers)
+
+    rc = 1
+
+    if req.status_code == 200:
+        result = json.loads(req.text)
+        print(result)
+        if result is True:
+            rc = 0
+    elif req.status_code == 500:
+        print("An internal error has occurred. Please check /var/log/patching.log for details")
+
+    return rc
+
+
 def patch_report_app_dependencies_req(debug, args):
     if len(args) < 2:
         print_help()
@@ -1460,6 +1489,8 @@ def main():
             rc = patch_del_release(debug, sys.argv[2:])
         elif action == "is-applied":
             rc = patch_is_applied_req(sys.argv[2:])
+        elif action == "is-available":
+            rc = patch_is_available_req(sys.argv[2:])
         elif action == "report-app-dependencies":
             rc = patch_report_app_dependencies_req(debug, sys.argv[2:])
         elif action == "query-app-dependencies":

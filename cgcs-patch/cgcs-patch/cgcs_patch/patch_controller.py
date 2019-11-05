@@ -2244,6 +2244,25 @@ class PatchController(PatchService):
 
         return all_applied
 
+    def is_available(self, patch_ids):
+        all_available = True
+
+        self.patch_data_lock.acquire()
+
+        for patch_id in patch_ids:
+            if patch_id not in self.patch_data.metadata:
+                all_available = False
+                break
+
+            if self.patch_data.metadata[patch_id]["patchstate"] != \
+                    constants.AVAILABLE:
+                all_available = False
+                break
+
+        self.patch_data_lock.release()
+
+        return all_available
+
     def report_app_dependencies(self, patch_ids, **kwargs):
         """
         Handle report of application dependencies
