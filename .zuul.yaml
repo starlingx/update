@@ -7,6 +7,7 @@
     check:
       jobs:
         - openstack-tox-linters
+        - py3-bandit
         - patch-tox-flake8
         - patch-tox-pylint
         - patch-tox-py27
@@ -18,6 +19,7 @@
     gate:
       jobs:
         - openstack-tox-linters
+        - py3-bandit
         - patch-tox-flake8
         - patch-tox-pylint
         - patch-tox-py27
@@ -26,6 +28,12 @@
         - patch-alarm-tox-pylint
         - patch-alarm-tox-py27
         - patch-alarm-tox-py36
+
+- job:
+    name: py3-bandit
+    parent: tox
+    vars:
+      tox_envlist: bandit
 
 - job:
     name: patch-tox-flake8
