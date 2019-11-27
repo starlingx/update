@@ -25,6 +25,7 @@ import cgcs_patch.constants as constants
 import cgcs_patch.utils as utils
 
 from tsconfig.tsconfig import SW_VERSION as RUNNING_SW_VERSION
+from tsconfig.tsconfig import INITIAL_CONTROLLER_CONFIG_COMPLETE
 
 api_addr = "127.0.0.1:5487"
 auth_token = None
@@ -1073,11 +1074,17 @@ def patch_upload_dir_req(debug, args):
 
 def patch_install_local(debug, args):
     """ This function is used to trigger patch installation prior to configuration """
-    # First, check to see if the controller hostname is already known.
-    if utils.gethostbyname(constants.CONTROLLER_FLOATING_HOSTNAME):
-        # If this is successful, disallow the install
+    # Check to see if initial configuration has completed
+    if os.path.isfile(INITIAL_CONTROLLER_CONFIG_COMPLETE):
+        # Disallow the install
         print("Error: This function can only be used before initial system configuration.", file=sys.stderr)
         return 1
+
+    update_hosts_file = False
+
+    # Check to see if the controller hostname is already known.
+    if not utils.gethostbyname(constants.CONTROLLER_FLOATING_HOSTNAME):
+        update_hosts_file = True
 
     # Ignore interrupts during this function
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -1089,8 +1096,9 @@ def patch_install_local(debug, args):
 
     rc = 0
 
-    # Make a backup of /etc/hosts
-    shutil.copy2('/etc/hosts', '/etc/hosts.patchbak')
+    if update_hosts_file:
+        # Make a backup of /etc/hosts
+        shutil.copy2('/etc/hosts', '/etc/hosts.patchbak')
 
     # Update /etc/hosts
     with open('/etc/hosts', 'a') as f:
@@ -1105,8 +1113,9 @@ def patch_install_local(debug, args):
         print("Error: Failed to install patches. Please check /var/log/patching.log for details", file=sys.stderr)
         rc = 1
 
-    # Restore /etc/hosts
-    os.rename('/etc/hosts.patchbak', '/etc/hosts')
+    if update_hosts_file:
+        # Restore /etc/hosts
+        os.rename('/etc/hosts.patchbak', '/etc/hosts')
 
     if rc == 0:
         print("Patch installation is complete.")
