@@ -49,6 +49,8 @@ run_insvc_patch_scripts_cmd = "/usr/sbin/run-patch-scripts"
 
 pa = None
 
+http_port_real = http_port
+
 # Smart commands
 smart_cmd = ["/usr/bin/smart"]
 smart_quiet = smart_cmd + ["--quiet"]
@@ -81,7 +83,7 @@ def clearflag(fname):
 
 
 def check_install_uuid():
-    controller_install_uuid_url = "http://controller:%s/feed/rel-%s/install_uuid" % (http_port, SW_VERSION)
+    controller_install_uuid_url = "http://controller:%s/feed/rel-%s/install_uuid" % (http_port_real, SW_VERSION)
     try:
         req = requests.get(controller_install_uuid_url)
         if req.status_code != 200:
@@ -366,11 +368,11 @@ class PatchAgent(PatchService):
                     {'channel': 'base',
                      'type': 'rpm-md',
                      'name': 'Base',
-                     'baseurl': "http://controller:%s/feed/rel-%s" % (http_port, SW_VERSION)},
+                     'baseurl': "http://controller:%s/feed/rel-%s" % (http_port_real, SW_VERSION)},
                     {'channel': 'updates',
                      'type': 'rpm-md',
                      'name': 'Patches',
-                     'baseurl': "http://controller:%s/updates/rel-%s" % (http_port, SW_VERSION)}]
+                     'baseurl': "http://controller:%s/updates/rel-%s" % (http_port_real, SW_VERSION)}]
 
         updated = False
 
@@ -593,7 +595,7 @@ class PatchAgent(PatchService):
         self.missing_pkgs = []
         installed_pkgs = []
 
-        groups_url = "http://controller:%s/updates/rel-%s/comps.xml" % (http_port, SW_VERSION)
+        groups_url = "http://controller:%s/updates/rel-%s/comps.xml" % (http_port_real, SW_VERSION)
         try:
             req = requests.get(groups_url)
             if req.status_code != 200:
@@ -1066,6 +1068,13 @@ def main():
     if len(sys.argv) <= 1:
         pa.run()
     elif sys.argv[1] == "--install":
+        if not check_install_uuid():
+            # In certain cases, the lighttpd server could still be running using
+            # its default port 80, as opposed to the port configured in platform.conf
+            global http_port_real
+            LOG.info("Failed install_uuid check via http_port=%s. Trying with default port 80" % http_port_real)
+            http_port_real = 80
+
         pa.handle_install(verbose_to_stdout=True, disallow_insvc_patch=True)
     elif sys.argv[1] == "--status":
         rc = 0

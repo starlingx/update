@@ -79,6 +79,12 @@ if [ ! -f /var/run/.rpmdb_cleaned ]; then
     touch /var/run/.rpmdb_cleaned
 fi
 
+# For AIO-SX, abort if config is not yet applied and this is running in init
+if [ "${system_mode}" = "simplex" -a ! -f ${INITIAL_CONTROLLER_CONFIG_COMPLETE} -a "$1" = "start" ]; then
+    LOG_TO_FILE "Config is not yet applied. Skipping init patching"
+    exit 0
+fi
+
 # If the management interface is bonded, it may take some time
 # before communications can be properly setup.
 # Allow up to $DELAY_SEC seconds to reach controller.
