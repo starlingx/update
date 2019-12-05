@@ -392,7 +392,7 @@ class PatchMessageHelloAgentAck(messages.PatchMessage):
                                  self.agent_state)
         pc.hosts_lock.release()
 
-    def send(self, sock):
+    def send(self, sock):  # pylint: disable=unused-argument
         LOG.error("Should not get here")
 
 
@@ -469,7 +469,7 @@ class PatchMessageQueryDetailedResp(messages.PatchMessage):
         else:
             pc.hosts_lock.release()
 
-    def send(self, sock):
+    def send(self, sock):  # pylint: disable=unused-argument
         LOG.error("Should not get here")
 
 
@@ -525,7 +525,7 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
         pc.hosts[addr[0]].install_reject_reason = self.reject_reason
         pc.hosts_lock.release()
 
-    def send(self, sock):
+    def send(self, sock):  # pylint: disable=unused-argument
         LOG.error("Should not get here")
 
 
@@ -2297,6 +2297,8 @@ class PatchController(PatchService):
             raise PatchFail("Internal failure")
         finally:
             self.patch_data_lock.release()
+
+        return True
 
     def query_app_dependencies(self):
         """

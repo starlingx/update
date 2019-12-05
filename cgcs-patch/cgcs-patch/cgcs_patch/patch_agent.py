@@ -151,7 +151,7 @@ class PatchMessageHelloAgent(messages.PatchMessage):
         resp = PatchMessageHelloAgentAck()
         resp.send(sock)
 
-    def send(self, sock):
+    def send(self, sock):  # pylint: disable=unused-argument
         LOG.error("Should not get here")
 
 
@@ -197,7 +197,7 @@ class PatchMessageQueryDetailed(messages.PatchMessage):
         resp = PatchMessageQueryDetailedResp()
         resp.send(sock)
 
-    def send(self, sock):
+    def send(self, sock):  # pylint: disable=unused-argument
         LOG.error("Should not get here")
 
 
@@ -259,7 +259,7 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
         resp.status = pa.handle_install()
         resp.send(sock, addr)
 
-    def send(self, sock):
+    def send(self, sock):  # pylint: disable=unused-argument
         LOG.error("Should not get here")
 
 

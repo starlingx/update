@@ -1235,7 +1235,7 @@ class PatchFile(object):
             msg = "Failed during patch extraction"
             LOG.exception(msg)
             raise PatchFail(msg)
-        except IOError:
+        except IOError:  # pylint: disable=duplicate-except
             msg = "Failed during patch extraction"
             LOG.exception(msg)
             raise PatchFail(msg)

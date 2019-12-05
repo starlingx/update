@@ -960,7 +960,7 @@ def wait_for_install_complete(agent_ip):
     return rc
 
 
-def host_install(debug, args):
+def host_install(debug, args):  # pylint: disable=unused-argument
     force = False
     rc = 0
 
@@ -1072,7 +1072,7 @@ def patch_upload_dir_req(debug, args):
     return check_rc(req)
 
 
-def patch_install_local(debug, args):
+def patch_install_local(debug, args):  # pylint: disable=unused-argument
     """ This function is used to trigger patch installation prior to configuration """
     # Check to see if initial configuration has completed
     if os.path.isfile(INITIAL_CONTROLLER_CONFIG_COMPLETE):
@@ -1214,7 +1214,7 @@ def patch_is_available_req(args):
     return rc
 
 
-def patch_report_app_dependencies_req(debug, args):
+def patch_report_app_dependencies_req(debug, args):  # pylint: disable=unused-argument
     if len(args) < 2:
         print_help()
 

@@ -44,16 +44,12 @@ symbols=no
 # --enable=similarities". If you want to run only the classes checker, but have
 # no Warning level messages displayed, use"--disable=all --enable=classes
 # --disable=W"
-# E1111 assignment-from-no-return
 # W0107 unnecessary-pass
 # W0603 global-statement
-# W0612 unused-variable
-# W0613 unused-argument
 # W0703 broad-except
-# W0705 duplicate-except
 # W1201 logging-not-lazy
 # W1505, deprecated-method
-disable=C, R, E1111, W0107, W0603, W0612, W0613, W0703, W0705, W1201, W1505
+disable=C, R, W0107, W0603, W0703, W1201, W1505
 
 
 [REPORTS]

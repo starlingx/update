@@ -182,7 +182,7 @@ class PatchAPIController(object):
 
     @expose('json')
     @expose('query_hosts.xml', content_type='application/xml')
-    def query_hosts(self, *args):
+    def query_hosts(self, *args):  # pylint: disable=unused-argument
         return dict(data=pc.query_host_cache())
 
     @expose('json')
@@ -197,7 +197,7 @@ class PatchAPIController(object):
 
     @expose('json')
     @expose('query.xml', content_type='application/xml')
-    def host_install(self, *args):
+    def host_install(self, *args):  # pylint: disable=unused-argument
         return dict(error="Deprecated: Use host_install_async")
 
     @expose('json')
