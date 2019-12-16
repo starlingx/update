@@ -375,11 +375,11 @@ class PatchData(object):
                     for pkgver in self.package_versions[patch_sw_version][pkgname][arch].keys():
                         if self.package_versions[patch_sw_version][pkgname][arch][pkgver] == patch_id:
                             del self.package_versions[patch_sw_version][pkgname][arch][pkgver]
-                    if len(self.package_versions[patch_sw_version][pkgname][arch]) is 0:
+                    if len(self.package_versions[patch_sw_version][pkgname][arch]) == 0:
                         del self.package_versions[patch_sw_version][pkgname][arch]
-                if len(self.package_versions[patch_sw_version][pkgname]) is 0:
+                if len(self.package_versions[patch_sw_version][pkgname]) == 0:
                     del self.package_versions[patch_sw_version][pkgname]
-            if len(self.package_versions[patch_sw_version]) is 0:
+            if len(self.package_versions[patch_sw_version]) == 0:
                 del self.package_versions[patch_sw_version]
 
         for patch_sw_version in self.groups.keys():
@@ -1018,7 +1018,7 @@ class PatchFile(object):
                 for cert_type_str in cert_type_all:
                     try:
                         PatchFile.read_patch(abs_patch, metadata_only=True, cert_type=[cert_type_str])
-                    except PatchValidationFailure as e:
+                    except PatchValidationFailure:
                         pass
                     else:
                         # Successfully opened the file for reading, and we have discovered the cert_type
