@@ -1498,7 +1498,7 @@ def set_capture_source_path():
         old_path = "%s/stx/extras.ND/scripts/source_collect_package" % my_repo
         if os.path.isfile(old_path):
             rc = issue_cmd_rc("mkdir -p %s" % new_dir)
-            rc = issue_cmd_rc("\cp -f %s %s" % (old_path, new_path))
+            rc = issue_cmd_rc("\\cp -f %s %s" % (old_path, new_path))
             if rc == 0:
                 capture_source_path = new_path
 
