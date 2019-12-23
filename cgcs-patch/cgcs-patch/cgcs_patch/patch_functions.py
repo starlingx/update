@@ -176,6 +176,24 @@ def parse_rpm_filename(filename):
     return (pkgname, arch, PackageVersion(epoch, version, release))
 
 
+def parse_pkgver(pkgver):
+    # Version format is:
+    # [<epoch>:]<version>-<release>
+    #
+    pattern = re.compile(r'((([^:]):)?)([^-]+)((-(.*))?)$')
+
+    m = pattern.match(pkgver)
+
+    if m is None:
+        raise ValueError("Package version does not match expected format: %s" % pkgver)
+
+    epoch = m.group(3)
+    version = m.group(4)
+    release = m.group(7)
+
+    return (epoch, version, release)
+
+
 class PackageVersion(object):
     """
     The PackageVersion class provides a structure for RPM version information,

@@ -19,9 +19,8 @@ import sys
 import yaml
 import shutil
 
-from rpmUtils.miscutils import stringToVersion  # pylint: disable=import-error
-
 from cgcs_patch.patch_functions import configure_logging
+from cgcs_patch.patch_functions import parse_pkgver
 from cgcs_patch.patch_functions import LOG
 import cgcs_patch.config as cfg
 from cgcs_patch.base import PatchService
@@ -519,8 +518,8 @@ class PatchAgent(PatchService):
                 #     1, if first arg is higher version
                 #     0, if versions are same
                 #     -1, if first arg is lower version
-                rc = rpm.labelCompare(stringToVersion(version),
-                                      stringToVersion(stored_ver))
+                rc = rpm.labelCompare(parse_pkgver(version),
+                                      parse_pkgver(stored_ver))
 
                 if rc > 0:
                     # Update version
@@ -709,8 +708,8 @@ class PatchAgent(PatchService):
                     compare_version = base_version
 
                 # Compare the installed version to what's in the repo
-                rc = rpm.labelCompare(stringToVersion(installed_version),
-                                      stringToVersion(compare_version))
+                rc = rpm.labelCompare(parse_pkgver(installed_version),
+                                      parse_pkgver(compare_version))
                 if rc == 0:
                     # Versions match, nothing to do.
                     continue

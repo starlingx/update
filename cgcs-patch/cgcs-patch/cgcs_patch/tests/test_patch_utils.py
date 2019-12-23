@@ -9,6 +9,7 @@ import socket
 import testtools
 
 import cgcs_patch.constants
+import cgcs_patch.patch_functions
 import cgcs_patch.utils
 
 
@@ -130,3 +131,16 @@ class CgcsPatchUtilsTestCase(testtools.TestCase):
 
         result = cgcs_patch.utils.ip_to_versioned_localhost(ip)
         self.assertEqual(expected_result, result)
+
+    def test_parse_pkgver(self):
+        versions = {
+            '0:1.2.3-r4': ('0', '1.2.3', 'r4'),
+            '4.3.2-1': (None, '4.3.2', '1'),
+            '8.1.4': (None, '8.1.4', None),
+            '5:7.5.3': ('5', '7.5.3', None),
+            'This is a weird version string': (None, 'This is a weird version string', None),
+        }
+
+        for ver, expected in versions.items():
+            result = cgcs_patch.patch_functions.parse_pkgver(ver)
+            self.assertEqual(result, expected)

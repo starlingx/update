@@ -17,7 +17,7 @@ import rpm
 import os
 import gc
 
-from rpmUtils.miscutils import stringToVersion  # pylint: disable=import-error
+from cgcs_patch.patch_functions import parse_pkgver
 
 from wsgiref import simple_server
 from cgcs_patch.api import app
@@ -776,8 +776,8 @@ class PatchController(PatchService):
                         # Ignore epoch
                         patch_ver = patch_ver.split(':')[1]
 
-                    rc = rpm.labelCompare(stringToVersion(installed_ver),
-                                          stringToVersion(patch_ver))
+                    rc = rpm.labelCompare(parse_pkgver(installed_ver),
+                                          parse_pkgver(patch_ver))
 
                     if self.patch_data.metadata[patch_id]["repostate"] == constants.AVAILABLE:
                         # The RPM is not expected to be installed.
