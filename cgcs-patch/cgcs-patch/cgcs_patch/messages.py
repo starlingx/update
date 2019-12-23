@@ -61,4 +61,4 @@ class PatchMessage(object):
         return "invalid-type"
 
     def handle(self, sock, addr):  # pylint: disable=unused-argument
-        LOG.info("Unhandled message type: %s" % self.msgtype)
+        LOG.info("Unhandled message type: %s", self.msgtype)

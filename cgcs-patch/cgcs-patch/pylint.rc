@@ -47,9 +47,8 @@ symbols=no
 # W0107 unnecessary-pass
 # W0603 global-statement
 # W0703 broad-except
-# W1201 logging-not-lazy
 # W1505, deprecated-method
-disable=C, R, W0107, W0603, W0703, W1201, W1505
+disable=C, R, W0107, W0603, W0703, W1505
 
 
 [REPORTS]

@@ -70,7 +70,7 @@ def setflag(fname):
         with open(fname, "w") as f:
             f.write("%d\n" % os.getpid())
     except Exception:
-        LOG.exception("Failed to update %s flag" % fname)
+        LOG.exception("Failed to update %s flag", fname)
 
 
 def clearflag(fname):
@@ -78,7 +78,7 @@ def clearflag(fname):
         try:
             os.remove(fname)
         except Exception:
-            LOG.exception("Failed to clear %s flag" % fname)
+            LOG.exception("Failed to clear %s flag", fname)
 
 
 def check_install_uuid():
@@ -101,7 +101,7 @@ def check_install_uuid():
     controller_install_uuid = str(req.text).rstrip()
 
     if install_uuid != controller_install_uuid:
-        LOG.error("Local install_uuid=%s doesn't match controller=%s" % (install_uuid, controller_install_uuid))
+        LOG.error("Local install_uuid=%s doesn't match controller=%s", install_uuid, controller_install_uuid)
         return False
 
     return True
@@ -239,7 +239,7 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
         messages.PatchMessage.encode(self)
 
     def handle(self, sock, addr):
-        LOG.info("Handling host install request, force=%s" % self.force)
+        LOG.info("Handling host install request, force=%s", self.force)
         global pa
         resp = PatchMessageAgentInstallResp()
 
@@ -354,7 +354,7 @@ class PatchAgent(PatchService):
             config = yaml.load(output)
         except subprocess.CalledProcessError as e:
             LOG.exception("Failed to query channels")
-            LOG.error("Command output: %s" % e.output)
+            LOG.error("Command output: %s", e.output)
             return False
         except Exception:
             LOG.exception("Failed to query channels")
@@ -390,23 +390,23 @@ class PatchAgent(PatchService):
                         config[channel].get('baseurl') != ch_baseurl):
                     # Config is invalid
                     add_channel = True
-                    LOG.warning("Invalid smart config found for %s" % channel)
+                    LOG.warning("Invalid smart config found for %s", channel)
                     try:
                         output = subprocess.check_output(smart_cmd +
                                                          ["channel", "--yes",
                                                           "--remove", channel],
                                                          stderr=subprocess.STDOUT)
                     except subprocess.CalledProcessError as e:
-                        LOG.exception("Failed to configure %s channel" % channel)
-                        LOG.error("Command output: %s" % e.output)
+                        LOG.exception("Failed to configure %s channel", channel)
+                        LOG.error("Command output: %s", e.output)
                         return False
             else:
                 # Channel is missing
                 add_channel = True
-                LOG.warning("Channel %s is missing from config" % channel)
+                LOG.warning("Channel %s is missing from config", channel)
 
             if add_channel:
-                LOG.info("Adding channel %s" % channel)
+                LOG.info("Adding channel %s", channel)
                 cmd_args = ["channel", "--yes", "--add", channel,
                             "type=%s" % ch_type,
                             "name=%s" % ch_name]
@@ -417,8 +417,8 @@ class PatchAgent(PatchService):
                     output = subprocess.check_output(smart_cmd + cmd_args,
                                                      stderr=subprocess.STDOUT)
                 except subprocess.CalledProcessError as e:
-                    LOG.exception("Failed to configure %s channel" % channel)
-                    LOG.error("Command output: %s" % e.output)
+                    LOG.exception("Failed to configure %s channel", channel)
+                    LOG.error("Command output: %s", e.output)
                     return False
 
                 updated = True
@@ -431,7 +431,7 @@ class PatchAgent(PatchService):
             config = yaml.load(output)
         except subprocess.CalledProcessError as e:
             LOG.exception("Failed to query smart config")
-            LOG.error("Command output: %s" % e.output)
+            LOG.error("Command output: %s", e.output)
             return False
         except Exception:
             LOG.exception("Failed to query smart config")
@@ -441,15 +441,15 @@ class PatchAgent(PatchService):
         nolinktos = 'rpm-nolinktos'
         if config.get(nolinktos) is not True:
             # Set the flag
-            LOG.warning("Setting %s option" % nolinktos)
+            LOG.warning("Setting %s option", nolinktos)
             try:
                 output = subprocess.check_output(smart_cmd +
                                                  ["config", "--set",
                                                   "%s=true" % nolinktos],
                                                  stderr=subprocess.STDOUT)
             except subprocess.CalledProcessError as e:
-                LOG.exception("Failed to configure %s option" % nolinktos)
-                LOG.error("Command output: %s" % e.output)
+                LOG.exception("Failed to configure %s option", nolinktos)
+                LOG.error("Command output: %s", e.output)
                 return False
 
             updated = True
@@ -458,15 +458,15 @@ class PatchAgent(PatchService):
         nosignature = 'rpm-check-signatures'
         if config.get(nosignature) is not False:
             # Set the flag
-            LOG.warning("Setting %s option" % nosignature)
+            LOG.warning("Setting %s option", nosignature)
             try:
                 output = subprocess.check_output(smart_cmd +
                                                  ["config", "--set",
                                                   "%s=false" % nosignature],
                                                  stderr=subprocess.STDOUT)
             except subprocess.CalledProcessError as e:
-                LOG.exception("Failed to configure %s option" % nosignature)
-                LOG.error("Command output: %s" % e.output)
+                LOG.exception("Failed to configure %s option", nosignature)
+                LOG.error("Command output: %s", e.output)
                 return False
 
             updated = True
@@ -476,7 +476,7 @@ class PatchAgent(PatchService):
                 subprocess.check_output(smart_update, stderr=subprocess.STDOUT)
             except subprocess.CalledProcessError as e:
                 LOG.exception("Failed to update smartpm")
-                LOG.error("Command output: %s" % e.output)
+                LOG.error("Command output: %s", e.output)
                 return False
 
             # Reset the patch op counter to force a detailed query
@@ -584,7 +584,7 @@ class PatchAgent(PatchService):
                     self.installed[pkgname] = version.split('@')[0]
                     break
             except subprocess.CalledProcessError:
-                LOG.error("Failed to query installed version of %s" % pkgname)
+                LOG.error("Failed to query installed version of %s", pkgname)
 
             self.changes = True
 
@@ -641,7 +641,7 @@ class PatchAgent(PatchService):
             subprocess.check_output(smart_update, stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
             LOG.error("Failed to update smartpm")
-            LOG.error("Command output: %s" % e.output)
+            LOG.error("Command output: %s", e.output)
             # Set a state to "unknown"?
             return False
 
@@ -663,7 +663,7 @@ class PatchAgent(PatchService):
             output = subprocess.check_output(smart_query_installed)
             pkgs_installed = self.parse_smart_pkglist(output)
         except subprocess.CalledProcessError as e:
-            LOG.error("Failed to query installed pkgs: %s" % e.output)
+            LOG.error("Failed to query installed pkgs: %s", e.output)
             # Set a state to "unknown"?
             return False
 
@@ -671,7 +671,7 @@ class PatchAgent(PatchService):
             output = subprocess.check_output(smart_query_base)
             pkgs_base = self.parse_smart_pkglist(output)
         except subprocess.CalledProcessError as e:
-            LOG.error("Failed to query base pkgs: %s" % e.output)
+            LOG.error("Failed to query base pkgs: %s", e.output)
             # Set a state to "unknown"?
             return False
 
@@ -679,7 +679,7 @@ class PatchAgent(PatchService):
             output = subprocess.check_output(smart_query_updates)
             pkgs_updates = self.parse_smart_pkglist(output)
         except subprocess.CalledProcessError as e:
-            LOG.error("Failed to query patched pkgs: %s" % e.output)
+            LOG.error("Failed to query patched pkgs: %s", e.output)
             # Set a state to "unknown"?
             return False
 
@@ -722,11 +722,11 @@ class PatchAgent(PatchService):
         # Look for new packages
         self.check_groups()
 
-        LOG.info("Patch state query returns %s" % self.changes)
-        LOG.info("Installed: %s" % self.installed)
-        LOG.info("To install: %s" % self.to_install)
-        LOG.info("To remove: %s" % self.to_remove)
-        LOG.info("Missing: %s" % self.missing_pkgs)
+        LOG.info("Patch state query returns %s", self.changes)
+        LOG.info("Installed: %s", self.installed)
+        LOG.info("To install: %s", self.to_install)
+        LOG.info("To remove: %s", self.to_remove)
+        LOG.info("Missing: %s", self.missing_pkgs)
 
         return True
 
@@ -794,16 +794,16 @@ class PatchAgent(PatchService):
             try:
                 if verbose_to_stdout:
                     print("Installing software updates...")
-                LOG.info("Installing: %s" % ", ".join(install_set))
+                LOG.info("Installing: %s", ", ".join(install_set))
                 output = subprocess.check_output(smart_install_cmd + install_set, stderr=subprocess.STDOUT)
                 changed = True
                 for line in output.split('\n'):
-                    LOG.info("INSTALL: %s" % line)
+                    LOG.info("INSTALL: %s", line)
                 if verbose_to_stdout:
                     print("Software updated.")
             except subprocess.CalledProcessError as e:
                 LOG.exception("Failed to install RPMs")
-                LOG.error("Command output: %s" % e.output)
+                LOG.error("Command output: %s", e.output)
                 rc = False
                 if verbose_to_stdout:
                     print("WARNING: Software update failed.")
@@ -820,16 +820,16 @@ class PatchAgent(PatchService):
                 try:
                     if verbose_to_stdout:
                         print("Handling patch removal...")
-                    LOG.info("Removing: %s" % ", ".join(remove_set))
+                    LOG.info("Removing: %s", ", ".join(remove_set))
                     output = subprocess.check_output(smart_remove_cmd + remove_set, stderr=subprocess.STDOUT)
                     changed = True
                     for line in output.split('\n'):
-                        LOG.info("REMOVE: %s" % line)
+                        LOG.info("REMOVE: %s", line)
                     if verbose_to_stdout:
                         print("Patch removal complete.")
                 except subprocess.CalledProcessError as e:
                     LOG.exception("Failed to remove RPMs")
-                    LOG.error("Command output: %s" % e.output)
+                    LOG.error("Command output: %s", e.output)
                     rc = False
                     if verbose_to_stdout:
                         print("WARNING: Patch removal failed.")
@@ -862,7 +862,7 @@ class PatchAgent(PatchService):
                     self.node_is_patched = False
                 except subprocess.CalledProcessError as e:
                     LOG.exception("In-Service patch scripts failed")
-                    LOG.error("Command output: %s" % e.output)
+                    LOG.error("Command output: %s", e.output)
                     # Fail the patching operation
                     rc = False
 
@@ -1071,7 +1071,7 @@ def main():
             # In certain cases, the lighttpd server could still be running using
             # its default port 80, as opposed to the port configured in platform.conf
             global http_port_real
-            LOG.info("Failed install_uuid check via http_port=%s. Trying with default port 80" % http_port_real)
+            LOG.info("Failed install_uuid check via http_port=%s. Trying with default port 80", http_port_real)
             http_port_real = 80
 
         pa.handle_install(verbose_to_stdout=True, disallow_insvc_patch=True)

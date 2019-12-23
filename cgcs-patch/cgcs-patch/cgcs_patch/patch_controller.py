@@ -137,11 +137,11 @@ class AgentNeighbour(object):
         if out_of_date != self.out_of_date or requires_reboot != self.requires_reboot:
             self.out_of_date = out_of_date
             self.requires_reboot = requires_reboot
-            LOG.info("Agent %s (%s) reporting out_of_date=%s, requires_reboot=%s" % (
-                self.hostname,
-                self.ip,
-                self.out_of_date,
-                self.requires_reboot))
+            LOG.info("Agent %s (%s) reporting out_of_date=%s, requires_reboot=%s",
+                     self.hostname,
+                     self.ip,
+                     self.out_of_date,
+                     self.requires_reboot)
 
         if self.last_query_id != query_id:
             self.last_query_id = query_id
@@ -488,7 +488,7 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
         LOG.error("Should not get here")
 
     def send(self, sock):
-        LOG.info("sending install request to node: %s" % self.ip)
+        LOG.info("sending install request to node: %s", self.ip)
         self.encode()
         message = json.dumps(self.message)
         sock.sendto(message, (self.ip, cfg.agent_port))
@@ -512,7 +512,7 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
         messages.PatchMessage.encode(self)
 
     def handle(self, sock, addr):
-        LOG.info("Handling install resp from %s" % addr[0])
+        LOG.info("Handling install resp from %s", addr[0])
         global pc
         # LOG.info("Handling hello ack")
 
@@ -551,7 +551,7 @@ class PatchMessageDropHostReq(messages.PatchMessage):
             return
 
         if self.ip is None:
-            LOG.error("Received PATCHMSG_DROP_HOST_REQ with no ip: %s" % json.dumps(self.data))
+            LOG.error("Received PATCHMSG_DROP_HOST_REQ with no ip: %s", json.dumps(self.data))
             return
 
         pc.drop_host(self.ip, sync_nbr=False)
@@ -602,7 +602,7 @@ class PatchController(PatchService):
                 with open(app_dependency_filename, 'r') as f:
                     self.app_dependencies = json.loads(f.read())
             except Exception:
-                LOG.exception("Failed to read app dependencies: %s" % app_dependency_filename)
+                LOG.exception("Failed to read app dependencies: %s", app_dependency_filename)
         else:
             self.app_dependencies = {}
 
@@ -658,7 +658,7 @@ class PatchController(PatchService):
             counter = config.getint('runtime', 'patch_op_counter')
             self.patch_op_counter = counter
 
-            LOG.info("patch_op_counter is: %d" % self.patch_op_counter)
+            LOG.info("patch_op_counter is: %d", self.patch_op_counter)
         except configparser.Error:
             LOG.exception("Failed to read state info")
 
@@ -679,9 +679,9 @@ class PatchController(PatchService):
                                               "rsync://%s/patching/" % host_url,
                                               "%s/" % patch_dir],
                                              stderr=subprocess.STDOUT)
-            LOG.info("Synced to mate patching via rsync: %s" % output)
+            LOG.info("Synced to mate patching via rsync: %s", output)
         except subprocess.CalledProcessError as e:
-            LOG.error("Failed to rsync: %s" % e.output)
+            LOG.error("Failed to rsync: %s", e.output)
             return False
 
         try:
@@ -691,9 +691,9 @@ class PatchController(PatchService):
                                               "rsync://%s/repo/" % host_url,
                                               "%s/" % repo_root_dir],
                                              stderr=subprocess.STDOUT)
-            LOG.info("Synced to mate repo via rsync: %s" % output)
+            LOG.info("Synced to mate repo via rsync: %s", output)
         except subprocess.CalledProcessError:
-            LOG.error("Failed to rsync: %s" % output)
+            LOG.error("Failed to rsync: %s", output)
             return False
 
         self.read_state_file()
@@ -710,7 +710,7 @@ class PatchController(PatchService):
                 with open(app_dependency_filename, 'r') as f:
                     self.app_dependencies = json.loads(f.read())
             except Exception:
-                LOG.exception("Failed to read app dependencies: %s" % app_dependency_filename)
+                LOG.exception("Failed to read app dependencies: %s", app_dependency_filename)
         else:
             self.app_dependencies = {}
 
@@ -757,7 +757,7 @@ class PatchController(PatchService):
                         continue
 
                     if patch_id not in self.patch_data.metadata:
-                        LOG.error("Patch data missing for %s" % patch_id)
+                        LOG.error("Patch data missing for %s", patch_id)
                         continue
 
                     # If the patch is on a different release than the host, skip it.
@@ -811,7 +811,7 @@ class PatchController(PatchService):
                         continue
 
                     if patch_id not in self.patch_data.metadata:
-                        LOG.error("Patch data missing for %s" % patch_id)
+                        LOG.error("Patch data missing for %s", patch_id)
                         continue
 
                     if personality not in self.patch_data.metadata[patch_id]:
@@ -835,7 +835,7 @@ class PatchController(PatchService):
                         continue
 
                     if patch_id not in self.patch_data.metadata:
-                        LOG.error("Patch data missing for %s" % patch_id)
+                        LOG.error("Patch data missing for %s", patch_id)
                         continue
 
                     if personality not in self.patch_data.metadata[patch_id]:
@@ -902,10 +902,10 @@ class PatchController(PatchService):
 
             if os.path.exists(semchk):
                 try:
-                    LOG.info("Running semantic check: %s" % semchk)
+                    LOG.info("Running semantic check: %s", semchk)
                     subprocess.check_output([semchk] + patch_state_args,
                                             stderr=subprocess.STDOUT)
-                    LOG.info("Semantic check %s passed" % semchk)
+                    LOG.info("Semantic check %s passed", semchk)
                 except subprocess.CalledProcessError as e:
                     msg = "Semantic check failed for %s:\n%s" % (patch_id, e.output)
                     LOG.exception(msg)
@@ -1158,7 +1158,7 @@ class PatchController(PatchService):
             # Copy the RPMs. If a failure occurs, clean up copied files.
             copied = []
             for rpmfile in rpmlist:
-                LOG.info("Copy %s to %s" % (rpmfile, rpmlist[rpmfile]))
+                LOG.info("Copy %s to %s", rpmfile, rpmlist[rpmfile])
                 try:
                     shutil.copy(rpmfile, rpmlist[rpmfile])
                     copied.append(rpmlist[rpmfile])
@@ -1167,7 +1167,7 @@ class PatchController(PatchService):
                     LOG.exception(msg)
                     # Clean up files
                     for filename in copied:
-                        LOG.info("Cleaning up %s" % filename)
+                        LOG.info("Cleaning up %s", filename)
                         os.remove(filename)
 
                     raise RpmFail(msg)
@@ -1206,7 +1206,7 @@ class PatchController(PatchService):
                                                       "comps.xml",
                                                       rdir],
                                                      stderr=subprocess.STDOUT)
-                    LOG.info("Repo[%s] updated:\n%s" % (ver, output))
+                    LOG.info("Repo[%s] updated:\n%s", ver, output)
                 except subprocess.CalledProcessError:
                     msg = "Failed to update the repo for %s" % ver
                     LOG.exception(msg)
@@ -1387,7 +1387,7 @@ class PatchController(PatchService):
                                                       "comps.xml",
                                                       rdir],
                                                      stderr=subprocess.STDOUT)
-                    LOG.info("Repo[%s] updated:\n%s" % (ver, output))
+                    LOG.info("Repo[%s] updated:\n%s", ver, output)
                 except subprocess.CalledProcessError:
                     msg = "Failed to update the repo for %s" % ver
                     LOG.exception(msg)
@@ -1529,7 +1529,7 @@ class PatchController(PatchService):
                                               "comps.xml",
                                               repo_dir[release]],
                                              stderr=subprocess.STDOUT)
-            LOG.info("Repo[%s] updated:\n%s" % (release, output))
+            LOG.info("Repo[%s] updated:\n%s", release, output)
         except subprocess.CalledProcessError:
             msg = "Failed to update the repo for %s" % release
             LOG.exception(msg)
@@ -1844,7 +1844,7 @@ class PatchController(PatchService):
         for patch_id in sorted(patch_ids):
             if patch_id not in self.patch_data.metadata.keys():
                 errormsg = "%s is unrecognized\n" % patch_id
-                LOG.info("patch_query_dependencies: %s" % errormsg)
+                LOG.info("patch_query_dependencies: %s", errormsg)
                 results["error"] += errormsg
                 failure = True
         self.patch_data_lock.release()
@@ -1892,7 +1892,7 @@ class PatchController(PatchService):
             errormsg = "A commit cannot be performed with non-REL status patches in the system:\n"
             for patch_id in non_rel_list:
                 errormsg += "    %s\n" % patch_id
-            LOG.info("patch_commit rejected: %s" % errormsg)
+            LOG.info("patch_commit rejected: %s", errormsg)
             results["error"] += errormsg
             return results
 
@@ -1901,7 +1901,7 @@ class PatchController(PatchService):
         for patch_id in sorted(patch_ids):
             if patch_id not in self.patch_data.metadata.keys():
                 errormsg = "%s is unrecognized\n" % patch_id
-                LOG.info("patch_commit: %s" % errormsg)
+                LOG.info("patch_commit: %s", errormsg)
                 results["error"] += errormsg
                 failure = True
         self.patch_data_lock.release()
@@ -1925,7 +1925,7 @@ class PatchController(PatchService):
             errormsg = "The following patches are not applied and cannot be committed:\n"
             for patch_id in avail_list:
                 errormsg += "    %s\n" % patch_id
-            LOG.info("patch_commit rejected: %s" % errormsg)
+            LOG.info("patch_commit rejected: %s", errormsg)
             results["error"] += errormsg
             return results
 
@@ -2039,7 +2039,7 @@ class PatchController(PatchService):
                                                   "comps.xml",
                                                   rdir],
                                                  stderr=subprocess.STDOUT)
-                LOG.info("Repo[%s] updated:\n%s" % (ver, output))
+                LOG.info("Repo[%s] updated:\n%s", ver, output)
             except subprocess.CalledProcessError:
                 msg = "Failed to update the repo for %s" % ver
                 LOG.exception(msg)
@@ -2100,7 +2100,7 @@ class PatchController(PatchService):
                 self.hosts_lock.release()
                 msg = "Unknown host specified: %s" % host_ip
                 msg_error += msg + "\n"
-                LOG.error("Error in host-install: " + msg)
+                LOG.error("Error in host-install: %s", msg)
                 return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         msg = "Running host-install for %s (%s), force=%s, async_req=%s" % (host_ip, ip, force, async_req)
@@ -2128,7 +2128,7 @@ class PatchController(PatchService):
             # async_req install requested, so return now
             msg = "Patch installation request sent to %s." % self.hosts[ip].hostname
             msg_info += msg + "\n"
-            LOG.info("host-install async_req: " + msg)
+            LOG.info("host-install async_req: %s", msg)
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         # Now we wait, up to ten mins... TODO: Wait on a condition
@@ -2141,7 +2141,7 @@ class PatchController(PatchService):
                 self.hosts_lock.release()
                 msg = "Agent expired while waiting: %s" % ip
                 msg_error += msg + "\n"
-                LOG.error("Error in host-install: " + msg)
+                LOG.error("Error in host-install: %s", msg)
                 break
 
             if not self.hosts[ip].install_pending:
@@ -2150,17 +2150,17 @@ class PatchController(PatchService):
                 if self.hosts[ip].install_status:
                     msg = "Patch installation was successful on %s." % self.hosts[ip].hostname
                     msg_info += msg + "\n"
-                    LOG.info("host-install: " + msg)
+                    LOG.info("host-install: %s", msg)
                 elif self.hosts[ip].install_reject_reason:
                     msg = "Patch installation rejected by %s. %s" % (
                         self.hosts[ip].hostname,
                         self.hosts[ip].install_reject_reason)
                     msg_error += msg + "\n"
-                    LOG.error("Error in host-install: " + msg)
+                    LOG.error("Error in host-install: %s", msg)
                 else:
                     msg = "Patch installation failed on %s." % self.hosts[ip].hostname
                     msg_error += msg + "\n"
-                    LOG.error("Error in host-install: " + msg)
+                    LOG.error("Error in host-install: %s", msg)
 
                 self.hosts_lock.release()
                 break
@@ -2172,7 +2172,7 @@ class PatchController(PatchService):
         if not resp_rx:
             msg = "Timeout occurred while waiting response from %s." % ip
             msg_error += msg + "\n"
-            LOG.error("Error in host-install: " + msg)
+            LOG.error("Error in host-install: %s", msg)
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
@@ -2203,7 +2203,7 @@ class PatchController(PatchService):
                 self.hosts_lock.release()
                 msg = "Unknown host specified: %s" % host_ip
                 msg_error += msg + "\n"
-                LOG.error("Error in drop-host: " + msg)
+                LOG.error("Error in drop-host: %s", msg)
                 return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         msg = "Running drop-host for %s (%s)" % (host_ip, ip)
@@ -2272,8 +2272,8 @@ class PatchController(PatchService):
 
         appname = kwargs.get("app")
 
-        LOG.info("Handling app dependencies report: app=%s, patch_ids=%s" %
-                 (appname, ','.join(patch_ids)))
+        LOG.info("Handling app dependencies report: app=%s, patch_ids=%s",
+                 appname, ','.join(patch_ids))
 
         self.patch_data_lock.acquire()
 
@@ -2516,7 +2516,7 @@ class PatchControllerMainThread(threading.Thread):
                 inputs = [pc.sock_in] + agent_query_conns
                 outputs = []
 
-                # LOG.info("Running select, remaining=%d" % remaining)
+                # LOG.info("Running select, remaining=%d", remaining)
                 rlist, wlist, xlist = select.select(inputs, outputs, inputs, remaining)
 
                 if (len(rlist) == 0 and
@@ -2641,7 +2641,7 @@ class PatchControllerMainThread(threading.Thread):
                     for n in nbrs:
                         # Age out controllers after 2 minutes
                         if pc.controller_neighbours[n].get_age() >= 120:
-                            LOG.info("Aging out controller %s from table" % n)
+                            LOG.info("Aging out controller %s from table", n)
                             del pc.controller_neighbours[n]
                     pc.controller_neighbours_lock.release()
 
@@ -2650,7 +2650,7 @@ class PatchControllerMainThread(threading.Thread):
                     for n in nbrs:
                         # Age out hosts after 1 hour
                         if pc.hosts[n].get_age() >= 3600:
-                            LOG.info("Aging out host %s from table" % n)
+                            LOG.info("Aging out host %s from table", n)
                             del pc.hosts[n]
                             for patch_id in pc.interim_state.keys():
                                 if n in pc.interim_state[patch_id]:

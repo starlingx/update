@@ -160,11 +160,11 @@ class PatchService(object):
             if result == self.mcast_addr:
                 return
         except subprocess.CalledProcessError as e:
-            LOG.error("Command output: %s" % e.output)
+            LOG.error("Command output: %s", e.output)
             return
 
         # Close the socket and set it up again
-        LOG.info("Detected missing multicast addr (%s). Reconfiguring" % self.mcast_addr)
+        LOG.info("Detected missing multicast addr (%s). Reconfiguring", self.mcast_addr)
         while self.setup_socket() is None:
             LOG.info("Unable to setup sockets. Waiting to retry")
             time.sleep(5)
