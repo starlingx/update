@@ -45,10 +45,11 @@ symbols=no
 # no Warning level messages displayed, use"--disable=all --enable=classes
 # --disable=W"
 # W0107 unnecessary-pass
+# W0511 fixme
 # W0603 global-statement
 # W0703 broad-except
 # W1505, deprecated-method
-disable=C, R, W0107, W0603, W0703, W1505
+disable=C, R, W0107, W0511, W0603, W0703, W1505
 
 
 [REPORTS]
@@ -235,7 +236,7 @@ ignore-mixin-members=yes
 # List of module names for which member attributes should not be checked
 # (useful for modules/projects where namespaces are manipulated during runtime
 # and thus existing member attributes cannot be deduced by static analysis
-ignored-modules=
+ignored-modules=dnf,libdnf
 
 # List of classes names for which member attributes should not be checked
 # (useful for classes with attributes dynamically set).
