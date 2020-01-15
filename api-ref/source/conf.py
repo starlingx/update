@@ -20,7 +20,7 @@ extensions = [
     'os_api_ref',
 ]
 
-html_theme = 'openstackdocs'
+html_theme = 'starlingxdocs'
 
 html_theme_options = {
     "sidebar_dropdown": "api_ref",
@@ -42,7 +42,7 @@ master_doc = 'index'
 
 # General information about the project.
 repository_name = 'openstack/stx-update'
-project = u'stx-update'
+project = u'StarlingX Update'
 bug_project = 'starlingx'
 bug_tag = 'stx.update'
 
