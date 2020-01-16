@@ -1090,7 +1090,7 @@ def patch_install_local(debug, args):  # pylint: disable=unused-argument
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     # To allow patch installation to occur before configuration, we need
-    # to alias controller to localhost so that the smartpm channels work.
+    # to alias controller to localhost so that the dnf repos work.
     # There is a HOSTALIASES feature that would be preferred here, but it
     # unfortunately requires dnsmasq to be running, which it is not at this point.
 
