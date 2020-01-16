@@ -268,7 +268,7 @@ class BasePackageData(object):
                 continue
 
             self.pkgs[sw_rel] = {}
-            for root, dirs, files in os.walk("%s/Packages" % reldir):  # pylint: disable=unused-variable
+            for _root, _dirs, files in os.walk("%s/Packages" % reldir):  # pylint: disable=unused-variable
                 for name in files:
                     if name.endswith(".rpm"):
                         try:
@@ -589,7 +589,7 @@ class PatchData(object):
         return self.package_versions[sw_ver][pkgname][arch][pkgver]
 
     def load_all_metadata(self,
-                          loaddir=os.getcwd(),
+                          loaddir,
                           repostate=None):
         """
         Parse all metadata files in the specified dir
@@ -831,8 +831,7 @@ class PatchFile(object):
 
         self.semantics[action] = os.path.abspath(fname)
 
-    def gen_patch(self,
-                  outdir=os.getcwd()):
+    def gen_patch(self, outdir):
         """
         Generate the patch file, named PATCHID.patch
         :param outdir: Output directory for the patch
@@ -1382,4 +1381,4 @@ def patch_build():
     for rpmfile in remainder:
         pf.add_rpm(rpmfile)
 
-    pf.gen_patch()
+    pf.gen_patch(outdir=os.getcwd())

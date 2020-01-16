@@ -17,6 +17,7 @@ import getopt
 import subprocess
 import time
 import re
+import six
 from cgcs_patch.patch_functions import PatchFile
 # import twisted.python.lockfile
 
@@ -1258,7 +1259,7 @@ class PatchRecipeData(object):
             rpm_dir = "%s/%s/%s" % (workdir, build_type, RPM_DIR)
             rpm_db = self._get_rpm_db_path(self.patch_id)
             issue_cmd("echo > %s" % rpm_db)
-            for subdir in os.walk(rpm_dir).next()[1]:
+            for subdir in six.next(os.walk(rpm_dir))[1]:
                 rpm_sub_dir = "%s/%s" % (rpm_dir, subdir)
                 issue_cmd("rpm -qp --dbpath %s --queryformat '%s %%{NAME} %%{RELEASE}\n' %s/*rpm >> %s 2> /dev/null" % (temp_rpm_db_dir, subdir, rpm_sub_dir, rpm_db))
 
