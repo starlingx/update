@@ -984,8 +984,8 @@ class PatchController(PatchService):
                     continue
                 except PatchValidationFailure as e:
                     msg = "Patch validation failed for %s" % patch_id
-                    if e.message is not None and e.message != '':
-                        msg += ":\n%s" % e.message
+                    if str(e) is not None and str(e) != '':
+                        msg += ":\n%s" % str(e)
                     LOG.exception(msg)
                     msg_error += msg + "\n"
                     continue
@@ -1019,8 +1019,8 @@ class PatchController(PatchService):
                     self.patch_data.metadata[patch_id]["patchstate"] = constants.UNKNOWN
             except PatchValidationFailure as e:
                 msg = "Patch validation failed for %s" % patch_id
-                if e.message is not None and e.message != '':
-                    msg += ":\n%s" % e.message
+                if str(e) is not None and str(e) != '':
+                    msg += ":\n%s" % str(e)
                 LOG.exception(msg)
                 msg_error += msg + "\n"
                 continue
