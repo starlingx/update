@@ -10,26 +10,26 @@ Source0: %{name}-%{version}.tar.gz
 
 %define debug_package %{nil}
 
-BuildRequires: python-setuptools
-BuildRequires: python2-pip
-BuildRequires: python2-wheel
-Requires: python-devel
+BuildRequires: python3-setuptools
+BuildRequires: python3-pip
+BuildRequires: python3-wheel
+Requires: python3-devel
 Requires: /bin/bash
 
 %description
 TIS Platform Patching
 
-%define pythonroot           /usr/lib64/python2.7/site-packages
+%define pythonroot           %{python3_sitearch}
 
 %prep
 %setup
 
 %build
-%{__python} setup.py build
-%py2_build_wheel
+%{__python3} setup.py build
+%py3_build_wheel
 
 %install
-%{__python} setup.py install --root=$RPM_BUILD_ROOT \
+%{__python3} setup.py install --root=$RPM_BUILD_ROOT \
                              --install-lib=%{pythonroot} \
                              --prefix=/usr \
                              --install-data=/usr/share \
