@@ -8,11 +8,10 @@
       jobs:
         - openstack-tox-linters
         - py3-bandit
-        - patch-tox-flake8
+        - py3-flake8
         - patch-tox-pylint
         - patch-tox-py27
         - patch-tox-py36
-        - patch-alarm-tox-flake8
         - patch-alarm-tox-pylint
         - patch-alarm-tox-py27
         - patch-alarm-tox-py36
@@ -20,11 +19,10 @@
       jobs:
         - openstack-tox-linters
         - py3-bandit
-        - patch-tox-flake8
+        - py3-flake8
         - patch-tox-pylint
         - patch-tox-py27
         - patch-tox-py36
-        - patch-alarm-tox-flake8
         - patch-alarm-tox-pylint
         - patch-alarm-tox-py27
         - patch-alarm-tox-py36
@@ -36,16 +34,13 @@
       tox_envlist: bandit
 
 - job:
-    name: patch-tox-flake8
+    name: py3-flake8
     parent: tox
     required-projects:
       - starlingx/config
       - starlingx/fault
-    files:
-      - cgcs-patch/cgcs-patch/*
     vars:
       tox_envlist: flake8
-      tox_extra_args: -c cgcs-patch/cgcs-patch/tox.ini
 
 - job:
     name: patch-tox-pylint
@@ -82,18 +77,6 @@
     vars:
       tox_envlist: py36
       tox_extra_args: -c cgcs-patch/cgcs-patch/tox.ini
-
-- job:
-    name: patch-alarm-tox-flake8
-    parent: tox
-    required-projects:
-      - starlingx/config
-      - starlingx/fault
-    files:
-      - patch-alarm/patch-alarm/*
-    vars:
-      tox_envlist: flake8
-      tox_extra_args: -c patch-alarm/patch-alarm/tox.ini
 
 - job:
     name: patch-alarm-tox-pylint
