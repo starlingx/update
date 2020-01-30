@@ -1,6 +1,6 @@
-========================
-stx-update Release Notes
-========================
+==============================
+StarlingX Update Release Notes
+==============================
 
 .. toctree::
    :maxdepth: 2
