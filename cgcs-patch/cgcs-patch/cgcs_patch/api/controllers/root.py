@@ -30,7 +30,7 @@ class PatchAPIController(object):
         try:
             pd = pc.patch_query_cached(**kwargs)
         except PatchError as e:
-            return dict(error="Error: %s" % e.message)
+            return dict(error="Error: %s" % str(e))
 
         return dict(pd=pd)
 
@@ -40,7 +40,7 @@ class PatchAPIController(object):
         try:
             result = pc.patch_query_specific_cached(list(args))
         except PatchError as e:
-            return dict(error="Error: %s" % e.message)
+            return dict(error="Error: %s" % str(e))
 
         return result
 
@@ -53,7 +53,7 @@ class PatchAPIController(object):
         try:
             result = pc.patch_apply_api(list(args), **kwargs)
         except PatchError as e:
-            return dict(error="Error: %s" % e.message)
+            return dict(error="Error: %s" % str(e))
 
         pc.patch_sync()
 
@@ -68,7 +68,7 @@ class PatchAPIController(object):
         try:
             result = pc.patch_remove_api(list(args), **kwargs)
         except PatchError as e:
-            return dict(error="Error: %s" % e.message)
+            return dict(error="Error: %s" % str(e))
 
         pc.patch_sync()
 
@@ -80,7 +80,7 @@ class PatchAPIController(object):
         try:
             result = pc.patch_delete_api(list(args))
         except PatchError as e:
-            return dict(error="Error: %s" % e.message)
+            return dict(error="Error: %s" % str(e))
 
         pc.patch_sync()
 
@@ -123,7 +123,7 @@ class PatchAPIController(object):
             result = pc.patch_import_api([fn])
         except PatchError as e:
             os.remove(fn)
-            return dict(error=e.message)
+            return dict(error=str(e))
 
         os.remove(fn)
 
@@ -146,7 +146,7 @@ class PatchAPIController(object):
         try:
             result = pc.patch_import_api(sorted(files))
         except PatchError as e:
-            return dict(error=e.message)
+            return dict(error=str(e))
 
         pc.patch_sync()
 
@@ -160,7 +160,7 @@ class PatchAPIController(object):
         try:
             result = pc.patch_init_release_api(list(args)[0])
         except PatchError as e:
-            return dict(error=e.message)
+            return dict(error=str(e))
 
         pc.patch_sync()
 
@@ -174,7 +174,7 @@ class PatchAPIController(object):
         try:
             result = pc.patch_del_release_api(list(args)[0])
         except PatchError as e:
-            return dict(error=e.message)
+            return dict(error=str(e))
 
         pc.patch_sync()
 
@@ -191,7 +191,7 @@ class PatchAPIController(object):
         try:
             result = pc.patch_query_what_requires(list(args))
         except PatchError as e:
-            return dict(error="Error: %s" % e.message)
+            return dict(error="Error: %s" % str(e))
 
         return result
 
@@ -212,7 +212,7 @@ class PatchAPIController(object):
         try:
             result = pc.patch_host_install(list(args)[0], force, async_req=True)
         except PatchError as e:
-            return dict(error="Error: %s" % e.message)
+            return dict(error="Error: %s" % str(e))
 
         return result
 
@@ -225,7 +225,7 @@ class PatchAPIController(object):
         try:
             result = pc.drop_host(list(args)[0])
         except PatchError as e:
-            return dict(error="Error: %s" % e.message)
+            return dict(error="Error: %s" % str(e))
 
         return result
 
@@ -234,7 +234,7 @@ class PatchAPIController(object):
         try:
             result = pc.patch_query_dependencies(list(args), **kwargs)
         except PatchError as e:
-            return dict(error=e.message)
+            return dict(error=str(e))
 
         return result
 
@@ -243,7 +243,7 @@ class PatchAPIController(object):
         try:
             result = pc.patch_commit(list(args))
         except PatchError as e:
-            return dict(error=e.message)
+            return dict(error=str(e))
 
         pc.patch_sync()
 
@@ -254,7 +254,7 @@ class PatchAPIController(object):
         try:
             result = pc.patch_commit(list(args), dry_run=True)
         except PatchError as e:
-            return dict(error=e.message)
+            return dict(error=str(e))
 
         return result
 
@@ -271,7 +271,7 @@ class PatchAPIController(object):
         try:
             result = pc.report_app_dependencies(list(args), **kwargs)
         except PatchError as e:
-            return dict(status=500, error=e.message)
+            return dict(status=500, error=str(e))
 
         pc.patch_sync()
 

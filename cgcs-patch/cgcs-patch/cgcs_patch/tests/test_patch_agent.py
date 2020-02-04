@@ -10,6 +10,15 @@ import sys
 import testtools
 
 sys.modules['rpm'] = mock.Mock()
+sys.modules['dnf'] = mock.Mock()
+sys.modules['dnf.callback'] = mock.Mock()
+sys.modules['dnf.comps'] = mock.Mock()
+sys.modules['dnf.exceptions'] = mock.Mock()
+sys.modules['dnf.rpm'] = mock.Mock()
+sys.modules['dnf.sack'] = mock.Mock()
+sys.modules['dnf.transaction'] = mock.Mock()
+sys.modules['libdnf'] = mock.Mock()
+sys.modules['libdnf.transaction'] = mock.Mock()
 
 import cgcs_patch.patch_agent  # noqa: E402
 

@@ -69,7 +69,7 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     sys.__excepthook__(exc_type, exc_value, exc_traceback)
 
 
-def configure_logging(logtofile=True, level=logging.INFO):
+def configure_logging(logtofile=True, level=logging.INFO, dnf_log=False):
     if logtofile:
         my_exec = os.path.basename(sys.argv[0])
 
@@ -84,6 +84,11 @@ def configure_logging(logtofile=True, level=logging.INFO):
         main_log_handler = logging.FileHandler(logfile)
         main_log_handler.setFormatter(formatter)
         LOG.addHandler(main_log_handler)
+
+        if dnf_log:
+            dnf_logger = logging.getLogger('dnf')
+            dnf_logger.addHandler(main_log_handler)
+
         try:
             os.chmod(logfile, 0o640)
         except Exception:
@@ -263,7 +268,7 @@ class BasePackageData(object):
                 continue
 
             self.pkgs[sw_rel] = {}
-            for root, dirs, files in os.walk("%s/Packages" % reldir):  # pylint: disable=unused-variable
+            for _root, _dirs, files in os.walk("%s/Packages" % reldir):  # pylint: disable=unused-variable
                 for name in files:
                     if name.endswith(".rpm"):
                         try:
@@ -584,7 +589,7 @@ class PatchData(object):
         return self.package_versions[sw_ver][pkgname][arch][pkgver]
 
     def load_all_metadata(self,
-                          loaddir=os.getcwd(),
+                          loaddir,
                           repostate=None):
         """
         Parse all metadata files in the specified dir
@@ -826,8 +831,7 @@ class PatchFile(object):
 
         self.semantics[action] = os.path.abspath(fname)
 
-    def gen_patch(self,
-                  outdir=os.getcwd()):
+    def gen_patch(self, outdir):
         """
         Generate the patch file, named PATCHID.patch
         :param outdir: Output directory for the patch
@@ -1377,4 +1381,4 @@ def patch_build():
     for rpmfile in remainder:
         pf.add_rpm(rpmfile)
 
-    pf.gen_patch()
+    pf.gen_patch(outdir=os.getcwd())

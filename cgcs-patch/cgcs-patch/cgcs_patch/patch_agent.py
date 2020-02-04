@@ -5,22 +5,26 @@ SPDX-License-Identifier: Apache-2.0
 
 """
 
-import os
-import time
-import socket
+import dnf
+import dnf.callback
+import dnf.comps
+import dnf.exceptions
+import dnf.rpm
+import dnf.sack
+import dnf.transaction
 import json
-import select
-import subprocess
+import libdnf.transaction
+import os
 import random
 import requests
-import xml.etree.ElementTree as ElementTree
-import rpm
-import sys
-import yaml
+import select
 import shutil
+import socket
+import subprocess
+import sys
+import time
 
 from cgcs_patch.patch_functions import configure_logging
-from cgcs_patch.patch_functions import parse_pkgver
 from cgcs_patch.patch_functions import LOG
 import cgcs_patch.config as cfg
 from cgcs_patch.base import PatchService
@@ -50,19 +54,13 @@ pa = None
 
 http_port_real = http_port
 
-# Smart commands
-smart_cmd = ["/usr/bin/smart"]
-smart_quiet = smart_cmd + ["--quiet"]
-smart_update = smart_quiet + ["update"]
-smart_newer = smart_quiet + ["newer"]
-smart_orphans = smart_quiet + ["query", "--orphans", "--show-format", "$name\n"]
-smart_query = smart_quiet + ["query"]
-smart_query_repos = smart_quiet + ["query", "--channel=base", "--channel=updates"]
-smart_install_cmd = smart_cmd + ["install", "--yes", "--explain"]
-smart_remove_cmd = smart_cmd + ["remove", "--yes", "--explain"]
-smart_query_installed = smart_quiet + ["query", "--installed", "--show-format", "$name $version\n"]
-smart_query_base = smart_quiet + ["query", "--channel=base", "--show-format", "$name $version\n"]
-smart_query_updates = smart_quiet + ["query", "--channel=updates", "--show-format", "$name $version\n"]
+# DNF commands
+dnf_cmd = ['/bin/dnf']
+dnf_quiet = dnf_cmd + ['--quiet']
+dnf_makecache = dnf_quiet + ['makecache',
+                             '--disablerepo="*"',
+                             '--enablerepo', 'platform-base',
+                             '--enablerepo', 'platform-updates']
 
 
 def setflag(fname):
@@ -122,10 +120,6 @@ class PatchMessageHelloAgent(messages.PatchMessage):
 
     def handle(self, sock, addr):
         # Send response
-
-        # Run the smart config audit
-        global pa
-        pa.timed_audit_smart_config()
 
         #
         # If a user tries to do a host-install on an unlocked node,
@@ -289,6 +283,46 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
         resp.send(sock)
 
 
+class PatchAgentDnfTransLogCB(dnf.callback.TransactionProgress):
+    def __init__(self):
+        dnf.callback.TransactionProgress.__init__(self)
+
+        self.log_prefix = 'dnf trans'
+
+    def progress(self, package, action, ti_done, ti_total, ts_done, ts_total):
+        if action in dnf.transaction.ACTIONS:
+            action_str = dnf.transaction.ACTIONS[action]
+        elif action == dnf.transaction.TRANS_POST:
+            action_str = 'Post transaction'
+        else:
+            action_str = 'unknown(%d)' % action
+
+        if ti_done is not None:
+            # To reduce the volume of logs, only log 0% and 100%
+            if ti_done == 0 or ti_done == ti_total:
+                LOG.info('%s PROGRESS %s: %s %0.1f%% [%s/%s]',
+                         self.log_prefix, action_str, package,
+                         (ti_done * 100 / ti_total),
+                         ts_done, ts_total)
+        else:
+            LOG.info('%s PROGRESS %s: %s [%s/%s]',
+                     self.log_prefix, action_str, package, ts_done, ts_total)
+
+    def filelog(self, package, action):
+        if action in dnf.transaction.FILE_ACTIONS:
+            msg = '%s: %s' % (dnf.transaction.FILE_ACTIONS[action], package)
+        else:
+            msg = '%s: %s' % (package, action)
+        LOG.info('%s FILELOG %s', self.log_prefix, msg)
+
+    def scriptout(self, msgs):
+        if msgs:
+            LOG.info("%s SCRIPTOUT :\n%s", self.log_prefix, msgs)
+
+    def error(self, message):
+        LOG.error("%s ERROR: %s", self.log_prefix, message)
+
+
 class PatchAgent(PatchService):
     def __init__(self):
         PatchService.__init__(self)
@@ -298,9 +332,14 @@ class PatchAgent(PatchService):
         self.listener = None
         self.changes = False
         self.installed = {}
+        self.installed_dnf = []
         self.to_install = {}
+        self.to_install_dnf = []
+        self.to_downgrade_dnf = []
         self.to_remove = []
+        self.to_remove_dnf = []
         self.missing_pkgs = []
+        self.missing_pkgs_dnf = []
         self.patch_op_counter = 0
         self.node_is_patched = os.path.exists(node_is_patched_file)
         self.node_is_patched_timestamp = 0
@@ -308,6 +347,7 @@ class PatchAgent(PatchService):
         self.state = constants.PATCH_AGENT_STATE_IDLE
         self.last_config_audit = 0
         self.rejection_timestamp = 0
+        self.dnfb = None
 
         # Check state flags
         if os.path.exists(patch_installing_file):
@@ -343,289 +383,40 @@ class PatchAgent(PatchService):
         self.listener.bind(('', self.port))
         self.listener.listen(2)  # Allow two connections, for two controllers
 
-    def audit_smart_config(self):
-        LOG.info("Auditing smart configuration")
-
-        # Get the current channel config
-        try:
-            output = subprocess.check_output(smart_cmd +
-                                             ["channel", "--yaml"],
-                                             stderr=subprocess.STDOUT)
-            config = yaml.load(output)
-        except subprocess.CalledProcessError as e:
-            LOG.exception("Failed to query channels")
-            LOG.error("Command output: %s", e.output)
-            return False
-        except Exception:
-            LOG.exception("Failed to query channels")
-            return False
-
-        expected = [{'channel': 'rpmdb',
-                     'type': 'rpm-sys',
-                     'name': 'RPM Database',
-                     'baseurl': None},
-                    {'channel': 'base',
-                     'type': 'rpm-md',
-                     'name': 'Base',
-                     'baseurl': "http://controller:%s/feed/rel-%s" % (http_port_real, SW_VERSION)},
-                    {'channel': 'updates',
-                     'type': 'rpm-md',
-                     'name': 'Patches',
-                     'baseurl': "http://controller:%s/updates/rel-%s" % (http_port_real, SW_VERSION)}]
-
-        updated = False
-
-        for item in expected:
-            channel = item['channel']
-            ch_type = item['type']
-            ch_name = item['name']
-            ch_baseurl = item['baseurl']
-
-            add_channel = False
-
-            if channel in config:
-                # Verify existing channel config
-                if (config[channel].get('type') != ch_type or
-                        config[channel].get('name') != ch_name or
-                        config[channel].get('baseurl') != ch_baseurl):
-                    # Config is invalid
-                    add_channel = True
-                    LOG.warning("Invalid smart config found for %s", channel)
-                    try:
-                        output = subprocess.check_output(smart_cmd +
-                                                         ["channel", "--yes",
-                                                          "--remove", channel],
-                                                         stderr=subprocess.STDOUT)
-                    except subprocess.CalledProcessError as e:
-                        LOG.exception("Failed to configure %s channel", channel)
-                        LOG.error("Command output: %s", e.output)
-                        return False
-            else:
-                # Channel is missing
-                add_channel = True
-                LOG.warning("Channel %s is missing from config", channel)
-
-            if add_channel:
-                LOG.info("Adding channel %s", channel)
-                cmd_args = ["channel", "--yes", "--add", channel,
-                            "type=%s" % ch_type,
-                            "name=%s" % ch_name]
-                if ch_baseurl is not None:
-                    cmd_args += ["baseurl=%s" % ch_baseurl]
-
-                try:
-                    output = subprocess.check_output(smart_cmd + cmd_args,
-                                                     stderr=subprocess.STDOUT)
-                except subprocess.CalledProcessError as e:
-                    LOG.exception("Failed to configure %s channel", channel)
-                    LOG.error("Command output: %s", e.output)
-                    return False
-
-                updated = True
-
-        # Validate the smart config
-        try:
-            output = subprocess.check_output(smart_cmd +
-                                             ["config", "--yaml"],
-                                             stderr=subprocess.STDOUT)
-            config = yaml.load(output)
-        except subprocess.CalledProcessError as e:
-            LOG.exception("Failed to query smart config")
-            LOG.error("Command output: %s", e.output)
-            return False
-        except Exception:
-            LOG.exception("Failed to query smart config")
-            return False
-
-        # Check for the rpm-nolinktos flag
-        nolinktos = 'rpm-nolinktos'
-        if config.get(nolinktos) is not True:
-            # Set the flag
-            LOG.warning("Setting %s option", nolinktos)
-            try:
-                output = subprocess.check_output(smart_cmd +
-                                                 ["config", "--set",
-                                                  "%s=true" % nolinktos],
-                                                 stderr=subprocess.STDOUT)
-            except subprocess.CalledProcessError as e:
-                LOG.exception("Failed to configure %s option", nolinktos)
-                LOG.error("Command output: %s", e.output)
-                return False
-
-            updated = True
-
-        # Check for the rpm-check-signatures flag
-        nosignature = 'rpm-check-signatures'
-        if config.get(nosignature) is not False:
-            # Set the flag
-            LOG.warning("Setting %s option", nosignature)
-            try:
-                output = subprocess.check_output(smart_cmd +
-                                                 ["config", "--set",
-                                                  "%s=false" % nosignature],
-                                                 stderr=subprocess.STDOUT)
-            except subprocess.CalledProcessError as e:
-                LOG.exception("Failed to configure %s option", nosignature)
-                LOG.error("Command output: %s", e.output)
-                return False
-
-            updated = True
-
-        if updated:
-            try:
-                subprocess.check_output(smart_update, stderr=subprocess.STDOUT)
-            except subprocess.CalledProcessError as e:
-                LOG.exception("Failed to update smartpm")
-                LOG.error("Command output: %s", e.output)
-                return False
-
-            # Reset the patch op counter to force a detailed query
-            self.patch_op_counter = 0
-
-        self.last_config_audit = time.time()
-        return True
-
-    def timed_audit_smart_config(self):
-        rc = True
-        if (time.time() - self.last_config_audit) > 1800:
-            # It's been 30 minutes since the last completed audit
-            LOG.info("Kicking timed audit")
-            rc = self.audit_smart_config()
-
-        return rc
-
     @staticmethod
-    def parse_smart_pkglist(output):
-        pkglist = {}
-        for line in output.splitlines():
-            if line == '':
-                continue
-
-            fields = line.split()
-            pkgname = fields[0]
-            (version, arch) = fields[1].split('@')
-
-            if pkgname not in pkglist:
-                pkglist[pkgname] = {}
-                pkglist[pkgname][arch] = version
-            elif arch not in pkglist[pkgname]:
-                pkglist[pkgname][arch] = version
+    def pkgobjs_to_list(pkgobjs):
+        # Transform pkgobj list to format used by patch-controller
+        output = {}
+        for pkg in pkgobjs:
+            if pkg.epoch != 0:
+                output[pkg.name] = "%s:%s-%s@%s" % (pkg.epoch, pkg.version, pkg.release, pkg.arch)
             else:
-                stored_ver = pkglist[pkgname][arch]
+                output[pkg.name] = "%s-%s@%s" % (pkg.version, pkg.release, pkg.arch)
 
-                # The rpm.labelCompare takes version broken into 3 components
-                # It returns:
-                #     1, if first arg is higher version
-                #     0, if versions are same
-                #     -1, if first arg is lower version
-                rc = rpm.labelCompare(parse_pkgver(version),
-                                      parse_pkgver(stored_ver))
+        return output
 
-                if rc > 0:
-                    # Update version
-                    pkglist[pkgname][arch] = version
+    def dnf_reset_client(self):
+        if self.dnfb is not None:
+            self.dnfb.close()
+            self.dnfb = None
 
-        return pkglist
+        self.dnfb = dnf.Base()
+        self.dnfb.conf.substitutions['infra'] = 'stock'
 
-    @staticmethod
-    def get_pkg_version(pkglist, pkg, arch):
-        if pkg not in pkglist:
-            return None
-        if arch not in pkglist[pkg]:
-            return None
-        return pkglist[pkg][arch]
+        # Reset default installonlypkgs list
+        self.dnfb.conf.installonlypkgs = []
 
-    def parse_smart_newer(self, output):
-        # Skip the first two lines, which are headers
-        for line in output.splitlines()[2:]:
-            if line == '':
-                continue
+        self.dnfb.read_all_repos()
 
-            fields = line.split()
-            pkgname = fields[0]
-            installedver = fields[2]
-            newver = fields[5]
-
-            self.installed[pkgname] = installedver
-            self.to_install[pkgname] = newver
-
-    def parse_smart_orphans(self, output):
-        for pkgname in output.splitlines():
-            if pkgname == '':
-                continue
-
-            highest_version = None
-
-            try:
-                query = subprocess.check_output(smart_query_repos + ["--show-format", '$version\n', pkgname])
-                # The last non-blank version is the highest
-                for version in query.splitlines():
-                    if version == '':
-                        continue
-                    highest_version = version.split('@')[0]
-
-            except subprocess.CalledProcessError:
-                # Package is not in the repo
-                highest_version = None
-
-            if highest_version is None:
-                # Package is to be removed
-                self.to_remove.append(pkgname)
+        # Ensure only platform repos are enabled for transaction
+        for repo in self.dnfb.repos.all():
+            if repo.id == 'platform-base' or repo.id == 'platform-updates':
+                repo.enable()
             else:
-                # Rollback to the highest version
-                self.to_install[pkgname] = highest_version
+                repo.disable()
 
-            # Get the installed version
-            try:
-                query = subprocess.check_output(smart_query + ["--installed", "--show-format", '$version\n', pkgname])
-                for version in query.splitlines():
-                    if version == '':
-                        continue
-                    self.installed[pkgname] = version.split('@')[0]
-                    break
-            except subprocess.CalledProcessError:
-                LOG.error("Failed to query installed version of %s", pkgname)
-
-            self.changes = True
-
-    def check_groups(self):
-        # Get the groups file
-        mygroup = "updates-%s" % "-".join(subfunctions)
-        self.missing_pkgs = []
-        installed_pkgs = []
-
-        groups_url = "http://controller:%s/updates/rel-%s/comps.xml" % (http_port_real, SW_VERSION)
-        try:
-            req = requests.get(groups_url)
-            if req.status_code != 200:
-                LOG.error("Failed to get groups list from server")
-                return False
-        except requests.ConnectionError:
-            LOG.error("Failed to connect to server")
-            return False
-
-        # Get list of installed packages
-        try:
-            query = subprocess.check_output(["rpm", "-qa", "--queryformat", "%{NAME}\n"])
-            installed_pkgs = query.split()
-        except subprocess.CalledProcessError:
-            LOG.exception("Failed to query RPMs")
-            return False
-
-        root = ElementTree.fromstring(req.text)
-        for child in root:
-            group_id = child.find('id')
-            if group_id is None or group_id.text != mygroup:
-                continue
-
-            pkglist = child.find('packagelist')
-            if pkglist is None:
-                continue
-
-            for pkg in pkglist.findall('packagereq'):
-                if pkg.text not in installed_pkgs and pkg.text not in self.missing_pkgs:
-                    self.missing_pkgs.append(pkg.text)
-                    self.changes = True
+        # Read repo info
+        self.dnfb.fill_sack()
 
     def query(self):
         """ Check current patch state """
@@ -633,14 +424,15 @@ class PatchAgent(PatchService):
             LOG.info("Failed install_uuid check. Skipping query")
             return False
 
-        if not self.audit_smart_config():
-            # Set a state to "unknown"?
-            return False
+        if self.dnfb is not None:
+            self.dnfb.close()
+            self.dnfb = None
 
+        # TODO(dpenney): Use python APIs for makecache
         try:
-            subprocess.check_output(smart_update, stderr=subprocess.STDOUT)
+            subprocess.check_output(dnf_makecache, stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
-            LOG.error("Failed to update smartpm")
+            LOG.error("Failed to run dnf makecache")
             LOG.error("Command output: %s", e.output)
             # Set a state to "unknown"?
             return False
@@ -649,78 +441,72 @@ class PatchAgent(PatchService):
         self.query_id = random.random()
 
         self.changes = False
+        self.installed_dnf = []
         self.installed = {}
-        self.to_install = {}
+        self.to_install_dnf = []
+        self.to_downgrade_dnf = []
         self.to_remove = []
+        self.to_remove_dnf = []
         self.missing_pkgs = []
+        self.missing_pkgs_dnf = []
+
+        self.dnf_reset_client()
 
         # Get the repo data
-        pkgs_installed = {}
-        pkgs_base = {}
-        pkgs_updates = {}
+        pkgs_installed = dnf.sack._rpmdb_sack(self.dnfb).query().installed()  # pylint: disable=protected-access
+        avail = self.dnfb.sack.query().available().latest()
 
-        try:
-            output = subprocess.check_output(smart_query_installed)
-            pkgs_installed = self.parse_smart_pkglist(output)
-        except subprocess.CalledProcessError as e:
-            LOG.error("Failed to query installed pkgs: %s", e.output)
-            # Set a state to "unknown"?
-            return False
-
-        try:
-            output = subprocess.check_output(smart_query_base)
-            pkgs_base = self.parse_smart_pkglist(output)
-        except subprocess.CalledProcessError as e:
-            LOG.error("Failed to query base pkgs: %s", e.output)
-            # Set a state to "unknown"?
-            return False
-
-        try:
-            output = subprocess.check_output(smart_query_updates)
-            pkgs_updates = self.parse_smart_pkglist(output)
-        except subprocess.CalledProcessError as e:
-            LOG.error("Failed to query patched pkgs: %s", e.output)
-            # Set a state to "unknown"?
-            return False
-
-        # There are four possible actions:
-        # 1. If installed pkg is not in base or updates, remove it.
-        # 2. If installed pkg version is higher than highest in base
-        #    or updates, downgrade it.
-        # 3. If installed pkg version is lower than highest in updates,
-        #    upgrade it.
-        # 4. If pkg in grouplist is not in installed, install it.
+        # There are three possible actions:
+        # 1. If installed pkg is not in a repo, remove it.
+        # 2. If installed pkg version does not match newest repo version, update it.
+        # 3. If a package in the grouplist is not installed, install it.
 
         for pkg in pkgs_installed:
-            for arch in pkgs_installed[pkg]:
-                installed_version = pkgs_installed[pkg][arch]
-                updates_version = self.get_pkg_version(pkgs_updates, pkg, arch)
-                base_version = self.get_pkg_version(pkgs_base, pkg, arch)
+            highest = avail.filter(name=pkg.name, arch=pkg.arch)
+            if highest:
+                highest_pkg = highest[0]
 
-                if updates_version is None and base_version is None:
-                    # Remove it
-                    self.to_remove.append(pkg)
-                    self.changes = True
+                if pkg.evr_eq(highest_pkg):
                     continue
 
-                compare_version = updates_version
-                if compare_version is None:
-                    compare_version = base_version
-
-                # Compare the installed version to what's in the repo
-                rc = rpm.labelCompare(parse_pkgver(installed_version),
-                                      parse_pkgver(compare_version))
-                if rc == 0:
-                    # Versions match, nothing to do.
-                    continue
+                if pkg.evr_gt(highest_pkg):
+                    self.to_downgrade_dnf.append(highest_pkg)
                 else:
-                    # Install the version from the repo
-                    self.to_install[pkg] = "@".join([compare_version, arch])
-                    self.installed[pkg] = "@".join([installed_version, arch])
-                    self.changes = True
+                    self.to_install_dnf.append(highest_pkg)
+            else:
+                self.to_remove_dnf.append(pkg)
+                self.to_remove.append(pkg.name)
+
+            self.installed_dnf.append(pkg)
+            self.changes = True
 
         # Look for new packages
-        self.check_groups()
+        self.dnfb.read_comps()
+        grp_id = 'updates-%s' % '-'.join(subfunctions)
+        pkggrp = None
+        for grp in self.dnfb.comps.groups_iter():
+            if grp.id == grp_id:
+                pkggrp = grp
+                break
+
+        if pkggrp is None:
+            LOG.error("Could not find software group: %s", grp_id)
+
+        for pkg in pkggrp.packages_iter():
+            try:
+                res = pkgs_installed.filter(name=pkg.name)
+                if len(res) == 0:
+                    found_pkg = avail.filter(name=pkg.name)
+                    self.missing_pkgs_dnf.append(found_pkg[0])
+                    self.missing_pkgs.append(found_pkg[0].name)
+                    self.changes = True
+            except dnf.exceptions.PackageNotFoundError:
+                self.missing_pkgs_dnf.append(pkg)
+                self.missing_pkgs.append(pkg.name)
+                self.changes = True
+
+        self.installed = self.pkgobjs_to_list(self.installed_dnf)
+        self.to_install = self.pkgobjs_to_list(self.to_install_dnf + self.to_downgrade_dnf)
 
         LOG.info("Patch state query returns %s", self.changes)
         LOG.info("Installed: %s", self.installed)
@@ -729,6 +515,35 @@ class PatchAgent(PatchService):
         LOG.info("Missing: %s", self.missing_pkgs)
 
         return True
+
+    def resolve_dnf_transaction(self, undo_failure=True):
+        LOG.info("Starting to process transaction: undo_failure=%s", undo_failure)
+        self.dnfb.resolve()
+        self.dnfb.download_packages(self.dnfb.transaction.install_set)
+
+        tid = self.dnfb.do_transaction(display=PatchAgentDnfTransLogCB())
+
+        transaction_rc = True
+        for t in self.dnfb.transaction:
+            if t.state != libdnf.transaction.TransactionItemState_DONE:
+                transaction_rc = False
+                break
+
+        self.dnf_reset_client()
+
+        if not transaction_rc:
+            if undo_failure:
+                LOG.error("Failure occurred... Undoing last transaction (%s)", tid)
+                old = self.dnfb.history.old((tid,))[0]
+                mobj = dnf.db.history.MergedTransactionWrapper(old)
+
+                self.dnfb._history_undo_operations(mobj, old.tid, True)  # pylint: disable=protected-access
+
+                if not self.resolve_dnf_transaction(undo_failure=False):
+                    LOG.error("Failed to undo transaction")
+
+        LOG.info("Transaction complete: undo_failure=%s, success=%s", undo_failure, transaction_rc)
+        return transaction_rc
 
     def handle_install(self, verbose_to_stdout=False, disallow_insvc_patch=False):
         #
@@ -781,64 +596,54 @@ class PatchAgent(PatchService):
         if verbose_to_stdout:
             print("Checking for software updates...")
         self.query()
-        install_set = []
-        for pkg, version in self.to_install.items():
-            install_set.append("%s-%s" % (pkg, version))
-
-        install_set += self.missing_pkgs
 
         changed = False
         rc = True
 
-        if len(install_set) > 0:
+        if len(self.to_install_dnf) > 0 or len(self.to_downgrade_dnf) > 0:
+            LOG.info("Adding pkgs to installation set: %s", self.to_install)
+            for pkg in self.to_install_dnf:
+                self.dnfb.package_install(pkg)
+
+            for pkg in self.to_downgrade_dnf:
+                self.dnfb.package_downgrade(pkg)
+
+            changed = True
+
+        if len(self.missing_pkgs_dnf) > 0:
+            LOG.info("Adding missing pkgs to installation set: %s", self.missing_pkgs)
+            for pkg in self.missing_pkgs_dnf:
+                self.dnfb.package_install(pkg)
+            changed = True
+
+        if len(self.to_remove_dnf) > 0:
+            LOG.info("Adding pkgs to be removed: %s", self.to_remove)
+            for pkg in self.to_remove_dnf:
+                self.dnfb.package_remove(pkg)
+            changed = True
+
+        if changed:
+            # Run the transaction set
+            transaction_rc = False
             try:
-                if verbose_to_stdout:
-                    print("Installing software updates...")
-                LOG.info("Installing: %s", ", ".join(install_set))
-                output = subprocess.check_output(smart_install_cmd + install_set, stderr=subprocess.STDOUT)
-                changed = True
-                for line in output.split('\n'):
-                    LOG.info("INSTALL: %s", line)
-                if verbose_to_stdout:
-                    print("Software updated.")
-            except subprocess.CalledProcessError as e:
-                LOG.exception("Failed to install RPMs")
-                LOG.error("Command output: %s", e.output)
+                transaction_rc = self.resolve_dnf_transaction()
+            except dnf.exceptions.DepsolveError:
+                LOG.error("Failures resolving dependencies in transaction")
+            except dnf.exceptions.DownloadError:
+                LOG.error("Failures downloading in transaction")
+
+            if not transaction_rc:
+                LOG.error("Failures occurred during transaction")
                 rc = False
                 if verbose_to_stdout:
                     print("WARNING: Software update failed.")
+
         else:
             if verbose_to_stdout:
                 print("Nothing to install.")
             LOG.info("Nothing to install")
 
-        if rc:
-            self.query()
-            remove_set = self.to_remove
-
-            if len(remove_set) > 0:
-                try:
-                    if verbose_to_stdout:
-                        print("Handling patch removal...")
-                    LOG.info("Removing: %s", ", ".join(remove_set))
-                    output = subprocess.check_output(smart_remove_cmd + remove_set, stderr=subprocess.STDOUT)
-                    changed = True
-                    for line in output.split('\n'):
-                        LOG.info("REMOVE: %s", line)
-                    if verbose_to_stdout:
-                        print("Patch removal complete.")
-                except subprocess.CalledProcessError as e:
-                    LOG.exception("Failed to remove RPMs")
-                    LOG.error("Command output: %s", e.output)
-                    rc = False
-                    if verbose_to_stdout:
-                        print("WARNING: Patch removal failed.")
-            else:
-                if verbose_to_stdout:
-                    print("Nothing to remove.")
-                LOG.info("Nothing to remove")
-
-        if changed:
+        if changed and rc:
             # Update the node_is_patched flag
             setflag(node_is_patched_file)
 
@@ -1057,7 +862,7 @@ class PatchAgent(PatchService):
 def main():
     global pa
 
-    configure_logging()
+    configure_logging(dnf_log=True)
 
     cfg.read_config()
 

@@ -1090,7 +1090,7 @@ def patch_install_local(debug, args):  # pylint: disable=unused-argument
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     # To allow patch installation to occur before configuration, we need
-    # to alias controller to localhost so that the smartpm channels work.
+    # to alias controller to localhost so that the dnf repos work.
     # There is a HOSTALIASES feature that would be preferred here, but it
     # unfortunately requires dnsmasq to be running, which it is not at this point.
 
@@ -1351,7 +1351,7 @@ def get_auth_token_and_endpoint(region_name):
                                      interface='internal',
                                      region_name=region_name)
     except (exceptions.http.Unauthorized, exceptions.EndpointNotFound) as e:
-        print(e.message)
+        print(str(e))
         exit(-1)
 
     return token, endpoint

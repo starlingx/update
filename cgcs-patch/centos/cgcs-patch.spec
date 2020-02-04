@@ -1,4 +1,4 @@
-Summary: TIS Platform Patching
+Summary: StarlingX Platform Patching
 Name: cgcs-patch
 Version: 1.0
 Release: %{tis_patch_ver}%{?_tis_dist}
@@ -16,11 +16,12 @@ BuildRequires: systemd-units
 BuildRequires: systemd-devel
 Requires: python-devel
 Requires: python-crypto
-Requires: python-smartpm
+Requires: dnf
+Requires: python-dnf
 Requires: /bin/bash
 
 %description
-TIS Platform Patching
+StarlingX Platform Patching
 
 %define pythonroot           /usr/lib64/python2.7/site-packages
 
@@ -110,10 +111,10 @@ install -m 644 dist/*.whl $RPM_BUILD_ROOT/wheels/
         %{buildroot}%{_sbindir}/upgrade-start-pkg-extract
 
 %clean
-rm -rf $RPM_BUILD_ROOT 
+rm -rf $RPM_BUILD_ROOT
 
 %package -n cgcs-patch-controller
-Summary: TIS Platform Patching
+Summary: StarlingX Platform Patching
 Group: base
 Requires: /usr/bin/env
 Requires: /bin/sh
@@ -123,7 +124,7 @@ Requires(post): /usr/bin/env
 Requires(post): /bin/sh
 
 %description -n cgcs-patch-controller
-TIS Platform Patching
+StarlingX Platform Patching
 
 %post -n cgcs-patch-controller
 /usr/bin/systemctl enable sw-patch-controller.service
@@ -131,7 +132,7 @@ TIS Platform Patching
 
 
 %package -n cgcs-patch-agent
-Summary: TIS Platform Patching
+Summary: StarlingX Platform Patching
 Group: base
 Requires: /usr/bin/env
 Requires: /bin/sh
@@ -139,7 +140,7 @@ Requires(post): /usr/bin/env
 Requires(post): /bin/sh
 
 %description -n cgcs-patch-agent
-TIS Platform Patching
+StarlingX Platform Patching
 
 %post -n cgcs-patch-agent
 /usr/bin/systemctl enable sw-patch-agent.service
