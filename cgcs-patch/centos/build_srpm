@@ -52,7 +52,7 @@ else
 fi
 
 if [ $TAR_NEEDED -gt 0 ]; then
-    tar czvf  $TAR_PATH $SRC_DIR $EXTRA_DIR \
+    tar czvf $TAR_PATH \
         --exclude='cgcs-patch/cgcs_patch_id' \
         --exclude='cgcs-patch/cgcs_make_patch' \
         --exclude='.git*' \
@@ -61,6 +61,7 @@ if [ $TAR_NEEDED -gt 0 ]; then
         --exclude='patches' \
         --exclude="$DISTRO" \
         --exclude='pbr-*.egg' \
+        $SRC_DIR $EXTRA_DIR \
         --transform "s,^$SRC_DIR/LICENSE,LICENSE," \
         --transform "s,^$SRC_DIR,$TAR_NAME-$VERSION,"
 fi

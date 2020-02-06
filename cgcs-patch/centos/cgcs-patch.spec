@@ -9,21 +9,21 @@ URL: unknown
 Source0: %{name}-%{version}.tar.gz
 Source1: LICENSE
 
-BuildRequires: python-setuptools
-BuildRequires: python2-pip
-BuildRequires: python2-wheel
+BuildRequires: python3-setuptools
+BuildRequires: python3-pip
+BuildRequires: python3-wheel
 BuildRequires: systemd-units
 BuildRequires: systemd-devel
-Requires: python-devel
-Requires: python-crypto
+Requires: python3-devel
+Requires: python3-crypto
 Requires: dnf
-Requires: python-dnf
+Requires: python3-dnf
 Requires: /bin/bash
 
 %description
 StarlingX Platform Patching
 
-%define pythonroot           /usr/lib64/python2.7/site-packages
+%define pythonroot           %{python3_sitearch}
 
 %define debug_package %{nil}
 
@@ -31,11 +31,11 @@ StarlingX Platform Patching
 %setup
 
 %build
-%{__python} setup.py build
-%py2_build_wheel
+%{__python3} setup.py build
+%py3_build_wheel
 
 %install
-%{__python} setup.py install --root=$RPM_BUILD_ROOT \
+%{__python3} setup.py install --root=$RPM_BUILD_ROOT \
                              --install-lib=%{pythonroot} \
                              --prefix=/usr \
                              --install-data=/usr/share \
