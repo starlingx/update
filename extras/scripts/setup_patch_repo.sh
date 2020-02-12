@@ -16,6 +16,6 @@ export PLATFORM_RELEASE
 export PYTHONPATH=$CGCSPATCH_DIR/cgcs-patch
 export PYTHONDONTWRITEBYTECODE=true
 
-# Run the patch_build tool 
-exec $CGCSPATCH_DIR/bin/patch_build "$@"
+# Run the setup_patch_repo tool
+exec $CGCSPATCH_DIR/bin/setup_patch_repo "$@"
 
