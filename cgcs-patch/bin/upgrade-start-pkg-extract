@@ -82,7 +82,7 @@ function extract_pkg() {
     cd $WORKDIR
 
     # Find the RPM
-    local pkgfile=$(repoquery --repofrompath base,${TGT_BASE_REPO} ${TGT_PATCHES_REPO_OPT} --location -q ${pkgname})
+    local pkgfile=$(dnf repoquery --repofrompath base,${TGT_BASE_REPO} ${TGT_PATCHES_REPO_OPT} --location -q ${pkgname})
     if [ -z "${pkgfile}" ]; then
         logger -t $0 "Could not find ${pkgname}"
         exit 1
