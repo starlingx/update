@@ -9,7 +9,7 @@ URL: unknown
 Source0: dev_certificate_enable.bin
 
 %description
-Enables the installation of Titanium patches signed by developers
+Enables the installation of StarlingX patches signed by developers
 
 %prep
 
