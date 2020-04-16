@@ -6,31 +6,36 @@
 #
 
 # This builds 3 patches:
-# SYSINV.1 contains sysinv components
-# KUBE.1 contains kubeadm
-# KUBE.2 contains the remainder (node, client, master, etc..)
+# PLATFORM_PATCH_1 contains sysinv and playbookconfig components
+# KUBE_PATCH_1 contains kubeadm
+# KUBE_PATCH_2 contains the remainder (node, client, master, etc..)
 
-PATH=$MY_REPO/stx/stx-update/extras/scripts:$PATH
-SYSINV_PATCH_1=SYSINV.1
-KUBE_PATCH_1=KUBE.1
-KUBE_PATCH_2=KUBE.2
+PATH=$MY_REPO/stx/update/extras/scripts:$PATH
 SEMANTIC_PATH=`dirname "$0"`
 DIR=${MY_WORKSPACE}/std/rpmbuild/RPMS
-SYSINV_SUFFIX=1.0-342.tis.x86_64.rpm
-KUBE_SUFFIX=1.16.2-1.tis.1.x86_64.rpm
 
+# Patch names
+PLATFORM_PATCH_1=PLATFORM.1
+KUBE_PATCH_1=KUBE.1
+KUBE_PATCH_2=KUBE.2
+
+# Add the following options to include restart scripts for sysinv:
+# --controller ${DIR}/EXAMPLE_SYSINV-1.0-*.x86_64.rpm \
+# --controller-worker ${DIR}/EXAMPLE_SYSINV-1.0-*.x86_64.rpm \
+# --controller-worker-lowlatency ${DIR}/EXAMPLE_SYSINV-1.0-*.x86_64.rpm \
 patch_build.sh \
-    --id ${SYSINV_PATCH_1} \
+    --id ${PLATFORM_PATCH_1} \
     --reboot-required=N \
-    ${DIR}/sysinv-${SYSINV_SUFFIX}
+    ${DIR}/sysinv-1.0-*.tis.x86_64.rpm \
+    ${DIR}/playbookconfig-1.0-*.tis.x86_64.rpm
 
 patch_build.sh \
     --id ${KUBE_PATCH_1} \
     --reboot-required=N \
     --pre-apply ${SEMANTIC_PATH}/KUBE.1.preapply   \
     --pre-remove ${SEMANTIC_PATH}/KUBE.1.preremove \
-    --req ${SYSINV_PATCH_1} \
-    ${DIR}/kubernetes-kubeadm-${KUBE_SUFFIX}
+    --req ${PLATFORM_PATCH_1} \
+    ${DIR}/kubernetes-kubeadm-1.18.1_upgrade-1.tis.*.x86_64.rpm
 
 patch_build.sh \
     --id ${KUBE_PATCH_2} \
@@ -38,7 +43,7 @@ patch_build.sh \
     --pre-apply ${SEMANTIC_PATH}/KUBE.2.preapply   \
     --pre-remove ${SEMANTIC_PATH}/KUBE.2.preremove \
     --req ${KUBE_PATCH_1} \
-    ${DIR}/kubernetes-node-${KUBE_SUFFIX}    \
-    ${DIR}/kubernetes-client-${KUBE_SUFFIX}  \
-    ${DIR}/kubernetes-${KUBE_SUFFIX} \
-    ${DIR}/kubernetes-master-${KUBE_SUFFIX}
+    ${DIR}/kubernetes-node-1.18.1_upgrade-1.tis.*.x86_64.rpm \
+    ${DIR}/kubernetes-client-1.18.1_upgrade-1.tis.*.x86_64.rpm \
+    ${DIR}/kubernetes-1.18.1_upgrade-1.tis.*.x86_64.rpm \
+    ${DIR}/kubernetes-master-1.18.1_upgrade-1.tis.*.x86_64.rpm
