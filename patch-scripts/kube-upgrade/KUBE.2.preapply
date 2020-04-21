@@ -41,8 +41,8 @@ def main():
     if len(running_versions) == 0:
         fatal_error("Could not determine kube-apiserver version")
 
-    # Running version must be at least v1.16.2
-    test_version = 'v1.16.2'
+    # Running version must be at least v1.18.1-upgrade
+    test_version = 'v1.18.1-upgrade'
     for running_version in running_versions:
         if LooseVersion(running_version) < LooseVersion(test_version):
             fatal_error("A kube-apiserver is running %s, but must be"
