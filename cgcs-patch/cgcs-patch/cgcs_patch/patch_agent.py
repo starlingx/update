@@ -628,9 +628,11 @@ class PatchAgent(PatchService):
             try:
                 transaction_rc = self.resolve_dnf_transaction()
             except dnf.exceptions.DepsolveError:
-                LOG.error("Failures resolving dependencies in transaction")
+                LOG.exception("Failures resolving dependencies in transaction")
             except dnf.exceptions.DownloadError:
-                LOG.error("Failures downloading in transaction")
+                LOG.exception("Failures downloading in transaction")
+            except dnf.exceptions.Error:
+                LOG.exception("Failure resolving transaction")
 
             if not transaction_rc:
                 LOG.error("Failures occurred during transaction")

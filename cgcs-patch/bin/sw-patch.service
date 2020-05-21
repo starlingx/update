@@ -1,5 +1,5 @@
 [Unit]
-Description=TIS Patching
+Description=StarlingX Patching
 After=syslog.target network-online.target
 Before=sw-patch-agent.service
 

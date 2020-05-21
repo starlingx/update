@@ -1,5 +1,5 @@
 [Unit]
-Description=TIS Patching Controller Daemon
+Description=StarlingX Patching Controller Daemon
 After=syslog.target network-online.target sw-patch.service sw-patch-controller.service
 Before=pmon.service
 
