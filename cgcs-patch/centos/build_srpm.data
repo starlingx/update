@@ -1,1 +1,5 @@
-TIS_PATCH_VER=28
+SRC_DIR=.
+EXCLUDE_LIST_FROM_TAR="centos \
+    cgcs-patch/cgcs-patch/.tox cgcs-patch/cgcs-patch/.coverage cgcs-patch/cgcs-patch/.stestr cgcs-patch/cgcs-patch/cover \
+    cgcs-patch/cgcs_make_patch cgcs-patch/cgcs_patch_id"
+TIS_PATCH_VER=PKG_GITREVCOUNT

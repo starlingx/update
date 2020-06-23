@@ -17,12 +17,10 @@ Requires: python-devel
 Requires: /bin/bash
 
 %description
-TIS Platform Patching
-
-%define pythonroot           /usr/lib64/python2.7/site-packages
+StarlingX Platform Patching Alarm Manager
 
 %prep
-%setup
+%setup -n %{name}-%{version}/%{name}
 
 %build
 %{__python} setup.py build
@@ -30,20 +28,20 @@ TIS Platform Patching
 
 %install
 %{__python} setup.py install --root=$RPM_BUILD_ROOT \
-                             --install-lib=%{pythonroot} \
+                             --install-lib=%{python2_sitearch} \
                              --prefix=/usr \
                              --install-data=/usr/share \
                              --single-version-externally-managed
 mkdir -p $RPM_BUILD_ROOT/wheels
 install -m 644 dist/*.whl $RPM_BUILD_ROOT/wheels/
 
-    install -m 755 -d %{buildroot}%{_bindir}
-    install -m 755 -d %{buildroot}%{_sysconfdir}/init.d
+install -m 755 -d %{buildroot}%{_bindir}
+install -m 755 -d %{buildroot}%{_sysconfdir}/init.d
 
-    install -m 700 ${RPM_BUILD_DIR}/scripts/bin/patch-alarm-manager \
+install -m 700 ${RPM_BUILD_DIR}/%{name}-%{version}/scripts/bin/patch-alarm-manager \
         %{buildroot}%{_bindir}/patch-alarm-manager
 
-    install -m 700 ${RPM_BUILD_DIR}/scripts/init.d/patch-alarm-manager \
+install -m 700 ${RPM_BUILD_DIR}/%{name}-%{version}/scripts/init.d/patch-alarm-manager \
         %{buildroot}%{_sysconfdir}/init.d/patch-alarm-manager
 
 %clean
@@ -53,8 +51,8 @@ rm -rf $RPM_BUILD_ROOT
 %files
 %defattr(-,root,root,-)
 %doc LICENSE
-%{pythonroot}/patch_alarm
-%{pythonroot}/patch_alarm-*.egg-info
+%{python2_sitearch}/patch_alarm
+%{python2_sitearch}/patch_alarm-*.egg-info
 "%{_bindir}/patch-alarm-manager"
 "%{_sysconfdir}/init.d/patch-alarm-manager"
 
