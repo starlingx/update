@@ -7,8 +7,8 @@
     check:
       jobs:
         - openstack-tox-linters
-        - py3-bandit
-        - py3-flake8
+        # - py3-bandit
+        # - py3-flake8
         - patch-tox-pylint
         - patch-tox-py27
         - patch-tox-py36
@@ -18,8 +18,8 @@
     gate:
       jobs:
         - openstack-tox-linters
-        - py3-bandit
-        - py3-flake8
+        # - py3-bandit
+        # - py3-flake8
         - patch-tox-pylint
         - patch-tox-py27
         - patch-tox-py36
