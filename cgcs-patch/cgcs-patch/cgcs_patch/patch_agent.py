@@ -348,6 +348,7 @@ class PatchAgent(PatchService):
         self.last_config_audit = 0
         self.rejection_timestamp = 0
         self.dnfb = None
+        self.last_repo_revision = None
 
         # Check state flags
         if os.path.exists(patch_installing_file):
@@ -418,7 +419,7 @@ class PatchAgent(PatchService):
         # Read repo info
         self.dnfb.fill_sack()
 
-    def query(self):
+    def query(self, check_revision=False):
         """ Check current patch state """
         if not check_install_uuid():
             LOG.info("Failed install_uuid check. Skipping query")
@@ -437,6 +438,32 @@ class PatchAgent(PatchService):
             # Set a state to "unknown"?
             return False
 
+        self.dnf_reset_client()
+        current_repo_revision = self.dnfb.repos['platform-updates']._repo.getRevision()  # pylint: disable=protected-access
+
+        if check_revision and self.last_repo_revision is not None:
+            # We're expecting the revision to be updated.
+            # If it's not, we ended up getting a cached repomd query.
+            if current_repo_revision == self.last_repo_revision:
+                LOG.info("makecache returned same revision as previous (%s). Retry after one second",
+                         current_repo_revision)
+                time.sleep(1)
+                try:
+                    subprocess.check_output(dnf_makecache, stderr=subprocess.STDOUT)
+                except subprocess.CalledProcessError as e:
+                    LOG.error("Failed to run dnf makecache")
+                    LOG.error("Command output: %s", e.output)
+                    # Set a state to "unknown"?
+                    return False
+
+                self.dnf_reset_client()
+                current_repo_revision = self.dnfb.repos['platform-updates']._repo.getRevision()  # pylint: disable=protected-access
+                if current_repo_revision != self.last_repo_revision:
+                    LOG.info("Stale repo revision id corrected with retry. New id: %s",
+                             current_repo_revision)
+
+        self.last_repo_revision = current_repo_revision
+
         # Generate a unique query id
         self.query_id = random.random()
 
@@ -449,8 +476,6 @@ class PatchAgent(PatchService):
         self.to_remove_dnf = []
         self.missing_pkgs = []
         self.missing_pkgs_dnf = []
-
-        self.dnf_reset_client()
 
         # Get the repo data
         pkgs_installed = dnf.sack._rpmdb_sack(self.dnfb).query().installed()  # pylint: disable=protected-access
@@ -723,7 +748,7 @@ class PatchAgent(PatchService):
             changed = True
 
         if changed:
-            rc = self.query()
+            rc = self.query(check_revision=True)
             if not rc:
                 # Query failed. Reset the op counter
                 self.patch_op_counter = 0
