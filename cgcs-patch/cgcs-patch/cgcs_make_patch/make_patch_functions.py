@@ -1361,7 +1361,7 @@ class PatchRecipeData(object):
         else:
             pf.meta.status = STATUS_DEVELOPEMENT
         if 'UNREMOVABLE' in self.metadata:
-            pf.meta.removable = self.metadata['UNREMOVABLE']
+            pf.meta.unremovable = self.metadata['UNREMOVABLE']
         if 'SUMMARY' in self.metadata:
             pf.meta.summary = self.metadata['SUMMARY']
         if 'DESCRIPTION' in self.metadata:
