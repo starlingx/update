@@ -31,6 +31,7 @@ patch_build.sh \
 
 patch_build.sh \
     --id ${KUBE_PATCH_1} \
+    --apply-active-release-only \
     --reboot-required=N \
     --pre-apply ${SEMANTIC_PATH}/KUBE.1.preapply   \
     --pre-remove ${SEMANTIC_PATH}/KUBE.1.preremove \
@@ -39,6 +40,7 @@ patch_build.sh \
 
 patch_build.sh \
     --id ${KUBE_PATCH_2} \
+    --apply-active-release-only \
     --reboot-required=N \
     --pre-apply ${SEMANTIC_PATH}/KUBE.2.preapply   \
     --pre-remove ${SEMANTIC_PATH}/KUBE.2.preremove \
