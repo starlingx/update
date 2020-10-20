@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2018 Wind River Systems, Inc.
+Copyright (c) 2018-2020 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -110,7 +110,7 @@ def main():
 
             patch_sw_version = thispatch.query_line(patch_id, 'sw_version')
             if patch_sw_version != sw_version:
-                print "%s is for release %s, not %s" % (patch_sw_version, sw_version)
+                raise Exception("%s is for release %s, not %s" % (patch_id, patch_sw_version, sw_version))
 
             # Move the metadata to the "committed" dir, and the rpms to the Packages dir
             shutil.move('metadata.xml', os.path.join(committed_dir, "%s-metadata.xml" % patch_id))
