@@ -57,10 +57,11 @@ symbols=no
 # W0613 unused-argument
 # W0622 redefined-builtin
 # W0703 broad-except
+# W0707 raise-missing-from
 # W1401 anomalous-backslash-in-string
 # W1505, deprecated-method
 disable=C, R, fixme, E1101,
-        W0101, W0104, W0107, W0212, W0231, W0603, W0612, W0613, W0622, W0703,
+        W0101, W0104, W0107, W0212, W0231, W0603, W0612, W0613, W0622, W0703, W0707,
         W1401, W1505
 
 [REPORTS]
