@@ -1,12 +1,12 @@
 #!/bin/bash
 #
-# Copyright (c) 2014-2019 Wind River Systems, Inc.
+# Copyright (c) 2014-2020 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
 # StarlingX Patching
 # chkconfig: 345 20 23
-# description: CGCS Patching init script
+# description: StarlingX Patching init script
 
 ### BEGIN INIT INFO
 # Provides:          sw-patch
@@ -25,6 +25,7 @@ NAME=$(basename $0)
 
 logfile=/var/log/patching.log
 patch_failed_file=/var/run/patch_install_failed
+patched_during_init=/etc/patching/.patched_during_init
 
 function LOG_TO_FILE {
     echo "`date "+%FT%T.%3N"`: $NAME: $*" >> $logfile
@@ -32,11 +33,24 @@ function LOG_TO_FILE {
 
 function check_for_rr_patch {
     if [ -f /var/run/node_is_patched_rr ]; then
-        echo
-        echo "Node has been patched and requires an immediate reboot."
-        echo
-        LOG_TO_FILE "Node has been patched, with reboot-required flag set. Rebooting"
-        /sbin/reboot
+        if [ ! -f ${patched_during_init} ]; then
+            echo
+            echo "Node has been patched and requires an immediate reboot."
+            echo
+            LOG_TO_FILE "Node has been patched, with reboot-required flag set. Rebooting"
+            touch ${patched_during_init}
+            /sbin/reboot
+        else
+            echo
+            echo "Node has been patched during init a second consecutive time. Skipping reboot due to possible error"
+            echo
+            LOG_TO_FILE "Node has been patched during init a second consecutive time. Skipping reboot due to possible error"
+            touch ${patch_failed_file}
+            rm -f ${patched_during_init}
+            exit 1
+        fi
+    else
+        rm -f ${patched_during_init}
     fi
 }
 

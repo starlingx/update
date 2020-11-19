@@ -115,6 +115,7 @@ class AgentNeighbour(object):
         self.installed = {}
         self.to_remove = []
         self.missing_pkgs = []
+        self.duplicated_pkgs = {}
         self.nodetype = None
         self.sw_version = "unknown"
         self.subfunctions = []
@@ -156,6 +157,7 @@ class AgentNeighbour(object):
                                    installed,
                                    to_remove,
                                    missing_pkgs,
+                                   duplicated_pkgs,
                                    nodetype,
                                    sw_version,
                                    subfunctions,
@@ -163,6 +165,7 @@ class AgentNeighbour(object):
         self.installed = installed
         self.to_remove = to_remove
         self.missing_pkgs = missing_pkgs
+        self.duplicated_pkgs = duplicated_pkgs
         self.nodetype = nodetype
         self.stale = False
         self.pending_query = False
@@ -186,6 +189,7 @@ class AgentNeighbour(object):
              "installed": self.installed,
              "to_remove": self.to_remove,
              "missing_pkgs": self.missing_pkgs,
+             "duplicated_pkgs": self.duplicated_pkgs,
              "nodetype": self.nodetype,
              "subfunctions": self.subfunctions,
              "sw_version": self.sw_version,
@@ -421,6 +425,7 @@ class PatchMessageQueryDetailedResp(messages.PatchMessage):
         self.to_install = {}
         self.to_remove = []
         self.missing_pkgs = []
+        self.duplicated_pkgs = {}
         self.subfunctions = []
         self.nodetype = "unknown"
         self.agent_sw_version = "unknown"
@@ -434,6 +439,8 @@ class PatchMessageQueryDetailedResp(messages.PatchMessage):
             self.to_remove = data['to_remove']
         if 'missing_pkgs' in data:
             self.missing_pkgs = data['missing_pkgs']
+        if 'duplicated_pkgs' in data:
+            self.duplicated_pkgs = data['duplicated_pkgs']
         if 'nodetype' in data:
             self.nodetype = data['nodetype']
         if 'sw_version' in data:
@@ -455,6 +462,7 @@ class PatchMessageQueryDetailedResp(messages.PatchMessage):
             pc.hosts[ip].handle_query_detailed_resp(self.installed,
                                                     self.to_remove,
                                                     self.missing_pkgs,
+                                                    self.duplicated_pkgs,
                                                     self.nodetype,
                                                     self.agent_sw_version,
                                                     self.subfunctions,
