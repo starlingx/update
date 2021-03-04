@@ -28,7 +28,7 @@ declare -i GLOBAL_RC=$PATCH_STATUS_OK
 
 if is_controller
 then
-    processes_to_restart="dcmanager-manager dcmanager-api \
+    processes_to_restart="dcmanager-manager dcmanager-api dcmanager-audit-worker \
                           dcmanager-audit dcmanager-orchestrator \
                           dcorch-engine dcorch-sysinv-api-proxy dcdbsync-api \
                           dcorch-patch-api-proxy dcorch-identity-api-proxy"
