@@ -48,8 +48,10 @@ symbols=no
 # W0511 fixme
 # W0603 global-statement
 # W0703 broad-except
+# W0707 raise-missing-from
 # W1505, deprecated-method
-disable=C, R, W0107, W0511, W0603, W0703, W1505
+# H216, unittest mock
+disable=C, H216, R, W0107, W0511, W0603, W0703, W0707, W1505
 
 
 [REPORTS]

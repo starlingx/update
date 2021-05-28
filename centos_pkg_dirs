@@ -2,6 +2,7 @@ cgcs-patch
 patch-alarm
 patch-scripts/EXAMPLE_0001
 patch-scripts/EXAMPLE_0002
+patch-scripts/EXAMPLE_DC
 patch-scripts/EXAMPLE_RR
 patch-scripts/EXAMPLE_MTCE
 patch-scripts/EXAMPLE_VIM

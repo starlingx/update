@@ -204,6 +204,7 @@ class PatchMessageQueryDetailedResp(messages.PatchMessage):
         self.message['installed'] = pa.installed
         self.message['to_remove'] = pa.to_remove
         self.message['missing_pkgs'] = pa.missing_pkgs
+        self.message['duplicated_pkgs'] = pa.duplicated_pkgs
         self.message['nodetype'] = cfg.nodetype
         self.message['sw_version'] = SW_VERSION
         self.message['subfunctions'] = subfunctions
@@ -340,6 +341,7 @@ class PatchAgent(PatchService):
         self.to_remove_dnf = []
         self.missing_pkgs = []
         self.missing_pkgs_dnf = []
+        self.duplicated_pkgs = {}
         self.patch_op_counter = 0
         self.node_is_patched = os.path.exists(node_is_patched_file)
         self.node_is_patched_timestamp = 0
@@ -348,6 +350,7 @@ class PatchAgent(PatchService):
         self.last_config_audit = 0
         self.rejection_timestamp = 0
         self.dnfb = None
+        self.last_repo_revision = None
 
         # Check state flags
         if os.path.exists(patch_installing_file):
@@ -384,14 +387,21 @@ class PatchAgent(PatchService):
         self.listener.listen(2)  # Allow two connections, for two controllers
 
     @staticmethod
+    def pkgobj_to_version_str(pkg):
+        # Transform pkgobj version to format used by patch-controller
+        if pkg.epoch != 0:
+            output = "%s:%s-%s@%s" % (pkg.epoch, pkg.version, pkg.release, pkg.arch)
+        else:
+            output = "%s-%s@%s" % (pkg.version, pkg.release, pkg.arch)
+
+        return output
+
+    @staticmethod
     def pkgobjs_to_list(pkgobjs):
         # Transform pkgobj list to format used by patch-controller
         output = {}
         for pkg in pkgobjs:
-            if pkg.epoch != 0:
-                output[pkg.name] = "%s:%s-%s@%s" % (pkg.epoch, pkg.version, pkg.release, pkg.arch)
-            else:
-                output[pkg.name] = "%s-%s@%s" % (pkg.version, pkg.release, pkg.arch)
+            output[pkg.name] = PatchAgent.pkgobj_to_version_str(pkg)
 
         return output
 
@@ -418,7 +428,7 @@ class PatchAgent(PatchService):
         # Read repo info
         self.dnfb.fill_sack()
 
-    def query(self):
+    def query(self, check_revision=False):
         """ Check current patch state """
         if not check_install_uuid():
             LOG.info("Failed install_uuid check. Skipping query")
@@ -437,6 +447,32 @@ class PatchAgent(PatchService):
             # Set a state to "unknown"?
             return False
 
+        self.dnf_reset_client()
+        current_repo_revision = self.dnfb.repos['platform-updates']._repo.getRevision()  # pylint: disable=protected-access
+
+        if check_revision and self.last_repo_revision is not None:
+            # We're expecting the revision to be updated.
+            # If it's not, we ended up getting a cached repomd query.
+            if current_repo_revision == self.last_repo_revision:
+                LOG.info("makecache returned same revision as previous (%s). Retry after one second",
+                         current_repo_revision)
+                time.sleep(1)
+                try:
+                    subprocess.check_output(dnf_makecache, stderr=subprocess.STDOUT)
+                except subprocess.CalledProcessError as e:
+                    LOG.error("Failed to run dnf makecache")
+                    LOG.error("Command output: %s", e.output)
+                    # Set a state to "unknown"?
+                    return False
+
+                self.dnf_reset_client()
+                current_repo_revision = self.dnfb.repos['platform-updates']._repo.getRevision()  # pylint: disable=protected-access
+                if current_repo_revision != self.last_repo_revision:
+                    LOG.info("Stale repo revision id corrected with retry. New id: %s",
+                             current_repo_revision)
+
+        self.last_repo_revision = current_repo_revision
+
         # Generate a unique query id
         self.query_id = random.random()
 
@@ -450,11 +486,21 @@ class PatchAgent(PatchService):
         self.missing_pkgs = []
         self.missing_pkgs_dnf = []
 
-        self.dnf_reset_client()
-
         # Get the repo data
         pkgs_installed = dnf.sack._rpmdb_sack(self.dnfb).query().installed()  # pylint: disable=protected-access
         avail = self.dnfb.sack.query().available().latest()
+
+        # Check for packages with multiple installed versions
+        self.duplicated_pkgs = {}
+        for pkg in pkgs_installed:
+            pkglist = pkgs_installed.filter(name=pkg.name, arch=pkg.arch)
+            if len(pkglist) > 1:
+                if pkg.name not in self.duplicated_pkgs:
+                    self.duplicated_pkgs[pkg.name] = {}
+                if pkg.arch not in self.duplicated_pkgs[pkg.name]:
+                    self.duplicated_pkgs[pkg.name][pkg.arch] = map(PatchAgent.pkgobj_to_version_str, pkglist)
+                    LOG.warn("Duplicate packages installed: %s %s",
+                             pkg.name, ", ".join(self.duplicated_pkgs[pkg.name][pkg.arch]))
 
         # There are three possible actions:
         # 1. If installed pkg is not in a repo, remove it.
@@ -513,6 +559,8 @@ class PatchAgent(PatchService):
         LOG.info("To install: %s", self.to_install)
         LOG.info("To remove: %s", self.to_remove)
         LOG.info("Missing: %s", self.missing_pkgs)
+        if len(self.duplicated_pkgs) > 0:
+            LOG.info("Duplicated: %s", self.duplicated_pkgs)
 
         return True
 
@@ -600,78 +648,82 @@ class PatchAgent(PatchService):
         changed = False
         rc = True
 
-        if len(self.to_install_dnf) > 0 or len(self.to_downgrade_dnf) > 0:
-            LOG.info("Adding pkgs to installation set: %s", self.to_install)
-            for pkg in self.to_install_dnf:
-                self.dnfb.package_install(pkg)
-
-            for pkg in self.to_downgrade_dnf:
-                self.dnfb.package_downgrade(pkg)
-
-            changed = True
-
-        if len(self.missing_pkgs_dnf) > 0:
-            LOG.info("Adding missing pkgs to installation set: %s", self.missing_pkgs)
-            for pkg in self.missing_pkgs_dnf:
-                self.dnfb.package_install(pkg)
-            changed = True
-
-        if len(self.to_remove_dnf) > 0:
-            LOG.info("Adding pkgs to be removed: %s", self.to_remove)
-            for pkg in self.to_remove_dnf:
-                self.dnfb.package_remove(pkg)
-            changed = True
-
-        if changed:
-            # Run the transaction set
-            transaction_rc = False
-            try:
-                transaction_rc = self.resolve_dnf_transaction()
-            except dnf.exceptions.DepsolveError:
-                LOG.exception("Failures resolving dependencies in transaction")
-            except dnf.exceptions.DownloadError:
-                LOG.exception("Failures downloading in transaction")
-            except dnf.exceptions.Error:
-                LOG.exception("Failure resolving transaction")
-
-            if not transaction_rc:
-                LOG.error("Failures occurred during transaction")
-                rc = False
-                if verbose_to_stdout:
-                    print("WARNING: Software update failed.")
-
+        if len(self.duplicated_pkgs) > 0:
+            LOG.error("Duplicate installed packages found. Manual recovery is required.")
+            rc = False
         else:
-            if verbose_to_stdout:
-                print("Nothing to install.")
-            LOG.info("Nothing to install")
+            if len(self.to_install_dnf) > 0 or len(self.to_downgrade_dnf) > 0:
+                LOG.info("Adding pkgs to installation set: %s", self.to_install)
+                for pkg in self.to_install_dnf:
+                    self.dnfb.package_install(pkg)
 
-        if changed and rc:
-            # Update the node_is_patched flag
-            setflag(node_is_patched_file)
+                for pkg in self.to_downgrade_dnf:
+                    self.dnfb.package_downgrade(pkg)
 
-            self.node_is_patched = True
-            if verbose_to_stdout:
-                print("This node has been patched.")
+                changed = True
 
-            if os.path.exists(node_is_patched_rr_file):
-                LOG.info("Reboot is required. Skipping patch-scripts")
-            elif disallow_insvc_patch:
-                LOG.info("Disallowing patch-scripts. Treating as reboot-required")
-                setflag(node_is_patched_rr_file)
-            else:
-                LOG.info("Running in-service patch-scripts")
+            if len(self.missing_pkgs_dnf) > 0:
+                LOG.info("Adding missing pkgs to installation set: %s", self.missing_pkgs)
+                for pkg in self.missing_pkgs_dnf:
+                    self.dnfb.package_install(pkg)
+                changed = True
 
+            if len(self.to_remove_dnf) > 0:
+                LOG.info("Adding pkgs to be removed: %s", self.to_remove)
+                for pkg in self.to_remove_dnf:
+                    self.dnfb.package_remove(pkg)
+                changed = True
+
+            if changed:
+                # Run the transaction set
+                transaction_rc = False
                 try:
-                    subprocess.check_output(run_insvc_patch_scripts_cmd, stderr=subprocess.STDOUT)
+                    transaction_rc = self.resolve_dnf_transaction()
+                except dnf.exceptions.DepsolveError:
+                    LOG.exception("Failures resolving dependencies in transaction")
+                except dnf.exceptions.DownloadError:
+                    LOG.exception("Failures downloading in transaction")
+                except dnf.exceptions.Error:
+                    LOG.exception("Failure resolving transaction")
 
-                    # Clear the node_is_patched flag, since we've handled it in-service
-                    clearflag(node_is_patched_file)
-                    self.node_is_patched = False
-                except subprocess.CalledProcessError as e:
-                    LOG.exception("In-Service patch scripts failed")
-                    LOG.error("Command output: %s", e.output)
-                    # Fail the patching operation
+                if not transaction_rc:
+                    LOG.error("Failures occurred during transaction")
                     rc = False
+                    if verbose_to_stdout:
+                        print("WARNING: Software update failed.")
+
+            else:
+                if verbose_to_stdout:
+                    print("Nothing to install.")
+                LOG.info("Nothing to install")
+
+            if changed and rc:
+                # Update the node_is_patched flag
+                setflag(node_is_patched_file)
+
+                self.node_is_patched = True
+                if verbose_to_stdout:
+                    print("This node has been patched.")
+
+                if os.path.exists(node_is_patched_rr_file):
+                    LOG.info("Reboot is required. Skipping patch-scripts")
+                elif disallow_insvc_patch:
+                    LOG.info("Disallowing patch-scripts. Treating as reboot-required")
+                    setflag(node_is_patched_rr_file)
+                else:
+                    LOG.info("Running in-service patch-scripts")
+
+                    try:
+                        subprocess.check_output(run_insvc_patch_scripts_cmd, stderr=subprocess.STDOUT)
+
+                        # Clear the node_is_patched flag, since we've handled it in-service
+                        clearflag(node_is_patched_file)
+                        self.node_is_patched = False
+                    except subprocess.CalledProcessError as e:
+                        LOG.exception("In-Service patch scripts failed")
+                        LOG.error("Command output: %s", e.output)
+                        # Fail the patching operation
+                        rc = False
 
         # Clear the in-service patch dirs
         if os.path.exists(insvc_patch_scripts):
@@ -723,7 +775,7 @@ class PatchAgent(PatchService):
             changed = True
 
         if changed:
-            rc = self.query()
+            rc = self.query(check_revision=True)
             if not rc:
                 # Query failed. Reset the op counter
                 self.patch_op_counter = 0
