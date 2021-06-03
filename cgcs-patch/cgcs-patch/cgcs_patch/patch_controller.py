@@ -12,6 +12,7 @@ import socket
 import json
 import select
 import subprocess
+import six
 from six.moves import configparser
 import rpm
 import os
@@ -241,7 +242,7 @@ class PatchMessageHello(messages.PatchMessage):
         global pc
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(message, (pc.controller_address, cfg.controller_port))
+        sock.sendto(str.encode(message), (pc.controller_address, cfg.controller_port))
 
 
 class PatchMessageHelloAck(messages.PatchMessage):
@@ -266,7 +267,7 @@ class PatchMessageHelloAck(messages.PatchMessage):
         global pc
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(message, (pc.controller_address, cfg.controller_port))
+        sock.sendto(str.encode(message), (pc.controller_address, cfg.controller_port))
 
 
 class PatchMessageSyncReq(messages.PatchMessage):
@@ -297,7 +298,7 @@ class PatchMessageSyncReq(messages.PatchMessage):
         LOG.info("sending sync req")
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(message, (pc.controller_address, cfg.controller_port))
+        sock.sendto(str.encode(message), (pc.controller_address, cfg.controller_port))
 
 
 class PatchMessageSyncComplete(messages.PatchMessage):
@@ -324,7 +325,7 @@ class PatchMessageSyncComplete(messages.PatchMessage):
         LOG.info("sending sync complete")
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(message, (pc.controller_address, cfg.controller_port))
+        sock.sendto(str.encode(message), (pc.controller_address, cfg.controller_port))
 
 
 class PatchMessageHelloAgent(messages.PatchMessage):
@@ -344,8 +345,8 @@ class PatchMessageHelloAgent(messages.PatchMessage):
         self.encode()
         message = json.dumps(self.message)
         local_hostname = utils.ip_to_versioned_localhost(cfg.agent_mcast_group)
-        sock.sendto(message, (pc.agent_address, cfg.agent_port))
-        sock.sendto(message, (local_hostname, cfg.agent_port))
+        sock.sendto(str.encode(message), (pc.agent_address, cfg.agent_port))
+        sock.sendto(str.encode(message), (local_hostname, cfg.agent_port))
 
 
 class PatchMessageHelloAgentAck(messages.PatchMessage):
@@ -414,7 +415,7 @@ class PatchMessageQueryDetailed(messages.PatchMessage):
     def send(self, sock):
         self.encode()
         message = json.dumps(self.message)
-        sock.sendall(message)
+        sock.sendall(str.encode(message))
 
 
 class PatchMessageQueryDetailedResp(messages.PatchMessage):
@@ -467,7 +468,7 @@ class PatchMessageQueryDetailedResp(messages.PatchMessage):
                                                     self.agent_sw_version,
                                                     self.subfunctions,
                                                     self.agent_state)
-            for patch_id in pc.interim_state.keys():
+            for patch_id in list(pc.interim_state):
                 if ip in pc.interim_state[patch_id]:
                     pc.interim_state[patch_id].remove(ip)
                     if len(pc.interim_state[patch_id]) == 0:
@@ -499,7 +500,7 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
         LOG.info("sending install request to node: %s", self.ip)
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(message, (self.ip, cfg.agent_port))
+        sock.sendto(str.encode(message), (self.ip, cfg.agent_port))
 
 
 class PatchMessageAgentInstallResp(messages.PatchMessage):
@@ -569,7 +570,7 @@ class PatchMessageDropHostReq(messages.PatchMessage):
         global pc
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(message, (pc.controller_address, cfg.controller_port))
+        sock.sendto(str.encode(message), (pc.controller_address, cfg.controller_port))
 
 
 class PatchController(PatchService):
@@ -648,7 +649,10 @@ class PatchController(PatchService):
             pass
 
     def write_state_file(self):
-        config = configparser.ConfigParser()
+        if six.PY2:
+            config = configparser.ConfigParser()
+        elif six.PY3:
+            config = configparser.ConfigParser(strict=False)
 
         cfgfile = open(state_file, 'w')
 
@@ -658,7 +662,10 @@ class PatchController(PatchService):
         cfgfile.close()
 
     def read_state_file(self):
-        config = configparser.ConfigParser()
+        if six.PY2:
+            config = configparser.ConfigParser()
+        elif six.PY3:
+            config = configparser.ConfigParser(strict=False)
 
         config.read(state_file)
 
@@ -755,12 +762,12 @@ class PatchController(PatchService):
                 self.patch_data.metadata[patch_id]["patchstate"] = \
                     self.patch_data.metadata[patch_id]["repostate"]
 
-        for ip in self.hosts.keys():
+        for ip in list(self.hosts):
             if not self.hosts[ip].out_of_date:
                 continue
 
-            for pkg in self.hosts[ip].installed.keys():
-                for patch_id in self.patch_data.content_versions.keys():
+            for pkg in list(self.hosts[ip].installed):
+                for patch_id in list(self.patch_data.content_versions):
                     if pkg not in self.patch_data.content_versions[patch_id]:
                         continue
 
@@ -814,7 +821,7 @@ class PatchController(PatchService):
 
             # Check the to_remove list
             for pkg in self.hosts[ip].to_remove:
-                for patch_id in self.patch_data.content_versions.keys():
+                for patch_id in list(self.patch_data.content_versions):
                     if pkg not in self.patch_data.content_versions[patch_id]:
                         continue
 
@@ -838,7 +845,7 @@ class PatchController(PatchService):
 
             # Check the missing_pkgs list
             for pkg in self.hosts[ip].missing_pkgs:
-                for patch_id in self.patch_data.content_versions.keys():
+                for patch_id in list(self.patch_data.content_versions):
                     if pkg not in self.patch_data.content_versions[patch_id]:
                         continue
 
@@ -900,7 +907,7 @@ class PatchController(PatchService):
 
         # Pass the current patch state to the semantic check as a series of args
         patch_state_args = []
-        for patch_id in self.patch_data.metadata.keys():
+        for patch_id in list(self.patch_data.metadata):
             patch_state = '%s=%s' % (patch_id, self.patch_data.metadata[patch_id]["patchstate"])
             patch_state_args += ['-p', patch_state]
 
@@ -1060,7 +1067,7 @@ class PatchController(PatchService):
             # Set patch_ids to list of all available patches
             # We're getting this list now, before we load the applied patches
             patch_list = []
-            for patch_id in sorted(self.patch_data.metadata.keys()):
+            for patch_id in sorted(list(self.patch_data.metadata)):
                 if self.patch_data.metadata[patch_id]["repostate"] == constants.AVAILABLE:
                     patch_list.append(patch_id)
 
@@ -1198,7 +1205,7 @@ class PatchController(PatchService):
                 self.patch_data.metadata[patch_id]["patchstate"] = constants.UNKNOWN
 
             self.hosts_lock.acquire()
-            self.interim_state[patch_id] = self.hosts.keys()
+            self.interim_state[patch_id] = list(self.hosts)
             self.hosts_lock.release()
 
             repo_changed = True
@@ -1283,7 +1290,7 @@ class PatchController(PatchService):
         # Next, see if any of the patches are required by applied patches
         # required_patches will map the required patch to the patches that need it
         required_patches = {}
-        for patch_iter in self.patch_data.metadata.keys():
+        for patch_iter in list(self.patch_data.metadata):
             # Ignore patches in the op set
             if patch_iter in patch_list:
                 continue
@@ -1381,7 +1388,7 @@ class PatchController(PatchService):
                 self.patch_data.metadata[patch_id]["patchstate"] = constants.UNKNOWN
 
             self.hosts_lock.acquire()
-            self.interim_state[patch_id] = self.hosts.keys()
+            self.interim_state[patch_id] = list(self.hosts)
             self.hosts_lock.release()
 
         if repo_changed:
@@ -1570,7 +1577,7 @@ class PatchController(PatchService):
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         # Delete patch XML files
-        for patch_id in self.patch_data.metadata.keys():
+        for patch_id in list(self.patch_data.metadata):
             if self.patch_data.metadata[patch_id]["sw_version"] != release:
                 continue
 
@@ -1682,7 +1689,7 @@ class PatchController(PatchService):
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         required_patches = {}
-        for patch_iter in self.patch_data.metadata.keys():
+        for patch_iter in list(self.patch_data.metadata):
             for req_patch in self.patch_data.metadata[patch_iter]["requires"]:
                 if req_patch not in patch_ids:
                     continue
@@ -1795,7 +1802,7 @@ class PatchController(PatchService):
         self.patch_data_lock.acquire()
 
         for patch_id in patch_ids:
-            if patch_id not in self.patch_data.metadata.keys():
+            if patch_id not in list(self.patch_data.metadata):
                 results["error"] += "%s is unrecognized\n" % patch_id
 
         for patch_id, data in self.patch_data.metadata.items():
@@ -1850,7 +1857,7 @@ class PatchController(PatchService):
 
         # Verify patch IDs
         for patch_id in sorted(patch_ids):
-            if patch_id not in self.patch_data.metadata.keys():
+            if patch_id not in list(self.patch_data.metadata):
                 errormsg = "%s is unrecognized\n" % patch_id
                 LOG.info("patch_query_dependencies: %s", errormsg)
                 results["error"] += errormsg
@@ -1907,7 +1914,7 @@ class PatchController(PatchService):
         # Verify patch IDs
         self.patch_data_lock.acquire()
         for patch_id in sorted(patch_ids):
-            if patch_id not in self.patch_data.metadata.keys():
+            if patch_id not in list(self.patch_data.metadata):
                 errormsg = "%s is unrecognized\n" % patch_id
                 LOG.info("patch_commit: %s", errormsg)
                 results["error"] += errormsg
@@ -2062,10 +2069,10 @@ class PatchController(PatchService):
         output = []
 
         self.hosts_lock.acquire()
-        for nbr in self.hosts.keys():
+        for nbr in list(self.hosts):
             host = self.hosts[nbr].get_dict()
             host["interim_state"] = False
-            for patch_id in pc.interim_state.keys():
+            for patch_id in list(pc.interim_state):
                 if nbr in pc.interim_state[patch_id]:
                     host["interim_state"] = True
 
@@ -2198,7 +2205,7 @@ class PatchController(PatchService):
                 # Because the host may be getting dropped due to deletion,
                 # we may be unable to do a hostname lookup. Instead, we'll
                 # iterate through the table here.
-                for host in self.hosts.keys():
+                for host in list(self.hosts):
                     if host_ip == self.hosts[host].hostname:
                         ip = host
                         break
@@ -2219,7 +2226,7 @@ class PatchController(PatchService):
         audit_log_info(msg)
 
         del self.hosts[ip]
-        for patch_id in self.interim_state.keys():
+        for patch_id in list(self.interim_state):
             if ip in self.interim_state[patch_id]:
                 self.interim_state[patch_id].remove(ip)
 
@@ -2555,7 +2562,7 @@ class PatchControllerMainThread(threading.Thread):
                                 break
 
                             if packet:
-                                data += packet
+                                data += packet.decode()
 
                                 if data == '':
                                     break
@@ -2645,7 +2652,7 @@ class PatchControllerMainThread(threading.Thread):
 
                     # Age out neighbours
                     pc.controller_neighbours_lock.acquire()
-                    nbrs = pc.controller_neighbours.keys()
+                    nbrs = list(pc.controller_neighbours)
                     for n in nbrs:
                         # Age out controllers after 2 minutes
                         if pc.controller_neighbours[n].get_age() >= 120:
@@ -2654,13 +2661,13 @@ class PatchControllerMainThread(threading.Thread):
                     pc.controller_neighbours_lock.release()
 
                     pc.hosts_lock.acquire()
-                    nbrs = pc.hosts.keys()
+                    nbrs = list(pc.hosts)
                     for n in nbrs:
                         # Age out hosts after 1 hour
                         if pc.hosts[n].get_age() >= 3600:
                             LOG.info("Aging out host %s from table", n)
                             del pc.hosts[n]
-                            for patch_id in pc.interim_state.keys():
+                            for patch_id in list(pc.interim_state):
                                 if n in pc.interim_state[patch_id]:
                                     pc.interim_state[patch_id].remove(n)
 

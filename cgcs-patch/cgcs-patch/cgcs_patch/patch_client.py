@@ -223,7 +223,7 @@ def print_patch_op_result(req):
 
             show_repo = False
 
-            for patch_id in pd.keys():
+            for patch_id in list(pd):
                 if len(patch_id) > width_id:
                     width_id = len(patch_id)
                 if len(pd[patch_id]["sw_version"]) > width_rel:
@@ -244,7 +244,7 @@ def print_patch_op_result(req):
                 print("{0}  {1}  {2}  {3}  {4}".format(
                     '=' * width_id, '=' * width_rr, '=' * width_rel, '=' * width_repo, '=' * width_state))
 
-                for patch_id in sorted(pd.keys()):
+                for patch_id in sorted(list(pd)):
                     if "reboot_required" in pd[patch_id]:
                         rr = pd[patch_id]["reboot_required"]
                     else:
@@ -266,7 +266,7 @@ def print_patch_op_result(req):
                 print("{0}  {1}  {2}  {3}".format(
                     '=' * width_id, '=' * width_rr, '=' * width_rel, '=' * width_state))
 
-                for patch_id in sorted(pd.keys()):
+                for patch_id in sorted(list(pd)):
                     if "reboot_required" in pd[patch_id]:
                         rr = pd[patch_id]["reboot_required"]
                     else:
@@ -302,7 +302,7 @@ def print_patch_show_result(req):
 
         if 'metadata' in data:
             pd = data['metadata']
-            for patch_id in sorted(pd.keys()):
+            for patch_id in sorted(list(pd)):
                 print("%s:" % patch_id)
 
                 if "sw_version" in pd[patch_id] and pd[patch_id]["sw_version"] != "":
@@ -606,7 +606,7 @@ def patch_commit_req(debug, args):
             data = json.loads(req.text)
 
             if 'pd' in data:
-                patch_list = sorted(data['pd'].keys())
+                patch_list = sorted(list(data['pd']))
         elif req.status_code == 500:
             print("Failed to get patch list. Aborting...")
             return 1
@@ -907,6 +907,7 @@ def wait_for_install_complete(agent_ip):
             state = None
             agents = data['data']
             interim_state = None
+
             for agent in agents:
                 if agent['hostname'] == agent_ip \
                    or agent['ip'] == agent_ip:
@@ -1299,7 +1300,7 @@ def completion_opts(args):
             data = json.loads(req.text)
 
             if 'pd' in data:
-                print(" ".join(data['pd'].keys()))
+                print(" ".join(list(data['pd'])))
         return 0
 
     elif args[0] == "hosts":

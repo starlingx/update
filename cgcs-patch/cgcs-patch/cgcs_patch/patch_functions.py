@@ -17,7 +17,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-import xml.etree.ElementTree as ElementTree
+from lxml import etree as ElementTree
 from xml.dom import minidom
 
 from cgcs_patch.patch_verify import verify_files
@@ -146,7 +146,7 @@ def write_xml_file(top,
                    fname):
     # Generate the file, in a readable format if possible
     outfile = open(fname, 'w')
-    rough_xml = ElementTree.tostring(top, 'utf-8')
+    rough_xml = ElementTree.tostring(top)
     if platform.python_version() == "2.7.2":
         # The 2.7.2 toprettyxml() function unnecessarily indents
         # childless tags, adding whitespace. In the case of the
@@ -226,6 +226,13 @@ class PackageVersion(object):
         self.epoch = epoch
         self.version = version
         self.release = release
+
+    def __le__(self, other):
+        out = rpm.labelCompare((self.epoch, self.version, self.release),
+                               (other.epoch, other.version, other.release))
+        if out == 1:
+            return False
+        return True
 
     def __cmp__(self, other):
         """
@@ -378,42 +385,42 @@ class PatchData(object):
         self.semantics.update(new_patch.semantics)
 
         # Need to recursively update package_version and keys dicts
-        for patch_sw_version in new_patch.package_versions.keys():
+        for patch_sw_version in list(new_patch.package_versions):
             if patch_sw_version not in self.package_versions:
                 self.package_versions[patch_sw_version] = {}
-            for pkgname in new_patch.package_versions[patch_sw_version].keys():
+            for pkgname in list(new_patch.package_versions[patch_sw_version]):
                 if pkgname not in self.package_versions[patch_sw_version]:
                     self.package_versions[patch_sw_version][pkgname] = {}
-                for arch in new_patch.package_versions[patch_sw_version][pkgname].keys():
+                for arch in list(new_patch.package_versions[patch_sw_version][pkgname]):
                     if arch not in self.package_versions[patch_sw_version][pkgname]:
                         self.package_versions[patch_sw_version][pkgname][arch] = {}
-                    for pkgver in new_patch.package_versions[patch_sw_version][pkgname][arch].keys():
+                    for pkgver in list(new_patch.package_versions[patch_sw_version][pkgname][arch]):
                         self.package_versions[patch_sw_version][pkgname][arch][pkgver] = patch_id
 
-        for patch_sw_version in new_patch.groups.keys():
+        for patch_sw_version in list(new_patch.groups):
             if patch_sw_version not in self.groups:
                 self.groups[patch_sw_version] = {}
-            for ptype in new_patch.groups[patch_sw_version].keys():
+            for ptype in list(new_patch.groups[patch_sw_version]):
                 if ptype not in self.groups[patch_sw_version]:
                     self.groups[patch_sw_version][ptype] = {}
-                for patch_id in new_patch.groups[patch_sw_version][ptype].keys():
+                for patch_id in list(new_patch.groups[patch_sw_version][ptype]):
                     if patch_id not in self.groups[patch_sw_version][ptype]:
                         self.groups[patch_sw_version][ptype][patch_id] = {}
                     self.groups[patch_sw_version][ptype][patch_id].update(
                         new_patch.groups[patch_sw_version][ptype][patch_id])
 
     def update_patch(self, updated_patch):
-        for patch_id in updated_patch.metadata.keys():
+        for patch_id in list(updated_patch.metadata):
             # Update all fields except repostate
             cur_repostate = self.metadata[patch_id]['repostate']
             self.metadata[patch_id].update(updated_patch.metadata[patch_id])
             self.metadata[patch_id]['repostate'] = cur_repostate
 
     def delete_patch(self, patch_id):
-        for patch_sw_version in self.package_versions.keys():
-            for pkgname in self.package_versions[patch_sw_version].keys():
-                for arch in self.package_versions[patch_sw_version][pkgname].keys():
-                    for pkgver in self.package_versions[patch_sw_version][pkgname][arch].keys():
+        for patch_sw_version in list(self.package_versions):
+            for pkgname in list(self.package_versions[patch_sw_version]):
+                for arch in list(self.package_versions[patch_sw_version][pkgname]):
+                    for pkgver in list(self.package_versions[patch_sw_version][pkgname][arch]):
                         if self.package_versions[patch_sw_version][pkgname][arch][pkgver] == patch_id:
                             del self.package_versions[patch_sw_version][pkgname][arch][pkgver]
                     if len(self.package_versions[patch_sw_version][pkgname][arch]) == 0:
@@ -423,8 +430,8 @@ class PatchData(object):
             if len(self.package_versions[patch_sw_version]) == 0:
                 del self.package_versions[patch_sw_version]
 
-        for patch_sw_version in self.groups.keys():
-            for ptype in self.groups[patch_sw_version].keys():
+        for patch_sw_version in list(self.groups):
+            for ptype in list(self.groups[patch_sw_version]):
                 if patch_id in self.groups[patch_sw_version][ptype]:
                     del self.groups[patch_sw_version][ptype][patch_id]
 
@@ -636,7 +643,7 @@ class PatchData(object):
         fname = "%s/comps.xml" % output_dir
         top = ElementTree.Element('comps')
         if sw_version in self.groups:
-            for groupname in sorted(self.groups[sw_version].keys()):
+            for groupname in sorted(list(self.groups[sw_version])):
                 if self.groups[sw_version][groupname]:
                     group = ElementTree.SubElement(top, 'group')
 
@@ -770,7 +777,7 @@ class PatchMetadata(object):
         add_text_tag_to_xml(top, 'apply_active_release_only',
                             self.apply_active_release_only)
 
-        for groupname in sorted(self.groups.keys()):
+        for groupname in sorted(list(self.groups)):
             if self.groups[groupname]:
                 group = ElementTree.SubElement(top,
                                                'personality',
@@ -780,7 +787,7 @@ class PatchMetadata(object):
                     add_text_tag_to_xml(group, 'package', pkg)
 
         content = ElementTree.SubElement(top, 'contents')
-        for rpmname in sorted(self.contents.keys()):
+        for rpmname in sorted(list(self.contents)):
             add_text_tag_to_xml(content, 'rpm', rpmname)
 
         req = ElementTree.SubElement(top, 'requires')
@@ -873,7 +880,7 @@ class PatchFile(object):
         os.chdir(tmpdir)
 
         # Copy RPM files to tmpdir
-        for rpmfile in self.rpmlist.keys():
+        for rpmfile in list(self.rpmlist):
             shutil.copy(rpmfile, tmpdir)
 
         # add file signatures to RPMs
@@ -887,14 +894,14 @@ class PatchFile(object):
 
         # generate tar file
         tar = tarfile.open("software.tar", "w")
-        for rpmfile in self.rpmlist.keys():
+        for rpmfile in list(self.rpmlist):
             tar.add(os.path.basename(rpmfile))
         tar.close()
 
         # Copy semantics to tmpdir, if any
         if len(self.semantics) > 0:
             tar = tarfile.open("semantics.tar", "w")
-            for action in self.semantics.keys():
+            for action in list(self.semantics):
                 os.mkdir(action, 0o755)
                 sname = os.path.join(action, self.meta.id)
                 shutil.copy(self.semantics[action], sname)
