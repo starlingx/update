@@ -8,11 +8,11 @@ SPDX-License-Identifier: Apache-2.0
 import os
 import logging
 
-from Crypto.Signature import PKCS1_v1_5
-from Crypto.Signature import PKCS1_PSS
-from Crypto.Hash import SHA256
-from Crypto.PublicKey import RSA
-from Crypto.Util.asn1 import DerSequence
+from Cryptodome.Signature import PKCS1_v1_5
+from Cryptodome.Signature import PKCS1_PSS
+from Cryptodome.Hash import SHA256
+from Cryptodome.PublicKey import RSA
+from Cryptodome.Util.asn1 import DerSequence
 from binascii import a2b_base64
 
 from cgcs_patch.certificates import dev_certificate
@@ -112,10 +112,10 @@ def get_public_certificates():
     # encrypted with our formal private key.  If the file is present (and valid)
     # then we add the developer key to the approved certificates list
     if os.path.exists(dev_certificate_marker):
-        with open(dev_certificate_marker) as infile:
+        with open(dev_certificate_marker, 'rb') as infile:
             signature = infile.read()
         data_hash = SHA256.new()
-        data_hash.update('Titanium patching')
+        data_hash.update(b'Titanium patching')
         if verify_hash(data_hash, signature, cert_list):
             cert_list.append(dev_certificate)
         else:

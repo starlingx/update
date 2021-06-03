@@ -6,6 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 """
 
 import os
+import six
 from six.moves import configparser
 import io
 import logging
@@ -48,7 +49,18 @@ def read_config():
     global controller_port
     global agent_port
 
-    config = configparser.SafeConfigParser(defaults)
+    # In python3 configparser uses strict mode by default. It doesn't
+    # agree duplicate keys, and will throw an error
+    # In python2 the strict argument is missing
+    # TODO(dsafta): the logic branching here can be removed once
+    # https://bugs.launchpad.net/starlingx/+bug/1931529 is fixed, allowing
+    # python3 parser to work in strict mode.
+
+    if six.PY2:
+        config = configparser.SafeConfigParser(defaults)
+    elif six.PY3:
+        config = configparser.SafeConfigParser(defaults, strict=False)
+
     config.read(patching_conf)
     patching_conf_mtime = os.stat(patching_conf).st_mtime
 
@@ -103,7 +115,10 @@ def get_mgmt_iface():
         # so return the cached value.
         return mgmt_if
 
-    config = configparser.SafeConfigParser()
+    if six.PY2:
+        config = configparser.SafeConfigParser()
+    elif six.PY3:
+        config = configparser.SafeConfigParser(strict=False)
 
     # The platform.conf file has no section headers, which causes problems
     # for ConfigParser. So we'll fake it out.

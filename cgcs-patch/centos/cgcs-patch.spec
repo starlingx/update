@@ -13,6 +13,7 @@ BuildRequires: python3-pip
 BuildRequires: python3-wheel
 BuildRequires: systemd-units
 BuildRequires: systemd-devel
+BuildRequires: python3-lxml
 Requires: python3-devel
 Requires: python3-crypto
 Requires: dnf
