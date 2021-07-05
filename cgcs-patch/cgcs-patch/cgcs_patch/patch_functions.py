@@ -199,6 +199,24 @@ def parse_pkgver(pkgver):
     return (epoch, version, release)
 
 
+def get_release_from_patch(patchfile):
+    rel = ""
+    try:
+        cmd = "tar xf %s -O metadata.tar | tar x -O" % patchfile
+        metadata_str = subprocess.check_output(cmd, shell=True)
+        root = ElementTree.fromstring(metadata_str)
+        # Extract release version
+        rel = root.findtext('sw_version')
+    except subprocess.CalledProcessError as e:
+        LOG.error("Failed to run tar command")
+        LOG.error("Command output: %s", e.output)
+        raise e
+    except Exception as e:
+        print("Failed to parse patch software version")
+        raise e
+    return rel
+
+
 class PackageVersion(object):
     """
     The PackageVersion class provides a structure for RPM version information,
