@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright (c) 2018 Wind River Systems, Inc.
+# Copyright (c) 2018-2021 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -106,6 +106,8 @@ if [ -z "${WORKDIR}" -o ! -d "${WORKDIR}" ]; then
     logger -t $0 "Failed to create workdir"
     exit 1
 fi
+# Clean dnf cache in case a previous load had different package versions
+dnf clean expire-cache
 extract_pkg pxe-network-installer
 rsync -ac ${WORKDIR}/usr/ /usr/ &&
 rsync -ac ${WORKDIR}/pxeboot/rel-${TGT_RELEASE}/ /pxeboot/rel-${TGT_RELEASE}/ &&
