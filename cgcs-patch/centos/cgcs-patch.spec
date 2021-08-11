@@ -16,6 +16,7 @@ BuildRequires: systemd-devel
 BuildRequires: python-lxml
 Requires: python-devel
 Requires: python-crypto
+Requires: python-pycryptodomex
 Requires: dnf
 Requires: python-dnf
 Requires: /bin/bash
