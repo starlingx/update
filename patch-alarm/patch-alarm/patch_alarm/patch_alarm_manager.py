@@ -28,13 +28,27 @@ LOG_FILE = '/var/log/patch-alarms.log'
 PID_FILE = '/var/run/patch-alarm-manager.pid'
 
 
+class DaemonRunnerWrapper(runner.DaemonRunner):
+    # Workaround: fix the "unbuffered bytes I/O for py3" runtime
+    # error in pyhon3 env.
+    # Picked from [starlingx/utilities]:utilities/logmgmt/logmgmt/logmgmt/logmgmt.py
+    # If there will be a saner approach, it must be changed also in utilities repo.
+    def _open_streams_from_app_stream_paths(self, app):
+        self.daemon_context.stdin = open(app.stdin_path, 'rt')
+        self.daemon_context.stdout = open(app.stdout_path, 'w+t')
+        try:
+            self.daemon_context.stderr = open(app.stderr_path, 'w+t', buffering=0)
+        except Exception:
+            self.daemon_context.stderr = open(app.stderr_path, 'wb+', buffering=0)
+
+
 ###################
 # METHODS
 ###################
 def start_polling():
     cfg.read_config()
     patch_alarm_daemon = PatchAlarmDaemon()
-    alarm_runner = runner.DaemonRunner(patch_alarm_daemon)
+    alarm_runner = DaemonRunnerWrapper(patch_alarm_daemon)
     alarm_runner.daemon_context.umask = 0o022
     alarm_runner.do_action()
 
