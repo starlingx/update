@@ -13,6 +13,9 @@ setuptools.setup(
     version='1.0',
     description='CGCS Patch',
     packages=setuptools.find_packages(),
+    install_requires=[
+        'pycryptodomex',
+    ],
     package_data={
         # Include templates
         '': ['templates/*'],
