@@ -170,7 +170,7 @@ class PatchMessageHelloAgentAck(messages.PatchMessage):
         global pa
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(message, (pa.controller_address, cfg.controller_port))
+        sock.sendto(str.encode(message), (pa.controller_address, cfg.controller_port))
 
 
 class PatchMessageQueryDetailed(messages.PatchMessage):
@@ -216,7 +216,7 @@ class PatchMessageQueryDetailedResp(messages.PatchMessage):
     def send(self, sock):
         self.encode()
         message = json.dumps(self.message)
-        sock.sendall(message)
+        sock.sendall(str.encode(message))
 
 
 class PatchMessageAgentInstallReq(messages.PatchMessage):
@@ -277,7 +277,7 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
         address = (addr[0], cfg.controller_port)
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(message, address)
+        sock.sendto(str.encode(message), address)
 
         # Send a hello ack to follow it
         resp = PatchMessageHelloAgentAck()
@@ -498,7 +498,7 @@ class PatchAgent(PatchService):
                 if pkg.name not in self.duplicated_pkgs:
                     self.duplicated_pkgs[pkg.name] = {}
                 if pkg.arch not in self.duplicated_pkgs[pkg.name]:
-                    self.duplicated_pkgs[pkg.name][pkg.arch] = map(PatchAgent.pkgobj_to_version_str, pkglist)
+                    self.duplicated_pkgs[pkg.name][pkg.arch] = list(map(PatchAgent.pkgobj_to_version_str, pkglist))
                     LOG.warn("Duplicate packages installed: %s %s",
                              pkg.name, ", ".join(self.duplicated_pkgs[pkg.name][pkg.arch]))
 
@@ -847,7 +847,7 @@ class PatchAgent(PatchService):
                             break
 
                         if packet:
-                            data += packet
+                            data += packet.decode()
 
                             if data == '':
                                 break

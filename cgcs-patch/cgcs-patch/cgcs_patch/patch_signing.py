@@ -6,10 +6,10 @@ SPDX-License-Identifier: Apache-2.0
 """
 
 import os
-from Crypto.Signature import PKCS1_PSS
-from Crypto.Hash import SHA256
-from Crypto.PublicKey import RSA  # pylint: disable=unused-import
-from Crypto.Util.asn1 import DerSequence  # pylint: disable=unused-import
+from Cryptodome.Signature import PKCS1_PSS
+from Cryptodome.Hash import SHA256
+from Cryptodome.PublicKey import RSA  # pylint: disable=unused-import
+from Cryptodome.Util.asn1 import DerSequence  # pylint: disable=unused-import
 from binascii import a2b_base64  # pylint: disable=unused-import
 from cgcs_patch.patch_verify import read_RSA_key
 from cgcs_patch.patch_verify import cert_type_formal_str
@@ -55,7 +55,7 @@ def sign_files(filenames, signature_file, private_key=None, cert_type=None):
     if private_key is None:
         if cert_type is not None:
             # A Specific key is asked for
-            assert (cert_type in private_key_files.keys()), "cert_type=%s is not a known cert type" % cert_type
+            assert (cert_type in list(private_key_files)), "cert_type=%s is not a known cert type" % cert_type
             dict_key = cert_type
             filename = private_key_files[dict_key]
             # print 'cert_type given: Checking to see if ' + filename + ' exists\n'
