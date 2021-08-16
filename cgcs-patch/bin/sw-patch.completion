@@ -88,7 +88,7 @@ function _swpatch()
             query)
                 if [ "${prev}" = "--release" ]; then
                     # If --release has been specified, provide installed releases for completion
-                    local releases=$(/bin/ls -d /www/pages/feed/rel-* 2>/dev/null | sed 's#/www/pages/feed/rel-##')
+                    local releases=$(/bin/ls -d /var/www/pages/feed/rel-* 2>/dev/null | sed 's#/var/www/pages/feed/rel-##')
                     COMPREPLY=( $(compgen -W "${releases}" -- ${cur}) )
                 else
                     # --release is only completion option for query
@@ -110,7 +110,7 @@ function _swpatch()
             commit)
                 if [ "${prev}" = "--release" ]; then
                     # If --release has been specified, provide installed releases for completion
-                    local releases=$(/bin/ls -d /www/pages/feed/rel-* 2>/dev/null | sed 's#/www/pages/feed/rel-##')
+                    local releases=$(/bin/ls -d /var/www/pages/feed/rel-* 2>/dev/null | sed 's#/var/www/pages/feed/rel-##')
                     COMPREPLY=( $(compgen -W "${releases}" -- ${cur}) )
                 else
                     # Query the list of known patches

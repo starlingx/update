@@ -23,7 +23,7 @@
 NAME=$(basename $0)
 
 REPO_ID=updates
-REPO_ROOT=/www/pages/${REPO_ID}
+REPO_ROOT=/var/www/pages/${REPO_ID}
 REPO_DIR=${REPO_ROOT}/rel-${SW_VERSION}
 GROUPS_FILE=$REPO_DIR/comps.xml
 PATCHING_DIR=/opt/patching

@@ -44,7 +44,7 @@ applied_dir = "%s/metadata/applied" % patch_dir
 committed_dir = "%s/metadata/committed" % patch_dir
 semantics_dir = "%s/semantics" % patch_dir
 
-repo_root_dir = "/www/pages/updates"
+repo_root_dir = "/var/www/pages/updates"
 repo_dir = {SW_VERSION: "%s/rel-%s" % (repo_root_dir, SW_VERSION)}
 
 root_package_dir = "%s/packages" % patch_dir
@@ -308,7 +308,7 @@ class BasePackageData(object):
 
     def loaddirs(self):
         # Load up available package info
-        base_dir = "/www/pages/feed"
+        base_dir = "/var/www/pages/feed"
         if not os.path.exists(base_dir):
             # Return, since this could be running off-box
             return
