@@ -1652,7 +1652,7 @@ class PatchController(PatchService):
 
         del repo_dir[release]
 
-        if self.base_pkgdata is not None:
+        if self.base_pkgdata is not None and release in self.base_pkgdata.pkgs:
             del self.base_pkgdata.pkgs[release]
 
         # Refresh patch data
