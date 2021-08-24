@@ -1,0 +1,7 @@
+#!/bin/bash
+set -x
+LOCAL_DIR=$1
+PACKAGE_NAME=cgcs-patch
+BASE_DIR=$MY_REPO/stx/update/cgcs-patch
+cp -aL $BASE_DIR/cgcs-patch $LOCAL_DIR
+cp -aL $BASE_DIR/bin $LOCAL_DIR

@@ -1,0 +1,10 @@
+usr/sbin/sw-patch
+usr/sbin/sw-patch-controller-daemon
+usr/sbin/sw-patch-controller-daemon-restart
+usr/sbin/upgrade-start-pkg-extract
+etc/pmon.d/sw-patch-controller-daemon.conf
+etc/init.d/sw-patch-controller-daemon
+etc/init.d/sw-patch-controller
+lib/systemd/system/sw-patch-controller-daemon.service
+etc/bash_completion.d/sw-patch
+lib/systemd/system/sw-patch-controller.service

@@ -1,0 +1,78 @@
+#!/usr/bin/make -f
+#export DH_VERBOSE = 1
+
+export PYBUILD_NAME=cgcs-patch
+DEBIAN_DESTDIR := $(CURDIR)/debian/tmp
+
+%:
+	dh $@ --with python3 --buildsystem=pybuild
+
+override_dh_auto_test:
+	echo
+
+override_dh_auto_install:
+	echo
+
+override_dh_install:
+	python3 setup.py install -f --install-layout=deb --root=${DEBIAN_DESTDIR}
+
+	install -m 755 -d ${DEBIAN_DESTDIR}/usr/sbin
+	install -m 755 -d ${DEBIAN_DESTDIR}/etc/bash_completion.d
+	install -m 755 -d ${DEBIAN_DESTDIR}/etc/goenabled.d
+	install -m 755 -d ${DEBIAN_DESTDIR}/etc/init.d
+	install -m 755 -d ${DEBIAN_DESTDIR}/etc/logrotate.d
+	install -m 755 -d ${DEBIAN_DESTDIR}/etc/patching
+	install -m 700 -d ${DEBIAN_DESTDIR}/etc/patching/patch-scripts
+	install -m 755 -d ${DEBIAN_DESTDIR}/etc/pmon.d
+	install -m 755 -d ${DEBIAN_DESTDIR}/lib/systemd/system
+	install -m 500 bin/sw-patch-agent \
+		${DEBIAN_DESTDIR}/usr/sbin/sw-patch-agent
+	install -m 500 bin/sw-patch-controller-daemon \
+		${DEBIAN_DESTDIR}/usr/sbin/sw-patch-controller-daemon
+	install -m 555 bin/sw-patch \
+		${DEBIAN_DESTDIR}/usr/sbin/sw-patch
+	install -m 555 bin/rpm-audit \
+		${DEBIAN_DESTDIR}/usr/sbin/rpm-audit
+	install -m 500 bin/sw-patch-controller-daemon-init.sh \
+		${DEBIAN_DESTDIR}/etc/init.d/sw-patch-controller-daemon
+	install -m 500 bin/sw-patch-agent-init.sh \
+		${DEBIAN_DESTDIR}/etc/init.d/sw-patch-agent
+	install -m 600 bin/patching.conf \
+		${DEBIAN_DESTDIR}/etc/patching/patching.conf
+	install -m 644 bin/policy.json \
+		${DEBIAN_DESTDIR}/etc/patching/policy.json
+	install -m 444 bin/pmon-sw-patch-controller-daemon.conf \
+		${DEBIAN_DESTDIR}/etc//pmon.d/sw-patch-controller-daemon.conf
+	install -m 444 bin/pmon-sw-patch-agent.conf \
+		${DEBIAN_DESTDIR}/etc/pmon.d/sw-patch-agent.conf
+	install -m 444 bin/*.service ${DEBIAN_DESTDIR}/lib/systemd/system
+	install -m 444 bin/sw-patch.completion ${DEBIAN_DESTDIR}/etc/bash_completion.d/sw-patch
+	install -m 400 bin/patch-functions \
+		${DEBIAN_DESTDIR}/etc/patching/patch-functions
+	install -D -m 444 bin/patch-tmpdirs.conf \
+		${DEBIAN_DESTDIR}/run/patch-tmpdirs.conf
+	install -m 500 bin/run-patch-scripts \
+		${DEBIAN_DESTDIR}/usr/sbin/run-patch-scripts
+	install -m 500 bin/sw-patch-controller-daemon-restart \
+		${DEBIAN_DESTDIR}/usr/sbin/sw-patch-controller-daemon-restart
+	install -m 500 bin/sw-patch-agent-restart \
+		${DEBIAN_DESTDIR}/usr/sbin/sw-patch-agent-restart
+	install -m 500 bin/sw-patch-init.sh \
+		${DEBIAN_DESTDIR}/etc/init.d/sw-patch
+	install -m 500 bin/sw-patch-controller-init.sh \
+		${DEBIAN_DESTDIR}/etc/init.d/sw-patch-controller
+	install -m 555 bin/patch_check_goenabled.sh \
+		${DEBIAN_DESTDIR}/etc/goenabled.d/patch_check_goenabled.sh
+	install -m 444 bin/patching.logrotate \
+		${DEBIAN_DESTDIR}/etc/logrotate.d/patching
+	install -m 500 bin/upgrade-start-pkg-extract \
+		${DEBIAN_DESTDIR}/usr/sbin/upgrade-start-pkg-extract
+	dh_install
+
+override_dh_python3:
+	dh_python3 --shebang=/usr/bin/python3
+
+override_dh_fixperms:
+	dh_fixperms -Xsw-patch-* -Xrpm-audit -Xpatching.conf -Xpolicy.json \
+		-Xpatch-functions -Xpatch-tmpdirs.conf -Xrun-patch-scripts \
+		-Xpatch_check_goenabled.sh -Xpatching -Xupgrade-start-pkg-extract

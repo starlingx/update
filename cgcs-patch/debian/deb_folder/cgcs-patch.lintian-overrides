@@ -1,0 +1,4 @@
+dir-or-file-in-run
+init.d-script-does-not-implement-required-option
+init.d-script-missing-dependency-on-local_fs
+
