@@ -1,5 +1,5 @@
 """
-Copyright (c) 2017-2019 Wind River Systems, Inc.
+Copyright (c) 2017-2021 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -61,7 +61,6 @@ class PatchService(object):
         self.sock_out.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock_in.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-        self.sock_out.bind((mgmt_ip, 0))
         self.sock_in.bind(('', self.port))
 
         if self.mcast_addr:
