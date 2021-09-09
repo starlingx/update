@@ -108,7 +108,7 @@
 - job:
     name: patch-alarm-tox-pylint
     parent: tox
-    nodeset: ubuntu-bionic
+    nodeset: ubuntu-xenial
     required-projects:
       - starlingx/config
       - starlingx/fault
