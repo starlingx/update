@@ -132,12 +132,8 @@ enable=E1603,E1609,E1610,E1602,E1606,E1608,E1607,E1605,E1604,E1601,E1611,W1652,
 # W1505, deprecated-method
 # H216, unittest mock
 # Disable Python3 checkers:
-#  W1618: no-absolute-import
-#  W1619: old-division
-#  W1630: cmp-method
-disable=C, H216, R, W0107, W0511, W0603, W0703, W0707, W1505, W1618, W1619,
-        W1630
-
+# W1618: no-absolute-import
+disable=C, H216, R, W0107, W0511, W0603, W0703, W0707, W1505, W1618
 
 [REPORTS]
 

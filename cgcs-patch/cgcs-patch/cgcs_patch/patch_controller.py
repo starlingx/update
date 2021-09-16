@@ -2017,7 +2017,7 @@ class PatchController(PatchService):
             disk_space += statinfo.st_size
 
         if dry_run:
-            results["info"] = "This commit operation would free %0.2f MiB" % (disk_space / (1024.0 * 1024.0))
+            results["info"] = "This commit operation would free %0.2f MiB" % (disk_space / (1024.0 * 1024.0))  # pylint: disable=W1619
             return results
 
         # Do the commit
