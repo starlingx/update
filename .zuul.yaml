@@ -11,11 +11,9 @@
         - py3-flake8
         - patch-tox-pylint
         - patch-tox-py27
-        - patch-tox-py36
         - patch-tox-py39
         - patch-alarm-tox-pylint
         - patch-alarm-tox-py27
-        - patch-alarm-tox-py36
         - patch-alarm-tox-py39
     gate:
       jobs:
@@ -24,11 +22,9 @@
         - py3-flake8
         - patch-tox-pylint
         - patch-tox-py27
-        - patch-tox-py36
         - patch-tox-py39
         - patch-alarm-tox-pylint
         - patch-alarm-tox-py27
-        - patch-alarm-tox-py36
         - patch-alarm-tox-py39
     post:
       jobs:
@@ -77,19 +73,6 @@
       tox_extra_args: -c cgcs-patch/cgcs-patch/tox.ini
 
 - job:
-    name: patch-tox-py36
-    parent: tox
-    nodeset: ubuntu-bionic
-    required-projects:
-      - starlingx/config
-      - starlingx/fault
-    files:
-      - cgcs-patch/cgcs-patch/*
-    vars:
-      tox_envlist: py36
-      tox_extra_args: -c cgcs-patch/cgcs-patch/tox.ini
-
-- job:
     name: patch-tox-py39
     parent: tox-py39
     nodeset: debian-bullseye
@@ -129,19 +112,6 @@
       - patch-alarm/patch-alarm/*
     vars:
       tox_envlist: py27
-      tox_extra_args: -c patch-alarm/patch-alarm/tox.ini
-
-- job:
-    name: patch-alarm-tox-py36
-    parent: tox
-    nodeset: ubuntu-bionic
-    required-projects:
-      - starlingx/config
-      - starlingx/fault
-    files:
-      - patch-alarm/patch-alarm/*
-    vars:
-      tox_envlist: py36
       tox_extra_args: -c patch-alarm/patch-alarm/tox.ini
 
 - job:
