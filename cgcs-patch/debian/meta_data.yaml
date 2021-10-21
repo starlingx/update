@@ -1,6 +1,6 @@
 ---
 debname: cgcs-patch
-debver: 1.0
+debver: 1.0-1
 dl_hook: dl_hook
 revision:
   dist: $STX_DIST

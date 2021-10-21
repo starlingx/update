@@ -37,14 +37,14 @@ Description: Starlingx platform patching
 Package: python3-cgcs-patch
 Architecture: all
 Depends: ${python3:Depends},
-${misc:Depends},
+ ${misc:Depends},
  python3-keystonemiddleware,
  python3-oslo.config,
  python3-pecan,
  python3-pycryptodome,
  python3-lxml,
  python3-requests-toolbelt,
- python3-six
+ python3-six,
  tsconfig
 Description: Starlingx platfom patching (python3)
  Starlingx platform patching system python libraries
