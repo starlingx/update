@@ -228,20 +228,51 @@ class PackageVersion(object):
         self.release = release
 
     def __le__(self, other):
+        """
+        This function is called by comparison operators to compare
+        two versions. The rpm.labelCompare() function takes two versions,
+        specified in a list structure, and returns -1, 0, or 1.
+        """
         out = rpm.labelCompare((self.epoch, self.version, self.release),
                                (other.epoch, other.version, other.release))
         if out == 1:
             return False
         return True
 
-    def __cmp__(self, other):
-        """
-        This function is called by comparison operators to compare
-        two versions. The rpm.labelCompare() function takes two versions,
-        specified in a list structure, and returns -1, 0, or 1.
-        """
-        return rpm.labelCompare((self.epoch, self.version, self.release),
-                                (other.epoch, other.version, other.release))
+    def __eq__(self, other):
+        out = rpm.labelCompare((self.epoch, self.version, self.release),
+                               (other.epoch, other.version, other.release))
+        if out == 0:
+            return True
+        return False
+
+    def __ne__(self, other):
+        out = rpm.labelCompare((self.epoch, self.version, self.release),
+                               (other.epoch, other.version, other.release))
+        if out == 0:
+            return False
+        return True
+
+    def __gt__(self, other):
+        out = rpm.labelCompare((self.epoch, self.version, self.release),
+                               (other.epoch, other.version, other.release))
+        if out == 1:
+            return True
+        return False
+
+    def __lt__(self, other):
+        out = rpm.labelCompare((self.epoch, self.version, self.release),
+                               (other.epoch, other.version, other.release))
+        if out == -1:
+            return True
+        return False
+
+    def __ge__(self, other):
+        out = rpm.labelCompare((self.epoch, self.version, self.release),
+                               (other.epoch, other.version, other.release))
+        if out == -1:
+            return False
+        return True
 
     def __str__(self):
         """

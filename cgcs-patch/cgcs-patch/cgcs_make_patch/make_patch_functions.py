@@ -803,7 +803,7 @@ class RecipeData(object):
         self._parse_recipe(e)
 
     def __str__(self):
-        return "name: %s, packages: %s" % (self.name, str(self.packages.keys()))
+        return "name: %s, packages: %s" % (self.name, str(list(self.packages.keys())))
 
     def myprint(self, indent=""):
         print("%sname: %s" % (indent, self.name))
@@ -961,7 +961,7 @@ class PatchRecipeData(object):
         return rc
 
     def set_implicit_requires(self, patch_list):
-        self.auto_requires = patch_list.get_implicit_requires(self.patch_id, self.recipies.keys())
+        self.auto_requires = patch_list.get_implicit_requires(self.patch_id, list(self.recipies.keys()))
 
     def get_build_context(self):
         return self.build_context
@@ -1170,7 +1170,7 @@ class PatchRecipeData(object):
         write_xml_file(e_top, fname)
 
     def __str__(self):
-        return "[ patch_id: %s, context:  %s, metadata: %s, requires: %s, recipies: %s ]" % (str(self.patch_id), str(self.build_context), str(self.metadata), str(self.requires), str(self.recipies.keys()))
+        return "[ patch_id: %s, context:  %s, metadata: %s, requires: %s, recipies: %s ]" % (str(self.patch_id), str(self.build_context), str(self.metadata), str(self.requires), str(list(self.recipies.keys())))
 
     def myprint(self, indent=""):
         print("patch_id: %s" % str(self.patch_id))

@@ -303,7 +303,7 @@ class PatchAgentDnfTransLogCB(dnf.callback.TransactionProgress):
             if ti_done == 0 or ti_done == ti_total:
                 LOG.info('%s PROGRESS %s: %s %0.1f%% [%s/%s]',
                          self.log_prefix, action_str, package,
-                         (ti_done * 100 / ti_total),
+                         (ti_done * 100 // ti_total),
                          ts_done, ts_total)
         else:
             LOG.info('%s PROGRESS %s: %s [%s/%s]',
