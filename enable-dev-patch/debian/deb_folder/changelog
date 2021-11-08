@@ -1,0 +1,5 @@
+enable-dev-patch (1.0-1) unstable; urgency=medium
+
+  * Initial release.
+
+ --  Tracey Bogue <tracey.bogue@windriver.com>  Mon, 8 Nov 2021 08:53:42 +0000

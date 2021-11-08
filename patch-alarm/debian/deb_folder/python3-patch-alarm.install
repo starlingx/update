@@ -1,0 +1,4 @@
+etc/init.d/patch-alarm-manager
+usr/bin/patch-alarm-manager
+usr/lib/python3/dist-packages/patch_alarm-1.0.0.egg-info/*
+usr/lib/python3/dist-packages/patch_alarm/*

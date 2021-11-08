@@ -1,0 +1,44 @@
+#!/usr/bin/make -f
+# export DH_VERBOSE = 1
+
+export ROOT=debian/tmp
+export BINDIR=$(ROOT)/usr/bin
+export INITDIR=$(ROOT)/etc/init.d
+
+export APP_NAME=patch-alarm
+export PYBUILD_NAME=k8sapp-vault
+export SKIP_PIP_INSTALL=1
+
+%:
+	dh $@ --with=python3 --buildsystem=pybuild
+
+override_dh_auto_build:
+	python3 setup.py build
+
+override_dh_auto_install:
+	python3 setup.py install \
+		--skip-build \
+		--install-layout=deb \
+		--root $(ROOT) \
+		--prefix=/usr \
+		--install-data=/usr/share \
+		--single-version-externally-managed
+	python3 setup.py bdist_wheel \
+		--universal \
+		-d $(ROOT)/plugins/$(APP_NAME)
+	install -m 755 -d $(BINDIR)
+	install -m 700 scripts/bin/patch-alarm-manager $(BINDIR)
+	install -m 755 -d $(INITDIR)
+	install -m 700 scripts/init.d/patch-alarm-manager $(INITDIR)
+
+override_dh_fixperms:
+	dh_fixperms -Xpatch-alarm-manager
+
+override_dh_python3:
+	dh_python3 --shebang=/usr/bin/python3
+
+ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
+override_dh_auto_test:
+	# (tbogue) FIXME
+	PYTHONDIR=$(CURDIR) stestr run || true
+endif

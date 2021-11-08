@@ -1,0 +1,15 @@
+Source: enable-dev-patch
+Section: libs
+Priority: optional
+Maintainer: StarlingX Developers <starlingx-discuss@lists.starlingx.io>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.5.1
+Homepage: https://www.starlingx.io
+
+Package: enable-dev-patch
+Section: libs
+Architecture: any
+Depends: ${misc:Depends}
+Description: StarlingX Enable Developer Patch Installation
+ This package enables the installation of StarlingX patches signed by
+ developers.

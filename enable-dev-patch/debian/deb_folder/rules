@@ -1,0 +1,15 @@
+#!/usr/bin/make -f
+# export DH_VERBOSE = 1
+
+export ROOT=debian/tmp
+export WRSPKIDIR=$(ROOT)/etc/pki/wrs
+
+%:
+	dh $@
+
+override_dh_auto_install:
+	install -m 755 -d $(WRSPKIDIR)
+	install -m 444 dev_certificate_enable.bin $(WRSPKIDIR)
+
+override_dh_fixperms:
+	dh_fixperms -Xdev_certificate_enable.bin

@@ -1,0 +1,27 @@
+Source: python3-patch-alarm
+Section: libs
+Priority: optional
+Maintainer: StarlingX Developers <starlingx-discuss@lists.starlingx.io>
+Build-Depends: debhelper-compat (= 13),
+ dh-python,
+ python3-all,
+ python3-setuptools,
+ python3-wheel
+Standards-Version: 4.5.1
+Homepage: https://www.starlingx.io
+
+Package: python3-patch-alarm
+Section: libs
+Architecture: any
+Depends: ${misc:Depends}, ${python3:Depends}, python3-dev
+Description: StarlingX Patch Alarm Management
+ This package contains the StarlingX platform patching alarm
+ manager.
+
+Package: python3-patch-alarm-wheels
+Section: libs
+Architecture: any
+Depends: ${misc:Depends}, ${python3:Depends}, python3-wheel
+Description: StarlingX Patch Alarm Management Wheels
+ This package contains python wheels for the platform patching
+ alarm manager.
