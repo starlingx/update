@@ -110,9 +110,9 @@ fi
 dnf clean expire-cache
 extract_pkg pxe-network-installer
 rsync -ac ${WORKDIR}/usr/ /usr/ &&
-rsync -ac ${WORKDIR}/pxeboot/rel-${TGT_RELEASE}/ /pxeboot/rel-${TGT_RELEASE}/ &&
-rsync -c ${WORKDIR}/pxeboot/pxelinux.cfg.files/*-${TGT_RELEASE} /pxeboot/pxelinux.cfg.files/ &&
-rsync -ac ${WORKDIR}/www/pages/feed/rel-${TGT_RELEASE}/ /www/pages/feed/rel-${TGT_RELEASE}/
+rsync -ac ${WORKDIR}/var/pxeboot/rel-${TGT_RELEASE}/ /pxeboot/rel-${TGT_RELEASE}/ &&
+rsync -c ${WORKDIR}/var/pxeboot/pxelinux.cfg.files/*-${TGT_RELEASE} /pxeboot/pxelinux.cfg.files/ &&
+rsync -ac ${WORKDIR}/var/www/pages/feed/rel-${TGT_RELEASE}/ /www/pages/feed/rel-${TGT_RELEASE}/
 if [ $? -ne 0 ]; then
     logger -t $0 "rsync command failed, extracting pxe-network-installer"
     exit 1
@@ -126,7 +126,7 @@ if [ -z "${WORKDIR}" -o ! -d "${WORKDIR}" ]; then
     exit 1
 fi
 extract_pkg platform-kickstarts
-rsync -ac ${WORKDIR}/www/pages/feed/rel-${TGT_RELEASE}/ /www/pages/feed/rel-${TGT_RELEASE}/
+rsync -ac ${WORKDIR}/var/www/pages/feed/rel-${TGT_RELEASE}/ /www/pages/feed/rel-${TGT_RELEASE}/
 if [ $? -ne 0 ]; then
     logger -t $0 "rsync command failed, extracting platform-kickstarts"
     exit 1
