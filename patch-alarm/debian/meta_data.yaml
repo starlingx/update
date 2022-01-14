@@ -1,7 +1,9 @@
 ---
 debname: python3-patch-alarm
 debver: 1.0-1
-dl_hook: dl_hook
+src_path: patch-alarm
+src_files:
+  - scripts
 revision:
   dist: $STX_DIST
   PKG_GITREVCOUNT: true
