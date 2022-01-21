@@ -17,7 +17,7 @@ override_dh_install:
 	python3 setup.py install -f --install-layout=deb --root=${DEBIAN_DESTDIR}
 
 	install -m 755 -d ${DEBIAN_DESTDIR}/usr/sbin
-	install -m 755 -d ${DEBIAN_DESTDIR}/etc/bash_completion.d
+	install -m 755 -d ${DEBIAN_DESTDIR}/usr/share/bash-completion
 	install -m 755 -d ${DEBIAN_DESTDIR}/etc/goenabled.d
 	install -m 755 -d ${DEBIAN_DESTDIR}/etc/init.d
 	install -m 755 -d ${DEBIAN_DESTDIR}/etc/logrotate.d
@@ -46,7 +46,7 @@ override_dh_install:
 	install -m 444 bin/pmon-sw-patch-agent.conf \
 		${DEBIAN_DESTDIR}/etc/pmon.d/sw-patch-agent.conf
 	install -m 444 bin/*.service ${DEBIAN_DESTDIR}/lib/systemd/system
-	install -m 444 bin/sw-patch.completion ${DEBIAN_DESTDIR}/etc/bash_completion.d/sw-patch
+	install -m 444 bin/sw-patch.completion ${DEBIAN_DESTDIR}/usr/share/bash-completion/sw-patch
 	install -m 400 bin/patch-functions \
 		${DEBIAN_DESTDIR}/etc/patching/patch-functions
 	install -D -m 444 bin/patch-tmpdirs.conf \
