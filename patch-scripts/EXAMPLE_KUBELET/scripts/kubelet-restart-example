@@ -1,0 +1,110 @@
+#!/bin/bash
+#
+# Copyright (c) 2022 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+#
+# This script provides an example in-service patching restart,
+# triggering a restart of the patching daemons themselves
+#
+
+#
+# The patching subsystem provides a patch-functions bash source file
+# with useful function and variable definitions.
+#
+. /etc/patching/patch-functions
+
+#
+# We can now check to see what type of node we're on, if it's locked, etc,
+# and act accordingly
+#
+
+#
+# Declare an overall script return code
+#
+declare -i GLOBAL_RC=$PATCH_STATUS_OK
+
+# kubelet doesn't run on storage nodes
+if is_storage
+then
+    exit $GLOBAL_RC
+fi
+
+if [ ! -f $PATCH_FLAGDIR/kubelet.restarted ]
+then
+    # Check to see if kubelet is running
+    systemctl status kubelet.service|grep -q "Active: active (running)"
+    if [ $? -eq 0 ]
+    then
+        # issue a systemd daemon-reload once the rpms have been installed
+        # and before the processes have been restarted.
+        systemctl daemon-reload
+
+        # Ask pmon to stop kubelet and isolcpu_plugin so that it won't raise
+        # any alarms as we force a restart
+        loginfo "$0: pmond stopping kubelet"
+        OLDPID=`pgrep -f /usr/bin/kubelet`
+        pmon-stop kubelet
+        pmon-stop isolcpu_plugin
+
+        # Wait up to 30 seconds for service stop and enter a systemd
+        # auto-restart state
+        let -i UNTIL=$SECONDS+30
+        while [ $UNTIL -ge $SECONDS ]
+        do
+            # Check to see if the process has stopped and switched states
+            systemctl status kubelet.service | grep -q "Active: activating (auto-restart)"
+            if [ $? -eq 0 ]
+            then
+                # Now that we are waiting on systemd to restart. Tell pmon
+                # to start this back up and enter it's delayed monitoring
+                # state
+                loginfo "$0: pmond starting kubelet"
+                pmon-start kubelet
+                pmon-start isolcpu_plugin
+                break
+            fi
+
+            # Check every second to catch this auto-restart state
+            sleep 1
+        done
+
+        let -i UNTIL=$SECONDS+15
+        while [ $UNTIL -ge $SECONDS ]
+        do
+            # Check to make sure the service is running
+            systemctl status kubelet.service | grep -q "Active: active (running)"
+            if [ $? -eq 0 ]
+            then
+                # Verify that it's not still the old process
+                NEWPID=`pgrep -f /usr/bin/kubelet`
+                if [ $? -eq 0 -a "$OLDPID" != "$NEWPID" ]
+                then
+                    touch $PATCH_FLAGDIR/kubelet.restarted
+                    break
+                fi
+            fi
+
+            # Still not running? Let's wait 5 seconds and check again
+            sleep 5
+        done
+
+        systemctl status kubelet.service|grep -q "Active: active (running)"
+        STATUS=$?
+        NEWPID=`pgrep -f /usr/bin/kubelet`
+        if [ $STATUS -ne 0 -o $? -ne 0 -o "$OLDPID" = "$NEWPID" ]
+        then
+            # Still not running new kubelet! Clear the flag and mark the RC as failed
+            loginfo "$0: Failed to restart kubelet"
+            rm -f $PATCH_FLAGDIR/kubelet.restarted
+            GLOBAL_RC=$PATCH_STATUS_FAILED
+        fi
+    fi
+fi
+
+#
+# Exit the script with the overall return code
+#
+exit $GLOBAL_RC
