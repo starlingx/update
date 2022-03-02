@@ -26,6 +26,12 @@
 #
 declare -i GLOBAL_RC=$PATCH_STATUS_OK
 
+#
+# Declare subset of kubernetes versions we want to patch.
+# This is customized for the particular patch.
+#
+declare -a PATCH_RESTART_VERSIONS=( "v1.21.8" )
+
 # kubelet doesn't run on storage nodes
 if is_storage
 then
@@ -38,6 +44,26 @@ then
     systemctl status kubelet.service|grep -q "Active: active (running)"
     if [ $? -eq 0 ]
     then
+        # Obtain current kubelet version
+        KVER=$(kubectl version --short=true 2>/dev/null | grep -oP 'Client Version: \K\S+')
+
+        # Check current kubelet version matches any expected restart versions
+        FOUND=0
+        for val in ${PATCH_RESTART_VERSIONS[@]}; do
+            if [ "${val}" == "${KVER}" ]; then
+                FOUND=1
+                break
+            fi
+        done
+        if [ ${FOUND} -eq 1 ]; then
+            loginfo "$0: Current kubelet ${KVER} found in: ${PATCH_RESTART_VERSIONS[@]}"
+        else
+            # do not restart versions that do not require patching
+            loginfo "$0: Current kubelet ${KVER} not found in" \
+                "${PATCH_RESTART_VERSIONS[@]}, skipping kubelet restart"
+            exit $GLOBAL_RC
+        fi
+
         # issue a systemd daemon-reload once the rpms have been installed
         # and before the processes have been restarted.
         systemctl daemon-reload
