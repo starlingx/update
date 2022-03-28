@@ -1,0 +1,137 @@
+#!/bin/bash
+#
+# Copyright (c) 2018-2021 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+function show_usage()
+{
+    cat >&2 <<EOF
+$(basename $0): -r <release>
+
+This tool will extract required packages to support upgrade-start
+
+Options:
+    -r <release> : Release ID for target release.
+
+EOF
+    exit 1
+}
+
+. /etc/build.info
+if [ -z "${SW_VERSION}" ]; then
+    logger -t $0 "Unable to identify running release ID"
+    exit 1
+fi
+
+declare TGT_RELEASE=
+
+while getopts "r:h" opt; do
+    case $opt in
+        r)
+            TGT_RELEASE=$OPTARG
+            ;;
+        h)
+            show_usage
+            ;;
+        *)
+            logger -t $0 "Unsupported option"
+            show_usage
+            ;;
+    esac
+done
+
+if [ -z "${TGT_RELEASE}" ]; then
+    logger -t $0 "You must specify the target release."
+    exit 1
+fi
+
+if [ "${TGT_RELEASE}" = "${SW_VERSION}" ]; then
+    logger -t $0 "Target release cannot be running release."
+    exit 1
+fi
+
+declare TGT_BASE_REPO=/var/www/pages/feed/rel-${TGT_RELEASE}
+declare TGT_PATCHES_REPO=/var/www/pages/updates/rel-${TGT_RELEASE}
+
+if [ ! -d ${TGT_BASE_REPO} ]; then
+    logger -t $0 "Target release ${TGT_RELEASE} is not installed"
+    exit 1
+fi
+
+declare TGT_PATCHES_REPO_OPT=""
+if [ -d ${TGT_PATCHES_REPO} ]; then
+    TGT_PATCHES_REPO_OPT="--repofrompath updates,${TGT_PATCHES_REPO}"
+fi
+
+declare WORKDIR=
+
+function cleanup() {
+    if [ -n "${WORKDIR}" -a -d "${WORKDIR}" ]; then
+        rm -rf ${WORKDIR}
+    fi
+}
+
+trap cleanup EXIT
+
+function extract_pkg() {
+    local pkgname=$1
+
+    ORIG_PWD=$PWD
+    cd $WORKDIR
+
+    # Find the RPM
+    local pkgfile=$(dnf repoquery --disablerepo=* --repofrompath base,${TGT_BASE_REPO} ${TGT_PATCHES_REPO_OPT} --latest-limit=1 --location -q ${pkgname})
+    if [ -z "${pkgfile}" ]; then
+        logger -t $0 "Could not find ${pkgname}"
+        exit 1
+    fi
+
+    # Chop off the file: from the start of the file location
+    local rpmfile=${pkgfile/file://}
+
+    rpm2cpio ${rpmfile} | cpio -idm
+    if [ $? -ne 0 ]; then
+        logger -t $0 "Failed to extract $pkgname files from ${pkgfile/file://}"
+        exit 1
+    fi
+
+    cd ${ORIG_PWD}
+}
+
+# Extract files from pxe-network-installer
+WORKDIR=$(mktemp -d --tmpdir=/scratch pkgextract_XXXX)
+if [ -z "${WORKDIR}" -o ! -d "${WORKDIR}" ]; then
+    logger -t $0 "Failed to create workdir"
+    exit 1
+fi
+# Clean dnf cache in case a previous load had different package versions
+dnf clean expire-cache
+extract_pkg pxe-network-installer
+rsync -ac ${WORKDIR}/usr/ /usr/ &&
+rsync -ac ${WORKDIR}/var/pxeboot/rel-${TGT_RELEASE}/ /var/pxeboot/rel-${TGT_RELEASE}/ &&
+rsync -c ${WORKDIR}/var/pxeboot/pxelinux.cfg.files/*-${TGT_RELEASE} /var/pxeboot/pxelinux.cfg.files/ &&
+rsync -ac ${WORKDIR}/var/www/pages/feed/rel-${TGT_RELEASE}/ /var/www/pages/feed/rel-${TGT_RELEASE}/
+if [ $? -ne 0 ]; then
+    logger -t $0 "rsync command failed, extracting pxe-network-installer"
+    exit 1
+fi
+rm -rf ${WORKDIR}
+
+# Extract files from platform-kickstarts
+WORKDIR=$(mktemp -d --tmpdir=/scratch pkgextract_XXXX)
+if [ -z "${WORKDIR}" -o ! -d "${WORKDIR}" ]; then
+    logger -t $0 "Failed to create workdir"
+    exit 1
+fi
+extract_pkg platform-kickstarts
+rsync -ac ${WORKDIR}/var/www/pages/feed/rel-${TGT_RELEASE}/ /var/www/pages/feed/rel-${TGT_RELEASE}/
+if [ $? -ne 0 ]; then
+    logger -t $0 "rsync command failed, extracting platform-kickstarts"
+    exit 1
+fi
+rm -rf ${WORKDIR}
+
+exit 0
+

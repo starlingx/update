@@ -15,6 +15,8 @@
         - patch-alarm-tox-pylint
         - patch-alarm-tox-py27
         - patch-alarm-tox-py39
+        - sw-patch-tox-pylint
+        - sw-patch-tox-py39
     gate:
       jobs:
         - openstack-tox-linters
@@ -26,6 +28,8 @@
         - patch-alarm-tox-pylint
         - patch-alarm-tox-py27
         - patch-alarm-tox-py39
+        - sw-patch-tox-pylint
+        - sw-patch-tox-py39
     post:
       jobs:
         - stx-update-upload-git-mirror
@@ -79,13 +83,40 @@
     required-projects:
       - starlingx/config
       - starlingx/fault
-      - starlingx/root
     files:
       - cgcs-patch/cgcs-patch/*
     vars:
       tox_envlist: py39
       python_version: 3.9
       tox_extra_args: -c cgcs-patch/cgcs-patch/tox.ini
+
+- job:
+    name: sw-patch-tox-py39
+    parent: tox-py39
+    nodeset: debian-bullseye
+    required-projects:
+      - starlingx/config
+      - starlingx/fault
+    files:
+      - sw-patch/cgcs-patch/*
+    vars:
+      tox_envlist: py39
+      python_version: 3.9
+      tox_extra_args: -c sw-patch/cgcs-patch/tox.ini
+
+- job:
+    name: sw-patch-tox-pylint
+    parent: tox
+    nodeset: debian-bullseye
+    required-projects:
+      - starlingx/config
+      - starlingx/fault
+    files:
+      - sw-patch/cgcs-patch/*
+    vars:
+      tox_envlist: pylint
+      python_version: 3.9
+      tox_extra_args: -c sw-patch/cgcs-patch/tox.ini
 
 
 - job:
@@ -121,7 +152,6 @@
     required-projects:
       - starlingx/config
       - starlingx/fault
-      - starlingx/root
     files:
       - patch-alarm/patch-alarm/*
     vars:
