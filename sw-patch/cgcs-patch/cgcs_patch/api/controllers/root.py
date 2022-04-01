@@ -10,6 +10,7 @@ from pecan import expose
 from pecan import request
 import cgi
 import glob
+import shutil
 
 from cgcs_patch.exceptions import PatchError
 from cgcs_patch.patch_controller import pc
@@ -97,27 +98,11 @@ class PatchAPIController(object):
 
         fn = '/scratch/' + os.path.basename(fileitem.filename)
 
-        if hasattr(fileitem.file, 'fileno'):
-            # This technique cannot copy a very large file. It
-            # requires a lot of memory as all data from the
-            # source file is read into memory then written to
-            # the destination file one chunk
-            # open(fn, 'wb').write(fileitem.file.read())
-
-            # Copying file by chunks using OS system calls
-            # requires much less memory. A larger chunk
-            # size can be used to improve the copy speed;
-            # currently 64K chunk size is selected
-            dst = os.open(fn, os.O_WRONLY | os.O_CREAT)
-            src = fileitem.file.fileno()
-            size = 64 * 1024
-            n = size
-            while n >= size:
-                s = os.read(src, size)
-                n = os.write(dst, s)
-            os.close(dst)
-        else:
-            open(fn, 'wb').write(fileitem.file.read())
+        fdst = open(fn, 'wb')
+        # Copies file in 64K chunk size. A larger chunk size
+        # can be used to improve the copy speed.
+        shutil.copyfileobj(fileitem.file, fdst, 64)
+        fdst.close()
 
         try:
             result = pc.patch_import_api([fn])
