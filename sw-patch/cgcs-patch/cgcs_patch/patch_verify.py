@@ -22,6 +22,7 @@ from cgcs_patch.certificates import formal_certificate
 default_blocksize = 1 * 1024 * 1024
 
 dev_certificate_marker = '/etc/pki/wrs/dev_certificate_enable.bin'
+DEV_CERT_CONTENTS = b'Titanium patching'
 LOG = logging.getLogger('main_logger')
 
 cert_type_dev_str = 'dev'
@@ -114,8 +115,7 @@ def get_public_certificates():
     if os.path.exists(dev_certificate_marker):
         with open(dev_certificate_marker, 'rb') as infile:
             signature = infile.read()
-        data_hash = SHA256.new()
-        data_hash.update(b'Titanium patching')
+        data_hash = SHA256.new(DEV_CERT_CONTENTS)
         if verify_hash(data_hash, signature, cert_list):
             cert_list.append(dev_certificate)
         else:
