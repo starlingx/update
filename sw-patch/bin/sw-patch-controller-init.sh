@@ -39,28 +39,14 @@ function LOG_TO_FILE {
     echo "`date "+%FT%T.%3N"`: $NAME: $*" >> $logfile
 }
 
-function create_groups {
-    if [ -f $GROUPS_FILE ]; then
-        return 0
-    fi
-
-    cat >$GROUPS_FILE <<EOF
-<comps>
-</comps>
-
-EOF
-}
-
 function do_setup {
     # Does the repo exist?
     if [ ! -d $REPO_DIR ]; then
-        LOG "Creating repo"
+        LOG "Creating repo. UNDER CONSTRUCTION for OSTREE"
         mkdir -p $REPO_DIR
 
-        # Setup the groups file
-        create_groups
-
-        createrepo -g $GROUPS_FILE $REPO_DIR >> $logfile 2>&1
+        # The original Centos code would create the groups and call createrepo
+        # todo(jcasteli): determine if the ostree code needs a setup also
     fi
 
     if [ ! -d $PATCHING_DIR ]; then

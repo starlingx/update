@@ -4,23 +4,22 @@ Copyright (c) 2014-2019 Wind River Systems, Inc.
 SPDX-License-Identifier: Apache-2.0
 
 """
+import gc
+import json
+import os
+import select
 import shutil
+import six
+from six.moves import configparser
+import socket
+import subprocess
 import tempfile
 import threading
 import time
-import socket
-import json
-import select
-import subprocess
-import six
-from six.moves import configparser
-import rpm
-import os
-import gc
-
-from cgcs_patch.patch_functions import parse_pkgver
-
 from wsgiref import simple_server
+
+from oslo_config import cfg as oslo_cfg
+
 from cgcs_patch.api import app
 from cgcs_patch.authapi import app as auth_app
 from cgcs_patch.patch_functions import configure_logging
@@ -28,15 +27,17 @@ from cgcs_patch.patch_functions import BasePackageData
 from cgcs_patch.patch_functions import avail_dir
 from cgcs_patch.patch_functions import applied_dir
 from cgcs_patch.patch_functions import committed_dir
+from cgcs_patch.patch_functions import contentCompare
 from cgcs_patch.patch_functions import PatchFile
 from cgcs_patch.patch_functions import parse_rpm_filename
+from cgcs_patch.patch_functions import parse_pkgver
 from cgcs_patch.patch_functions import package_dir
 from cgcs_patch.patch_functions import repo_dir
 from cgcs_patch.patch_functions import semantics_dir
 from cgcs_patch.patch_functions import SW_VERSION
 from cgcs_patch.patch_functions import root_package_dir
 from cgcs_patch.exceptions import MetadataFail
-from cgcs_patch.exceptions import RpmFail
+from cgcs_patch.exceptions import ContentFail
 from cgcs_patch.exceptions import SemanticFail
 from cgcs_patch.exceptions import PatchError
 from cgcs_patch.exceptions import PatchFail
@@ -52,8 +53,7 @@ from cgcs_patch.base import PatchService
 
 import cgcs_patch.config as cfg
 import cgcs_patch.utils as utils
-# noinspection PyUnresolvedReferences
-from oslo_config import cfg as oslo_cfg
+
 
 import cgcs_patch.messages as messages
 import cgcs_patch.constants as constants
@@ -780,7 +780,7 @@ class PatchController(PatchService):
                         continue
 
                     # Is the installed pkg higher or lower version?
-                    # The rpm.labelCompare takes version broken into 3 components
+                    # OSTREE: this comparison will be different than for RPMs
                     installed_ver = self.hosts[ip].installed[pkg].split('@')[0]
                     if ":" in installed_ver:
                         # Ignore epoch
@@ -791,8 +791,8 @@ class PatchController(PatchService):
                         # Ignore epoch
                         patch_ver = patch_ver.split(':')[1]
 
-                    rc = rpm.labelCompare(parse_pkgver(installed_ver),
-                                          parse_pkgver(patch_ver))
+                    rc = contentCompare(parse_pkgver(installed_ver),
+                                        parse_pkgver(patch_ver))
 
                     if self.patch_data.metadata[patch_id]["repostate"] == constants.AVAILABLE:
                         # The RPM is not expected to be installed.
@@ -869,35 +869,21 @@ class PatchController(PatchService):
 
         self.hosts_lock.release()
 
-    def get_store_filename(self, patch_sw_version, rpmname):
-        rpm_dir = package_dir[patch_sw_version]
-        rpmfile = "%s/%s" % (rpm_dir, rpmname)
-        return rpmfile
+    def get_store_filename(self, patch_sw_version, contentname):
+        """Returns the path of a content file from the store"""
+        content_dir = package_dir[patch_sw_version]
+        contentfile = "%s/%s" % (content_dir, contentname)
+        return contentfile
 
-    def get_repo_filename(self, patch_sw_version, rpmname):
-        rpmfile = self.get_store_filename(patch_sw_version, rpmname)
-        if not os.path.isfile(rpmfile):
-            msg = "Could not find rpm: %s" % rpmfile
+    def get_repo_filename(self, patch_sw_version, contentname):
+        contentfile = self.get_store_filename(patch_sw_version, contentname)
+        if not os.path.isfile(contentfile):
+            msg = "Could not find content: %s" % contentfile
             LOG.error(msg)
             return None
 
-        repo_filename = None
-
-        try:
-            # Get the architecture from the RPM
-            pkgarch = subprocess.check_output(["rpm",
-                                               "-qp",
-                                               "--queryformat",
-                                               "%{ARCH}",
-                                               "--nosignature",
-                                               rpmfile])
-
-            repo_filename = "%s/Packages/%s/%s" % (repo_dir[patch_sw_version], pkgarch, rpmname)
-        except subprocess.CalledProcessError:
-            msg = "RPM query failed for %s" % rpmfile
-            LOG.exception(msg)
-            return None
-
+        # OSTREE:  need to determine the actual path for the content ie: Content
+        repo_filename = "%s/Content/%s" % (repo_dir[patch_sw_version], contentname)
         return repo_filename
 
     def run_semantic_check(self, action, patch_list):
@@ -1146,49 +1132,52 @@ class PatchController(PatchService):
                 continue
 
             # To allow for easy cleanup, we're going to first iterate
-            # through the rpm list to determine where to copy the file.
+            # through the content list to determine where to copy the file.
             # As a second step, we'll go through the list and copy each file.
-            # If there are problems querying any RPMs, none will be copied.
-            rpmlist = {}
-            for rpmname in self.patch_data.contents[patch_id]:
-                patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
-
-                rpmfile = self.get_store_filename(patch_sw_version, rpmname)
-                if not os.path.isfile(rpmfile):
-                    msg = "Could not find rpm: %s" % rpmfile
+            # If there are problems querying the content, none will be copied.
+            content_dict = {}
+            patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
+            for contentname in self.patch_data.contents[patch_id]:
+                # the log can be debug or removed altogether  once code is working
+                msg = "OSTREE applying %s " % contentname
+                LOG.info(msg)
+                contentfile = self.get_store_filename(patch_sw_version, contentname)
+                if not os.path.isfile(contentfile):
+                    msg = "Could not find content file: %s" % contentfile
                     LOG.error(msg)
-                    raise RpmFail(msg)
+                    raise ContentFail(msg)
 
-                repo_filename = self.get_repo_filename(patch_sw_version, rpmname)
+                # todo: should 'repo' be replaced with something ostree related
+                repo_filename = self.get_repo_filename(patch_sw_version, contentname)
                 if repo_filename is None:
-                    msg = "Failed to determine repo path for %s" % rpmfile
+                    msg = "Failed to determine repo path for %s" % contentfile
                     LOG.exception(msg)
-                    raise RpmFail(msg)
+                    raise ContentFail(msg)
 
                 repo_pkg_dir = os.path.dirname(repo_filename)
                 if not os.path.exists(repo_pkg_dir):
                     os.makedirs(repo_pkg_dir)
-                rpmlist[rpmfile] = repo_filename
+                content_dict[contentfile] = repo_filename
 
-            # Copy the RPMs. If a failure occurs, clean up copied files.
+            # Copy the Content. If a failure occurs, clean up copied files.
             copied = []
-            for rpmfile in rpmlist:
-                LOG.info("Copy %s to %s", rpmfile, rpmlist[rpmfile])
+            for contentfile, repo_filename in content_dict.items():
+                LOG.info("Copy %s to %s", contentfile, repo_filename)
                 try:
-                    shutil.copy(rpmfile, rpmlist[rpmfile])
-                    copied.append(rpmlist[rpmfile])
+                    shutil.copy(contentfile, repo_filename)
+                    copied.append(repo_filename)
                 except IOError:
-                    msg = "Failed to copy %s" % rpmfile
+                    msg = "Failed to copy %s" % contentfile
                     LOG.exception(msg)
                     # Clean up files
                     for filename in copied:
                         LOG.info("Cleaning up %s", filename)
                         os.remove(filename)
 
-                    raise RpmFail(msg)
+                    raise ContentFail(msg)
 
             try:
-                # Move the metadata to the applied dir
+                # Move the patching metadata from avail to applied dir
                 shutil.move("%s/%s-metadata.xml" % (avail_dir, patch_id),
                             "%s/%s-metadata.xml" % (applied_dir, patch_id))
 
@@ -1215,14 +1204,11 @@ class PatchController(PatchService):
             self.patch_data.gen_groups_xml()
             for ver, rdir in repo_dir.items():
                 try:
-                    output = subprocess.check_output(["createrepo",
-                                                      "--update",
-                                                      "-g",
-                                                      "comps.xml",
-                                                      rdir],
-                                                     stderr=subprocess.STDOUT)
+                    # todo(jcasteli)  determine if ostree change needs additional actions
+                    # old code was calling 'createrepo' for rpms
+                    output = "OSTREE determined a change occurred rdir=%s" % rdir
                     LOG.info("Repo[%s] updated:\n%s", ver, output)
-                except subprocess.CalledProcessError:
+                except Exception:
                     msg = "Failed to update the repo for %s" % ver
                     LOG.exception(msg)
                     raise PatchFail(msg)
@@ -1350,26 +1336,26 @@ class PatchController(PatchService):
 
             repo_changed = True
 
-            for rpmname in self.patch_data.contents[patch_id]:
-                patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
-                rpmfile = self.get_store_filename(patch_sw_version, rpmname)
-                if not os.path.isfile(rpmfile):
-                    msg = "Could not find rpm: %s" % rpmfile
+            patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
+            for contentname in self.patch_data.contents[patch_id]:
+                contentfile = self.get_store_filename(patch_sw_version, contentname)
+                if not os.path.isfile(contentfile):
+                    msg = "Could not find content: %s" % contentfile
                     LOG.error(msg)
-                    raise RpmFail(msg)
+                    raise ContentFail(msg)
 
-                repo_filename = self.get_repo_filename(patch_sw_version, rpmname)
+                repo_filename = self.get_repo_filename(patch_sw_version, contentname)
                 if repo_filename is None:
-                    msg = "Failed to determine repo path for %s" % rpmfile
+                    msg = "Failed to determine repo path for %s" % contentfile
                     LOG.exception(msg)
-                    raise RpmFail(msg)
+                    raise ContentFail(msg)
 
                 try:
                     os.remove(repo_filename)
                 except OSError:
-                    msg = "Failed to remove RPM"
+                    msg = "Failed to remove content %s" % repo_filename
                     LOG.exception(msg)
-                    raise RpmFail(msg)
+                    raise ContentFail(msg)
 
             try:
                 # Move the metadata to the available dir
@@ -1396,14 +1382,11 @@ class PatchController(PatchService):
             self.patch_data.gen_groups_xml()
             for ver, rdir in repo_dir.items():
                 try:
-                    output = subprocess.check_output(["createrepo",
-                                                      "--update",
-                                                      "-g",
-                                                      "comps.xml",
-                                                      rdir],
-                                                     stderr=subprocess.STDOUT)
+                    # todo(jcasteli)  determine if ostree change needs additional actions
+                    # old code was calling 'createrepo' for rpms
+                    output = "OSTREE determined a change occurred rdir=%s" % rdir
                     LOG.info("Repo[%s] updated:\n%s", ver, output)
-                except subprocess.CalledProcessError:
+                except Exception:
                     msg = "Failed to update the repo for %s" % ver
                     LOG.exception(msg)
                     raise PatchFail(msg)
@@ -1456,20 +1439,20 @@ class PatchController(PatchService):
 
         # Handle operation
         for patch_id in patch_list:
-            for rpmname in self.patch_data.contents[patch_id]:
-                patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
-                rpmfile = self.get_store_filename(patch_sw_version, rpmname)
-                if not os.path.isfile(rpmfile):
+            patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
+            for contentname in self.patch_data.contents[patch_id]:
+                contentfile = self.get_store_filename(patch_sw_version, contentname)
+                if not os.path.isfile(contentfile):
                     # We're deleting the patch anyway, so the missing file
                     # doesn't really matter
                     continue
 
                 try:
-                    os.remove(rpmfile)
+                    os.remove(contentfile)
                 except OSError:
-                    msg = "Failed to remove RPM %s" % rpmfile
+                    msg = "Failed to remove Content %s" % contentfile
                     LOG.exception(msg)
-                    raise RpmFail(msg)
+                    raise ContentFail(msg)
 
             for action in constants.SEMANTIC_ACTIONS:
                 action_file = os.path.join(semantics_dir, action, patch_id)
@@ -1538,14 +1521,10 @@ class PatchController(PatchService):
 
         # Create the repo
         try:
-            output = subprocess.check_output(["createrepo",
-                                              "--update",
-                                              "-g",
-                                              "comps.xml",
-                                              repo_dir[release]],
-                                             stderr=subprocess.STDOUT)
+            # todo(jcasteli)  determine if ostree change needs a createrepo equivalent
+            output = "UNDER CONSTRUCTION for OSTREE"
             LOG.info("Repo[%s] updated:\n%s", release, output)
-        except subprocess.CalledProcessError:
+        except Exception:
             msg = "Failed to update the repo for %s" % release
             LOG.exception(msg)
 
@@ -2036,26 +2015,24 @@ class PatchController(PatchService):
                     raise MetadataFail(msg)
 
         # Delete the files
-        for rpmfile in cleanup_files:
+        for contentfile in cleanup_files:
             try:
-                os.remove(rpmfile)
+                os.remove(contentfile)
             except OSError:
-                msg = "Failed to remove: %s" % rpmfile
+                msg = "Failed to remove: %s" % contentfile
                 LOG.exception(msg)
                 raise MetadataFail(msg)
 
+        # OSTREE:  this repo update code needs to be re-examined
         # Update the repo
         self.patch_data.gen_groups_xml()
         for ver, rdir in repo_dir.items():
             try:
-                output = subprocess.check_output(["createrepo",
-                                                  "--update",
-                                                  "-g",
-                                                  "comps.xml",
-                                                  rdir],
-                                                 stderr=subprocess.STDOUT)
+                # todo(jcasteli)  determine if ostree change needs additional actions
+                # old code was calling 'createrepo' for rpms
+                output = "OSTREE determined a change occurred rdir=%s" % rdir
                 LOG.info("Repo[%s] updated:\n%s", ver, output)
-            except subprocess.CalledProcessError:
+            except Exception:
                 msg = "Failed to update the repo for %s" % ver
                 LOG.exception(msg)
                 raise PatchFail(msg)

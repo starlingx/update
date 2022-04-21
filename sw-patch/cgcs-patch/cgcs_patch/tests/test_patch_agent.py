@@ -9,7 +9,6 @@ import six  # pylint: disable=unused-import
 import sys
 import testtools
 
-sys.modules['rpm'] = mock.Mock()
 sys.modules['dnf'] = mock.Mock()
 sys.modules['dnf.callback'] = mock.Mock()
 sys.modules['dnf.comps'] = mock.Mock()
@@ -26,5 +25,5 @@ import cgcs_patch.patch_agent  # noqa: E402
 class CgcsPatchAgentTestCase(testtools.TestCase):
 
     def test_cgcs_patch_agent_instantiate(self):
-        # pylint: disable=unused-variable
-        pc = cgcs_patch.patch_agent.PatchAgent()  # noqa: F841
+        pc = cgcs_patch.patch_agent.PatchAgent()
+        self.assertIsNotNone(pc)
