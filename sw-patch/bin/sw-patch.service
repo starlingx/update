@@ -8,8 +8,8 @@ Type=oneshot
 User=root
 ExecStart=/etc/init.d/sw-patch start
 RemainAfterExit=yes
-StandardOutput=syslog+console
-StandardError=syslog+console
+StandardOutput=journal+console
+StandardError=journal+console
 
 [Install]
 WantedBy=multi-user.target
