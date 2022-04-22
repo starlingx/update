@@ -135,45 +135,6 @@ def main():
 
     # Purge unneeded RPMs
     keep = {}
-    for patch_id in allpatches.metadata.keys():
-        for rpmname in allpatches.contents[patch_id]:
-            try:
-                pkgname, arch, pkgver = pf.parse_rpm_filename(rpmname)
-            except ValueError as e:
-                raise e
-
-            if pkgname not in keep:
-                keep[pkgname] = { arch: pkgver }
-                continue
-            elif arch not in keep[pkgname]:
-                keep[pkgname][arch] = pkgver
-                continue
-
-            # Compare versions
-            keep_pkgver = keep[pkgname][arch]
-            if pkgver > keep_pkgver:
-                # Find the rpmname
-                keep_rpmname = keep_pkgver.generate_rpm_filename(pkgname, arch)
-
-                filename = os.path.join(pkgdir, keep_rpmname)
-                if os.path.exists(filename):
-                    os.remove(filename)
-
-                # Keep the new pkgver
-                keep[pkgname][arch] = pkgver
-            else:
-                filename = os.path.join(pkgdir, rpmname)
-                if os.path.exists(filename):
-                    os.remove(filename)
-
-    # Create the repo metadata
-    if os.path.exists('/usr/bin/createrepo_c'):
-        createrepo = '/usr/bin/createrepo_c'
-    else:
-        createrepo = 'createrepo'
-
-    os.chdir(output)
-    subprocess.check_call([createrepo, '-g', 'comps.xml', '.'])
 
 if __name__ == "__main__":
     sys.exit(main())

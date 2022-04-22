@@ -1,5 +1,5 @@
 """
-Copyright (c) 2014-2019 Wind River Systems, Inc.
+Copyright (c) 2014-2022 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -157,55 +157,6 @@ def write_xml_file(top,
         outfile.write(minidom.parseString(rough_xml).toprettyxml(indent="  "))
 
 
-def parse_rpm_filename(filename):
-
-    # Drop the extension
-    basename = os.path.splitext(os.path.basename(filename))[0]
-
-    # RPM name format is:
-    # [<epoch>:]<pkgname>-<version>-<release>.<arch>
-    #
-    pattern = re.compile(r'((([^:]):)?)(.*)-([^-]+)-(.*)\.([^\.]*)$')
-
-    m = pattern.match(basename)
-
-    if m is None:
-        raise ValueError("Filename does not match expected RPM format: %s" % basename)
-
-    epoch = m.group(3)
-    pkgname = m.group(4)
-    version = m.group(5)
-    release = m.group(6)
-    arch = m.group(7)
-
-    return (pkgname, arch, PackageVersion(epoch, version, release))
-
-
-def parse_pkgver(pkgver):
-    # Version format is:
-    # [<epoch>:]<version>-<release>
-    #
-    pattern = re.compile(r'((([^:]):)?)([^-]+)((-(.*))?)$')
-
-    m = pattern.match(pkgver)
-
-    if m is None:
-        raise ValueError("Package version does not match expected format: %s" % pkgver)
-
-    epoch = m.group(3)
-    version = m.group(4)
-    release = m.group(7)
-
-    return (epoch, version, release)
-
-
-# OSTREE:  this method may be removed or revisited
-# based on comparing SHAs and dependencies
-def contentCompare(_list1, _list2):
-    LOG.info("OSTREE: DEV MODE. contentCompare always returns zero")
-    return 0
-
-
 def get_release_from_patch(patchfile):
     rel = ""
     try:
@@ -222,87 +173,6 @@ def get_release_from_patch(patchfile):
         print("Failed to parse patch software version")
         raise e
     return rel
-
-
-class PackageVersion(object):
-    """
-    The PackageVersion class provides a structure for RPM version information,
-    along with suport for comparison operators.
-    """
-    def __init__(self, epoch, version, release):
-        self.epoch = epoch
-        self.version = version
-        self.release = release
-
-    def __le__(self, other):
-        """
-        This function is called by comparison operators to compare
-        two versions. The contentCompare() function takes two versions,
-        specified in a list structure, and returns -1, 0, or 1.
-        """
-        out = contentCompare((self.epoch, self.version, self.release),
-                             (other.epoch, other.version, other.release))
-        if out == 1:
-            return False
-        return True
-
-    def __eq__(self, other):
-        out = contentCompare((self.epoch, self.version, self.release),
-                             (other.epoch, other.version, other.release))
-        if out == 0:
-            return True
-        return False
-
-    def __ne__(self, other):
-        out = contentCompare((self.epoch, self.version, self.release),
-                             (other.epoch, other.version, other.release))
-        if out == 0:
-            return False
-        return True
-
-    def __gt__(self, other):
-        out = contentCompare((self.epoch, self.version, self.release),
-                             (other.epoch, other.version, other.release))
-        if out == 1:
-            return True
-        return False
-
-    def __lt__(self, other):
-        out = contentCompare((self.epoch, self.version, self.release),
-                             (other.epoch, other.version, other.release))
-        if out == -1:
-            return True
-        return False
-
-    def __ge__(self, other):
-        out = contentCompare((self.epoch, self.version, self.release),
-                             (other.epoch, other.version, other.release))
-        if out == -1:
-            return False
-        return True
-
-    def __str__(self):
-        """
-        This function is called by str() and print to compute the
-        informal string representation of a PackageVersion object.
-        """
-        prefix = ""
-        if self.epoch is not None and self.epoch != '':
-            # Prefix the version with epoch, if specified
-            prefix = "%s:" % self.epoch
-
-        return "%s%s-%s" % (prefix, self.version, self.release)
-
-    def __hash__(self):
-        return hash(self.__str__())
-
-    def generate_rpm_filename(self, pkgname, arch):
-        prefix = ""
-        if self.epoch is not None and self.epoch != '':
-            # Prefix the version with epoch, if specified
-            prefix = "%s:" % self.epoch
-
-        return "%s%s-%s-%s.%s.rpm" % (prefix, pkgname, self.version, self.release, arch)
 
 
 class BasePackageData(object):
@@ -331,17 +201,6 @@ class BasePackageData(object):
                 continue
 
             self.pkgs[sw_rel] = {}
-            for _root, _dirs, files in os.walk("%s/Packages" % reldir):  # pylint: disable=unused-variable
-                for name in files:
-                    if name.endswith(".rpm"):
-                        try:
-                            pkgname, arch, pkgver = parse_rpm_filename(name)
-                        except ValueError as e:
-                            raise e
-
-                        if pkgname not in self.pkgs[sw_rel]:
-                            self.pkgs[sw_rel][pkgname] = {}
-                        self.pkgs[sw_rel][pkgname][arch] = pkgver
 
         # Clean up deleted data
         for sw_rel in self.pkgs:
@@ -366,19 +225,6 @@ class PatchData(object):
     """
     def __init__(self):
         #
-        # The groups dict provides information about targetted (new) packages,
-        # identifying the software group in which to include the package.
-        # This allows the patch agent to identify new packages to install
-        # (or erase) as appropriate.
-        # This dict is nested as follows:
-        #   [ patch_sw_version ] - Release associated with the patch
-        #     [ group/ptype ] - Group (personality) in which the pkg belongs
-        #       [ patch_id ]
-        #         [ package ]
-        #
-        self.groups = {}
-
-        #
         # The metadata dict stores all metadata associated with a patch.
         # This dict is keyed on patch_id, with metadata for each patch stored
         # in a nested dict. (See parse_metadata method for more info)
@@ -391,61 +237,10 @@ class PatchData(object):
         #
         self.contents = {}
 
-        #
-        # The content_versions dict provides a simple list of packages and their
-        # versions for each patch, used by the patch controller in determining
-        # patch states.
-        # content_versions[patch_id][pkgname] = "%s-%s" % (pkgver.version, pkgver.release)
-        #
-        self.content_versions = {}
-
-        #
-        # The package_versions dict provides a mapping of packages to the patch_id,
-        # including the package arch.
-        #   [ patch_sw_version ]
-        #     [ pkgname ]
-        #       [ arch ]
-        #         [ pkgver ]
-        #           -> patch_id
-        self.package_versions = {}
-
-        #
-        # The semantics dict stores the lists of semantic actions provided by each patch,
-        # indexed by patch_id.
-        #
-        self.semantics = {}
-
-    def add_patch(self, patch_id, new_patch):
+    def add_patch(self, new_patch):
         # We can just use "update" on these dicts because they are indexed by patch_id
         self.metadata.update(new_patch.metadata)
         self.contents.update(new_patch.contents)
-        self.content_versions.update(new_patch.content_versions)
-        self.semantics.update(new_patch.semantics)
-
-        # Need to recursively update package_version and keys dicts
-        for patch_sw_version in list(new_patch.package_versions):
-            if patch_sw_version not in self.package_versions:
-                self.package_versions[patch_sw_version] = {}
-            for pkgname in list(new_patch.package_versions[patch_sw_version]):
-                if pkgname not in self.package_versions[patch_sw_version]:
-                    self.package_versions[patch_sw_version][pkgname] = {}
-                for arch in list(new_patch.package_versions[patch_sw_version][pkgname]):
-                    if arch not in self.package_versions[patch_sw_version][pkgname]:
-                        self.package_versions[patch_sw_version][pkgname][arch] = {}
-                    for pkgver in list(new_patch.package_versions[patch_sw_version][pkgname][arch]):
-                        self.package_versions[patch_sw_version][pkgname][arch][pkgver] = patch_id
-
-        for patch_sw_version in list(new_patch.groups):
-            if patch_sw_version not in self.groups:
-                self.groups[patch_sw_version] = {}
-            for ptype in list(new_patch.groups[patch_sw_version]):
-                if ptype not in self.groups[patch_sw_version]:
-                    self.groups[patch_sw_version][ptype] = {}
-                for patch_id in list(new_patch.groups[patch_sw_version][ptype]):
-                    if patch_id not in self.groups[patch_sw_version][ptype]:
-                        self.groups[patch_sw_version][ptype][patch_id] = {}
-                    self.groups[patch_sw_version][ptype][patch_id].update(
-                        new_patch.groups[patch_sw_version][ptype][patch_id])
 
     def update_patch(self, updated_patch):
         for patch_id in list(updated_patch.metadata):
@@ -455,27 +250,7 @@ class PatchData(object):
             self.metadata[patch_id]['repostate'] = cur_repostate
 
     def delete_patch(self, patch_id):
-        for patch_sw_version in list(self.package_versions):
-            for pkgname in list(self.package_versions[patch_sw_version]):
-                for arch in list(self.package_versions[patch_sw_version][pkgname]):
-                    for pkgver in list(self.package_versions[patch_sw_version][pkgname][arch]):
-                        if self.package_versions[patch_sw_version][pkgname][arch][pkgver] == patch_id:
-                            del self.package_versions[patch_sw_version][pkgname][arch][pkgver]
-                    if len(self.package_versions[patch_sw_version][pkgname][arch]) == 0:
-                        del self.package_versions[patch_sw_version][pkgname][arch]
-                if len(self.package_versions[patch_sw_version][pkgname]) == 0:
-                    del self.package_versions[patch_sw_version][pkgname]
-            if len(self.package_versions[patch_sw_version]) == 0:
-                del self.package_versions[patch_sw_version]
-
-        for patch_sw_version in list(self.groups):
-            for ptype in list(self.groups[patch_sw_version]):
-                if patch_id in self.groups[patch_sw_version][ptype]:
-                    del self.groups[patch_sw_version][ptype][patch_id]
-
-        del self.content_versions[patch_id]
         del self.contents[patch_id]
-        del self.semantics[patch_id]
         del self.metadata[patch_id]
 
     @staticmethod
@@ -541,13 +316,6 @@ class PatchData(object):
         #        <status>Dev</status>
         #        <unremovable/>
         #        <reboot_required/>
-        #        <personality type="worker">
-        #            <package>pkgA</package>
-        #            <package>pkgB</package>
-        #        </personality>
-        #        <personality type="controller">
-        #            <package>pkgB</package>
-        #        </personality>
         #    </patch>
         #
 
@@ -590,66 +358,26 @@ class PatchData(object):
             package_dir[patch_sw_version] = "%s/%s" % (root_package_dir, patch_sw_version)
             repo_dir[patch_sw_version] = "%s/rel-%s" % (repo_root_dir, patch_sw_version)
 
-        # Specifying personality for given packages is optional,
-        # intended to allow a patch to include a new package.
-        # For each configured personality type, create a software group.
-        for personality in root.findall("personality"):
-            ptype = personality.attrib["type"]
-            tag = "personality-%s" % ptype
-            self.metadata[patch_id][tag] = list()
-            for pkg in personality.findall("package"):
-                self.metadata[patch_id][tag].append(pkg.text)
-                if patch_sw_version not in self.groups:
-                    self.groups[patch_sw_version] = {}
-                if ptype not in self.groups[patch_sw_version]:
-                    self.groups[patch_sw_version][ptype] = {}
-                if patch_id not in self.groups[patch_sw_version][ptype]:
-                    self.groups[patch_sw_version][ptype][patch_id] = {}
-                self.groups[patch_sw_version][ptype][patch_id][pkg.text] = True
-
         self.metadata[patch_id]["requires"] = []
         for req in root.findall("requires"):
             for req_patch in req.findall("req_patch_id"):
                 self.metadata[patch_id]["requires"].append(req_patch.text)
 
-        self.contents[patch_id] = list()
-        self.content_versions[patch_id] = {}
+        self.contents[patch_id] = {}
 
-        for content in root.findall("contents"):
-            for rpmname in content.findall("rpm"):
-                try:
-                    pkgname, arch, pkgver = parse_rpm_filename(rpmname.text)
-                except ValueError as e:
-                    LOG.exception(e)
-                    return None
-
-                self.contents[patch_id].append(rpmname.text)
-                self.content_versions[patch_id][pkgname] = "%s-%s" % (pkgver.version, pkgver.release)
-
-                if patch_sw_version not in self.package_versions:
-                    self.package_versions[patch_sw_version] = {}
-                if pkgname not in self.package_versions[patch_sw_version]:
-                    self.package_versions[patch_sw_version][pkgname] = {}
-                if arch not in self.package_versions[patch_sw_version][pkgname]:
-                    self.package_versions[patch_sw_version][pkgname][arch] = {}
-
-                self.package_versions[patch_sw_version][pkgname][arch][pkgver] = patch_id
-
-        self.semantics[patch_id] = list()
-        for semantics in root.findall("semantics"):
-            for action in semantics.findall("action"):
-                self.semantics[patch_id].append(action.text)
+        for content in root.findall("contents/ostree"):
+            self.contents[patch_id]["number_of_commits"] = content.findall("number_of_commits")[0].text
+            self.contents[patch_id]["base"] = {}
+            self.contents[patch_id]["base"]["commit"] = content.findall("base/commit")[0].text
+            self.contents[patch_id]["base"]["checksum"] = content.findall("base/checksum")[0].text
+            for i in range(int(self.contents[patch_id]["number_of_commits"])):
+                self.contents[patch_id]["commit%s" % (i + 1)] = {}
+                self.contents[patch_id]["commit%s" % (i + 1)]["commit"] = \
+                    content.findall("commit%s/commit" % (i + 1))[0].text
+                self.contents[patch_id]["commit%s" % (i + 1)]["checksum"] = \
+                    content.findall("commit%s/checksum" % (i + 1))[0].text
 
         return patch_id
-
-    def find_patch_with_pkgver(self, sw_ver, pkgname, arch, pkgver):
-        if sw_ver not in self.package_versions or \
-           pkgname not in self.package_versions[sw_ver] or \
-           arch not in self.package_versions[sw_ver][pkgname] or \
-           pkgver not in self.package_versions[sw_ver][pkgname][arch]:
-            return None
-
-        return self.package_versions[sw_ver][pkgname][arch][pkgver]
 
     def load_all_metadata(self,
                           loaddir,
@@ -667,54 +395,6 @@ class PatchData(object):
         self.load_all_metadata(applied_dir, repostate=constants.APPLIED)
         self.load_all_metadata(avail_dir, repostate=constants.AVAILABLE)
         self.load_all_metadata(committed_dir, repostate=constants.COMMITTED)
-
-    def gen_release_groups_xml(self, sw_version, output_dir=None):
-        """
-        Generate the groups configuration file for the patching repo
-        """
-        if output_dir is None:
-            output_dir = repo_dir[sw_version]
-
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-
-        fname = "%s/comps.xml" % output_dir
-        top = ElementTree.Element('comps')
-        if sw_version in self.groups:
-            for groupname in sorted(list(self.groups[sw_version])):
-                if self.groups[sw_version][groupname]:
-                    group = ElementTree.SubElement(top, 'group')
-
-                    add_text_tag_to_xml(group, 'id',
-                                        "updates-%s" % groupname)
-                    add_text_tag_to_xml(group, 'default',
-                                        "false")
-                    add_text_tag_to_xml(group, 'uservisible',
-                                        "true")
-                    add_text_tag_to_xml(group, 'display_order',
-                                        "1024")
-                    add_text_tag_to_xml(group, 'name',
-                                        "updates-%s" % groupname)
-                    add_text_tag_to_xml(group, 'description',
-                                        "Patches for %s" % groupname)
-
-                    package_element = ElementTree.SubElement(group,
-                                                             'packagelist')
-
-                    for patch_id in sorted(self.groups[sw_version][groupname]):
-                        if self.metadata[patch_id]["repostate"] == constants.APPLIED \
-                                or self.metadata[patch_id]["repostate"] == constants.COMMITTED:
-                            for pkg in sorted(self.groups[sw_version][groupname][patch_id]):
-                                tag = ElementTree.SubElement(package_element,
-                                                             'packagereq',
-                                                             type="mandatory")
-                                tag.text = pkg
-
-        write_xml_file(top, fname)
-
-    def gen_groups_xml(self):
-        for ver in repo_dir:
-            self.gen_release_groups_xml(ver)
 
     def query_line(self,
                    patch_id,
@@ -748,23 +428,7 @@ class PatchMetadata(object):
         self.reboot_required = None
         self.apply_active_release_only = None
         self.requires = []
-        self.groups = {}
         self.contents = {}
-        self.semantics = []
-
-    def add_package(self,
-                    groupname,
-                    pkg):
-        """
-        Add a package to a particular group
-        :param groupname: Yum software group, eg. "controller"
-        :param pkg: Name of the package
-        :return:
-        """
-        if groupname not in self.groups:
-            self.groups[groupname] = {}
-
-        self.groups[groupname][pkg] = True
 
     def add_rpm(self,
                 fname):
@@ -775,15 +439,6 @@ class PatchMetadata(object):
         """
         rpmname = os.path.basename(fname)
         self.contents[rpmname] = True
-
-    def add_semantic(self,
-                     action):
-        """
-        Add a semantic check to the patch
-        :param action: semantic action
-        :return:
-        """
-        self.semantics.append(action)
 
     def gen_xml(self,
                 fname="metadata.xml"):
@@ -815,15 +470,6 @@ class PatchMetadata(object):
         add_text_tag_to_xml(top, 'apply_active_release_only',
                             self.apply_active_release_only)
 
-        for groupname in sorted(list(self.groups)):
-            if self.groups[groupname]:
-                group = ElementTree.SubElement(top,
-                                               'personality',
-                                               type=groupname)
-
-                for pkg in sorted(self.groups[groupname]):
-                    add_text_tag_to_xml(group, 'package', pkg)
-
         content = ElementTree.SubElement(top, 'contents')
         for rpmname in sorted(list(self.contents)):
             add_text_tag_to_xml(content, 'rpm', rpmname)
@@ -831,10 +477,6 @@ class PatchMetadata(object):
         req = ElementTree.SubElement(top, 'requires')
         for req_patch in sorted(self.requires):
             add_text_tag_to_xml(req, 'req_patch_id', req_patch)
-
-        semantics = ElementTree.SubElement(top, 'semantics')
-        for action in sorted(self.semantics):
-            add_text_tag_to_xml(semantics, 'action', action)
 
         write_xml_file(top, fname)
 
@@ -846,11 +488,9 @@ class PatchFile(object):
     def __init__(self):
         self.meta = PatchMetadata()
         self.rpmlist = {}
-        self.semantics = {}
 
     def add_rpm(self,
-                fname,
-                personality=None):
+                fname):
         """
         Add an RPM to the patch
         :param fname: Path to RPM
@@ -865,44 +505,12 @@ class PatchFile(object):
         # Add the RPM to the patch
         self.rpmlist[os.path.abspath(fname)] = True
 
-        if personality is not None:
-            # Get the package name from the RPM itself,
-            # and add it to the appropriate group(s)
-            pkgname = subprocess.check_output(["rpm",
-                                               "-qp",
-                                               "--queryformat",
-                                               "%{NAME}",
-                                               "--nosignature",
-                                               fname])
-            if isinstance(personality, list):
-                for p in personality:
-                    self.meta.add_package(p, pkgname)
-            elif isinstance(personality, str):
-                self.meta.add_package(personality, pkgname)
-
-    def add_semantic(self,
-                     action,
-                     fname):
-        """
-        Add a semantic check to the patch
-        :param action: Semantic check type
-        :param fname: Path to semantic check
-        :return:
-        """
-        # Add the semantic to the metadata
-        self.meta.add_semantic(action)
-
-        self.semantics[action] = os.path.abspath(fname)
-
     def gen_patch(self, outdir):
         """
         Generate the patch file, named PATCHID.patch
         :param outdir: Output directory for the patch
         :return:
         """
-        if self.meta.sw_version is None or self.meta.sw_version == '':
-            raise MetadataFail("The release version must be specified in the sw_version field")
-
         if not self.rpmlist:
             raise MetadataFail("Cannot generate empty patch")
 
@@ -935,16 +543,6 @@ class PatchFile(object):
         for rpmfile in list(self.rpmlist):
             tar.add(os.path.basename(rpmfile))
         tar.close()
-
-        # Copy semantics to tmpdir, if any
-        if len(self.semantics) > 0:
-            tar = tarfile.open("semantics.tar", "w")
-            for action in list(self.semantics):
-                os.mkdir(action, 0o755)
-                sname = os.path.join(action, self.meta.id)
-                shutil.copy(self.semantics[action], sname)
-                tar.add(sname)
-            tar.close()
 
         # Generate the metadata xml file
         self.meta.gen_xml("metadata.xml")
@@ -1014,7 +612,7 @@ class PatchFile(object):
                 raise SystemExit(e.returncode)
 
     @staticmethod
-    def read_patch(path, metadata_only=False, cert_type=None):
+    def read_patch(path, cert_type=None):
         # We want to enable signature checking by default
         # Note: cert_type=None is required if we are to enforce 'no dev patches on a formal load' rule.
 
@@ -1073,14 +671,6 @@ class PatchFile(object):
         tar = tarfile.open("metadata.tar")
         tar.extractall()
 
-        if not metadata_only:
-            tar = tarfile.open("software.tar")
-            tar.extractall()
-
-            if os.path.exists("semantics.tar"):
-                tar = tarfile.open("semantics.tar")
-                tar.extractall()
-
     @staticmethod
     def query_patch(patch, field=None):
 
@@ -1102,7 +692,7 @@ class PatchFile(object):
                 # Need to determine the cert_type
                 for cert_type_str in cert_type_all:
                     try:
-                        PatchFile.read_patch(abs_patch, metadata_only=True, cert_type=[cert_type_str])
+                        PatchFile.read_patch(abs_patch, cert_type=[cert_type_str])
                     except PatchValidationFailure:
                         pass
                     else:
@@ -1116,7 +706,7 @@ class PatchFile(object):
                 # We can't omit cert_type, or pass None, because that will trigger the code
                 # path used by installed product, in which dev keys are not accepted unless
                 # a magic file exists.
-                PatchFile.read_patch(abs_patch, metadata_only=True, cert_type=cert_type_all)
+                PatchFile.read_patch(abs_patch, cert_type=cert_type_all)
 
             thispatch = PatchData()
             patch_id = thispatch.parse_metadata("metadata.xml")
@@ -1174,7 +764,7 @@ class PatchFile(object):
             meta_data = PatchFile.query_patch(abs_patch)
             if 'cert' in meta_data:
                 cert_type = meta_data['cert']
-            PatchFile.read_patch(abs_patch, metadata_only=True, cert_type=cert_type)
+            PatchFile.read_patch(abs_patch, cert_type=cert_type)
             PatchData.modify_metadata_text("metadata.xml", key, value)
             PatchFile.write_patch(new_abs_patch, cert_type=cert_type)
             os.rename(new_abs_patch, abs_patch)
@@ -1204,7 +794,6 @@ class PatchFile(object):
                       metadata_dir=avail_dir,
                       metadata_only=False,
                       existing_content=None,
-                      allpatches=None,
                       base_pkgdata=None):
         """
         Extract the metadata and patch contents
@@ -1228,7 +817,7 @@ class PatchFile(object):
 
         try:
             # Open the patch file and extract the contents to the tmpdir
-            PatchFile.read_patch(abs_patch, metadata_only)
+            PatchFile.read_patch(abs_patch)
 
             thispatch = PatchData()
             patch_id = thispatch.parse_metadata("metadata.xml")
@@ -1248,38 +837,13 @@ class PatchFile(object):
                     LOG.exception(msg)
                     raise PatchValidationFailure(msg)
 
-                for rpmname in thispatch.contents[patch_id]:
-                    pkgname, arch, pkgver = parse_rpm_filename(rpmname)
-                    base_pkgver = base_pkgdata.find_version(patch_sw_version, pkgname, arch)
-                    if base_pkgver is not None:
-                        # Compare the patch RPM's version against the base
-                        if pkgver <= base_pkgver:
-                            msg = "RPM %s in patch %s must be higher version than original (%s)" % \
-                                  (rpmname, patch_id, base_pkgver)
-                            LOG.exception(msg)
-                            raise PatchValidationFailure(msg)
-
-                    if allpatches is not None:
-                        # Compare the patch RPM's version against other patches
-                        other = allpatches.find_patch_with_pkgver(patch_sw_version, pkgname, arch, pkgver)
-                        if other is not None:
-                            msg = "Patch %s contains rpm %s, which is already provided by patch %s" % \
-                                  (patch_id, rpmname, other)
-                            LOG.exception(msg)
-                            raise PatchValidationFailure(msg)
-
             if metadata_only:
                 # This is a re-import. Ensure the content lines up
                 if existing_content is None \
-                        or len(existing_content) != len(thispatch.contents[patch_id]):
+                        or existing_content != thispatch.contents[patch_id]:
                     msg = "Contents of re-imported patch do not match"
                     LOG.exception(msg)
                     raise PatchMismatchFailure(msg)
-                for rpmname in existing_content:
-                    if rpmname not in thispatch.contents[patch_id]:
-                        msg = "Contents of re-imported patch do not match"
-                        LOG.exception(msg)
-                        raise PatchMismatchFailure(msg)
 
             shutil.move("metadata.xml",
                         "%s/%s-metadata.xml" % (abs_metadata_dir, patch_id))
@@ -1291,18 +855,6 @@ class PatchFile(object):
                     if not os.path.exists(rpm_dir):
                         os.makedirs(rpm_dir)
                     shutil.move(rpmname, "%s/" % rpm_dir)
-
-                for action in constants.SEMANTIC_ACTIONS:
-                    action_file = os.path.join(action, patch_id)
-                    if not os.path.exists(action_file):
-                        continue
-
-                    action_dir = os.path.join(semantics_dir, action)
-                    if not os.path.exists(action_dir):
-                        os.makedirs(action_dir)
-
-                    os.chmod(action_file, 0o544)
-                    shutil.move(action_file, action_dir)
 
         except PatchValidationFailure as e:
             raise e
@@ -1415,25 +967,6 @@ def patch_build():
             pf.meta.install_instructions = arg
         elif opt == "--req":
             pf.meta.requires.append(arg)
-        elif opt == "--all-nodes":
-            for p in ("controller",
-                      "worker",
-                      "worker-lowlatency",
-                      "storage",
-                      "controller-worker",
-                      "controller-worker-lowlatency"):
-                pf.add_rpm(arg, personality=p)
-        elif opt in ("--controller",
-                     "--worker",
-                     "--worker-lowlatency",
-                     "--storage",
-                     "--controller-worker",
-                     "--controller-worker-lowlatency"):
-            pf.add_rpm(arg, personality=opt[2:])
-        elif opt == "--pre-apply":
-            pf.add_semantic(constants.SEMANTIC_PREAPPLY, arg)
-        elif opt == "--pre-remove":
-            pf.add_semantic(constants.SEMANTIC_PREREMOVE, arg)
         elif opt == "--apply-active-release-only":
             pf.meta.apply_active_release_only = "Y"
 

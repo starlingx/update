@@ -1,5 +1,5 @@
 """
-Copyright (c) 2014-2019 Wind River Systems, Inc.
+Copyright (c) 2014-2022 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -27,10 +27,7 @@ from cgcs_patch.patch_functions import BasePackageData
 from cgcs_patch.patch_functions import avail_dir
 from cgcs_patch.patch_functions import applied_dir
 from cgcs_patch.patch_functions import committed_dir
-from cgcs_patch.patch_functions import contentCompare
 from cgcs_patch.patch_functions import PatchFile
-from cgcs_patch.patch_functions import parse_rpm_filename
-from cgcs_patch.patch_functions import parse_pkgver
 from cgcs_patch.patch_functions import package_dir
 from cgcs_patch.patch_functions import repo_dir
 from cgcs_patch.patch_functions import semantics_dir
@@ -767,9 +764,7 @@ class PatchController(PatchService):
                 continue
 
             for pkg in list(self.hosts[ip].installed):
-                for patch_id in list(self.patch_data.content_versions):
-                    if pkg not in self.patch_data.content_versions[patch_id]:
-                        continue
+                for patch_id in list(self.patch_data.contents):
 
                     if patch_id not in self.patch_data.metadata:
                         LOG.error("Patch data missing for %s", patch_id)
@@ -786,19 +781,11 @@ class PatchController(PatchService):
                         # Ignore epoch
                         installed_ver = installed_ver.split(':')[1]
 
-                    patch_ver = self.patch_data.content_versions[patch_id][pkg]
-                    if ":" in patch_ver:
-                        # Ignore epoch
-                        patch_ver = patch_ver.split(':')[1]
-
-                    rc = contentCompare(parse_pkgver(installed_ver),
-                                        parse_pkgver(patch_ver))
-
                     if self.patch_data.metadata[patch_id]["repostate"] == constants.AVAILABLE:
                         # The RPM is not expected to be installed.
                         # If the installed version is the same or higher,
                         # this patch is in a Partial-Remove state
-                        if rc >= 0 or patch_id in self.interim_state:
+                        if patch_id in self.interim_state:
                             self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_REMOVE
                             if self.patch_data.metadata[patch_id].get("reboot_required") != "N":
                                 self.allow_insvc_patching = False
@@ -807,7 +794,7 @@ class PatchController(PatchService):
                         # The RPM is expected to be installed.
                         # If the installed version is the lower,
                         # this patch is in a Partial-Apply state
-                        if rc == -1 or patch_id in self.interim_state:
+                        if patch_id in self.interim_state:
                             self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_APPLY
                             if self.patch_data.metadata[patch_id].get("reboot_required") != "N":
                                 self.allow_insvc_patching = False
@@ -821,8 +808,8 @@ class PatchController(PatchService):
 
             # Check the to_remove list
             for pkg in self.hosts[ip].to_remove:
-                for patch_id in list(self.patch_data.content_versions):
-                    if pkg not in self.patch_data.content_versions[patch_id]:
+                for patch_id in list(self.patch_data.contents):
+                    if pkg not in self.patch_data.contents[patch_id]:
                         continue
 
                     if patch_id not in self.patch_data.metadata:
@@ -845,8 +832,8 @@ class PatchController(PatchService):
 
             # Check the missing_pkgs list
             for pkg in self.hosts[ip].missing_pkgs:
-                for patch_id in list(self.patch_data.content_versions):
-                    if pkg not in self.patch_data.content_versions[patch_id]:
+                for patch_id in list(self.patch_data.contents):
+                    if pkg not in self.patch_data.contents[patch_id]:
                         continue
 
                     if patch_id not in self.patch_data.metadata:
@@ -972,7 +959,6 @@ class PatchController(PatchService):
                                                         metadata_dir=mdir,
                                                         metadata_only=True,
                                                         existing_content=self.patch_data.contents[patch_id],
-                                                        allpatches=self.patch_data,
                                                         base_pkgdata=self.base_pkgdata)
                     self.patch_data.update_patch(thispatch)
                     msg = "%s is already imported. Updated metadata only" % patch_id
@@ -1007,11 +993,10 @@ class PatchController(PatchService):
             try:
                 thispatch = PatchFile.extract_patch(patch,
                                                     metadata_dir=avail_dir,
-                                                    allpatches=self.patch_data,
                                                     base_pkgdata=self.base_pkgdata)
 
                 msg_info += "%s is now available\n" % patch_id
-                self.patch_data.add_patch(patch_id, thispatch)
+                self.patch_data.add_patch(thispatch)
 
                 self.patch_data.metadata[patch_id]["repostate"] = constants.AVAILABLE
                 if len(self.hosts) > 0:
@@ -1130,51 +1115,6 @@ class PatchController(PatchService):
                 LOG.info(msg)
                 msg_info += msg + "\n"
                 continue
-
-            # To allow for easy cleanup, we're going to first iterate
-            # through the content list to determine where to copy the file.
-            # As a second step, we'll go through the list and copy each file.
-            # If there are problems querying the content, none will be copied.
-            content_dict = {}
-            patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
-            for contentname in self.patch_data.contents[patch_id]:
-                # the log can be debug or removed altogether  once code is working
-                msg = "OSTREE applying %s " % contentname
-                LOG.info(msg)
-                contentfile = self.get_store_filename(patch_sw_version, contentname)
-                if not os.path.isfile(contentfile):
-                    msg = "Could not find content file: %s" % contentfile
-                    LOG.error(msg)
-                    raise ContentFail(msg)
-
-                # todo: should 'repo' be replaced with something ostree related
-                repo_filename = self.get_repo_filename(patch_sw_version, contentname)
-                if repo_filename is None:
-                    msg = "Failed to determine repo path for %s" % contentfile
-                    LOG.exception(msg)
-                    raise ContentFail(msg)
-
-                repo_pkg_dir = os.path.dirname(repo_filename)
-                if not os.path.exists(repo_pkg_dir):
-                    os.makedirs(repo_pkg_dir)
-                content_dict[contentfile] = repo_filename
-
-            # Copy the Content. If a failure occurs, clean up copied files.
-            copied = []
-            for contentfile, repo_filename in content_dict.items():
-                LOG.info("Copy %s to %s", contentfile, repo_filename)
-                try:
-                    shutil.copy(contentfile, repo_filename)
-                    copied.append(repo_filename)
-                except IOError:
-                    msg = "Failed to copy %s" % contentfile
-                    LOG.exception(msg)
-                    # Clean up files
-                    for filename in copied:
-                        LOG.info("Cleaning up %s", filename)
-                        os.remove(filename)
-
-                    raise ContentFail(msg)
 
             try:
                 # Move the patching metadata from avail to applied dir
@@ -1515,9 +1455,6 @@ class PatchController(PatchService):
             msg_info += msg + "\n"
             LOG.info(msg)
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
-        # Generate the groups xml
-        self.patch_data.gen_release_groups_xml(release)
 
         # Create the repo
         try:
@@ -1933,60 +1870,6 @@ class PatchController(PatchService):
             if patch_sw_version not in cleanup:
                 cleanup[patch_sw_version] = {}
 
-            for rpmname in self.patch_data.contents[patch_id]:
-                try:
-                    pkgname, arch, pkgver = parse_rpm_filename(rpmname)
-                except ValueError as e:
-                    self.patch_data_lock.release()
-                    raise e
-
-                if pkgname not in keep[patch_sw_version]:
-                    keep[patch_sw_version][pkgname] = {arch: pkgver}
-                    continue
-                elif arch not in keep[patch_sw_version][pkgname]:
-                    keep[patch_sw_version][pkgname][arch] = pkgver
-                    continue
-
-                # Compare versions
-                keep_pkgver = keep[patch_sw_version][pkgname][arch]
-                if pkgver > keep_pkgver:
-                    if pkgname not in cleanup[patch_sw_version]:
-                        cleanup[patch_sw_version][pkgname] = {arch: [keep_pkgver]}
-                    elif arch not in cleanup[patch_sw_version][pkgname]:
-                        cleanup[patch_sw_version][pkgname][arch] = [keep_pkgver]
-                    else:
-                        cleanup[patch_sw_version][pkgname][arch].append(keep_pkgver)
-
-                    # Find the rpmname
-                    keep_rpmname = keep_pkgver.generate_rpm_filename(pkgname, arch)
-
-                    store_filename = self.get_store_filename(patch_sw_version, keep_rpmname)
-                    if store_filename is not None and os.path.exists(store_filename):
-                        cleanup_files.add(store_filename)
-
-                    repo_filename = self.get_repo_filename(patch_sw_version, keep_rpmname)
-                    if repo_filename is not None and os.path.exists(repo_filename):
-                        cleanup_files.add(repo_filename)
-
-                    # Keep the new pkgver
-                    keep[patch_sw_version][pkgname][arch] = pkgver
-                else:
-                    # Put this pkg in the cleanup list
-                    if pkgname not in cleanup[patch_sw_version]:
-                        cleanup[patch_sw_version][pkgname] = {arch: [pkgver]}
-                    elif arch not in cleanup[patch_sw_version][pkgname]:
-                        cleanup[patch_sw_version][pkgname][arch] = [pkgver]
-                    else:
-                        cleanup[patch_sw_version][pkgname][arch].append(pkgver)
-
-                    store_filename = self.get_store_filename(patch_sw_version, rpmname)
-                    if store_filename is not None and os.path.exists(store_filename):
-                        cleanup_files.add(store_filename)
-
-                    repo_filename = self.get_repo_filename(patch_sw_version, rpmname)
-                    if repo_filename is not None and os.path.exists(repo_filename):
-                        cleanup_files.add(repo_filename)
-
         self.patch_data_lock.release()
 
         # Calculate disk space
@@ -2024,8 +1907,6 @@ class PatchController(PatchService):
                 raise MetadataFail(msg)
 
         # OSTREE:  this repo update code needs to be re-examined
-        # Update the repo
-        self.patch_data.gen_groups_xml()
         for ver, rdir in repo_dir.items():
             try:
                 # todo(jcasteli)  determine if ostree change needs additional actions
