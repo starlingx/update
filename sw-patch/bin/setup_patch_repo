@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2018-2020 Wind River Systems, Inc.
+Copyright (c) 2018-2022 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -10,7 +10,6 @@ SPDX-License-Identifier: Apache-2.0
 import getopt
 import os
 import platform
-import rpm
 import shutil
 import subprocess
 import sys
@@ -31,8 +30,7 @@ dev_cert_path = os.path.abspath(os.path.join(cgcs_patch_bindir, '../../enable-de
 pv.dev_certificate_marker = dev_cert_path
 
 def usage():
-    print "Usage: %s -o <repodir> <patch> ..." \
-              % os.path.basename(sys.argv[0])
+    print("Usage: %s -o <repodir> <patch> ..." % os.path.basename(sys.argv[0]))
     exit(1)
 
 
@@ -67,7 +65,7 @@ def main():
         # Check to see if the expected structure already exists,
         # maybe we're appending a patch.
         if not os.path.exists(committed_dir) or not os.path.exists(pkgdir):
-            print "Packages or metadata dir missing from existing %s. Aborting..." % output
+            print("Packages or metadata dir missing from existing %s. Aborting..." % output)
             exit(1)
 
         # Load the existing metadata
@@ -92,14 +90,14 @@ def main():
             # Change to the tmpdir
             os.chdir(tmpdir)
 
-            print "Parsing %s" % fpath
+            print("Parsing %s" % fpath)
             pf.PatchFile.read_patch(fpath)
 
             thispatch = pf.PatchData()
             patch_id = thispatch.parse_metadata("metadata.xml", constants.COMMITTED)
 
             if patch_id in allpatches.metadata:
-                print "Skipping %s as it's already in the repo" % patch_id
+                print("Skipping %s as it's already in the repo" % patch_id)
                 # Change back to original working dir
                 os.chdir(orig_wd)
 
