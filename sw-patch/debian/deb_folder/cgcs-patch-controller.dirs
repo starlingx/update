@@ -2,4 +2,4 @@ usr/sbin
 etc/pmon.d
 etc/init.d
 lib/systemd/system
-usr/share/bash-completion
+usr/share/bash-completion/completions
