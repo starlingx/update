@@ -29,7 +29,6 @@ from cgcs_patch.exceptions import PatchValidationFailure
 from cgcs_patch.exceptions import PatchMismatchFailure
 
 import cgcs_patch.constants as constants
-import rpm
 
 try:
     # The tsconfig module is only available at runtime
@@ -44,6 +43,7 @@ applied_dir = "%s/metadata/applied" % patch_dir
 committed_dir = "%s/metadata/committed" % patch_dir
 semantics_dir = "%s/semantics" % patch_dir
 
+# these next 4 variables may need to change to support ostree
 repo_root_dir = "/var/www/pages/updates"
 repo_dir = {SW_VERSION: "%s/rel-%s" % (repo_root_dir, SW_VERSION)}
 
@@ -199,6 +199,13 @@ def parse_pkgver(pkgver):
     return (epoch, version, release)
 
 
+# OSTREE:  this method may be removed or revisited
+# based on comparing SHAs and dependencies
+def contentCompare(_list1, _list2):
+    LOG.info("OSTREE: DEV MODE. contentCompare always returns zero")
+    return 0
+
+
 def get_release_from_patch(patchfile):
     rel = ""
     try:
@@ -230,46 +237,46 @@ class PackageVersion(object):
     def __le__(self, other):
         """
         This function is called by comparison operators to compare
-        two versions. The rpm.labelCompare() function takes two versions,
+        two versions. The contentCompare() function takes two versions,
         specified in a list structure, and returns -1, 0, or 1.
         """
-        out = rpm.labelCompare((self.epoch, self.version, self.release),
-                               (other.epoch, other.version, other.release))
+        out = contentCompare((self.epoch, self.version, self.release),
+                             (other.epoch, other.version, other.release))
         if out == 1:
             return False
         return True
 
     def __eq__(self, other):
-        out = rpm.labelCompare((self.epoch, self.version, self.release),
-                               (other.epoch, other.version, other.release))
+        out = contentCompare((self.epoch, self.version, self.release),
+                             (other.epoch, other.version, other.release))
         if out == 0:
             return True
         return False
 
     def __ne__(self, other):
-        out = rpm.labelCompare((self.epoch, self.version, self.release),
-                               (other.epoch, other.version, other.release))
+        out = contentCompare((self.epoch, self.version, self.release),
+                             (other.epoch, other.version, other.release))
         if out == 0:
             return False
         return True
 
     def __gt__(self, other):
-        out = rpm.labelCompare((self.epoch, self.version, self.release),
-                               (other.epoch, other.version, other.release))
+        out = contentCompare((self.epoch, self.version, self.release),
+                             (other.epoch, other.version, other.release))
         if out == 1:
             return True
         return False
 
     def __lt__(self, other):
-        out = rpm.labelCompare((self.epoch, self.version, self.release),
-                               (other.epoch, other.version, other.release))
+        out = contentCompare((self.epoch, self.version, self.release),
+                             (other.epoch, other.version, other.release))
         if out == -1:
             return True
         return False
 
     def __ge__(self, other):
-        out = rpm.labelCompare((self.epoch, self.version, self.release),
-                               (other.epoch, other.version, other.release))
+        out = contentCompare((self.epoch, self.version, self.release),
+                             (other.epoch, other.version, other.release))
         if out == -1:
             return False
         return True

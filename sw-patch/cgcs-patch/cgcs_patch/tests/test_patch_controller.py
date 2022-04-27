@@ -5,18 +5,14 @@
 #
 
 import mock
-import six  # pylint: disable=unused-import
-import sys
 import testtools
 
-sys.modules['rpm'] = mock.Mock()
-
-import cgcs_patch.patch_controller  # noqa: E402
+from cgcs_patch.patch_controller import PatchController
 
 
 class CgcsPatchControllerTestCase(testtools.TestCase):
 
     @mock.patch('six.moves.builtins.open')
-    def test_cgcs_patch_controller_instantiate(self, mock_open):  # pylint: disable=unused-argument
-        # pylint: disable=unused-variable
-        pc = cgcs_patch.patch_controller.PatchController()  # noqa: F841
+    def test_cgcs_patch_controller_instantiate(self, _mock_open):
+        pc = PatchController()
+        self.assertIsNotNone(pc)

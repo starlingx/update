@@ -22,8 +22,8 @@ class MetadataFail(PatchError):
     pass
 
 
-class RpmFail(PatchError):
-    """RPM error."""
+class ContentFail(PatchError):
+    """Content handling error."""
     pass
 
 

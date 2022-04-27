@@ -329,7 +329,7 @@ ignored-modules=dnf,libdnf
 
 # List of classes names for which member attributes should not be checked
 # (useful for classes with attributes dynamically set).
-ignored-classes=rpm,PKCS1_PSS
+ignored-classes=PKCS1_PSS
 
 # When zope mode is activated, add a predefined set of Zope acquired attributes
 # to generated-members.
