@@ -1,5 +1,5 @@
 """
-Copyright (c) 2017 Wind River Systems, Inc.
+Copyright (c) 2017-2022 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -8,12 +8,7 @@ SPDX-License-Identifier: Apache-2.0
 import os
 from Cryptodome.Signature import PKCS1_PSS
 from Cryptodome.Hash import SHA256
-from Cryptodome.PublicKey import RSA  # pylint: disable=unused-import
-from Cryptodome.Util.asn1 import DerSequence  # pylint: disable=unused-import
-from binascii import a2b_base64  # pylint: disable=unused-import
-from cgcs_patch.patch_verify import read_RSA_key
-from cgcs_patch.patch_verify import cert_type_formal_str
-from cgcs_patch.patch_verify import cert_type_dev_str
+from cgcs_patch import patch_verify
 
 # To save memory, read and hash 1M of files at a time
 default_blocksize = 1 * 1024 * 1024
@@ -22,8 +17,8 @@ default_blocksize = 1 * 1024 * 1024
 #
 # The (currently hardcoded) path on the signing server will be replaced
 # by the capability to specify filename from calling function.
-private_key_files = {cert_type_formal_str: '/signing/keys/formal-private-key.pem',
-                     cert_type_dev_str: os.path.expandvars('$MY_REPO/build-tools/signing/dev-private-key.pem')
+private_key_files = {patch_verify.cert_type_formal_str: '/signing/keys/formal-private-key.pem',
+                     patch_verify.cert_type_dev_str: os.path.expandvars('$MY_REPO/build-tools/signing/dev-private-key.pem')
                      }
 
 
@@ -59,15 +54,15 @@ def sign_files(filenames, signature_file, private_key=None, cert_type=None):
             dict_key = cert_type
             filename = private_key_files[dict_key]
             # print 'cert_type given: Checking to see if ' + filename + ' exists\n'
-            if not os.path.exists(filename) and dict_key == cert_type_formal_str:
+            if not os.path.exists(filename) and dict_key == patch_verify.cert_type_formal_str:
                 # The formal key is asked for, but is not locally available,
                 # substitute the dev key, and we will try to resign with the formal later.
-                dict_key = cert_type_dev_str
+                dict_key = patch_verify.cert_type_dev_str
                 filename = private_key_files[dict_key]
                 need_resign_with_formal = True
             if os.path.exists(filename):
                 # print 'Getting private key from ' + filename + '\n'
-                private_key = read_RSA_key(open(filename, 'rb').read())
+                private_key = patch_verify.read_RSA_key(open(filename, 'rb').read())
         else:
             # Search for available keys
             for dict_key in private_key_files.keys():
@@ -75,7 +70,7 @@ def sign_files(filenames, signature_file, private_key=None, cert_type=None):
                 # print 'Search for available keys: Checking to see if ' + filename + ' exists\n'
                 if os.path.exists(filename):
                     # print 'Getting private key from ' + filename + '\n'
-                    private_key = read_RSA_key(open(filename, 'rb').read())
+                    private_key = patch_verify.read_RSA_key(open(filename, 'rb').read())
 
     assert (private_key is not None), "Could not find signing key"
 

@@ -1648,7 +1648,7 @@ class PatchController(PatchService):
         msg.send(self.sock_out)
         self.socket_lock.release()
 
-        # Now we wait, up to two mins... TODO: Wait on a condition
+        # Now we wait, up to two mins. future enhancement: Wait on a condition
         my_ip = cfg.get_mgmt_ip()
         sync_rc = False
         max_time = time.time() + 120
@@ -2004,7 +2004,7 @@ class PatchController(PatchService):
             LOG.info("host-install async_req: %s", msg)
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-        # Now we wait, up to ten mins... TODO: Wait on a condition
+        # Now we wait, up to ten mins. future enhancement: Wait on a condition
         resp_rx = False
         max_time = time.time() + 600
         while time.time() < max_time:

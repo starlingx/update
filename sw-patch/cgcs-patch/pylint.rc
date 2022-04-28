@@ -126,20 +126,14 @@ enable=E1603,E1609,E1610,E1602,E1606,E1608,E1607,E1605,E1604,E1601,E1611,W1652,
 # --enable=similarities". If you want to run only the classes checker, but have
 # no Warning level messages displayed, use"--disable=all --enable=classes
 # --disable=W"
-# H216, unittest mock
 # W0107 unnecessary-pass
-# W0511 fixme
 # W0602 global-variable-not-assigned
 # W0603 global-statement
 # W0703 broad-except
 # W0707 raise-missing-from
-# W1406 redundant-u-string-prefix
 # W1505 deprecated-method
 # W1514 unspecified-encoding
-# Disable Python3 checkers:
-# W1618: no-absolute-import
-disable=C, H216, R,
-        W0107, W0511, W0602, W0603, W0703, W0707, W1406, W1505, W1514, W1618
+disable=C,R,W0107,W0602,W0603,W0703,W0707,W1505,W1514
 
 [REPORTS]
 

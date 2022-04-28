@@ -1,5 +1,5 @@
 """
-Copyright (c) 2014-2017 Wind River Systems, Inc.
+Copyright (c) 2014-2022 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -74,7 +74,7 @@ def read_config():
 
     # The platform.conf file has no section headers, which causes problems
     # for ConfigParser. So we'll fake it out.
-    ini_str = u'[platform_conf]\n' + open(tsc.PLATFORM_CONF_FILE, 'r').read()
+    ini_str = '[platform_conf]\n' + open(tsc.PLATFORM_CONF_FILE, 'r').read()
     ini_fp = io.StringIO(ini_str)
     config.readfp(ini_fp)
 
@@ -122,7 +122,7 @@ def get_mgmt_iface():
 
     # The platform.conf file has no section headers, which causes problems
     # for ConfigParser. So we'll fake it out.
-    ini_str = u'[platform_conf]\n' + open(tsc.PLATFORM_CONF_FILE, 'r').read()
+    ini_str = '[platform_conf]\n' + open(tsc.PLATFORM_CONF_FILE, 'r').read()
     ini_fp = io.StringIO(ini_str)
     config.readfp(ini_fp)
 

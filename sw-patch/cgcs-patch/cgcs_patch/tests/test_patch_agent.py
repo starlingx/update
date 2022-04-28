@@ -1,11 +1,10 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# Copyright (c) 2019 Wind River Systems, Inc.
+# Copyright (c) 2019-2022 Wind River Systems, Inc.
 #
 
 import mock
-import six  # pylint: disable=unused-import
 import sys
 import testtools
 
@@ -19,11 +18,13 @@ sys.modules['dnf.transaction'] = mock.Mock()
 sys.modules['libdnf'] = mock.Mock()
 sys.modules['libdnf.transaction'] = mock.Mock()
 
-import cgcs_patch.patch_agent  # noqa: E402
+# Need to suppress E402 because the sys.modules need
+# to be mocked before importing patch_agent
+from cgcs_patch import patch_agent  # noqa: E402
 
 
 class CgcsPatchAgentTestCase(testtools.TestCase):
 
     def test_cgcs_patch_agent_instantiate(self):
-        pc = cgcs_patch.patch_agent.PatchAgent()
+        pc = patch_agent.PatchAgent()
         self.assertIsNotNone(pc)

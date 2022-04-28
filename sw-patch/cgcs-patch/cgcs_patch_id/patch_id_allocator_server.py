@@ -1,12 +1,10 @@
 #!/usr/bin/env python
 #
-# Copyright (c) 2013-2014 Wind River Systems, Inc.
+# Copyright (c) 2013-2022 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
 
-import os
-import sys
 import web
 import patch_id_allocator as pida
 

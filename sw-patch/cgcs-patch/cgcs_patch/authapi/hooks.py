@@ -2,7 +2,7 @@
 #
 # Copyright © 2012 New Dream Network, LLC (DreamHost)
 #
-# Author: Doug Hellmann <doug.hellmann@dreamhost.com>
+# Author: Doug Hellmann <doug.hellmann@dreamhost.com>  # noqa: H105
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -16,7 +16,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 #
-# Copyright (c) 2013-2017 Wind River Systems, Inc.
+# Copyright (c) 2013-2022 Wind River Systems, Inc.
 #
 
 
