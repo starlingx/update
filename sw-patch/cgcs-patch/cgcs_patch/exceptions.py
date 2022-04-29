@@ -1,5 +1,5 @@
 """
-Copyright (c) 2017 Wind River Systems, Inc.
+Copyright (c) 2017-2022 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -24,6 +24,11 @@ class MetadataFail(PatchError):
 
 class ContentFail(PatchError):
     """Content handling error."""
+    pass
+
+
+class OSTreeTarMissingFailure(PatchError):
+    """OSTree Tarball Missing  error."""
     pass
 
 
