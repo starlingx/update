@@ -13,6 +13,7 @@ import six
 from six.moves import configparser
 import socket
 import subprocess
+import tarfile
 import tempfile
 import threading
 import time
@@ -35,7 +36,7 @@ from cgcs_patch.patch_functions import SW_VERSION
 from cgcs_patch.patch_functions import root_package_dir
 from cgcs_patch.exceptions import MetadataFail
 from cgcs_patch.exceptions import ContentFail
-from cgcs_patch.exceptions import OSTreeTarMissingFailure
+from cgcs_patch.exceptions import OSTreeTarFail
 from cgcs_patch.exceptions import PatchError
 from cgcs_patch.exceptions import PatchFail
 from cgcs_patch.exceptions import PatchInvalidRequest
@@ -863,6 +864,16 @@ class PatchController(PatchService):
         contentfile = "%s/%s" % (content_dir, contentname)
         return contentfile
 
+    def get_ostree_tar_filename(self, patch_sw_version, patch_id):
+        '''
+        Returns the path of the ostree tarball
+        :param patch_sw_version: sw version this patch must be applied to
+        :param patch_id: The patch ID
+        '''
+        ostree_tar_dir = package_dir[patch_sw_version]
+        ostree_tar_filename = "%s/%s" % (ostree_tar_dir, patch_id)
+        return ostree_tar_filename
+
     def get_repo_filename(self, patch_sw_version, contentname):
         contentfile = self.get_store_filename(patch_sw_version, contentname)
         if not os.path.isfile(contentfile):
@@ -1047,8 +1058,6 @@ class PatchController(PatchService):
                 msg_info += "There are no available patches to be applied.\n"
                 return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-        repo_changed = False
-
         # First, verify that all specified patches exist
         id_verification = True
         for patch_id in patch_list:
@@ -1117,6 +1126,81 @@ class PatchController(PatchService):
                 msg_info += msg + "\n"
                 continue
 
+            # OSTree Commit consistency check
+            # Check if the patch can be applied on the system
+            # Fetch the latest commit and checksum by running the command given below
+            # and compare it with the base commit and base checksum values from metadata.xml
+            #
+            # Command: ostree log starlingx --repo=/var/www/pages/feed/rel-22.02/ostree_repo
+            #
+            # Output:
+            #
+            # commit 478bc21c1702b9b667b5a75fac62a3ef9203cc1767cbe95e89dface6dc7f205e
+            # ContentChecksum:  61fc5bb4398d73027595a4d839daeb404200d0899f6e7cdb24bb8fb6549912ba
+            # Date:  2022-04-28 18:58:57 +0000
+            #
+            # Commit-id: starlingx-intel-x86-64-20220428185802
+            #
+            # commit ad7057a94a1d06e38eaedee2ce3fe56826ae817497469bce5d5ac05bc506aaa7
+            # ContentChecksum:  dc42a42427a4f9e4de1210327c12b12ea3ad6a5d232497a903cc6478ca381e8b
+            # Date:  2022-04-28 18:05:43 +0000
+            #
+            # Commit-id: starlingx-intel-x86-64-20220428180512
+
+            patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
+
+            feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, patch_sw_version)
+
+            cmd = "ostree log %s --repo=%s" % (constants.OSTREE_REF, feed_ostree)
+            output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
+
+            # Store the output of the above command in a string
+            output_string = output.stdout.decode('utf-8')
+
+            # Parse the string to get the latest commit and checksum on the controller
+            split_output_string = output_string.split()
+            latest_commit = split_output_string[1]
+            latest_checksum = split_output_string[3]
+
+            if self.patch_data.contents[patch_id]["base"]["commit"] != latest_commit \
+               and self.patch_data.contents[patch_id]["base"]["checksum"] != latest_checksum:
+                msg = "The base commit and checksum for %s do not match the latest commit " \
+                      "and checksum on this system." % (patch_id)
+                LOG.info(msg)
+                msg_info += msg + "\n"
+                continue
+
+            ostree_tar_filename = self.get_ostree_tar_filename(patch_sw_version, patch_id)
+
+            # Create a temporary working directory
+            tmpdir = tempfile.mkdtemp(prefix="patch_")
+
+            # Save the current directory, so we can chdir back after
+            orig_wd = os.getcwd()
+
+            # Change to the tmpdir
+            os.chdir(tmpdir)
+
+            try:
+                # Extract the software.tar
+                tar = tarfile.open(ostree_tar_filename)
+                tar.extractall()
+
+                # Copy extracted folders of software.tar to the feed ostree repo
+                shutil.copytree(tmpdir, feed_ostree, dirs_exist_ok=True)
+            except tarfile.TarError:
+                msg = "Failed to extract the ostree tarball for %s" % patch_id
+                LOG.exception(msg)
+                raise OSTreeTarFail(msg)
+            except shutil.Error:
+                msg = "Failed to copy the ostree tarball for %s" % patch_id
+                LOG.exception(msg)
+                raise OSTreeTarFail(msg)
+            finally:
+                # Change back to original working dir
+                os.chdir(orig_wd)
+                shutil.rmtree(tmpdir, ignore_errors=True)
+
             try:
                 # Move the patching metadata from avail to applied dir
                 shutil.move("%s/%s-metadata.xml" % (avail_dir, patch_id),
@@ -1138,24 +1222,6 @@ class PatchController(PatchService):
             self.interim_state[patch_id] = list(self.hosts)
             self.hosts_lock.release()
 
-            repo_changed = True
-
-        if repo_changed:
-            # Update the repo
-            self.patch_data.gen_groups_xml()
-            for ver, rdir in repo_dir.items():
-                try:
-                    # todo(jcasteli)  determine if ostree change needs additional actions
-                    # old code was calling 'createrepo' for rpms
-                    output = "OSTREE determined a change occurred rdir=%s" % rdir
-                    LOG.info("Repo[%s] updated:\n%s", ver, output)
-                except Exception:
-                    msg = "Failed to update the repo for %s" % ver
-                    LOG.exception(msg)
-                    raise PatchFail(msg)
-        else:
-            LOG.info("Repository is unchanged")
-
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     def patch_remove_api(self, patch_ids, **kwargs):
@@ -1167,8 +1233,6 @@ class PatchController(PatchService):
         msg_warning = ""
         msg_error = ""
         remove_unremovable = False
-
-        repo_changed = False
 
         # Protect against duplications
         patch_list = sorted(list(set(patch_ids)))
@@ -1275,8 +1339,6 @@ class PatchController(PatchService):
                 msg_info += msg + "\n"
                 continue
 
-            repo_changed = True
-
             patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
             for contentname in self.patch_data.contents[patch_id]:
                 contentfile = self.get_store_filename(patch_sw_version, contentname)
@@ -1317,22 +1379,6 @@ class PatchController(PatchService):
             self.hosts_lock.acquire()
             self.interim_state[patch_id] = list(self.hosts)
             self.hosts_lock.release()
-
-        if repo_changed:
-            # Update the repo
-            self.patch_data.gen_groups_xml()
-            for ver, rdir in repo_dir.items():
-                try:
-                    # todo(jcasteli)  determine if ostree change needs additional actions
-                    # old code was calling 'createrepo' for rpms
-                    output = "OSTREE determined a change occurred rdir=%s" % rdir
-                    LOG.info("Repo[%s] updated:\n%s", ver, output)
-                except Exception:
-                    msg = "Failed to update the repo for %s" % ver
-                    LOG.exception(msg)
-                    raise PatchFail(msg)
-        else:
-            LOG.info("Repository is unchanged")
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
@@ -1381,8 +1427,7 @@ class PatchController(PatchService):
         # Handle operation
         for patch_id in patch_list:
             patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
-            abs_ostree_tar_dir = package_dir[patch_sw_version]
-            ostree_tar_filename = "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id)
+            ostree_tar_filename = self.get_ostree_tar_filename(patch_sw_version, patch_id)
             if not os.path.isfile(ostree_tar_filename):
                 # We're deleting the patch anyway, so the missing file
                 # doesn't really matter
@@ -1393,7 +1438,7 @@ class PatchController(PatchService):
             except OSError:
                 msg = "Failed to remove ostree tarball %s" % ostree_tar_filename
                 LOG.exception(msg)
-                raise OSTreeTarMissingFailure(msg)
+                raise OSTreeTarFail(msg)
 
             try:
                 # Delete the metadata

@@ -27,8 +27,8 @@ class ContentFail(PatchError):
     pass
 
 
-class OSTreeTarMissingFailure(PatchError):
-    """OSTree Tarball Missing  error."""
+class OSTreeTarFail(PatchError):
+    """OSTree Tarball error."""
     pass
 
 

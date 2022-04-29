@@ -185,7 +185,7 @@ class BasePackageData(object):
 
     def loaddirs(self):
         # Load up available package info
-        base_dir = "/var/www/pages/feed"
+        base_dir = constants.FEED_OSTREE_BASE_DIR
         if not os.path.exists(base_dir):
             # Return, since this could be running off-box
             return
