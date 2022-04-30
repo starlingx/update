@@ -805,7 +805,6 @@ class PatchFile(object):
 
         abs_patch = os.path.abspath(patch)
         abs_metadata_dir = os.path.abspath(metadata_dir)
-
         # Create a temporary working directory
         tmpdir = tempfile.mkdtemp(prefix="patch_")
 
@@ -845,16 +844,15 @@ class PatchFile(object):
                     LOG.exception(msg)
                     raise PatchMismatchFailure(msg)
 
+            patch_sw_version = thispatch.metadata[patch_id]["sw_version"]
+            abs_ostree_tar_dir = package_dir[patch_sw_version]
+            if not os.path.exists(abs_ostree_tar_dir):
+                os.makedirs(abs_ostree_tar_dir)
+
             shutil.move("metadata.xml",
                         "%s/%s-metadata.xml" % (abs_metadata_dir, patch_id))
-
-            if not metadata_only:
-                for rpmname in thispatch.contents[patch_id]:
-                    patch_sw_version = thispatch.metadata[patch_id]["sw_version"]
-                    rpm_dir = package_dir[patch_sw_version]
-                    if not os.path.exists(rpm_dir):
-                        os.makedirs(rpm_dir)
-                    shutil.move(rpmname, "%s/" % rpm_dir)
+            shutil.move("software.tar",
+                        "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id))
 
         except PatchValidationFailure as e:
             raise e

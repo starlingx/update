@@ -35,12 +35,13 @@ from cgcs_patch.patch_functions import SW_VERSION
 from cgcs_patch.patch_functions import root_package_dir
 from cgcs_patch.exceptions import MetadataFail
 from cgcs_patch.exceptions import ContentFail
-from cgcs_patch.exceptions import SemanticFail
+from cgcs_patch.exceptions import OSTreeTarMissingFailure
 from cgcs_patch.exceptions import PatchError
 from cgcs_patch.exceptions import PatchFail
 from cgcs_patch.exceptions import PatchInvalidRequest
 from cgcs_patch.exceptions import PatchValidationFailure
 from cgcs_patch.exceptions import PatchMismatchFailure
+from cgcs_patch.exceptions import SemanticFail
 from cgcs_patch.patch_functions import LOG
 from cgcs_patch.patch_functions import audit_log_info
 from cgcs_patch.patch_functions import patch_dir
@@ -1380,31 +1381,19 @@ class PatchController(PatchService):
         # Handle operation
         for patch_id in patch_list:
             patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
-            for contentname in self.patch_data.contents[patch_id]:
-                contentfile = self.get_store_filename(patch_sw_version, contentname)
-                if not os.path.isfile(contentfile):
-                    # We're deleting the patch anyway, so the missing file
-                    # doesn't really matter
-                    continue
+            abs_ostree_tar_dir = package_dir[patch_sw_version]
+            ostree_tar_filename = "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id)
+            if not os.path.isfile(ostree_tar_filename):
+                # We're deleting the patch anyway, so the missing file
+                # doesn't really matter
+                continue
 
-                try:
-                    os.remove(contentfile)
-                except OSError:
-                    msg = "Failed to remove Content %s" % contentfile
-                    LOG.exception(msg)
-                    raise ContentFail(msg)
-
-            for action in constants.SEMANTIC_ACTIONS:
-                action_file = os.path.join(semantics_dir, action, patch_id)
-                if not os.path.isfile(action_file):
-                    continue
-
-                try:
-                    os.remove(action_file)
-                except OSError:
-                    msg = "Failed to remove semantic %s" % action_file
-                    LOG.exception(msg)
-                    raise SemanticFail(msg)
+            try:
+                os.remove(ostree_tar_filename)
+            except OSError:
+                msg = "Failed to remove ostree tarball %s" % ostree_tar_filename
+                LOG.exception(msg)
+                raise OSTreeTarMissingFailure(msg)
 
             try:
                 # Delete the metadata
