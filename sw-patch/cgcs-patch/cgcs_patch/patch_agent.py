@@ -1,19 +1,10 @@
 """
-Copyright (c) 2014-2019 Wind River Systems, Inc.
+Copyright (c) 2014-2022 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
-
-import dnf
-import dnf.callback
-import dnf.comps
-import dnf.exceptions
-import dnf.rpm
-import dnf.sack
-import dnf.transaction
 import json
-import libdnf.transaction
 import os
 import random
 import requests
@@ -53,14 +44,6 @@ run_insvc_patch_scripts_cmd = "/usr/sbin/run-patch-scripts"
 pa = None
 
 http_port_real = http_port
-
-# DNF commands
-dnf_cmd = ['/bin/dnf']
-dnf_quiet = dnf_cmd + ['--quiet']
-dnf_makecache = dnf_quiet + ['makecache',
-                             '--disablerepo="*"',
-                             '--enablerepo', 'platform-base',
-                             '--enablerepo', 'platform-updates']
 
 
 def setflag(fname):
@@ -284,46 +267,6 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
         resp.send(sock)
 
 
-class PatchAgentDnfTransLogCB(dnf.callback.TransactionProgress):
-    def __init__(self):
-        dnf.callback.TransactionProgress.__init__(self)
-
-        self.log_prefix = 'dnf trans'
-
-    def progress(self, package, action, ti_done, ti_total, ts_done, ts_total):
-        if action in dnf.transaction.ACTIONS:
-            action_str = dnf.transaction.ACTIONS[action]
-        elif action == dnf.transaction.TRANS_POST:
-            action_str = 'Post transaction'
-        else:
-            action_str = 'unknown(%d)' % action
-
-        if ti_done is not None:
-            # To reduce the volume of logs, only log 0% and 100%
-            if ti_done == 0 or ti_done == ti_total:
-                LOG.info('%s PROGRESS %s: %s %0.1f%% [%s/%s]',
-                         self.log_prefix, action_str, package,
-                         (ti_done * 100 // ti_total),
-                         ts_done, ts_total)
-        else:
-            LOG.info('%s PROGRESS %s: %s [%s/%s]',
-                     self.log_prefix, action_str, package, ts_done, ts_total)
-
-    def filelog(self, package, action):
-        if action in dnf.transaction.FILE_ACTIONS:
-            msg = '%s: %s' % (dnf.transaction.FILE_ACTIONS[action], package)
-        else:
-            msg = '%s: %s' % (package, action)
-        LOG.info('%s FILELOG %s', self.log_prefix, msg)
-
-    def scriptout(self, msgs):
-        if msgs:
-            LOG.info("%s SCRIPTOUT :\n%s", self.log_prefix, msgs)
-
-    def error(self, message):
-        LOG.error("%s ERROR: %s", self.log_prefix, message)
-
-
 class PatchAgent(PatchService):
     def __init__(self):
         PatchService.__init__(self)
@@ -333,14 +276,9 @@ class PatchAgent(PatchService):
         self.listener = None
         self.changes = False
         self.installed = {}
-        self.installed_dnf = []
         self.to_install = {}
-        self.to_install_dnf = []
-        self.to_downgrade_dnf = []
         self.to_remove = []
-        self.to_remove_dnf = []
         self.missing_pkgs = []
-        self.missing_pkgs_dnf = []
         self.duplicated_pkgs = {}
         self.patch_op_counter = 0
         self.node_is_patched = os.path.exists(node_is_patched_file)
@@ -349,7 +287,6 @@ class PatchAgent(PatchService):
         self.state = constants.PATCH_AGENT_STATE_IDLE
         self.last_config_audit = 0
         self.rejection_timestamp = 0
-        self.dnfb = None
         self.last_repo_revision = None
 
         # Check state flags
@@ -405,28 +342,13 @@ class PatchAgent(PatchService):
 
         return output
 
-    def dnf_reset_client(self):
-        if self.dnfb is not None:
-            self.dnfb.close()
-            self.dnfb = None
-
-        self.dnfb = dnf.Base()
-        self.dnfb.conf.substitutions['infra'] = 'stock'
-
-        # Reset default installonlypkgs list
-        self.dnfb.conf.installonlypkgs = []
-
-        self.dnfb.read_all_repos()
-
-        # Ensure only platform repos are enabled for transaction
-        for repo in self.dnfb.repos.all():
-            if repo.id == 'platform-base' or repo.id == 'platform-updates':
-                repo.enable()
-            else:
-                repo.disable()
-
-        # Read repo info
-        self.dnfb.fill_sack()
+    def getOSTreeRevision(self, feed_type):
+        """ Get the ostree revision for a particular feed """
+        # todo(abailey): is a software version parameter required to support upgrade?
+        # Probably this method will invoke something like:
+        # ostree pull --commit-metadata-only --depth=1
+        LOG.info("Querying OSTree Revision from %s", feed_type)
+        return "UNDER CONSTRUCTION"
 
     def query(self, check_revision=False):
         """ Check current patch state """
@@ -434,42 +356,12 @@ class PatchAgent(PatchService):
             LOG.info("Failed install_uuid check. Skipping query")
             return False
 
-        if self.dnfb is not None:
-            self.dnfb.close()
-            self.dnfb = None
-
-        # TODO(dpenney): Use python APIs for makecache
-        try:
-            subprocess.check_output(dnf_makecache, stderr=subprocess.STDOUT)
-        except subprocess.CalledProcessError as e:
-            LOG.error("Failed to run dnf makecache")
-            LOG.error("Command output: %s", e.output)
-            # Set a state to "unknown"?
-            return False
-
-        self.dnf_reset_client()
-        current_repo_revision = self.dnfb.repos['platform-updates']._repo.getRevision()  # pylint: disable=protected-access
-
-        if check_revision and self.last_repo_revision is not None:
-            # We're expecting the revision to be updated.
-            # If it's not, we ended up getting a cached repomd query.
-            if current_repo_revision == self.last_repo_revision:
-                LOG.info("makecache returned same revision as previous (%s). Retry after one second",
-                         current_repo_revision)
-                time.sleep(1)
-                try:
-                    subprocess.check_output(dnf_makecache, stderr=subprocess.STDOUT)
-                except subprocess.CalledProcessError as e:
-                    LOG.error("Failed to run dnf makecache")
-                    LOG.error("Command output: %s", e.output)
-                    # Set a state to "unknown"?
-                    return False
-
-                self.dnf_reset_client()
-                current_repo_revision = self.dnfb.repos['platform-updates']._repo.getRevision()  # pylint: disable=protected-access
-                if current_repo_revision != self.last_repo_revision:
-                    LOG.info("Stale repo revision id corrected with retry. New id: %s",
-                             current_repo_revision)
+        current_repo_revision = self.getOSTreeRevision('platform-updates')
+        if check_revision:
+            # The revision is a SHA for ostree
+            # todo(jcasteli): do we need check_revision
+            # since there is no caching or retry code
+            LOG.info("repo revision id: %s", current_repo_revision)
 
         self.last_repo_revision = current_repo_revision
 
@@ -477,82 +369,16 @@ class PatchAgent(PatchService):
         self.query_id = random.random()
 
         self.changes = False
-        self.installed_dnf = []
         self.installed = {}
-        self.to_install_dnf = []
-        self.to_downgrade_dnf = []
         self.to_remove = []
-        self.to_remove_dnf = []
         self.missing_pkgs = []
-        self.missing_pkgs_dnf = []
 
-        # Get the repo data
-        pkgs_installed = dnf.sack._rpmdb_sack(self.dnfb).query().installed()  # pylint: disable=protected-access
-        avail = self.dnfb.sack.query().available().latest()
-
-        # Check for packages with multiple installed versions
-        self.duplicated_pkgs = {}
-        for pkg in pkgs_installed:
-            pkglist = pkgs_installed.filter(name=pkg.name, arch=pkg.arch)
-            if len(pkglist) > 1:
-                if pkg.name not in self.duplicated_pkgs:
-                    self.duplicated_pkgs[pkg.name] = {}
-                if pkg.arch not in self.duplicated_pkgs[pkg.name]:
-                    self.duplicated_pkgs[pkg.name][pkg.arch] = list(map(PatchAgent.pkgobj_to_version_str, pkglist))
-                    LOG.warn("Duplicate packages installed: %s %s",
-                             pkg.name, ", ".join(self.duplicated_pkgs[pkg.name][pkg.arch]))
+        # todo(jcasteli): Can a patch contain commit SHAs from an easlier patch
 
         # There are three possible actions:
         # 1. If installed pkg is not in a repo, remove it.
         # 2. If installed pkg version does not match newest repo version, update it.
         # 3. If a package in the grouplist is not installed, install it.
-
-        for pkg in pkgs_installed:
-            highest = avail.filter(name=pkg.name, arch=pkg.arch)
-            if highest:
-                highest_pkg = highest[0]
-
-                if pkg.evr_eq(highest_pkg):
-                    continue
-
-                if pkg.evr_gt(highest_pkg):
-                    self.to_downgrade_dnf.append(highest_pkg)
-                else:
-                    self.to_install_dnf.append(highest_pkg)
-            else:
-                self.to_remove_dnf.append(pkg)
-                self.to_remove.append(pkg.name)
-
-            self.installed_dnf.append(pkg)
-            self.changes = True
-
-        # Look for new packages
-        self.dnfb.read_comps()
-        grp_id = 'updates-%s' % '-'.join(subfunctions)
-        pkggrp = None
-        for grp in self.dnfb.comps.groups_iter():
-            if grp.id == grp_id:
-                pkggrp = grp
-                break
-
-        if pkggrp is None:
-            LOG.error("Could not find software group: %s", grp_id)
-
-        for pkg in pkggrp.packages_iter():
-            try:
-                res = pkgs_installed.filter(name=pkg.name)
-                if len(res) == 0:
-                    found_pkg = avail.filter(name=pkg.name)
-                    self.missing_pkgs_dnf.append(found_pkg[0])
-                    self.missing_pkgs.append(found_pkg[0].name)
-                    self.changes = True
-            except dnf.exceptions.PackageNotFoundError:
-                self.missing_pkgs_dnf.append(pkg)
-                self.missing_pkgs.append(pkg.name)
-                self.changes = True
-
-        self.installed = self.pkgobjs_to_list(self.installed_dnf)
-        self.to_install = self.pkgobjs_to_list(self.to_install_dnf + self.to_downgrade_dnf)
 
         LOG.info("Patch state query returns %s", self.changes)
         LOG.info("Installed: %s", self.installed)
@@ -563,35 +389,6 @@ class PatchAgent(PatchService):
             LOG.info("Duplicated: %s", self.duplicated_pkgs)
 
         return True
-
-    def resolve_dnf_transaction(self, undo_failure=True):
-        LOG.info("Starting to process transaction: undo_failure=%s", undo_failure)
-        self.dnfb.resolve()
-        self.dnfb.download_packages(self.dnfb.transaction.install_set)
-
-        tid = self.dnfb.do_transaction(display=PatchAgentDnfTransLogCB())
-
-        transaction_rc = True
-        for t in self.dnfb.transaction:
-            if t.state != libdnf.transaction.TransactionItemState_DONE:
-                transaction_rc = False
-                break
-
-        self.dnf_reset_client()
-
-        if not transaction_rc:
-            if undo_failure:
-                LOG.error("Failure occurred... Undoing last transaction (%s)", tid)
-                old = self.dnfb.history.old((tid,))[0]
-                mobj = dnf.db.history.MergedTransactionWrapper(old)
-
-                self.dnfb._history_undo_operations(mobj, old.tid, True)  # pylint: disable=protected-access
-
-                if not self.resolve_dnf_transaction(undo_failure=False):
-                    LOG.error("Failed to undo transaction")
-
-        LOG.info("Transaction complete: undo_failure=%s, success=%s", undo_failure, transaction_rc)
-        return transaction_rc
 
     def handle_install(self, verbose_to_stdout=False, disallow_insvc_patch=False):
         #
@@ -648,82 +445,45 @@ class PatchAgent(PatchService):
         changed = False
         rc = True
 
-        if len(self.duplicated_pkgs) > 0:
-            LOG.error("Duplicate installed packages found. Manual recovery is required.")
-            rc = False
+        # todo(jcasteli): Are there things to install?
+        # if so, set changed = True
+
+        if changed:
+            # todo(jcasteli): See if the update is successful
+            # set rc=False if it is not successful
+            pass
         else:
-            if len(self.to_install_dnf) > 0 or len(self.to_downgrade_dnf) > 0:
-                LOG.info("Adding pkgs to installation set: %s", self.to_install)
-                for pkg in self.to_install_dnf:
-                    self.dnfb.package_install(pkg)
+            if verbose_to_stdout:
+                print("Nothing to install.")
+            LOG.info("Nothing to install")
 
-                for pkg in self.to_downgrade_dnf:
-                    self.dnfb.package_downgrade(pkg)
+        if changed and rc:
+            # Update the node_is_patched flag
+            setflag(node_is_patched_file)
 
-                changed = True
+            self.node_is_patched = True
+            if verbose_to_stdout:
+                print("This node has been patched.")
 
-            if len(self.missing_pkgs_dnf) > 0:
-                LOG.info("Adding missing pkgs to installation set: %s", self.missing_pkgs)
-                for pkg in self.missing_pkgs_dnf:
-                    self.dnfb.package_install(pkg)
-                changed = True
-
-            if len(self.to_remove_dnf) > 0:
-                LOG.info("Adding pkgs to be removed: %s", self.to_remove)
-                for pkg in self.to_remove_dnf:
-                    self.dnfb.package_remove(pkg)
-                changed = True
-
-            if changed:
-                # Run the transaction set
-                transaction_rc = False
-                try:
-                    transaction_rc = self.resolve_dnf_transaction()
-                except dnf.exceptions.DepsolveError:
-                    LOG.exception("Failures resolving dependencies in transaction")
-                except dnf.exceptions.DownloadError:
-                    LOG.exception("Failures downloading in transaction")
-                except dnf.exceptions.Error:
-                    LOG.exception("Failure resolving transaction")
-
-                if not transaction_rc:
-                    LOG.error("Failures occurred during transaction")
-                    rc = False
-                    if verbose_to_stdout:
-                        print("WARNING: Software update failed.")
-
+            if os.path.exists(node_is_patched_rr_file):
+                LOG.info("Reboot is required. Skipping patch-scripts")
+            elif disallow_insvc_patch:
+                LOG.info("Disallowing patch-scripts. Treating as reboot-required")
+                setflag(node_is_patched_rr_file)
             else:
-                if verbose_to_stdout:
-                    print("Nothing to install.")
-                LOG.info("Nothing to install")
+                LOG.info("Running in-service patch-scripts")
 
-            if changed and rc:
-                # Update the node_is_patched flag
-                setflag(node_is_patched_file)
+                try:
+                    subprocess.check_output(run_insvc_patch_scripts_cmd, stderr=subprocess.STDOUT)
 
-                self.node_is_patched = True
-                if verbose_to_stdout:
-                    print("This node has been patched.")
-
-                if os.path.exists(node_is_patched_rr_file):
-                    LOG.info("Reboot is required. Skipping patch-scripts")
-                elif disallow_insvc_patch:
-                    LOG.info("Disallowing patch-scripts. Treating as reboot-required")
-                    setflag(node_is_patched_rr_file)
-                else:
-                    LOG.info("Running in-service patch-scripts")
-
-                    try:
-                        subprocess.check_output(run_insvc_patch_scripts_cmd, stderr=subprocess.STDOUT)
-
-                        # Clear the node_is_patched flag, since we've handled it in-service
-                        clearflag(node_is_patched_file)
-                        self.node_is_patched = False
-                    except subprocess.CalledProcessError as e:
-                        LOG.exception("In-Service patch scripts failed")
-                        LOG.error("Command output: %s", e.output)
-                        # Fail the patching operation
-                        rc = False
+                    # Clear the node_is_patched flag, since we've handled it in-service
+                    clearflag(node_is_patched_file)
+                    self.node_is_patched = False
+                except subprocess.CalledProcessError as e:
+                    LOG.exception("In-Service patch scripts failed")
+                    LOG.error("Command output: %s", e.output)
+                    # Fail the patching operation
+                    rc = False
 
         # Clear the in-service patch dirs
         if os.path.exists(insvc_patch_scripts):
@@ -916,7 +676,7 @@ class PatchAgent(PatchService):
 def main():
     global pa
 
-    configure_logging(dnf_log=True)
+    configure_logging()
 
     cfg.read_config()
 
