@@ -871,7 +871,7 @@ class PatchController(PatchService):
         :param patch_id: The patch ID
         '''
         ostree_tar_dir = package_dir[patch_sw_version]
-        ostree_tar_filename = "%s/%s" % (ostree_tar_dir, patch_id)
+        ostree_tar_filename = "%s/%s-software.tar" % (ostree_tar_dir, patch_id)
         return ostree_tar_filename
 
     def get_repo_filename(self, patch_sw_version, contentname):
