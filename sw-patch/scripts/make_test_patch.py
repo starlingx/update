@@ -53,9 +53,7 @@ OSTREE_REPO = os.path.join(DEPLOY_DIR, 'ostree_repo')
 DELTA_DIR = 'delta_dir'
 
 detached_signature_file = 'signature.v2'
-PATCH_ID = 'PATCH_0001'
 SOFTWARE_VERSION = '22.06'
-patch_file =  PATCH_ID + '.patch'
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -88,7 +86,7 @@ def prepare_env(name='ostree-clone'):
     log.info('Prepared ostree repo clone at {}'.format(clone_dir))
 
 
-def create_delta_dir(delta_dir='delta_dir', clone_dir='ostree-clone'):
+def create_delta_dir(delta_dir='delta_dir', clone_dir='ostree-clone', clean_mode=False):
     '''
     Creates the ostree delta directory
     Contains the changes from the REPO (updated) and the cloned dir (pre update)
@@ -99,8 +97,12 @@ def create_delta_dir(delta_dir='delta_dir', clone_dir='ostree-clone'):
     clone_dir = os.path.join(DEPLOY_DIR, clone_dir)
 
     if os.path.isdir(delta_dir):
-        log.error('Delta dir exists {}, clean it up and try again'.format(delta_dir))
-        exit(1)
+        if clean_mode:
+            log.info('Delta dir exists {}, cleaning it'.format(delta_dir))
+            shutil.rmtree(delta_dir)
+        else:
+            log.error('Delta dir exists {}, clean it up and try again'.format(delta_dir))
+            exit(1)
 
     if not os.path.isdir(clone_dir):
         log.error('Clone dir not found')
@@ -125,14 +127,14 @@ def add_text_tag_to_xml(parent,
     return tag
 
 
-def gen_xml(ostree_content, file_name="metadata.xml"):
+def gen_xml(patch_id, ostree_content, file_name="metadata.xml"):
     '''
     Generate patch metadata XML file
     :param file_name: Path to output file
     '''
     top = ET.Element("patch")
 
-    add_text_tag_to_xml(top, 'id', PATCH_ID)
+    add_text_tag_to_xml(top, 'id', patch_id)
     add_text_tag_to_xml(top, 'sw_version', SOFTWARE_VERSION)
     add_text_tag_to_xml(top, 'summary', 'Summary text')
     add_text_tag_to_xml(top, 'description', 'Description text')
@@ -232,7 +234,7 @@ def get_commits_from_base(base_sha, repo='ostree_repo'):
 
     return commits_from_base
 
-def create_patch(repo='ostree_repo', clone_dir='ostree-clone'):
+def create_patch(patch_id, patch_file, repo='ostree_repo', clone_dir='ostree-clone', clean_mode=False):
     '''
     Creates a debian patch using ostree delta between 2 repos (rsync)
     :param repo: main ostree_repo where build-image adds new commits
@@ -243,7 +245,7 @@ def create_patch(repo='ostree_repo', clone_dir='ostree-clone'):
     base_sha = open(os.path.join(clone_dir, 'refs/heads/starlingx'), 'r').read().strip()
 
     log.info('Generating delta dir')
-    create_delta_dir(delta_dir=DELTA_DIR, clone_dir=clone_dir)
+    create_delta_dir(delta_dir=DELTA_DIR, clone_dir=clone_dir, clean_mode=clean_mode)
 
     # ostree --repo=ostree_repo show  starlingx | grep -i checksum |  sed 's/.* //'
     cmd = 'ostree --repo={} show starlingx | grep -i checksum | sed \'s/.* //\''.format(clone_dir)
@@ -274,7 +276,7 @@ def create_patch(repo='ostree_repo', clone_dir='ostree-clone'):
     tar.close
 
     log.info('Generating xml with ostree content {}'.format(commits))
-    gen_xml(ostree_content)
+    gen_xml(patch_id, ostree_content)
     tar = tarfile.open('metadata.tar', 'w')
     tar.add('metadata.xml')
     tar.close()
@@ -332,6 +334,10 @@ if __name__ == "__main__":
                         default=None, required=True)
     parser.add_argument('-c', '--create', action='store_true',
                         help='Create patch, should be executed after changes are done to the environment')
+    parser.add_argument('-i', '--id', type=str,
+                        help='Patch ID', default='PATCH_0001', required=True)
+    parser.add_argument('-cl', '--clean-mode', action='store_true',
+                        help='Whether to clean the delta directory automatically')
 
     args = parser.parse_args()
 
@@ -339,10 +345,13 @@ if __name__ == "__main__":
     log.info('DEPLOY DIR: {}'.format(DEPLOY_DIR))
     log.info('DELTA DIR: {}'.format(DELTA_DIR))
 
+    patch_id = args.id
+    patch_file =  patch_id + '.patch'
+
     if args.prepare:
         log.info('Calling prepare environment')
         prepare_env(args.clone_repo)
     elif args.create:
         log.info('Calling create patch')
-        create_patch(args.repo, args.clone_repo)
+        create_patch(patch_id, patch_file, args.repo, args.clone_repo, args.clean_mode)
 
