@@ -69,7 +69,7 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     sys.__excepthook__(exc_type, exc_value, exc_traceback)
 
 
-def configure_logging(logtofile=True, level=logging.INFO, dnf_log=False):
+def configure_logging(logtofile=True, level=logging.INFO):
     if logtofile:
         my_exec = os.path.basename(sys.argv[0])
 
@@ -84,10 +84,6 @@ def configure_logging(logtofile=True, level=logging.INFO, dnf_log=False):
         main_log_handler = logging.FileHandler(logfile)
         main_log_handler.setFormatter(formatter)
         LOG.addHandler(main_log_handler)
-
-        if dnf_log:
-            dnf_logger = logging.getLogger('dnf')
-            dnf_logger.addHandler(main_log_handler)
 
         try:
             os.chmod(logfile, 0o640)
