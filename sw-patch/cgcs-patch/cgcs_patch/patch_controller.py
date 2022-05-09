@@ -765,6 +765,7 @@ class PatchController(PatchService):
             if not self.hosts[ip].out_of_date:
                 continue
 
+            # todo(jcasteli):  the patch contents checks can be revisited
             for pkg in list(self.hosts[ip].installed):
                 for patch_id in list(self.patch_data.contents):
 
@@ -801,7 +802,7 @@ class PatchController(PatchService):
                             if self.patch_data.metadata[patch_id].get("reboot_required") != "N":
                                 self.allow_insvc_patching = False
                             continue
-
+            # todo(jcasteli):  patching no longer needs to verify personality
             if self.hosts[ip].sw_version == "14.10":
                 # For Release 1
                 personality = "personality-%s" % self.hosts[ip].nodetype

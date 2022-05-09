@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 
+from cgcs_patch import ostree_utils
 from cgcs_patch.patch_functions import configure_logging
 from cgcs_patch.patch_functions import LOG
 import cgcs_patch.config as cfg
@@ -368,25 +369,19 @@ class PatchAgent(PatchService):
         # Generate a unique query id
         self.query_id = random.random()
 
+        # determine OSTREE state of the system and the patches
         self.changes = False
-        self.installed = {}
-        self.to_remove = []
-        self.missing_pkgs = []
 
-        # todo(jcasteli): Can a patch contain commit SHAs from an easlier patch
+        active_commit, active_checksum = ostree_utils.get_sysroot_latest_commit()
+        patch_commit, patch_checksum = ostree_utils.get_feed_latest_commit(SW_VERSION)
 
-        # There are three possible actions:
-        # 1. If installed pkg is not in a repo, remove it.
-        # 2. If installed pkg version does not match newest repo version, update it.
-        # 3. If a package in the grouplist is not installed, install it.
+        if active_commit != patch_commit:
+            LOG.info("Active Commit:%s  does not match Patch Commit %s", active_commit, patch_commit)
+            self.changes = True
 
-        LOG.info("Patch state query returns %s", self.changes)
-        LOG.info("Installed: %s", self.installed)
-        LOG.info("To install: %s", self.to_install)
-        LOG.info("To remove: %s", self.to_remove)
-        LOG.info("Missing: %s", self.missing_pkgs)
-        if len(self.duplicated_pkgs) > 0:
-            LOG.info("Duplicated: %s", self.duplicated_pkgs)
+        if active_checksum != patch_checksum:
+            LOG.info("Active Checksum:%s  does not match Patch Checksum%s", active_checksum, patch_checksum)
+            self.changes = True
 
         return True
 

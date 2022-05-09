@@ -44,6 +44,7 @@ CLI_OPT_RELEASE = '--release'
 
 OSTREE_REF = "starlingx"
 FEED_OSTREE_BASE_DIR = "/var/www/pages/feed"
+SYSROOT_OSTREE = "/sysroot/ostree/repo"
 
 ENABLE_DEV_CERTIFICATE_PATCH_IDENTIFIER = 'ENABLE_DEV_CERTIFICATE'
 
