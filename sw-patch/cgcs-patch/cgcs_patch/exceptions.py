@@ -32,6 +32,11 @@ class OSTreeTarFail(PatchError):
     pass
 
 
+class OSTreeCommandFail(PatchError):
+    """OSTree Commands error."""
+    pass
+
+
 class SemanticFail(PatchError):
     """Semantic check error."""
     pass
