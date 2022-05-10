@@ -422,8 +422,8 @@ class PatchAgent(PatchService):
                 shutil.rmtree(insvc_patch_scripts, ignore_errors=True)
             if os.path.exists(insvc_patch_flags):
                 shutil.rmtree(insvc_patch_flags, ignore_errors=True)
-            os.mkdir(insvc_patch_scripts, 0o700)
-            os.mkdir(insvc_patch_flags, 0o700)
+            os.makedirs(insvc_patch_scripts, 0o700)
+            os.makedirs(insvc_patch_flags, 0o700)
         except Exception:
             LOG.exception("Failed to create in-service patch directories")
 
@@ -432,27 +432,20 @@ class PatchAgent(PatchService):
             hello_ack = PatchMessageHelloAgentAck()
             hello_ack.send(self.sock_out)
 
-        # Build up the install set
-        if verbose_to_stdout:
-            print("Checking for software updates...")
-        self.query()
-
         changed = False
-        rc = True
 
-        # todo(jcasteli): Are there things to install?
-        # if so, set changed = True
+        sysroot_ostree = constants.SYSROOT_OSTREE
+        feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, SW_VERSION)
+        cmd = "ostree --repo=%s pull-local %s %s --depth=-1" % (sysroot_ostree, feed_ostree, constants.OSTREE_REF)
+        try:
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+            changed = True
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Failed to pull feed ostree in to the sysroot ostree.")
+            info_msg = "OSTree Reset Error: return code: %s , Output: %s" % (e.returncode, e.stderr.decode("utf-8"))
+            LOG.info(info_msg)
 
         if changed:
-            # todo(jcasteli): See if the update is successful
-            # set rc=False if it is not successful
-            pass
-        else:
-            if verbose_to_stdout:
-                print("Nothing to install.")
-            LOG.info("Nothing to install")
-
-        if changed and rc:
             # Update the node_is_patched flag
             setflag(node_is_patched_file)
 
@@ -477,8 +470,7 @@ class PatchAgent(PatchService):
                 except subprocess.CalledProcessError as e:
                     LOG.exception("In-Service patch scripts failed")
                     LOG.error("Command output: %s", e.output)
-                    # Fail the patching operation
-                    rc = False
+                    changed = False
 
         # Clear the in-service patch dirs
         if os.path.exists(insvc_patch_scripts):
@@ -486,7 +478,7 @@ class PatchAgent(PatchService):
         if os.path.exists(insvc_patch_flags):
             shutil.rmtree(insvc_patch_flags, ignore_errors=True)
 
-        if rc:
+        if changed:
             self.patch_failed = False
             clearflag(patch_failed_file)
             self.state = constants.PATCH_AGENT_STATE_IDLE
@@ -504,7 +496,7 @@ class PatchAgent(PatchService):
             hello_ack = PatchMessageHelloAgentAck()
             hello_ack.send(self.sock_out)
 
-        return rc
+        return changed
 
     def handle_patch_op_counter(self, counter):
         changed = False
