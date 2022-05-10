@@ -35,7 +35,7 @@ from cgcs_patch.patch_functions import semantics_dir
 from cgcs_patch.patch_functions import SW_VERSION
 from cgcs_patch.patch_functions import root_package_dir
 from cgcs_patch.exceptions import MetadataFail
-from cgcs_patch.exceptions import ContentFail
+from cgcs_patch.exceptions import OSTreeCommandFail
 from cgcs_patch.exceptions import OSTreeTarFail
 from cgcs_patch.exceptions import PatchError
 from cgcs_patch.exceptions import PatchFail
@@ -1152,7 +1152,14 @@ class PatchController(PatchService):
             feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, patch_sw_version)
 
             cmd = "ostree log %s --repo=%s" % (constants.OSTREE_REF, feed_ostree)
-            output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
+            try:
+                output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
+            except subprocess.CalledProcessError as e:
+                msg = "Failed to fetch ostree log of the feed ostree repo for %s." % patch_id
+                info_msg = "OSTree log Error: return code: %s , Output: %s" \
+                           % (e.returncode, e.stderr.decode("utf-8"))
+                LOG.info(info_msg)
+                raise OSTreeCommandFail(msg)
 
             # Store the output of the above command in a string
             output_string = output.stdout.decode('utf-8')
@@ -1340,25 +1347,31 @@ class PatchController(PatchService):
                 continue
 
             patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
-            for contentname in self.patch_data.contents[patch_id]:
-                contentfile = self.get_store_filename(patch_sw_version, contentname)
-                if not os.path.isfile(contentfile):
-                    msg = "Could not find content: %s" % contentfile
-                    LOG.error(msg)
-                    raise ContentFail(msg)
+            # Reset ostree HEAD to base commit of this patch
+            # Base commit is fetched from the patch metadata
+            base_commit = self.patch_data.contents[patch_id]["base"]["commit"]
+            feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, patch_sw_version)
+            cmd = "ostree reset %s %s --repo=%s" % (constants.OSTREE_REF, base_commit, feed_ostree)
+            try:
+                subprocess.run(cmd, shell=True, check=True, capture_output=True)
+            except subprocess.CalledProcessError as e:
+                msg = "Failed to reset the feed ostree repo head for %s." % patch_id
+                info_msg = "OSTree Reset Error: return code: %s , Output: %s" \
+                           % (e.returncode, e.stderr.decode("utf-8"))
+                LOG.info(info_msg)
+                raise OSTreeCommandFail(msg)
 
-                repo_filename = self.get_repo_filename(patch_sw_version, contentname)
-                if repo_filename is None:
-                    msg = "Failed to determine repo path for %s" % contentfile
-                    LOG.exception(msg)
-                    raise ContentFail(msg)
-
+            for i in range(int(self.patch_data.contents[patch_id]["number_of_commits"])):
+                commit_to_delete = self.patch_data.contents[patch_id]["commit%s" % (i + 1)]["commit"]
+                cmd = "ostree prune --delete-commit %s --repo=%s" % (commit_to_delete, feed_ostree)
                 try:
-                    os.remove(repo_filename)
-                except OSError:
-                    msg = "Failed to remove content %s" % repo_filename
-                    LOG.exception(msg)
-                    raise ContentFail(msg)
+                    subprocess.run(cmd, shell=True, check=True, capture_output=True)
+                except subprocess.CalledProcessError as e:
+                    msg = "Failed to delete commit from feed ostree repo for %s." % patch_id
+                    info_msg = "OSTree Prune Error: return code: %s , Output: %s" \
+                               % (e.returncode, e.stderr.decode("utf-8"))
+                    LOG.info(info_msg)
+                    raise OSTreeCommandFail(msg)
 
             try:
                 # Move the metadata to the available dir
