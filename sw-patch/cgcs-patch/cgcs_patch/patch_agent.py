@@ -89,6 +89,25 @@ def check_install_uuid():
     return True
 
 
+class PatchMessageSendLatestFeedCommit(messages.PatchMessage):
+    def __init__(self):
+        messages.PatchMessage.__init__(self, messages.PATCHMSG_SEND_LATEST_FEED_COMMIT)
+
+    def decode(self, data):
+        global pa
+        messages.PatchMessage.decode(self, data)
+        if 'latest_feed_commit' in data:
+            pa.latest_feed_commit = data['latest_feed_commit']
+
+    def encode(self):
+        messages.PatchMessage.encode(self)
+
+    def handle(self, sock, addr):
+        global pa
+        # Check if the node is patch current
+        pa.query()
+
+
 class PatchMessageHelloAgent(messages.PatchMessage):
     def __init__(self):
         messages.PatchMessage.__init__(self, messages.PATCHMSG_HELLO_AGENT)
@@ -185,10 +204,7 @@ class PatchMessageQueryDetailedResp(messages.PatchMessage):
     def encode(self):
         global pa
         messages.PatchMessage.encode(self)
-        self.message['installed'] = pa.installed
-        self.message['to_remove'] = pa.to_remove
-        self.message['missing_pkgs'] = pa.missing_pkgs
-        self.message['duplicated_pkgs'] = pa.duplicated_pkgs
+        self.message['latest_sysroot_commit'] = pa.latest_sysroot_commit
         self.message['nodetype'] = cfg.nodetype
         self.message['sw_version'] = SW_VERSION
         self.message['subfunctions'] = subfunctions
@@ -276,11 +292,8 @@ class PatchAgent(PatchService):
         self.controller_address = None
         self.listener = None
         self.changes = False
-        self.installed = {}
-        self.to_install = {}
-        self.to_remove = []
-        self.missing_pkgs = []
-        self.duplicated_pkgs = {}
+        self.latest_feed_commit = None
+        self.latest_sysroot_commit = None
         self.patch_op_counter = 0
         self.node_is_patched = os.path.exists(node_is_patched_file)
         self.node_is_patched_timestamp = 0
@@ -324,47 +337,11 @@ class PatchAgent(PatchService):
         self.listener.bind(('', self.port))
         self.listener.listen(2)  # Allow two connections, for two controllers
 
-    @staticmethod
-    def pkgobj_to_version_str(pkg):
-        # Transform pkgobj version to format used by patch-controller
-        if pkg.epoch != 0:
-            output = "%s:%s-%s@%s" % (pkg.epoch, pkg.version, pkg.release, pkg.arch)
-        else:
-            output = "%s-%s@%s" % (pkg.version, pkg.release, pkg.arch)
-
-        return output
-
-    @staticmethod
-    def pkgobjs_to_list(pkgobjs):
-        # Transform pkgobj list to format used by patch-controller
-        output = {}
-        for pkg in pkgobjs:
-            output[pkg.name] = PatchAgent.pkgobj_to_version_str(pkg)
-
-        return output
-
-    def getOSTreeRevision(self, feed_type):
-        """ Get the ostree revision for a particular feed """
-        # todo(abailey): is a software version parameter required to support upgrade?
-        # Probably this method will invoke something like:
-        # ostree pull --commit-metadata-only --depth=1
-        LOG.info("Querying OSTree Revision from %s", feed_type)
-        return "UNDER CONSTRUCTION"
-
-    def query(self, check_revision=False):
+    def query(self):
         """ Check current patch state """
         if not check_install_uuid():
             LOG.info("Failed install_uuid check. Skipping query")
             return False
-
-        current_repo_revision = self.getOSTreeRevision('platform-updates')
-        if check_revision:
-            # The revision is a SHA for ostree
-            # todo(jcasteli): do we need check_revision
-            # since there is no caching or retry code
-            LOG.info("repo revision id: %s", current_repo_revision)
-
-        self.last_repo_revision = current_repo_revision
 
         # Generate a unique query id
         self.query_id = random.random()
@@ -372,15 +349,25 @@ class PatchAgent(PatchService):
         # determine OSTREE state of the system and the patches
         self.changes = False
 
-        active_commit, active_checksum = ostree_utils.get_sysroot_latest_commit()
-        patch_commit, patch_checksum = ostree_utils.get_feed_latest_commit(SW_VERSION)
+        active_sysroot_commit = ostree_utils.get_sysroot_latest_commit()
+        self.latest_sysroot_commit = active_sysroot_commit
+        self.last_repo_revision = active_sysroot_commit
 
-        if active_commit != patch_commit:
-            LOG.info("Active Commit:%s  does not match Patch Commit %s", active_commit, patch_commit)
-            self.changes = True
+        # latest_feed_commit is sent from patch controller
+        if self.latest_feed_commit:
+            if active_sysroot_commit != self.latest_feed_commit:
+                LOG.info("Active Sysroot Commit:%s does not match "
+                         "active controller's Feed Repo Commit: %s",
+                         active_sysroot_commit, self.latest_feed_commit)
+                self.changes = True
+        active_deployment_commit = ostree_utils.get_latest_deployment_commit()
+        # strip off anything after a period.  ex: 1234.1 becomes 1234
+        active_deployment_commit = active_deployment_commit.split(".")[0]
 
-        if active_checksum != patch_checksum:
-            LOG.info("Active Checksum:%s  does not match Patch Checksum%s", active_checksum, patch_checksum)
+        if active_sysroot_commit != active_deployment_commit:
+            LOG.info("Active Sysroot Commit:%s does not match "
+                     "Active Deployment Commit: %s",
+                     active_sysroot_commit, active_deployment_commit)
             self.changes = True
 
         return True
@@ -432,18 +419,35 @@ class PatchAgent(PatchService):
             hello_ack = PatchMessageHelloAgentAck()
             hello_ack.send(self.sock_out)
 
+        # Build up the install set
+        if verbose_to_stdout:
+            print("Checking for software updates...")
+        self.query()  # sets self.changes
+
         changed = False
 
         sysroot_ostree = constants.SYSROOT_OSTREE
         feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, SW_VERSION)
-        cmd = "ostree --repo=%s pull-local %s %s --depth=-1" % (sysroot_ostree, feed_ostree, constants.OSTREE_REF)
-        try:
-            subprocess.run(cmd, shell=True, check=True, capture_output=True)
-            changed = True
-        except subprocess.CalledProcessError as e:
-            LOG.exception("Failed to pull feed ostree in to the sysroot ostree.")
-            info_msg = "OSTree Reset Error: return code: %s , Output: %s" % (e.returncode, e.stderr.decode("utf-8"))
-            LOG.info(info_msg)
+        if self.changes:
+            cmd = "ostree --repo=%s pull-local %s %s --depth=-1" % (sysroot_ostree, feed_ostree, constants.OSTREE_REF)
+            try:
+                subprocess.run(cmd, shell=True, check=True, capture_output=True)
+            except subprocess.CalledProcessError as e:
+                LOG.exception("Failed to pull feed ostree in to the sysroot ostree.")
+                info_msg = "OSTree Pull Local Error: return code: %s , Output: %s" % (e.returncode, e.stderr.decode("utf-8"))
+                LOG.info(info_msg)
+
+            deployment_cmd = "ostree admin deploy %s" % constants.OSTREE_REF
+            try:
+                subprocess.run(deployment_cmd, shell=True, check=True, capture_output=True)
+                changed = True
+            except subprocess.CalledProcessError as e:
+                LOG.exception("Failed to create an ostree deployment.")
+                info_msg = "OSTree Deployment Error: return code: %s , Output: %s" % (e.returncode, e.stderr.decode("utf-8"))
+                LOG.info(info_msg)
+            self.query()  # sets self.changes..  Should now be false.
+            if self.changes:
+                LOG.info("Installing the patch did not change the patch current status")
 
         if changed:
             # Update the node_is_patched flag
@@ -522,7 +526,7 @@ class PatchAgent(PatchService):
             changed = True
 
         if changed:
-            rc = self.query(check_revision=True)
+            rc = self.query()
             if not rc:
                 # Query failed. Reset the op counter
                 self.patch_op_counter = 0
@@ -630,6 +634,8 @@ class PatchAgent(PatchService):
                         msg = PatchMessageHelloAgent()
                     elif msgdata['msgtype'] == messages.PATCHMSG_QUERY_DETAILED:
                         msg = PatchMessageQueryDetailed()
+                    elif msgdata['msgtype'] == messages.PATCHMSG_SEND_LATEST_FEED_COMMIT:
+                        msg = PatchMessageSendLatestFeedCommit()
                     elif msgdata['msgtype'] == messages.PATCHMSG_AGENT_INSTALL_REQ:
                         msg = PatchMessageAgentInstallReq()
 

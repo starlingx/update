@@ -56,6 +56,8 @@ class PatchAPIController(object):
         except PatchError as e:
             return dict(error="Error: %s" % str(e))
 
+        pc.send_latest_feed_commit_to_agent()
+
         pc.patch_sync()
 
         return result
@@ -70,6 +72,8 @@ class PatchAPIController(object):
             result = pc.patch_remove_api(list(args), **kwargs)
         except PatchError as e:
             return dict(error="Error: %s" % str(e))
+
+        pc.send_latest_feed_commit_to_agent()
 
         pc.patch_sync()
 
