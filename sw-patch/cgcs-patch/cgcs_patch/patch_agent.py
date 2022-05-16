@@ -355,6 +355,15 @@ class PatchAgent(PatchService):
         self.last_repo_revision = active_sysroot_commit
 
         # latest_feed_commit is sent from patch controller
+        # if unprovisioned (no mgmt ip) attempt to query it
+        if self.latest_feed_commit is None:
+            if self.sock_out is None:
+                try:
+                    self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
+                except OSTreeCommandFail:
+                    LOG.warn("Unable to query latest feed commit")
+                    # latest_feed_commit will remain as None
+
         if self.latest_feed_commit:
             if active_sysroot_commit != self.latest_feed_commit:
                 LOG.info("Active Sysroot Commit:%s does not match "
