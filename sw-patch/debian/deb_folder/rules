@@ -31,8 +31,6 @@ override_dh_install:
 		${DEBIAN_DESTDIR}/usr/sbin/sw-patch-controller-daemon
 	install -m 555 bin/sw-patch \
 		${DEBIAN_DESTDIR}/usr/sbin/sw-patch
-	install -m 555 bin/rpm-audit \
-		${DEBIAN_DESTDIR}/usr/sbin/rpm-audit
 	install -m 500 bin/sw-patch-controller-daemon-init.sh \
 		${DEBIAN_DESTDIR}/etc/init.d/sw-patch-controller-daemon
 	install -m 500 bin/sw-patch-agent-init.sh \
@@ -73,6 +71,6 @@ override_dh_python3:
 	dh_python3 --shebang=/usr/bin/python3
 
 override_dh_fixperms:
-	dh_fixperms -Xsw-patch-* -Xrpm-audit -Xpatching.conf -Xpolicy.json \
+	dh_fixperms -Xsw-patch-* -Xpatching.conf -Xpolicy.json \
 		-Xpatch-functions -Xpatch-tmpdirs.conf -Xrun-patch-scripts \
 		-Xpatch_check_goenabled.sh -Xpatching -Xupgrade-start-pkg-extract

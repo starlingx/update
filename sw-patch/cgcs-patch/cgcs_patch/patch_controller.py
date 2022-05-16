@@ -1555,6 +1555,11 @@ class PatchController(PatchService):
         Notify the patch agent that the latest commit on the feed
         repo has been updated
         """
+        # Skip sending messages if host not yet provisioned
+        if self.sock_out is None:
+            LOG.info("Skipping send feed commit to agent")
+            return
+
         send_commit_to_agent = PatchMessageSendLatestFeedCommit()
         self.socket_lock.acquire()
         send_commit_to_agent.send(self.sock_out)

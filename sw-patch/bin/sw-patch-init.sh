@@ -27,6 +27,13 @@ logfile=/var/log/patching.log
 patch_failed_file=/var/run/patch_install_failed
 patched_during_init=/etc/patching/.patched_during_init
 
+# if the system has never been bootstrapped, system_mode is not set
+# treat a non bootstrapped system like it is simplex
+# and manually manage lighttpd, etc..
+if [ "${system_mode}" = "" ]; then
+    system_mode="simplex"
+fi
+
 function LOG_TO_FILE {
     echo "`date "+%FT%T.%3N"`: $NAME: $*" >> $logfile
 }
@@ -86,13 +93,6 @@ if [ -f /etc/platform/installation_failed ] ; then
     exit 1
 fi
 
-# Clean up the RPM DB
-if [ ! -f /var/run/.rpmdb_cleaned ]; then
-    LOG_TO_FILE "Cleaning RPM DB"
-    rm -f /var/lib/rpm/__db*
-    touch /var/run/.rpmdb_cleaned
-fi
-
 # For AIO-SX, abort if config is not yet applied and this is running in init
 if [ "${system_mode}" = "simplex" -a ! -f ${INITIAL_CONTROLLER_CONFIG_COMPLETE} -a "$1" = "start" ]; then
     LOG_TO_FILE "Config is not yet applied. Skipping init patching"
@@ -106,8 +106,10 @@ DELAY_SEC=120
 START=`date +%s`
 FOUND=0
 while [ $(date +%s) -lt $(( ${START} + ${DELAY_SEC} )) ]; do
+    LOG_TO_FILE "Waiting for controller to be pingable"
     ping -c 1 controller > /dev/null 2>&1 || ping6 -c 1 controller > /dev/null 2>&1
     if [ $? -eq 0 ]; then
+        LOG_TO_FILE "controller is pingable"
         FOUND=1
         break
     fi

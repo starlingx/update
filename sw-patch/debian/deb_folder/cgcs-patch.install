@@ -1,4 +1,3 @@
-usr/sbin/rpm-audit
 etc/patching/policy.json
 etc/patching/patching.conf
 etc/patching/patch-functions

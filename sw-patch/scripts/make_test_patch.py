@@ -335,7 +335,7 @@ if __name__ == "__main__":
     parser.add_argument('-c', '--create', action='store_true',
                         help='Create patch, should be executed after changes are done to the environment')
     parser.add_argument('-i', '--id', type=str,
-                        help='Patch ID', default='PATCH_0001', required=True)
+                        help='Patch ID', default='PATCH_0001')
     parser.add_argument('-cl', '--clean-mode', action='store_true',
                         help='Whether to clean the delta directory automatically')
 
