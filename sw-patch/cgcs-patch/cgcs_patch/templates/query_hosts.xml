@@ -28,30 +28,11 @@ ${hostelem(host)}
             ${h["ip"]}
         % endif
         </ip>
-        <missing_pkgs>
-        % if "missing_pkgs" in h and len(h["missing_pkgs"]) > 0:
-            % for pkg in sorted(h["missing_pkgs"]):
-            <pkg>${pkg}</pkg>
-            % endfor
+        <latest_sysroot_commit>
+        % if h["latest_sysroot_commit"] != "":
+            ${h["latest_sysroot_commit"]}
         % endif
-        </missing_pkgs>
-        <installed>
-        % if "installed" in h and len(h["installed"]) > 0:
-            % for pkg in sorted(h["installed"]):
-            <pkg>
-                <name>${pkg}</name>
-                <pkgname>${h["installed"][pkg]}</pkgname>
-            </pkg>
-            % endfor
-        % endif
-        </installed>
-        <to_remove>
-        % if "to_remove" in h and len(h["to_remove"]) > 0:
-            % for pkg in sorted(h["to_remove"]):
-            <pkg>${pkg}</pkg>
-            % endfor
-        % endif
-        </to_remove>
+        </latest_sysroot_commit>
         <secs_since_ack>
         % if h["secs_since_ack"] != "":
             ${h["secs_since_ack"]}

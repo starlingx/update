@@ -112,10 +112,7 @@ class AgentNeighbour(object):
         self.patch_failed = False
         self.stale = False
         self.pending_query = False
-        self.installed = {}
-        self.to_remove = []
-        self.missing_pkgs = []
-        self.duplicated_pkgs = {}
+        self.latest_sysroot_commit = None
         self.nodetype = None
         self.sw_version = "unknown"
         self.subfunctions = []
@@ -154,18 +151,12 @@ class AgentNeighbour(object):
         return int(time.time() - self.last_ack)
 
     def handle_query_detailed_resp(self,
-                                   installed,
-                                   to_remove,
-                                   missing_pkgs,
-                                   duplicated_pkgs,
+                                   latest_sysroot_commit,
                                    nodetype,
                                    sw_version,
                                    subfunctions,
                                    state):
-        self.installed = installed
-        self.to_remove = to_remove
-        self.missing_pkgs = missing_pkgs
-        self.duplicated_pkgs = duplicated_pkgs
+        self.latest_sysroot_commit = latest_sysroot_commit
         self.nodetype = nodetype
         self.stale = False
         self.pending_query = False
@@ -186,10 +177,7 @@ class AgentNeighbour(object):
              "secs_since_ack": self.get_age(),
              "patch_failed": self.patch_failed,
              "stale_details": self.stale,
-             "installed": self.installed,
-             "to_remove": self.to_remove,
-             "missing_pkgs": self.missing_pkgs,
-             "duplicated_pkgs": self.duplicated_pkgs,
+             "latest_sysroot_commit": self.latest_sysroot_commit,
              "nodetype": self.nodetype,
              "subfunctions": self.subfunctions,
              "sw_version": self.sw_version,
@@ -348,6 +336,27 @@ class PatchMessageHelloAgent(messages.PatchMessage):
         sock.sendto(str.encode(message), (local_hostname, cfg.agent_port))
 
 
+class PatchMessageSendLatestFeedCommit(messages.PatchMessage):
+    def __init__(self):
+        messages.PatchMessage.__init__(self, messages.PATCHMSG_SEND_LATEST_FEED_COMMIT)
+
+    def encode(self):
+        global pc
+        messages.PatchMessage.encode(self)
+        self.message['latest_feed_commit'] = pc.latest_feed_commit
+
+    def handle(self, sock, addr):
+        LOG.error("Should not get here")
+
+    def send(self, sock):
+        global pc
+        self.encode()
+        message = json.dumps(self.message)
+        local_hostname = utils.ip_to_versioned_localhost(cfg.agent_mcast_group)
+        sock.sendto(str.encode(message), (pc.agent_address, cfg.agent_port))
+        sock.sendto(str.encode(message), (local_hostname, cfg.agent_port))
+
+
 class PatchMessageHelloAgentAck(messages.PatchMessage):
     def __init__(self):
         messages.PatchMessage.__init__(self, messages.PATCHMSG_HELLO_AGENT_ACK)
@@ -421,11 +430,7 @@ class PatchMessageQueryDetailedResp(messages.PatchMessage):
     def __init__(self):
         messages.PatchMessage.__init__(self, messages.PATCHMSG_QUERY_DETAILED_RESP)
         self.agent_sw_version = "unknown"
-        self.installed = {}
-        self.to_install = {}
-        self.to_remove = []
-        self.missing_pkgs = []
-        self.duplicated_pkgs = {}
+        self.latest_sysroot_commit = "unknown"
         self.subfunctions = []
         self.nodetype = "unknown"
         self.agent_sw_version = "unknown"
@@ -433,14 +438,8 @@ class PatchMessageQueryDetailedResp(messages.PatchMessage):
 
     def decode(self, data):
         messages.PatchMessage.decode(self, data)
-        if 'installed' in data:
-            self.installed = data['installed']
-        if 'to_remove' in data:
-            self.to_remove = data['to_remove']
-        if 'missing_pkgs' in data:
-            self.missing_pkgs = data['missing_pkgs']
-        if 'duplicated_pkgs' in data:
-            self.duplicated_pkgs = data['duplicated_pkgs']
+        if 'latest_sysroot_commit' in data:
+            self.latest_sysroot_commit = data['latest_sysroot_commit']
         if 'nodetype' in data:
             self.nodetype = data['nodetype']
         if 'sw_version' in data:
@@ -459,10 +458,7 @@ class PatchMessageQueryDetailedResp(messages.PatchMessage):
         ip = addr[0]
         pc.hosts_lock.acquire()
         if ip in pc.hosts:
-            pc.hosts[ip].handle_query_detailed_resp(self.installed,
-                                                    self.to_remove,
-                                                    self.missing_pkgs,
-                                                    self.duplicated_pkgs,
+            pc.hosts[ip].handle_query_detailed_resp(self.latest_sysroot_commit,
                                                     self.nodetype,
                                                     self.agent_sw_version,
                                                     self.subfunctions,
@@ -600,6 +596,7 @@ class PatchController(PatchService):
         self.patch_op_counter = 1
         self.patch_data = PatchData()
         self.patch_data.load_all()
+        self.latest_feed_commit = None
         self.check_patch_states()
         self.base_pkgdata = BasePackageData()
 
@@ -757,105 +754,11 @@ class PatchController(PatchService):
                     self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_REMOVE
                 elif self.patch_data.metadata[patch_id]["repostate"] == constants.APPLIED:
                     self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_APPLY
+                if self.patch_data.metadata[patch_id].get("reboot_required") != "N":
+                    self.allow_insvc_patching = False
             else:
                 self.patch_data.metadata[patch_id]["patchstate"] = \
                     self.patch_data.metadata[patch_id]["repostate"]
-
-        for ip in list(self.hosts):
-            if not self.hosts[ip].out_of_date:
-                continue
-
-            # todo(jcasteli):  the patch contents checks can be revisited
-            for pkg in list(self.hosts[ip].installed):
-                for patch_id in list(self.patch_data.contents):
-
-                    if patch_id not in self.patch_data.metadata:
-                        LOG.error("Patch data missing for %s", patch_id)
-                        continue
-
-                    # If the patch is on a different release than the host, skip it.
-                    if self.patch_data.metadata[patch_id]["sw_version"] != self.hosts[ip].sw_version:
-                        continue
-
-                    # Is the installed pkg higher or lower version?
-                    # OSTREE: this comparison will be different than for RPMs
-                    installed_ver = self.hosts[ip].installed[pkg].split('@')[0]
-                    if ":" in installed_ver:
-                        # Ignore epoch
-                        installed_ver = installed_ver.split(':')[1]
-
-                    if self.patch_data.metadata[patch_id]["repostate"] == constants.AVAILABLE:
-                        # The RPM is not expected to be installed.
-                        # If the installed version is the same or higher,
-                        # this patch is in a Partial-Remove state
-                        if patch_id in self.interim_state:
-                            self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_REMOVE
-                            if self.patch_data.metadata[patch_id].get("reboot_required") != "N":
-                                self.allow_insvc_patching = False
-                            continue
-                    elif self.patch_data.metadata[patch_id]["repostate"] == constants.APPLIED:
-                        # The RPM is expected to be installed.
-                        # If the installed version is the lower,
-                        # this patch is in a Partial-Apply state
-                        if patch_id in self.interim_state:
-                            self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_APPLY
-                            if self.patch_data.metadata[patch_id].get("reboot_required") != "N":
-                                self.allow_insvc_patching = False
-                            continue
-            # todo(jcasteli):  patching no longer needs to verify personality
-            if self.hosts[ip].sw_version == "14.10":
-                # For Release 1
-                personality = "personality-%s" % self.hosts[ip].nodetype
-            else:
-                personality = "personality-%s" % "-".join(self.hosts[ip].subfunctions)
-
-            # Check the to_remove list
-            for pkg in self.hosts[ip].to_remove:
-                for patch_id in list(self.patch_data.contents):
-                    if pkg not in self.patch_data.contents[patch_id]:
-                        continue
-
-                    if patch_id not in self.patch_data.metadata:
-                        LOG.error("Patch data missing for %s", patch_id)
-                        continue
-
-                    if personality not in self.patch_data.metadata[patch_id]:
-                        continue
-
-                    if pkg not in self.patch_data.metadata[patch_id][personality]:
-                        continue
-
-                    if self.patch_data.metadata[patch_id]["repostate"] == constants.AVAILABLE:
-                        # The RPM is not expected to be installed.
-                        # This patch is in a Partial-Remove state
-                        self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_REMOVE
-                        if self.patch_data.metadata[patch_id].get("reboot_required") != "N":
-                            self.allow_insvc_patching = False
-                        continue
-
-            # Check the missing_pkgs list
-            for pkg in self.hosts[ip].missing_pkgs:
-                for patch_id in list(self.patch_data.contents):
-                    if pkg not in self.patch_data.contents[patch_id]:
-                        continue
-
-                    if patch_id not in self.patch_data.metadata:
-                        LOG.error("Patch data missing for %s", patch_id)
-                        continue
-
-                    if personality not in self.patch_data.metadata[patch_id]:
-                        continue
-
-                    if pkg not in self.patch_data.metadata[patch_id][personality]:
-                        continue
-
-                    if self.patch_data.metadata[patch_id]["repostate"] == constants.APPLIED:
-                        # The RPM is expected to be installed.
-                        # This patch is in a Partial-Apply state
-                        self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_APPLY
-                        if self.patch_data.metadata[patch_id].get("reboot_required") != "N":
-                            self.allow_insvc_patching = False
-                        continue
 
         self.hosts_lock.release()
 
@@ -1226,6 +1129,10 @@ class PatchController(PatchService):
             else:
                 self.patch_data.metadata[patch_id]["patchstate"] = constants.UNKNOWN
 
+            # Commit1 in patch metadata.xml file represents the latest commit
+            # after this patch has been applied to the feed repo
+            self.latest_feed_commit = self.patch_data.contents[patch_id]["commit1"]
+
             self.hosts_lock.acquire()
             self.interim_state[patch_id] = list(self.hosts)
             self.hosts_lock.release()
@@ -1389,6 +1296,10 @@ class PatchController(PatchService):
                 self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_REMOVE
             else:
                 self.patch_data.metadata[patch_id]["patchstate"] = constants.UNKNOWN
+
+            # Base Commit in patch metadata.xml file represents the latest commit
+            # after this patch has been removed from the feed repo
+            self.latest_feed_commit = self.patch_data.contents[patch_id]["base"]["commit"]
 
             self.hosts_lock.acquire()
             self.interim_state[patch_id] = list(self.hosts)
@@ -1671,6 +1582,16 @@ class PatchController(PatchService):
                 msg_info += "%s is not required by any patches.\n" % patch_id
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+    def send_latest_feed_commit_to_agent(self):
+        """
+        Notify the patch agent that the latest commit on the feed
+        repo has been updated
+        """
+        send_commit_to_agent = PatchMessageSendLatestFeedCommit()
+        self.socket_lock.acquire()
+        send_commit_to_agent.send(self.sock_out)
+        self.socket_lock.release()
 
     def patch_sync(self):
         # Increment the patch_op_counter here

@@ -4,9 +4,13 @@ Copyright (c) 2022 Wind River Systems, Inc.
 SPDX-License-Identifier: Apache-2.0
 
 """
+import logging
 import subprocess
 
 from cgcs_patch import constants
+from cgcs_patch.exceptions import OSTreeCommandFail
+
+LOG = logging.getLogger('main_logger')
 
 
 def get_ostree_latest_commit(ostree_ref, repo_path):
@@ -17,7 +21,7 @@ def get_ostree_latest_commit(ostree_ref, repo_path):
      example: starlingx
     :param repo_path: the path to the ostree repo:
      example: /var/www/pages/feed/rel-22.06/ostree_repo
-    :return: a tuple of the most recent commit and checksum
+    :return: The most recent commit of the repo
     """
 
     # Sample command and output that is parsed to get the commit and checksum
@@ -39,16 +43,21 @@ def get_ostree_latest_commit(ostree_ref, repo_path):
     # Commit-id: starlingx-intel-x86-64-20220428180512
 
     cmd = "ostree log %s --repo=%s" % (ostree_ref, repo_path)
-    output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
-
+    try:
+        output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        info_msg = "OSTree log Error: return code: %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.info(info_msg)
+        msg = "Failed to fetch ostree log for %s." % repo_path
+        raise OSTreeCommandFail(msg)
     # Store the output of the above command in a string
     output_string = output.stdout.decode('utf-8')
 
-    # Parse the string to get the latest commit and checksum for that ostree
+    # Parse the string to get the latest commit for the ostree
     split_output_string = output_string.split()
     latest_commit = split_output_string[1]
-    latest_checksum = split_output_string[3]
-    return (latest_commit, latest_checksum)
+    return latest_commit
 
 
 def get_feed_latest_commit(patch_sw_version):
@@ -57,8 +66,7 @@ def get_feed_latest_commit(patch_sw_version):
 
     :param patch_sw_version: software version for the feed
      example: 22.06
-    :return: a tuple of the most recent commit and checksum
-     for that feed
+    :return: The latest commit for the feed repo
     """
     repo_path = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR,
                                            patch_sw_version)
@@ -68,6 +76,47 @@ def get_feed_latest_commit(patch_sw_version):
 def get_sysroot_latest_commit():
     """
     Query ostree sysroot to determine the currently active commit
-    :return: a tuple of the commit and checksum for sysroot
+    :return: The latest commit for sysroot repo
     """
     return get_ostree_latest_commit(constants.OSTREE_REF, constants.SYSROOT_OSTREE)
+
+
+def get_latest_deployment_commit():
+    """
+    Get the active deployment commit ID
+    :return: The commit ID associated with the active commit
+    """
+
+    # Sample command and output that is parsed to get the active commit
+    # associated with the deployment
+    #
+    # Command: ostree admin status
+    #
+    # Output:
+    #
+    # debian 0658a62854647b89caf5c0e9ed6ff62a6c98363ada13701d0395991569248d7e.0 (pending)
+    # origin refspec: starlingx
+    # * debian a5d8f8ca9bbafa85161083e9ca2259ff21e5392b7595a67f3bc7e7ab8cb583d9.0
+    # Unlocked: hotfix
+    # origin refspec: starlingx
+
+    cmd = "ostree admin status"
+
+    try:
+        output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to fetch ostree admin status."
+        info_msg = "OSTree Admin Status Error: return code: %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.info(info_msg)
+        raise OSTreeCommandFail(msg)
+
+    # Store the output of the above command in a string
+    output_string = output.stdout.decode('utf-8')
+
+    # Parse the string to get the active commit on this deployment
+    # Trim everything before * as * represents the active deployment commit
+    trimmed_output_string = output_string[output_string.index("*"):]
+    split_output_string = trimmed_output_string.split()
+    active_deployment_commit = split_output_string[2]
+    return active_deployment_commit
