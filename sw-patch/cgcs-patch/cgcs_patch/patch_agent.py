@@ -425,6 +425,7 @@ class PatchAgent(PatchService):
         self.query()  # sets self.changes
 
         changed = False
+        success = True
 
         sysroot_ostree = constants.SYSROOT_OSTREE
         feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, SW_VERSION)
@@ -436,7 +437,9 @@ class PatchAgent(PatchService):
                 LOG.exception("Failed to pull feed ostree in to the sysroot ostree.")
                 info_msg = "OSTree Pull Local Error: return code: %s , Output: %s" % (e.returncode, e.stderr.decode("utf-8"))
                 LOG.info(info_msg)
+                success = False
 
+            # todo(jcasteli): Should we skip the deploy if pull-local fails
             deployment_cmd = "ostree admin deploy %s" % constants.OSTREE_REF
             try:
                 subprocess.run(deployment_cmd, shell=True, check=True, capture_output=True)
@@ -445,36 +448,33 @@ class PatchAgent(PatchService):
                 LOG.exception("Failed to create an ostree deployment.")
                 info_msg = "OSTree Deployment Error: return code: %s , Output: %s" % (e.returncode, e.stderr.decode("utf-8"))
                 LOG.info(info_msg)
-            self.query()  # sets self.changes..  Should now be false.
-            if self.changes:
-                LOG.info("Installing the patch did not change the patch current status")
+                success = False
 
-        if changed:
-            # Update the node_is_patched flag
-            setflag(node_is_patched_file)
+            if changed:
+                # Update the node_is_patched flag
+                setflag(node_is_patched_file)
 
-            self.node_is_patched = True
-            if verbose_to_stdout:
-                print("This node has been patched.")
+                self.node_is_patched = True
+                if verbose_to_stdout:
+                    print("This node has been patched.")
 
-            if os.path.exists(node_is_patched_rr_file):
-                LOG.info("Reboot is required. Skipping patch-scripts")
-            elif disallow_insvc_patch:
-                LOG.info("Disallowing patch-scripts. Treating as reboot-required")
-                setflag(node_is_patched_rr_file)
-            else:
-                LOG.info("Running in-service patch-scripts")
+                if os.path.exists(node_is_patched_rr_file):
+                    LOG.info("Reboot is required. Skipping patch-scripts")
+                elif disallow_insvc_patch:
+                    LOG.info("Disallowing patch-scripts. Treating as reboot-required")
+                    setflag(node_is_patched_rr_file)
+                else:
+                    LOG.info("Running in-service patch-scripts")
+                    try:
+                        subprocess.check_output(run_insvc_patch_scripts_cmd, stderr=subprocess.STDOUT)
 
-                try:
-                    subprocess.check_output(run_insvc_patch_scripts_cmd, stderr=subprocess.STDOUT)
-
-                    # Clear the node_is_patched flag, since we've handled it in-service
-                    clearflag(node_is_patched_file)
-                    self.node_is_patched = False
-                except subprocess.CalledProcessError as e:
-                    LOG.exception("In-Service patch scripts failed")
-                    LOG.error("Command output: %s", e.output)
-                    changed = False
+                        # Clear the node_is_patched flag, since we've handled it in-service
+                        clearflag(node_is_patched_file)
+                        self.node_is_patched = False
+                    except subprocess.CalledProcessError as e:
+                        LOG.exception("In-Service patch scripts failed")
+                        LOG.error("Command output: %s", e.output)
+                        success = False
 
         # Clear the in-service patch dirs
         if os.path.exists(insvc_patch_scripts):
@@ -482,7 +482,7 @@ class PatchAgent(PatchService):
         if os.path.exists(insvc_patch_flags):
             shutil.rmtree(insvc_patch_flags, ignore_errors=True)
 
-        if changed:
+        if success:
             self.patch_failed = False
             clearflag(patch_failed_file)
             self.state = constants.PATCH_AGENT_STATE_IDLE
@@ -495,12 +495,17 @@ class PatchAgent(PatchService):
         clearflag(patch_installing_file)
         self.query()
 
+        if self.changes:
+            LOG.warn("Installing the patch did not change the patch current status")
+
         # Send a hello to provide a state update
         if self.sock_out is not None:
             hello_ack = PatchMessageHelloAgentAck()
             hello_ack.send(self.sock_out)
 
-        return changed
+        # Indicate if the method was successful
+        # success means no change needed, or a change worked.
+        return success
 
     def handle_patch_op_counter(self, counter):
         changed = False
