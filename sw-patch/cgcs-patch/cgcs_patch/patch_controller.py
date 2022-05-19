@@ -470,7 +470,11 @@ class PatchMessageQueryDetailedResp(messages.PatchMessage):
                     if len(pc.interim_state[patch_id]) == 0:
                         del pc.interim_state[patch_id]
             pc.hosts_lock.release()
-            pc.check_patch_states()
+            # CentOS code has an additional call here for
+            # check_patch_states which was removed in Debian
+            # The call had to be removed since it was mangling
+            # pc.allow_insvc_patching value and making all
+            # patches treat like an in-service patch.
         else:
             pc.hosts_lock.release()
 
@@ -1101,7 +1105,7 @@ class PatchController(PatchService):
 
             # Commit1 in patch metadata.xml file represents the latest commit
             # after this patch has been applied to the feed repo
-            self.latest_feed_commit = self.patch_data.contents[patch_id]["commit1"]
+            self.latest_feed_commit = self.patch_data.contents[patch_id]["commit1"]["commit"]
 
             self.hosts_lock.acquire()
             self.interim_state[patch_id] = list(self.hosts)

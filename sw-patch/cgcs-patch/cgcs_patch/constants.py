@@ -43,6 +43,7 @@ CLI_OPT_RECURSIVE = '--recursive'
 CLI_OPT_RELEASE = '--release'
 
 OSTREE_REF = "starlingx"
+OSTREE_REMOTE = "debian"
 FEED_OSTREE_BASE_DIR = "/var/www/pages/feed"
 SYSROOT_OSTREE = "/sysroot/ostree/repo"
 

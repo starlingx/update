@@ -159,6 +159,23 @@ def reset_ostree_repo_head(commit, repo_path):
         raise OSTreeCommandFail(msg)
 
 
+def pull_ostree_from_remote():
+    """
+    Pull from remote ostree to sysroot ostree
+    """
+
+    cmd = "ostree pull %s --depth=-1" % constants.OSTREE_REMOTE
+
+    try:
+        subprocess.run(cmd, shell=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to pull from %s remote into sysroot ostree" % constants.OSTREE_REMOTE
+        info_msg = "OSTree Pull Error: return code: %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.info(info_msg)
+        raise OSTreeCommandFail(msg)
+
+
 def delete_ostree_repo_commit(commit, repo_path):
     """
     Delete the specified commit from the ostree repo
@@ -174,6 +191,22 @@ def delete_ostree_repo_commit(commit, repo_path):
     except subprocess.CalledProcessError as e:
         msg = "Failed to delete commit %s from ostree repo %s" % (commit, repo_path)
         info_msg = "OSTree Delete Commit Error: return code: %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.info(info_msg)
+        raise OSTreeCommandFail(msg)
+
+
+def create_deployment():
+    """
+    Create a new deployment while retaining the previous ones
+    """
+
+    cmd = "ostree admin deploy %s --no-prune --retain" % constants.OSTREE_REF
+    try:
+        subprocess.run(cmd, shell=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to create an ostree deployment for sysroot ref %s." % constants.OSTREE_REF
+        info_msg = "OSTree Deployment Error: return code: %s , Output: %s" \
                    % (e.returncode, e.stderr.decode("utf-8"))
         LOG.info(info_msg)
         raise OSTreeCommandFail(msg)

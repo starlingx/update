@@ -20,6 +20,7 @@ from cgcs_patch.patch_functions import configure_logging
 from cgcs_patch.patch_functions import LOG
 import cgcs_patch.config as cfg
 from cgcs_patch.base import PatchService
+from cgcs_patch.exceptions import OSTreeCommandFail
 import cgcs_patch.utils as utils
 import cgcs_patch.messages as messages
 import cgcs_patch.constants as constants
@@ -360,15 +361,6 @@ class PatchAgent(PatchService):
                          "active controller's Feed Repo Commit: %s",
                          active_sysroot_commit, self.latest_feed_commit)
                 self.changes = True
-        active_deployment_commit = ostree_utils.get_latest_deployment_commit()
-        # strip off anything after a period.  ex: 1234.1 becomes 1234
-        active_deployment_commit = active_deployment_commit.split(".")[0]
-
-        if active_sysroot_commit != active_deployment_commit:
-            LOG.info("Active Sysroot Commit:%s does not match "
-                     "Active Deployment Commit: %s",
-                     active_sysroot_commit, active_deployment_commit)
-            self.changes = True
 
         return True
 
@@ -427,27 +419,21 @@ class PatchAgent(PatchService):
         changed = False
         success = True
 
-        sysroot_ostree = constants.SYSROOT_OSTREE
-        feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, SW_VERSION)
         if self.changes:
-            cmd = "ostree --repo=%s pull-local %s %s --depth=-1" % (sysroot_ostree, feed_ostree, constants.OSTREE_REF)
             try:
-                subprocess.run(cmd, shell=True, check=True, capture_output=True)
-            except subprocess.CalledProcessError as e:
-                LOG.exception("Failed to pull feed ostree in to the sysroot ostree.")
-                info_msg = "OSTree Pull Local Error: return code: %s , Output: %s" % (e.returncode, e.stderr.decode("utf-8"))
-                LOG.info(info_msg)
-                success = False
+                # Pull changes from remote to the sysroot ostree
+                # The remote value is configured inside
+                # "/sysroot/ostree/repo/config" file
+                ostree_utils.pull_ostree_from_remote()
 
-            # todo(jcasteli): Should we skip the deploy if pull-local fails
-            deployment_cmd = "ostree admin deploy %s" % constants.OSTREE_REF
-            try:
-                subprocess.run(deployment_cmd, shell=True, check=True, capture_output=True)
+                # Create a new deployment once the changes are pulled
+                ostree_utils.create_deployment()
+
                 changed = True
-            except subprocess.CalledProcessError as e:
-                LOG.exception("Failed to create an ostree deployment.")
-                info_msg = "OSTree Deployment Error: return code: %s , Output: %s" % (e.returncode, e.stderr.decode("utf-8"))
-                LOG.info(info_msg)
+
+            except OSTreeCommandFail:
+                LOG.exception("Failed to pull changes and create deployment"
+                              "during host-install.")
                 success = False
 
             if changed:
