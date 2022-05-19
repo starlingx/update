@@ -21,6 +21,7 @@ from wsgiref import simple_server
 
 from oslo_config import cfg as oslo_cfg
 
+from cgcs_patch import ostree_utils
 from cgcs_patch.api import app
 from cgcs_patch.authapi import app as auth_app
 from cgcs_patch.patch_functions import configure_logging
@@ -596,7 +597,13 @@ class PatchController(PatchService):
         self.patch_op_counter = 1
         self.patch_data = PatchData()
         self.patch_data.load_all()
-        self.latest_feed_commit = None
+        try:
+            self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
+        except OSTreeCommandFail:
+            LOG.exception("Failure to fetch the feed ostree latest log while "
+                          "initializing Patch Controller")
+            self.latest_feed_commit = None
+
         self.check_patch_states()
         self.base_pkgdata = BasePackageData()
 
@@ -1030,53 +1037,16 @@ class PatchController(PatchService):
                 msg_info += msg + "\n"
                 continue
 
-            # OSTree Commit consistency check
-            # Check if the patch can be applied on the system
-            # Fetch the latest commit and checksum by running the command given below
-            # and compare it with the base commit and base checksum values from metadata.xml
-            #
-            # Command: ostree log starlingx --repo=/var/www/pages/feed/rel-22.02/ostree_repo
-            #
-            # Output:
-            #
-            # commit 478bc21c1702b9b667b5a75fac62a3ef9203cc1767cbe95e89dface6dc7f205e
-            # ContentChecksum:  61fc5bb4398d73027595a4d839daeb404200d0899f6e7cdb24bb8fb6549912ba
-            # Date:  2022-04-28 18:58:57 +0000
-            #
-            # Commit-id: starlingx-intel-x86-64-20220428185802
-            #
-            # commit ad7057a94a1d06e38eaedee2ce3fe56826ae817497469bce5d5ac05bc506aaa7
-            # ContentChecksum:  dc42a42427a4f9e4de1210327c12b12ea3ad6a5d232497a903cc6478ca381e8b
-            # Date:  2022-04-28 18:05:43 +0000
-            #
-            # Commit-id: starlingx-intel-x86-64-20220428180512
-
             patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
-
-            feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, patch_sw_version)
-
-            cmd = "ostree log %s --repo=%s" % (constants.OSTREE_REF, feed_ostree)
+            latest_commit = ""
             try:
-                output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
-            except subprocess.CalledProcessError as e:
-                msg = "Failed to fetch ostree log of the feed ostree repo for %s." % patch_id
-                info_msg = "OSTree log Error: return code: %s , Output: %s" \
-                           % (e.returncode, e.stderr.decode("utf-8"))
-                LOG.info(info_msg)
-                raise OSTreeCommandFail(msg)
+                latest_commit = ostree_utils.get_feed_latest_commit(patch_sw_version)
+            except OSTreeCommandFail:
+                LOG.exception("Failure during commit consistency check for %s.", patch_id)
 
-            # Store the output of the above command in a string
-            output_string = output.stdout.decode('utf-8')
-
-            # Parse the string to get the latest commit and checksum on the controller
-            split_output_string = output_string.split()
-            latest_commit = split_output_string[1]
-            latest_checksum = split_output_string[3]
-
-            if self.patch_data.contents[patch_id]["base"]["commit"] != latest_commit \
-               and self.patch_data.contents[patch_id]["base"]["checksum"] != latest_checksum:
-                msg = "The base commit and checksum for %s do not match the latest commit " \
-                      "and checksum on this system." % (patch_id)
+            if self.patch_data.contents[patch_id]["base"]["commit"] != latest_commit:
+                msg = "The base commit for %s do not match the latest commit " \
+                      "on this system." % (patch_id)
                 LOG.info(msg)
                 msg_info += msg + "\n"
                 continue
@@ -1096,7 +1066,7 @@ class PatchController(PatchService):
                 # Extract the software.tar
                 tar = tarfile.open(ostree_tar_filename)
                 tar.extractall()
-
+                feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, patch_sw_version)
                 # Copy extracted folders of software.tar to the feed ostree repo
                 shutil.copytree(tmpdir, feed_ostree, dirs_exist_ok=True)
             except tarfile.TarError:
@@ -1255,31 +1225,24 @@ class PatchController(PatchService):
                 continue
 
             patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
-            # Reset ostree HEAD to base commit of this patch
+
             # Base commit is fetched from the patch metadata
             base_commit = self.patch_data.contents[patch_id]["base"]["commit"]
             feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, patch_sw_version)
-            cmd = "ostree reset %s %s --repo=%s" % (constants.OSTREE_REF, base_commit, feed_ostree)
             try:
-                subprocess.run(cmd, shell=True, check=True, capture_output=True)
-            except subprocess.CalledProcessError as e:
-                msg = "Failed to reset the feed ostree repo head for %s." % patch_id
-                info_msg = "OSTree Reset Error: return code: %s , Output: %s" \
-                           % (e.returncode, e.stderr.decode("utf-8"))
-                LOG.info(info_msg)
-                raise OSTreeCommandFail(msg)
+                # Reset the ostree HEAD
+                ostree_utils.reset_ostree_repo_head(base_commit, feed_ostree)
 
-            for i in range(int(self.patch_data.contents[patch_id]["number_of_commits"])):
-                commit_to_delete = self.patch_data.contents[patch_id]["commit%s" % (i + 1)]["commit"]
-                cmd = "ostree prune --delete-commit %s --repo=%s" % (commit_to_delete, feed_ostree)
-                try:
-                    subprocess.run(cmd, shell=True, check=True, capture_output=True)
-                except subprocess.CalledProcessError as e:
-                    msg = "Failed to delete commit from feed ostree repo for %s." % patch_id
-                    info_msg = "OSTree Prune Error: return code: %s , Output: %s" \
-                               % (e.returncode, e.stderr.decode("utf-8"))
-                    LOG.info(info_msg)
-                    raise OSTreeCommandFail(msg)
+                # Delete all commits that belong to this patch
+                for i in range(int(self.patch_data.contents[patch_id]["number_of_commits"])):
+                    commit_to_delete = self.patch_data.contents[patch_id]["commit%s" % (i + 1)]["commit"]
+                    ostree_utils.delete_ostree_repo_commit(commit_to_delete, feed_ostree)
+
+                # Update the feed ostree summary
+                ostree_utils.update_repo_summary_file(feed_ostree)
+
+            except OSTreeCommandFail:
+                LOG.exception("Failure during patch apply for %s.", patch_id)
 
             try:
                 # Move the metadata to the available dir

@@ -24,7 +24,7 @@ def get_ostree_latest_commit(ostree_ref, repo_path):
     :return: The most recent commit of the repo
     """
 
-    # Sample command and output that is parsed to get the commit and checksum
+    # Sample command and output that is parsed to get the commit
     #
     # Command: ostree log starlingx --repo=/var/www/pages/feed/rel-22.02/ostree_repo
     #
@@ -120,3 +120,60 @@ def get_latest_deployment_commit():
     split_output_string = trimmed_output_string.split()
     active_deployment_commit = split_output_string[2]
     return active_deployment_commit
+
+
+def update_repo_summary_file(repo_path):
+    """
+    Updates the summary file for the specified ostree repo
+    :param repo_path: the path to the ostree repo:
+     example: /var/www/pages/feed/rel-22.06/ostree_repo
+    """
+    cmd = "ostree summary --update --repo=%s" % repo_path
+
+    try:
+        subprocess.run(cmd, shell=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to update summary file for ostree repo %s." % (repo_path)
+        info_msg = "OSTree Summary Update Error: return code: %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.info(info_msg)
+        raise OSTreeCommandFail(msg)
+
+
+def reset_ostree_repo_head(commit, repo_path):
+    """
+    Resets the ostree repo HEAD to the commit that is specified
+    :param commit: an existing commit on the ostree repo which we need the HEAD to point to
+     example: 478bc21c1702b9b667b5a75fac62a3ef9203cc1767cbe95e89dface6dc7f205e
+    :param repo_path: the path to the ostree repo:
+     example: /var/www/pages/feed/rel-22.06/ostree_repo
+    """
+    cmd = "ostree reset %s %s --repo=%s" % (constants.OSTREE_REF, commit, repo_path)
+    try:
+        subprocess.run(cmd, shell=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to reset head of ostree repo: %s to commit: %s" % (repo_path, commit)
+        info_msg = "OSTree Reset Error: return code: %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.info(info_msg)
+        raise OSTreeCommandFail(msg)
+
+
+def delete_ostree_repo_commit(commit, repo_path):
+    """
+    Delete the specified commit from the ostree repo
+    :param commit: an existing commit on the ostree repo which we need to delete
+     example: 478bc21c1702b9b667b5a75fac62a3ef9203cc1767cbe95e89dface6dc7f205e
+    :param repo_path: the path to the ostree repo:
+     example: /var/www/pages/feed/rel-22.06/ostree_repo
+    """
+
+    cmd = "ostree prune --delete-commit %s --repo=%s" % (commit, repo_path)
+    try:
+        subprocess.run(cmd, shell=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to delete commit %s from ostree repo %s" % (commit, repo_path)
+        info_msg = "OSTree Delete Commit Error: return code: %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.info(info_msg)
+        raise OSTreeCommandFail(msg)
