@@ -25,12 +25,10 @@ class CgcsPatchUtilsTestCase(testtools.TestCase):
 
     def test_gethostbyname(self):
         result = cgcs_patch.utils.gethostbyname('localhost')
-        print("gethostbyname returned %s for localhost" % result)
         self.assertIn(result, ['127.0.0.1', '::1'])
 
     def test_gethostbyname_failure(self):
         result = cgcs_patch.utils.gethostbyname('xfakehostx')
-        print("gethostbyname returned %s for xfakehostx" % result)
         self.assertIsNone(result)
 
     @mock.patch('cgcs_patch.utils.gethostbyname')

@@ -49,7 +49,7 @@ def read_config():
     global controller_port
     global agent_port
 
-    config = configparser.SafeConfigParser(defaults)
+    config = configparser.ConfigParser(defaults)
 
     config.read(patching_conf)
     patching_conf_mtime = os.stat(patching_conf).st_mtime
@@ -105,7 +105,7 @@ def get_mgmt_iface():
         # so return the cached value.
         return mgmt_if
 
-    config = configparser.SafeConfigParser()
+    config = configparser.ConfigParser()
 
     # The platform.conf file has no section headers, which causes problems
     # for ConfigParser. So we'll fake it out.
