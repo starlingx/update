@@ -302,6 +302,7 @@ def print_patch_show_result(req):
 
         if 'metadata' in data:
             pd = data['metadata']
+            contents = data['contents']
             for patch_id in sorted(list(pd)):
                 print("%s:" % patch_id)
 
@@ -375,9 +376,21 @@ def print_patch_show_result(req):
                         print(' ' * 20 + req_patch)
 
                 if "contents" in data and patch_id in data["contents"]:
-                    print("    Contents:")
-                    for pkg in sorted(data["contents"][patch_id]):
-                        print(' ' * 20 + pkg)
+                    print("    Contents:\n")
+                    if "number_of_commits" in contents[patch_id] and \
+                            contents[patch_id]["number_of_commits"] != "":
+                        print(textwrap.fill("    {0:<15} ".format("No. of commits:") +
+                                            contents[patch_id]["number_of_commits"],
+                                            width=TERM_WIDTH, subsequent_indent=' ' * 20))
+                    if "base" in contents[patch_id] and \
+                            contents[patch_id]["base"]["commit"] != "":
+                        print(textwrap.fill("    {0:<15} ".format("Base commit:") +
+                                            contents[patch_id]["base"]["commit"],
+                                            width=TERM_WIDTH, subsequent_indent=' ' * 20))
+                    for i in range(int(contents[patch_id]["number_of_commits"])):
+                        print(textwrap.fill("    {0:<15} ".format("Commit%s:" % (i + 1)) +
+                                            contents[patch_id]["commit%s" % (i + 1)]["commit"],
+                                            width=TERM_WIDTH, subsequent_indent=' ' * 20))
 
                 print("\n")
 

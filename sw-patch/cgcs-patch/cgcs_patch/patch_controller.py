@@ -1049,8 +1049,11 @@ class PatchController(PatchService):
                 LOG.exception("Failure during commit consistency check for %s.", patch_id)
 
             if self.patch_data.contents[patch_id]["base"]["commit"] != latest_commit:
-                msg = "The base commit for %s do not match the latest commit " \
-                      "on this system." % (patch_id)
+                msg = "The base commit %s for %s does not match the latest commit %s" \
+                      "on this system." \
+                      % (self.patch_data.contents[patch_id]["base"]["commit"],
+                         patch_id,
+                         latest_commit)
                 LOG.info(msg)
                 msg_info += msg + "\n"
                 continue
