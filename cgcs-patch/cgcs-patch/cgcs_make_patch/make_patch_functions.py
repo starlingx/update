@@ -141,7 +141,7 @@ def handle_exception(exc_type, exc_value, exc_traceback):
 def write_xml_file(top, fname):
     # Generate the file, in a readable format if possible
     outfile = open(fname, 'w')
-    rough_xml = ElementTree.tostring(top, 'utf-8')
+    rough_xml = ElementTree.tostring(top)
     if platform.python_version() == "2.7.2":
         # The 2.7.2 toprettyxml() function unnecessarily indents
         # childless tags, adding whitespace. In the case of the
@@ -1134,7 +1134,7 @@ class PatchRecipeData(object):
     def write_xml_file(self, top, fname):
         # Generate the file, in a readable format if possible
         outfile = open(fname, 'w')
-        rough_xml = ElementTree.tostring(top, 'utf-8')
+        rough_xml = ElementTree.tostring(top)
         if platform.python_version() == "2.7.2":
             # The 2.7.2 toprettyxml() function unnecessarily indents
             # childless tags, adding whitespace. In the case of the

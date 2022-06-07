@@ -278,7 +278,7 @@ class PatchData(object):
 
         # write the modified file
         outfile = open(new_filename, 'w')
-        rough_xml = ElementTree.tostring(root, 'utf-8')
+        rough_xml = ElementTree.tostring(root)
         if platform.python_version() == "2.7.2":
             # The 2.7.2 toprettyxml() function unnecessarily indents
             # childless tags, adding whitespace. In the case of the
