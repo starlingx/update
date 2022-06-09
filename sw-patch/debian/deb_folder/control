@@ -13,7 +13,8 @@ Build-Depends-Indep: python3-keystonemiddleware,
  python3-stestr,
  python3-testtools,
  python3-six,
- tsconfig
+ tsconfig,
+ python3-sh
 Standards-Version: 4.4.1
 
 Package: cgcs-patch
@@ -45,6 +46,7 @@ Depends: ${python3:Depends},
  python3-lxml,
  python3-requests-toolbelt,
  python3-six,
- tsconfig
+ tsconfig,
+ python3-sh
 Description: Starlingx platfom patching (python3)
  Starlingx platform patching system python libraries

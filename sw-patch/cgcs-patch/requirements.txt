@@ -8,3 +8,4 @@ pecan
 pycryptodomex
 lxml
 requests_toolbelt
+sh

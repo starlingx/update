@@ -32,6 +32,7 @@ from cgcs_patch.patch_functions import committed_dir
 from cgcs_patch.patch_functions import PatchFile
 from cgcs_patch.patch_functions import package_dir
 from cgcs_patch.patch_functions import repo_dir
+from cgcs_patch.patch_functions import root_scripts_dir
 from cgcs_patch.patch_functions import semantics_dir
 from cgcs_patch.patch_functions import SW_VERSION
 from cgcs_patch.patch_functions import root_package_dir
@@ -833,6 +834,23 @@ class PatchController(PatchService):
         ostree_tar_filename = "%s/%s-software.tar" % (ostree_tar_dir, patch_id)
         return ostree_tar_filename
 
+    def delete_restart_script(self, patch_id):
+        '''
+        Deletes the restart script (if any) associated with the patch
+        :param patch_id: The patch ID
+        '''
+        if not self.patch_data.metadata[patch_id]["restart_script"]:
+            return
+
+        restart_script_path = "%s/%s" % (root_scripts_dir, self.patch_data.metadata[patch_id]["restart_script"])
+        try:
+            # Delete the metadata
+            os.remove(restart_script_path)
+        except OSError:
+            msg = "Failed to remove restart script for %s" % patch_id
+            LOG.exception(msg)
+            raise PatchError(msg)
+
     def get_repo_filename(self, patch_sw_version, contentname):
         contentfile = self.get_store_filename(patch_sw_version, contentname)
         if not os.path.isfile(contentfile):
@@ -1093,7 +1111,7 @@ class PatchController(PatchService):
                 LOG.exception("Failure during commit consistency check for %s.", patch_id)
 
             if self.patch_data.contents[patch_id]["base"]["commit"] != latest_commit:
-                msg = "The base commit %s for %s does not match the latest commit %s" \
+                msg = "The base commit %s for %s does not match the latest commit %s " \
                       "on this system." \
                       % (self.patch_data.contents[patch_id]["base"]["commit"],
                          patch_id,
@@ -1387,6 +1405,7 @@ class PatchController(PatchService):
                 LOG.exception(msg)
                 raise MetadataFail(msg)
 
+            self.delete_restart_script(patch_id)
             self.patch_data.delete_patch(patch_id)
             msg = "%s has been deleted" % patch_id
             LOG.info(msg)
@@ -1941,6 +1960,42 @@ class PatchController(PatchService):
 
         return rc
 
+    def copy_restart_scripts(self):
+        with self.patch_data_lock:
+            for patch_id in self.patch_data.metadata:
+                if (self.patch_data.metadata[patch_id]["patchstate"] in
+                    [constants.PARTIAL_APPLY, constants.PARTIAL_REMOVE]) \
+                   and self.patch_data.metadata[patch_id]["restart_script"]:
+                    try:
+                        restart_script_name = self.patch_data.metadata[patch_id]["restart_script"]
+                        restart_script_path = "%s/%s" \
+                            % (root_scripts_dir, restart_script_name)
+                        dest_path = constants.PATCH_SCRIPTS_STAGING_DIR
+                        dest_script_file = "%s/%s" \
+                            % (constants.PATCH_SCRIPTS_STAGING_DIR, restart_script_name)
+                        if not os.path.exists(dest_path):
+                            os.makedirs(dest_path, 0o700)
+                        shutil.copyfile(restart_script_path, dest_script_file)
+                        os.chmod(dest_script_file, 0o700)
+                        msg = "Creating restart script for %s" % patch_id
+                        LOG.info(msg)
+                    except shutil.Error:
+                        msg = "Failed to copy the restart script for %s" % patch_id
+                        LOG.exception(msg)
+                        raise PatchError(msg)
+                elif self.patch_data.metadata[patch_id]["restart_script"]:
+                    try:
+                        restart_script_name = self.patch_data.metadata[patch_id]["restart_script"]
+                        restart_script_path = "%s/%s" \
+                            % (constants.PATCH_SCRIPTS_STAGING_DIR, restart_script_name)
+                        if os.path.exists(restart_script_path):
+                            os.remove(restart_script_path)
+                            msg = "Removing restart script for %s" % patch_id
+                            LOG.info(msg)
+                    except shutil.Error:
+                        msg = "Failed to delete the restart script for %s" % patch_id
+                        LOG.exception(msg)
+
     def patch_host_install(self, host_ip, force, async_req=False):
         msg_info = ""
         msg_warning = ""
@@ -1971,6 +2026,7 @@ class PatchController(PatchService):
         if self.allow_insvc_patching:
             LOG.info("Allowing in-service patching")
             force = True
+            self.copy_restart_scripts()
 
         self.hosts[ip].install_pending = True
         self.hosts[ip].install_status = False

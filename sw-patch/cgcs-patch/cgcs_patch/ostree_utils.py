@@ -5,6 +5,8 @@ SPDX-License-Identifier: Apache-2.0
 
 """
 import logging
+import os.path
+import sh
 import subprocess
 
 from cgcs_patch import constants
@@ -208,5 +210,53 @@ def create_deployment():
         msg = "Failed to create an ostree deployment for sysroot ref %s." % constants.OSTREE_REF
         info_msg = "OSTree Deployment Error: return code: %s , Output: %s" \
                    % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.info(info_msg)
+        raise OSTreeCommandFail(msg)
+
+
+def fetch_pending_deployment():
+    """
+    Fetch the deployment ID of the pending deployment
+    :return: The deployment ID of the pending deployment
+    """
+
+    cmd = "ostree admin status |grep pending  |awk '{printf $2}'"
+
+    try:
+        output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to fetch ostree admin status."
+        info_msg = "OSTree Admin Status Error: return code: %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.info(info_msg)
+        raise OSTreeCommandFail(msg)
+
+    # Store the output of the above command in a string
+    pending_deployment = output.stdout.decode('utf-8')
+
+    return pending_deployment
+
+
+def mount_new_deployment(deployment_dir):
+    """
+    Unmount /usr and /etc from the file system and remount it to directory
+    <depoyment_dir>/usr and <depoyment_dir>/etc respectively
+    :param deployment_dir: a path on the filesystem which points to the pending
+    deployment
+     example: /ostree/deploy/debian/deploy/<deployment_id>
+    """
+    try:
+        if os.path.ismount("/usr"):
+            sh.umount("-l", "/usr")
+        if os.path.ismount("/etc"):
+            sh.umount("-l", "/etc")
+        new_usr_mount_dir = "%s/usr" % (deployment_dir)
+        new_etc_mount_dir = "%s/etc" % (deployment_dir)
+        sh.mount("--bind", "-o", "ro,noatime", new_usr_mount_dir, "/usr")
+        sh.mount("--bind", "-o", "ro,noatime", new_etc_mount_dir, "/etc")
+    except sh.ErrorReturnCode as e:
+        msg = "Failed to re-mount /usr and /etc."
+        info_msg = "OSTree Deployment Mount Error: Output: %s" \
+                   % (e.stderr.decode("utf-8"))
         LOG.info(info_msg)
         raise OSTreeCommandFail(msg)

@@ -239,6 +239,9 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
         global pa
         resp = PatchMessageAgentInstallResp()
 
+        if not self.force:
+            setflag(node_is_patched_rr_file)
+
         if not os.path.exists(node_is_locked_file):
             if self.force:
                 LOG.info("Installing on unlocked node, with force option")
@@ -406,12 +409,10 @@ class PatchAgent(PatchService):
 
         try:
             # Create insvc patch directories
-            if os.path.exists(insvc_patch_scripts):
-                shutil.rmtree(insvc_patch_scripts, ignore_errors=True)
-            if os.path.exists(insvc_patch_flags):
-                shutil.rmtree(insvc_patch_flags, ignore_errors=True)
-            os.makedirs(insvc_patch_scripts, 0o700)
-            os.makedirs(insvc_patch_flags, 0o700)
+            if not os.path.exists(insvc_patch_scripts):
+                os.makedirs(insvc_patch_scripts, 0o700)
+            if not os.path.exists(insvc_patch_flags):
+                os.makedirs(insvc_patch_flags, 0o700)
         except Exception:
             LOG.exception("Failed to create in-service patch directories")
 
@@ -459,15 +460,19 @@ class PatchAgent(PatchService):
                     LOG.info("Disallowing patch-scripts. Treating as reboot-required")
                     setflag(node_is_patched_rr_file)
                 else:
-                    LOG.info("Running in-service patch-scripts")
+                    LOG.info("Mounting the new deployment")
                     try:
+                        pending_deployment = ostree_utils.fetch_pending_deployment()
+                        deployment_dir = constants.OSTREE_BASE_DEPLOYMENT_DIR + pending_deployment
+                        ostree_utils.mount_new_deployment(deployment_dir)
+                        LOG.info("Running in-service patch-scripts")
                         subprocess.check_output(run_insvc_patch_scripts_cmd, stderr=subprocess.STDOUT)
 
                         # Clear the node_is_patched flag, since we've handled it in-service
                         clearflag(node_is_patched_file)
                         self.node_is_patched = False
                     except subprocess.CalledProcessError as e:
-                        LOG.exception("In-Service patch scripts failed")
+                        LOG.exception("In-Service patch installation failed")
                         LOG.error("Command output: %s", e.output)
                         success = False
 

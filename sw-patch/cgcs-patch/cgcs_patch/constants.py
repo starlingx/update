@@ -46,6 +46,8 @@ OSTREE_REF = "starlingx"
 OSTREE_REMOTE = "debian"
 FEED_OSTREE_BASE_DIR = "/var/www/pages/feed"
 SYSROOT_OSTREE = "/sysroot/ostree/repo"
+OSTREE_BASE_DEPLOYMENT_DIR = "/ostree/deploy/debian/deploy/"
+PATCH_SCRIPTS_STAGING_DIR = "/run/patching/patch-scripts"
 
 ENABLE_DEV_CERTIFICATE_PATCH_IDENTIFIER = 'ENABLE_DEV_CERTIFICATE'
 

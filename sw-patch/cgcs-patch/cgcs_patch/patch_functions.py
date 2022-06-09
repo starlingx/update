@@ -48,6 +48,7 @@ repo_root_dir = "/var/www/pages/updates"
 repo_dir = {SW_VERSION: "%s/rel-%s" % (repo_root_dir, SW_VERSION)}
 
 root_package_dir = "%s/packages" % patch_dir
+root_scripts_dir = "/etc/patching/patch-scripts"
 package_dir = {SW_VERSION: "%s/%s" % (root_package_dir, SW_VERSION)}
 
 logfile = "/var/log/patching.log"
@@ -335,6 +336,7 @@ class PatchData(object):
                     "summary",
                     "description",
                     "install_instructions",
+                    "restart_script",
                     "warnings",
                     "apply_active_release_only"]:
             value = root.findtext(key)
@@ -615,19 +617,21 @@ class PatchFile(object):
         # Open the patch file and extract the contents to the current dir
         tar = tarfile.open(path, "r:gz")
 
-        filelist = ["metadata.tar", "software.tar"]
-        if "semantics.tar" in [f.name for f in tar.getmembers()]:
-            filelist.append("semantics.tar")
+        filelist = []
+        for f in tar.getmembers():
+            filelist.append(f.name)
+
+        if detached_signature_file not in filelist:
+            msg = "Patch not signed"
+            LOG.warning(msg)
 
         for f in filelist:
             tar.extract(f)
 
-        tar.extract("signature")
-        try:
-            tar.extract(detached_signature_file)
-        except KeyError:
-            msg = "Patch has not been signed"
-            LOG.warning(msg)
+        # Filelist used for signature validation and verification
+        sig_filelist = ["metadata.tar", "software.tar"]
+        if "semantics.tar" in filelist:
+            sig_filelist.append("semantics.tar")
 
         # Verify the data integrity signature first
         sigfile = open("signature", "r")
@@ -635,7 +639,7 @@ class PatchFile(object):
         sigfile.close()
 
         expected_sig = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-        for f in filelist:
+        for f in sig_filelist:
             sig ^= get_md5(f)
 
         if sig != expected_sig:
@@ -646,7 +650,7 @@ class PatchFile(object):
         # Verify detached signature
         if os.path.exists(detached_signature_file):
             sig_valid = verify_files(
-                filelist,
+                sig_filelist,
                 detached_signature_file,
                 cert_type=cert_type)
             if sig_valid is True:
@@ -849,6 +853,13 @@ class PatchFile(object):
                         "%s/%s-metadata.xml" % (abs_metadata_dir, patch_id))
             shutil.move("software.tar",
                         "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id))
+
+            if thispatch.metadata[patch_id]["restart_script"]:
+                if not os.path.exists(root_scripts_dir):
+                    os.makedirs(root_scripts_dir)
+                restart_script_name = thispatch.metadata[patch_id]["restart_script"]
+                shutil.move(restart_script_name,
+                            "%s/%s" % (root_scripts_dir, restart_script_name))
 
         except PatchValidationFailure as e:
             raise e
