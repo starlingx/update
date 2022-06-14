@@ -365,7 +365,7 @@ class PatchBuilder(object):
         :param clone_dir: repo cloned before the changes
         """
         self.patch_data = patch_data
-        self.patch_file_name = patch_data.sw_version + "_" + patch_data.patch_id + ".patch"
+        self.patch_file_name = patch_data.patch_id + ".patch"
 
         os.chdir(self.deploy_dir)
         # read the base sha from the clone/ga directory
