@@ -35,7 +35,6 @@ $STX_BUILD_HOME/localdisk/lat/std/deploy/
 
 Pending items:
 - Modify patch Status
-- Formal signing
 
 """
 import argparse
@@ -337,6 +336,19 @@ class PatchBuilder(object):
 
         return commits_from_base
 
+    def __sign_official_patches(self):
+        """
+        Sign formal patch
+        Called internally once a patch is created and formal flag is set to true
+        """
+        log.info("Signing patch %s", self.patch_file_name)
+        try:
+            patch_file_path = os.path.join(self.deploy_dir, self.patch_file_name)
+            subprocess.check_call(["sign_patch_formal.sh", patch_file_path])
+        except subprocess.CalledProcessError as e:
+            log.exception("Failed to sign official patch. Call to sign_patch_formal.sh process returned non-zero exit status %i", e.returncode)
+            raise SystemExit(e.returncode)
+
     def prepare_env(self, clone_repo="ostree-clone"):
         """
         Generates a copy of the current ostree_repo which is used
@@ -358,7 +370,7 @@ class PatchBuilder(object):
         subprocess.call(["rsync", "-a", "--exclude", ".lock", self.ostree_repo + "/", clone_dir])
         log.info("Prepared ostree repo clone at %s", clone_dir)
 
-    def create_patch(self, patch_data: PatchRecipeData, clone_dir="ostree-clone"):
+    def create_patch(self, patch_data: PatchRecipeData, clone_dir="ostree-clone", formal=False):
         """
         Creates a debian patch using ostree delta between 2 repos (rsync)
         :param patch_data: PatchRecipeData object
@@ -453,6 +465,10 @@ class PatchBuilder(object):
 
         log.info("Patch file created %s at %s", self.patch_file_name, self.deploy_dir)
 
+        if formal:
+            log.info("Trying to sign formal patch")
+            self.__sign_official_patches()
+
 
 def handle_create(params):
     """
@@ -468,10 +484,7 @@ def handle_create(params):
 
     # continue steps to create a patch
     patch_builder = PatchBuilder(params.delta_dir)
-    patch_builder.create_patch(patch_data, params.clone_repo)
-
-    if params.formal:
-        log.info("Formal signing not supported yet")
+    patch_builder.create_patch(patch_data, params.clone_repo, params.formal)
 
 
 def handle_prepare(params):
@@ -512,9 +525,6 @@ if __name__ == "__main__":
 
     if args.cmd == "create":
         handle_create(args)
-        if args.formal:
-            log.info("Formal signing not supported yet")
-
     elif args.cmd == "prepare":
         handle_prepare(args)
 
