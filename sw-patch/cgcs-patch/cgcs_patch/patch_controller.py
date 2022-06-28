@@ -470,11 +470,7 @@ class PatchMessageQueryDetailedResp(messages.PatchMessage):
                     if len(pc.interim_state[patch_id]) == 0:
                         del pc.interim_state[patch_id]
             pc.hosts_lock.release()
-            # CentOS code has an additional call here for
-            # check_patch_states which was removed in Debian
-            # The call had to be removed since it was mangling
-            # pc.allow_insvc_patching value and making all
-            # patches treat like an in-service patch.
+            pc.check_patch_states()
         else:
             pc.hosts_lock.release()
 
@@ -771,7 +767,55 @@ class PatchController(PatchService):
                 self.patch_data.metadata[patch_id]["patchstate"] = \
                     self.patch_data.metadata[patch_id]["repostate"]
 
+        for ip in (ip for ip in list(self.hosts) if self.hosts[ip].out_of_date):
+            # If a host is out-of-date, the patch repostate is APPLIED and the patch's first
+            # commit doesn't match the active sysroot commit on the host, then change
+            # patchstate to PARTIAL-APPLY.
+            # If a host is out-of-date, the patch repostate is AVAILABLE and the patch's first
+            # commit is equal to the active sysroot commit on the host, then change the
+            # patchstate to PARTIAL-REMOVE. Additionally, change the patchstates of the
+            # patch required (directly or a chain dependency) by the current patch.
+            skip_patch = []
+            for patch_id in self.patch_data.metadata:
+                if patch_id not in skip_patch:
+                    if self.patch_data.metadata[patch_id]["repostate"] == constants.AVAILABLE and \
+                            self.hosts[ip].latest_sysroot_commit == \
+                            self.patch_data.contents[patch_id]["commit1"]["commit"]:
+                        self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_REMOVE
+                        patch_dependency_list = self.get_patch_dependency_list(patch_id)
+                        for req_patch in patch_dependency_list:
+                            if self.patch_data.metadata[req_patch]["repostate"] == constants.AVAILABLE:
+                                self.patch_data.metadata[req_patch]["patchstate"] = constants.PARTIAL_REMOVE
+                            else:
+                                self.patch_data.metadata[req_patch]["patchstate"] = constants.APPLIED
+                            skip_patch.append(req_patch)
+                    elif self.patch_data.metadata[patch_id]["repostate"] == constants.APPLIED and \
+                            self.hosts[ip].latest_sysroot_commit != \
+                            self.patch_data.contents[patch_id]["commit1"]["commit"]:
+                        self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_APPLY
+                    if self.patch_data.metadata[patch_id].get("reboot_required") != "N" and \
+                            (self.patch_data.metadata[patch_id]["patchstate"] == constants.PARTIAL_APPLY or
+                             self.patch_data.metadata[patch_id]["patchstate"] == constants.PARTIAL_REMOVE):
+                        self.allow_insvc_patching = False
+
         self.hosts_lock.release()
+
+    def get_patch_dependency_list(self, patch_id):
+        """
+        Returns a list of patch IDs that are required by this patch.
+        Example: If patch3 requires patch2 and patch2 requires patch1,
+                 then this patch will return ['patch2', 'patch1'] for
+                 input param patch_id='patch3'
+        :param patch_id: The patch ID
+        """
+        if not self.patch_data.metadata[patch_id]["requires"]:
+            return []
+        else:
+            patch_dependency_list = []
+            for req_patch in self.patch_data.metadata[patch_id]["requires"]:
+                patch_dependency_list.append(req_patch)
+                patch_dependency_list = patch_dependency_list + self.get_patch_dependency_list(req_patch)
+            return patch_dependency_list
 
     def get_store_filename(self, patch_sw_version, contentname):
         """Returns the path of a content file from the store"""
