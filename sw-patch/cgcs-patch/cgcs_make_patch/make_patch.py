@@ -126,6 +126,10 @@ class PatchRecipeData(object):
 
         if "ID" in self.metadata:
             self.patch_id = self.metadata["ID"]
+            # Update restart script name - prefix with patch_id
+            if self.restart_script:
+                self.restart_script["metadata_name"] = self.patch_id + "_" \
+                    + self.restart_script["name"]
         else:
             msg = "patch is missing required field <PATCH_RECIPE><METADATA><ID>"
             log.exception(msg)
@@ -248,7 +252,11 @@ class PatchBuilder(object):
             self.__add_text_tag_to_xml(top, "apply_active_release_only", self.patch_data.metadata["APPLY_ACTIVE_RELEASE_ONLY"])
 
         if self.patch_data.restart_script:
-            self.__add_text_tag_to_xml(top, "restart_script", self.patch_data.restart_script["name"])
+            self.__add_text_tag_to_xml(
+                top,
+                "restart_script",
+                self.patch_data.restart_script["metadata_name"]
+            )
 
         # Parse ostree_content
         content = ET.SubElement(top, "contents")
@@ -424,7 +432,10 @@ class PatchBuilder(object):
 
         if self.patch_data.restart_script:
             log.info("Saving restart scripts")
-            shutil.copyfile(self.patch_data.restart_script["full_path"], self.patch_data.restart_script["name"])
+            shutil.copyfile(
+                self.patch_data.restart_script["full_path"],
+                self.patch_data.restart_script["metadata_name"]
+            )
 
         filelist = ["metadata.tar", "software.tar"]
         # Generate the local signature file
@@ -455,8 +466,9 @@ class PatchBuilder(object):
             tar.add(file)
         tar.add("signature")
         tar.add(self.detached_signature_file)
-        if self.patch_data.restart_script and os.path.isfile(self.patch_data.restart_script["name"]):
-            tar.add(self.patch_data.restart_script["name"])
+        if self.patch_data.restart_script and \
+                os.path.isfile(self.patch_data.restart_script["metadata_name"]):
+            tar.add(self.patch_data.restart_script["metadata_name"])
         tar.close()
 
         os.chdir(self.deploy_dir)
