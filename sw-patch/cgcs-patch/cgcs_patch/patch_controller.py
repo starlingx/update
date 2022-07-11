@@ -4,13 +4,12 @@ Copyright (c) 2014-2022 Wind River Systems, Inc.
 SPDX-License-Identifier: Apache-2.0
 
 """
+import configparser
 import gc
 import json
 import os
 import select
 import shutil
-import six
-from six.moves import configparser
 import socket
 import subprocess
 import tarfile
@@ -54,7 +53,6 @@ from cgcs_patch.base import PatchService
 
 import cgcs_patch.config as cfg
 import cgcs_patch.utils as utils
-
 
 import cgcs_patch.messages as messages
 import cgcs_patch.constants as constants
@@ -653,10 +651,7 @@ class PatchController(PatchService):
             pass
 
     def write_state_file(self):
-        if six.PY2:
-            config = configparser.ConfigParser()
-        elif six.PY3:
-            config = configparser.ConfigParser(strict=False)
+        config = configparser.ConfigParser(strict=False)
 
         cfgfile = open(state_file, 'w')
 
@@ -666,10 +661,7 @@ class PatchController(PatchService):
         cfgfile.close()
 
     def read_state_file(self):
-        if six.PY2:
-            config = configparser.ConfigParser()
-        elif six.PY3:
-            config = configparser.ConfigParser(strict=False)
+        config = configparser.ConfigParser(strict=False)
 
         config.read(state_file)
 
@@ -839,7 +831,7 @@ class PatchController(PatchService):
         Deletes the restart script (if any) associated with the patch
         :param patch_id: The patch ID
         '''
-        if not self.patch_data.metadata[patch_id]["restart_script"]:
+        if not self.patch_data.metadata[patch_id].get("restart_script"):
             return
 
         restart_script_path = "%s/%s" % (root_scripts_dir, self.patch_data.metadata[patch_id]["restart_script"])
@@ -1965,7 +1957,7 @@ class PatchController(PatchService):
             for patch_id in self.patch_data.metadata:
                 if (self.patch_data.metadata[patch_id]["patchstate"] in
                     [constants.PARTIAL_APPLY, constants.PARTIAL_REMOVE]) \
-                   and self.patch_data.metadata[patch_id]["restart_script"]:
+                   and self.patch_data.metadata[patch_id].get("restart_script"):
                     try:
                         restart_script_name = self.patch_data.metadata[patch_id]["restart_script"]
                         restart_script_path = "%s/%s" \
@@ -1983,7 +1975,7 @@ class PatchController(PatchService):
                         msg = "Failed to copy the restart script for %s" % patch_id
                         LOG.exception(msg)
                         raise PatchError(msg)
-                elif self.patch_data.metadata[patch_id]["restart_script"]:
+                elif self.patch_data.metadata[patch_id].get("restart_script"):
                     try:
                         restart_script_name = self.patch_data.metadata[patch_id]["restart_script"]
                         restart_script_path = "%s/%s" \
@@ -2205,7 +2197,7 @@ class PatchController(PatchService):
                 prefix=app_dependency_basename,
                 dir=constants.PATCH_STORAGE_DIR)
 
-            os.write(tmpfile, json.dumps(self.app_dependencies))
+            os.write(tmpfile, json.dumps(self.app_dependencies).encode())
             os.close(tmpfile)
 
             os.rename(tmpfname, app_dependency_filename)

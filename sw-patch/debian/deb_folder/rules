@@ -13,6 +13,9 @@ override_dh_auto_test:
 override_dh_auto_install:
 	echo
 
+override_dh_auto_clean:
+	python3 setup.py clean
+
 override_dh_install:
 	python3 setup.py install -f --install-layout=deb --root=${DEBIAN_DESTDIR}
 

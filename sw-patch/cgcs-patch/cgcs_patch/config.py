@@ -4,10 +4,10 @@ Copyright (c) 2014-2022 Wind River Systems, Inc.
 SPDX-License-Identifier: Apache-2.0
 
 """
+import configparser
 import io
 import logging
 import os
-from six.moves import configparser
 import socket
 
 import tsconfig.tsconfig as tsc

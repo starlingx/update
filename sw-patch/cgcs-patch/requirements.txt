@@ -3,9 +3,10 @@
 # process, which may cause wedges in the gate later.
 
 keystonemiddleware
-oslo_config
+lxml
+oslo.config
+netaddr
 pecan
 pycryptodomex
-lxml
 requests_toolbelt
 sh

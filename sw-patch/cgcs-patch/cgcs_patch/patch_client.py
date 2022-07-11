@@ -4,21 +4,17 @@ Copyright (c) 2014-2022 Wind River Systems, Inc.
 SPDX-License-Identifier: Apache-2.0
 
 """
-from __future__ import print_function
-from six.moves import input
-import requests
 import json
 import os
-import sys
-import shutil
 import re
-import time
+import requests
+import shutil
 import signal
-
 import subprocess
+import sys
 import textwrap
+import time
 
-# noinspection PyUnresolvedReferences
 from requests_toolbelt import MultipartEncoder
 
 import cgcs_patch.constants as constants
@@ -878,6 +874,8 @@ def query_dependencies(debug, args):
             if 'patches' in data:
                 for patch_id in sorted(data['patches']):
                     print(patch_id)
+            if 'error' in data and data["error"] != "":
+                print("Error: %s" % data.get("error"))
 
         elif req.status_code == 500:
             print("An internal error has occurred. Please check /var/log/patching.log for details")
@@ -1259,6 +1257,7 @@ def patch_report_app_dependencies_req(debug, args):  # pylint: disable=unused-ar
     if req.status_code == 200:
         return 0
     else:
+        print("An internal error has occurred. Please check /var/log/patching.log for details")
         return 1
 
 

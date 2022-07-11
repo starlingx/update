@@ -5,6 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 """
 
+import configparser
 from oslo_config import cfg
 import pecan
 
@@ -13,7 +14,6 @@ from cgcs_patch.authapi import config
 from cgcs_patch.authapi import hooks
 from cgcs_patch.authapi import policy
 
-from six.moves import configparser
 
 auth_opts = [
     cfg.StrOpt('auth_strategy',

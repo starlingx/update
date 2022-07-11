@@ -12,7 +12,7 @@ from cgcs_patch.patch_controller import PatchController
 
 class CgcsPatchControllerTestCase(testtools.TestCase):
 
-    @mock.patch('six.moves.builtins.open')
+    @mock.patch('builtins.open')
     def test_cgcs_patch_controller_instantiate(self, _mock_open):
         pc = PatchController()
         self.assertIsNotNone(pc)

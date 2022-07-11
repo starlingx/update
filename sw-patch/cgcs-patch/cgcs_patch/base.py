@@ -8,6 +8,7 @@ SPDX-License-Identifier: Apache-2.0
 import socket
 import struct
 import subprocess
+import sys
 import time
 
 import cgcs_patch.utils as utils
@@ -154,7 +155,7 @@ class PatchService(object):
         cmd = "ip maddr show %s | awk 'BEGIN {ORS=\"\"}; {if ($2 == \"%s\") print $2}'" % \
               (cfg.get_mgmt_iface(), self.mcast_addr)
         try:
-            result = subprocess.check_output(cmd, shell=True)
+            result = subprocess.check_output(cmd, shell=True).decode(sys.stdout.encoding)
 
             if result == self.mcast_addr:
                 return

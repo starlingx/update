@@ -854,7 +854,8 @@ class PatchFile(object):
             shutil.move("software.tar",
                         "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id))
 
-            if thispatch.metadata[patch_id]["restart_script"]:
+            # restart_script may not exist in metadata.
+            if thispatch.metadata[patch_id].get("restart_script"):
                 if not os.path.exists(root_scripts_dir):
                     os.makedirs(root_scripts_dir)
                 restart_script_name = thispatch.metadata[patch_id]["restart_script"]
