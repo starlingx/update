@@ -48,7 +48,7 @@ repo_root_dir = "/var/www/pages/updates"
 repo_dir = {SW_VERSION: "%s/rel-%s" % (repo_root_dir, SW_VERSION)}
 
 root_package_dir = "%s/packages" % patch_dir
-root_scripts_dir = "/etc/patching/patch-scripts"
+root_scripts_dir = "/opt/patching/patch-scripts"
 package_dir = {SW_VERSION: "%s/%s" % (root_package_dir, SW_VERSION)}
 
 logfile = "/var/log/patching.log"
