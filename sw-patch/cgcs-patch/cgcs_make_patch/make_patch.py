@@ -31,11 +31,7 @@ This will create a new commit in the build ostree_repo
     --clone-repo ostree_test
 
 Once the script is done the .patch file can be located at:
-$STX_BUILD_HOME/localdisk/lat/std/deploy/
-
-Pending items:
-- Modify patch Status
-
+$STX_BUILD_HOME/localdisk/deploy/
 """
 import argparse
 import hashlib
@@ -52,10 +48,13 @@ from xml.dom import minidom
 # Signing function
 sys.path.insert(0, "../../cgcs-patch")
 from cgcs_patch.patch_signing import sign_files  # noqa: E402 pylint: disable=wrong-import-position
+from cgcs_patch.patch_verify import verify_files  # noqa: E402 pylint: disable=wrong-import-position
 
-# STATUS_OBSOLETE = 'OBS'
-# STATUS_RELEASED = 'REL'
-STATUS_DEVELOPEMENT = 'DEV'
+PATCH_STATUS = {
+    'release': 'REL',
+    'obsolete': 'OBS',
+    'development': 'DEV'
+}
 
 METADATA_TAGS = ['ID', 'SW_VERSION', 'SUMMARY', 'DESCRIPTION', 'INSTALL_INSTRUCTIONS', 'WARNINGS', 'STATUS',
                  'UNREMOVABLE', 'REBOOT_REQUIRED', 'REQUIRES', 'RESTART_SCRIPT', 'APPLY_ACTIVE_RELEASE_ONLY']
@@ -100,6 +99,21 @@ class PatchBuilderInitError(PatchError):
 
 class PatchRecipeXMLFail(PatchError):
     """Unkown tag"""
+    pass
+
+
+class PatchInvalidStatus(PatchError):
+    """Invalid status"""
+    pass
+
+
+class PatchModifyError(PatchError):
+    """Error while modifying patch"""
+    pass
+
+
+class PatchValidationFailure(PatchError):
+    """Patch validation failure"""
     pass
 
 
@@ -202,7 +216,7 @@ class PatchBuilder(object):
     def __init__(self, delta_dir="delta_dir"):
         try:
             # ostree repo location
-            self.deploy_dir = os.path.join(os.environ["STX_BUILD_HOME"], "localdisk/lat/std/deploy")
+            self.deploy_dir = os.path.join(os.environ["STX_BUILD_HOME"], "localdisk/deploy")
             self.ostree_repo = os.path.join(self.deploy_dir, "ostree_repo")
             self.delta_dir = delta_dir
             self.detached_signature_file = "signature.v2"
@@ -243,7 +257,7 @@ class PatchBuilder(object):
         if "STATUS" in self.patch_data.metadata:
             self.__add_text_tag_to_xml(top, "status", self.patch_data.metadata["STATUS"])
         else:
-            self.__add_text_tag_to_xml(top, "status", STATUS_DEVELOPEMENT)
+            self.__add_text_tag_to_xml(top, "status", PATCH_STATUS['development'])
 
         self.__add_text_tag_to_xml(top, "unremovable", self.patch_data.metadata["UNREMOVABLE"])
         self.__add_text_tag_to_xml(top, "reboot_required", self.patch_data.metadata["REBOOT_REQUIRED"])
@@ -344,18 +358,59 @@ class PatchBuilder(object):
 
         return commits_from_base
 
-    def __sign_official_patches(self):
+    def __sign_official_patches(self, patch_file):
         """
         Sign formal patch
         Called internally once a patch is created and formal flag is set to true
+        :param patch_file full path to the patch file
         """
-        log.info("Signing patch %s", self.patch_file_name)
+        log.info("Signing patch %s", patch_file)
         try:
-            patch_file_path = os.path.join(self.deploy_dir, self.patch_file_name)
-            subprocess.check_call(["sign_patch_formal.sh", patch_file_path])
+            # patch_file_path = os.path.join(self.deploy_dir, self.patch_file_name)
+            subprocess.check_call(["sign_patch_formal.sh", patch_file])
         except subprocess.CalledProcessError as e:
             log.exception("Failed to sign official patch. Call to sign_patch_formal.sh process returned non-zero exit status %i", e.returncode)
-            raise SystemExit(e.returncode)
+        except FileNotFoundError:
+            log.exception("sign_patch_formal.sh not found, make sure $STX_BUILD_HOME/repo/cgcs-root/build-tools is in the $PATH")
+
+    def __sign_and_pack(self, patch_file, formal=False):
+        """
+        Generates the patch signatures and pack the .patch file
+        :param patch_file .patch file full path
+        """
+        filelist = ["metadata.tar", "software.tar"]
+        # Generate the local signature file
+        sig = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+        for f in filelist:
+            sig ^= get_md5(f)
+
+        sigfile = open("signature", "w")
+        sigfile.write("%x" % sig)
+        sigfile.close()
+
+        # this comes from patch_functions write_patch
+        # Generate the detached signature
+        #
+        # Note: if cert_type requests a formal signature, but the signing key
+        #    is not found, we'll instead sign with the "dev" key and
+        #    need_resign_with_formal is set to True.
+        need_resign_with_formal = sign_files(
+            filelist,
+            self.detached_signature_file,
+            cert_type=None)
+
+        log.debug("Formal signing status %s", need_resign_with_formal)
+
+        # Save files into .patch
+        files = [f for f in os.listdir('.') if os.path.isfile(f)]
+        tar = tarfile.open(patch_file, "w:gz")
+        for file in files:
+            tar.add(file)
+        tar.close()
+        log.info("Patch file created %s", patch_file)
+        if formal:
+            log.info("Trying to sign formal patch")
+            self.__sign_official_patches(patch_file)
 
     def prepare_env(self, clone_repo="ostree-clone"):
         """
@@ -429,6 +484,7 @@ class PatchBuilder(object):
         tar = tarfile.open("metadata.tar", "w")
         tar.add("metadata.xml")
         tar.close()
+        os.remove("metadata.xml")
 
         if self.patch_data.restart_script:
             log.info("Saving restart scripts")
@@ -437,39 +493,11 @@ class PatchBuilder(object):
                 self.patch_data.restart_script["metadata_name"]
             )
 
-        filelist = ["metadata.tar", "software.tar"]
-        # Generate the local signature file
-        sig = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-        for f in filelist:
-            sig ^= get_md5(f)
-
-        sigfile = open("signature", "w")
-        sigfile.write("%x" % sig)
-        sigfile.close()
-
-        # this comes from patch_functions write_patch
-        # Generate the detached signature
-        #
-        # Note: if cert_type requests a formal signature, but the signing key
-        #    is not found, we'll instead sign with the "dev" key and
-        #    need_resign_with_formal is set to True.
-        need_resign_with_formal = sign_files(
-            filelist,
-            self.detached_signature_file,
-            cert_type=None)
-
-        log.debug("Formal signing status %s", need_resign_with_formal)
-
-        # Create the patch
-        tar = tarfile.open(os.path.join(self.deploy_dir, self.patch_file_name), "w:gz")
-        for file in filelist:
-            tar.add(file)
-        tar.add("signature")
-        tar.add(self.detached_signature_file)
-        if self.patch_data.restart_script and \
-                os.path.isfile(self.patch_data.restart_script["metadata_name"]):
-            tar.add(self.patch_data.restart_script["metadata_name"])
-        tar.close()
+        # Sign and create the .patch file
+        self.__sign_and_pack(
+            os.path.join(self.deploy_dir, self.patch_file_name),
+            formal
+        )
 
         os.chdir(self.deploy_dir)
         shutil.rmtree(tmpdir)
@@ -477,9 +505,91 @@ class PatchBuilder(object):
 
         log.info("Patch file created %s at %s", self.patch_file_name, self.deploy_dir)
 
-        if formal:
-            log.info("Trying to sign formal patch")
-            self.__sign_official_patches()
+    def modify_metadata_text(self, filename, key, value):
+        """
+        Open an xml file, find first element matching 'key' and replace the text with 'value'
+        """
+        new_filename = "%s.new" % filename
+        tree = ET.parse(filename)
+
+        # Prevent a proliferation of carriage returns when we write this XML back out to file.
+        for e in tree.iter():
+            if e.text is not None:
+                e.text = e.text.rstrip()
+            if e.tail is not None:
+                e.tail = e.tail.rstrip()
+
+        root = tree.getroot()
+        # Make the substitution
+        e = root.find(key)
+        if e is None:
+            msg = "modify_metadata_text: failed to find tag '%s'" % key
+            log.error(msg)
+            raise PatchValidationFailure(msg)
+        e.text = value
+
+        # write the modified file
+        outfile = open(new_filename, 'w')
+        rough_xml = ET.tostring(root)
+        outfile.write(minidom.parseString(rough_xml).toprettyxml(indent="  "))
+        outfile.close()
+        os.rename(new_filename, filename)
+
+    def read_patch(self, path):
+        """
+        Extract the patch to current dir and validate signature
+        """
+        # Open the patch file and extract the contents to the current dir
+        tar = tarfile.open(path, "r:gz")
+        tar.extractall()
+        # Checks signature
+        sigfile = open("signature", "r")
+        sig = int(sigfile.read(), 16)
+        sigfile.close()
+
+        filelist = ["metadata.tar", "software.tar"]
+        expected_sig = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+        for f in filelist:
+            sig ^= get_md5(f)
+
+        if sig != expected_sig:
+            msg = "Patch failed verification"
+            log.error(msg)
+            raise PatchValidationFailure(msg)
+
+        # Verify detached signature
+        if os.path.exists(self.detached_signature_file):
+            sig_valid = verify_files(
+                filelist,
+                self.detached_signature_file,
+                cert_type=None)
+            sig_valid = True
+            if sig_valid is True:
+                msg = "Signature verified, patch has been signed"
+            else:
+                msg = "Signature check failed"
+                raise PatchValidationFailure(msg)
+        else:
+            msg = "Patch has not been signed"
+            raise PatchValidationFailure(msg)
+
+        # Extract metadata xml
+        tar = tarfile.open("metadata.tar")
+        tar.extractall()
+
+    def write_patch(self, patch_file, formal=False):
+        """
+        Write files into .patch file and sign
+        """
+        log.info("Saving patch file")
+        tar = tarfile.open("metadata.tar", "w")
+        tar.add("metadata.xml")
+        tar.close()
+        # remove the xml
+        os.remove("metadata.xml")
+
+        # Sign and create the .patch file
+        self.__sign_and_pack(patch_file, formal)
 
 
 def handle_create(params):
@@ -510,6 +620,38 @@ def handle_prepare(params):
     patch_builder.prepare_env(params.clone_repo)
 
 
+def handle_modify(params):
+    """
+    Modify patch status and resigns
+    """
+    log.info("Modifying patch %s", params.patch_file)
+    if not os.path.isfile(params.patch_file):
+        raise FileNotFoundError("Patch file not found")
+
+    if params.status not in PATCH_STATUS:
+        raise PatchInvalidStatus(f"Supported status are {PATCH_STATUS}")
+
+    # Modify patch
+    orig_wd = os.getcwd()
+    workdir = tempfile.mkdtemp(prefix="patch_modify_")
+    os.chdir(workdir)
+
+    try:
+        p = PatchBuilder()
+        # extract and validate signatures
+        p.read_patch(params.patch_file)
+        log.info("Updating patch status to %s", PATCH_STATUS[params.status])
+        # Update Status
+        p.modify_metadata_text("metadata.xml", "status", PATCH_STATUS[params.status])
+        p.write_patch(params.patch_file, params.formal)
+
+    except PatchModifyError:
+        log.exception("Error while modifying patch")
+    finally:
+        shutil.rmtree(workdir)
+        os.chdir(orig_wd)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Debian make_patch helper")
 
@@ -532,6 +674,15 @@ if __name__ == "__main__":
     create_parser.add_argument("-d", "--delta-dir", type=str, help="Delta dir name", default="delta-dir")
     create_parser.add_argument("-c", "--clone-repo", type=str, help="Clone repo directory name", default=None, required=True)
 
+    # Modify Patch action
+    modify_parser = subparsers.add_parser("modify",
+                                          add_help=False,
+                                          description="modify patch status",
+                                          help="Modify patch status - DEV, REL, OBS")
+    modify_parser.add_argument("-s", "--status", type=str, help="Patch status", required=True)
+    modify_parser.add_argument("-f", "--formal", action="store_true", help="Formal patch flag")
+    modify_parser.add_argument("-pf", "--patch-file", type=str, help="Patch file", required=True)
+
     args = parser.parse_args()
     log.debug("Args: %s", args)
 
@@ -539,5 +690,7 @@ if __name__ == "__main__":
         handle_create(args)
     elif args.cmd == "prepare":
         handle_prepare(args)
+    elif args.cmd == "modify":
+        handle_modify(args)
 
     log.info("Done")

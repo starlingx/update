@@ -252,7 +252,7 @@ if __name__ == "__main__":
     patch_env = PatchEnv()
     log.info("Environment: %s", patch_env)
 
-    deploy_dir = os.path.join(patch_env.build_home, "localdisk", "lat", "std", "deploy")
+    deploy_dir = os.path.join(patch_env.build_home, "localdisk", "deploy")
     ostree_repo_build = os.path.join(deploy_dir, "ostree_repo")
 
     # Setup env
