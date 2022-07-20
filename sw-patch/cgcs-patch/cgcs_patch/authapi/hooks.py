@@ -18,15 +18,16 @@
 #
 # Copyright (c) 2013-2022 Wind River Systems, Inc.
 #
-
-
+# SPDX-License-Identifier: Apache-2.0
+#
 from oslo_config import cfg
 from pecan import hooks
+from webob import exc
 
 from sysinv.common import context
-from sysinv.common import utils
 from sysinv.openstack.common import policy
-from webob import exc
+
+from cgcs_patch import utils
 
 
 class ConfigHook(hooks.PecanHook):

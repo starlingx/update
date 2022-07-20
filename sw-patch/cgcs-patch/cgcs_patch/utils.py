@@ -1,24 +1,19 @@
 """
-Copyright (c) 2016-2019 Wind River Systems, Inc.
+Copyright (c) 2016-2022 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
-
+import logging
 from netaddr import IPAddress
-import cgcs_patch.constants as constants
+import os
 import socket
+from socket import if_nametoindex as if_nametoindex_func
 
-try:
-    # Python3
-    from socket import if_nametoindex as if_nametoindex_func
-except ImportError:
-    # Python2
-    import ctypes
-    import ctypes.util
+import cgcs_patch.constants as constants
 
-    libc = ctypes.CDLL(ctypes.util.find_library('c'))
-    if_nametoindex_func = libc.if_nametoindex
+
+LOG = logging.getLogger('main_logger')
 
 
 def if_nametoindex(name):
@@ -81,3 +76,40 @@ def ip_to_versioned_localhost(ip_address_string):
         return "::1"
     else:
         return "localhost"
+
+
+def read_cached_file(filename, cache_info, reload_func=None):
+    """Read from a file if it has been modified.
+
+    :param cache_info: dictionary to hold opaque cache.
+    :param reload_func: optional function to be called with data when
+                        file is reloaded due to a modification.
+
+    :returns: data from file
+
+    """
+    mtime = os.path.getmtime(filename)
+    if not cache_info or mtime != cache_info.get('mtime'):
+        LOG.debug("Reloading cached file %s", filename)
+        with open(filename) as fap:
+            cache_info['data'] = fap.read()
+        cache_info['mtime'] = mtime
+        if reload_func:
+            reload_func(cache_info['data'])
+    return cache_info['data']
+
+
+def safe_rstrip(value, chars=None):
+    """Removes trailing characters from a string if that does not make it empty
+
+    :param value: A string value that will be stripped.
+    :param chars: Characters to remove.
+    :return: Stripped value.
+
+    """
+    if not isinstance(value, str):
+        LOG.warn("Failed to remove trailing character. Returning original "
+                 "object. Supplied object is not a string: %s", value)
+        return value
+
+    return value.rstrip(chars) or value

@@ -11,9 +11,13 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations
 # under the License.
-
+#
+# Copyright (c) 2022 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
 from keystonemiddleware import auth_token
-from sysinv.common import utils
+from cgcs_patch import utils
 
 
 class AuthTokenMiddleware(auth_token.AuthProtocol):

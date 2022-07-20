@@ -22,8 +22,9 @@
 import os.path
 
 from sysinv.common import exception
-from sysinv.common import utils
 from sysinv.openstack.common import policy
+
+from cgcs_patch import utils
 
 
 _POLICY_PATH = None
