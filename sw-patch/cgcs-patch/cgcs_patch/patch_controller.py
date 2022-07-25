@@ -707,6 +707,21 @@ class PatchController(PatchService):
             LOG.error("Failed to rsync: %s", output)
             return False
 
+        try:
+            for neighbour in list(self.hosts):
+                if (self.hosts[neighbour].nodetype == "controller" and
+                        self.hosts[neighbour].ip == host):
+                    output = subprocess.check_output(["rsync",
+                                                      "-acv",
+                                                      "--delete",
+                                                      "rsync://%s/feed/" % host_url,
+                                                      "%s/" % constants.FEED_OSTREE_BASE_DIR],
+                                                     stderr=subprocess.STDOUT)
+            LOG.info("Synced to mate feed via rsync: %s", output)
+        except subprocess.CalledProcessError:
+            LOG.error("Failed to rsync: %s", output)
+            return False
+
         self.read_state_file()
 
         self.patch_data_lock.acquire()
