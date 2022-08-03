@@ -14,7 +14,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-# Copyright (c) 2014-2017 Wind River Systems, Inc.
+# Copyright (c) 2014-2022 Wind River Systems, Inc.
 #
 
 """Policy Engine For Patching."""
@@ -52,7 +52,8 @@ def init():
 
 def _set_rules(data):
     default_rule = "rule:admin_api"
-    policy.set_rules(policy.Rules.load_json(data, default_rule))
+    rules = policy.Rules.load_rules(data, default_rule, [])
+    policy.set_rules(rules)
 
 
 def enforce(context, action, target, do_raise=True):
