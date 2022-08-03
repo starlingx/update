@@ -825,12 +825,6 @@ class PatchController(PatchService):
                 patch_dependency_list = patch_dependency_list + self.get_patch_dependency_list(req_patch)
             return patch_dependency_list
 
-    def get_store_filename(self, patch_sw_version, contentname):
-        """Returns the path of a content file from the store"""
-        content_dir = package_dir[patch_sw_version]
-        contentfile = "%s/%s" % (content_dir, contentname)
-        return contentfile
-
     def get_ostree_tar_filename(self, patch_sw_version, patch_id):
         '''
         Returns the path of the ostree tarball
@@ -857,17 +851,6 @@ class PatchController(PatchService):
             msg = "Failed to remove restart script for %s" % patch_id
             LOG.exception(msg)
             raise PatchError(msg)
-
-    def get_repo_filename(self, patch_sw_version, contentname):
-        contentfile = self.get_store_filename(patch_sw_version, contentname)
-        if not os.path.isfile(contentfile):
-            msg = "Could not find content: %s" % contentfile
-            LOG.error(msg)
-            return None
-
-        # OSTREE:  need to determine the actual path for the content ie: Content
-        repo_filename = "%s/Content/%s" % (repo_dir[patch_sw_version], contentname)
-        return repo_filename
 
     def run_semantic_check(self, action, patch_list):
         if not os.path.exists(INITIAL_CONFIG_COMPLETE_FLAG):
@@ -1817,11 +1800,7 @@ class PatchController(PatchService):
 
         failure = False
         recursive = True
-
-        keep = {}
-        cleanup = {}
         cleanup_files = set()
-
         results = {"info": "",
                    "error": ""}
 
@@ -1874,22 +1853,26 @@ class PatchController(PatchService):
             results["error"] += errormsg
             return results
 
-        # Get list of packages
-        self.patch_data_lock.acquire()
-        for patch_id in commit_list:
-            patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
-
-            if patch_sw_version not in keep:
-                keep[patch_sw_version] = {}
-            if patch_sw_version not in cleanup:
-                cleanup[patch_sw_version] = {}
-
-        self.patch_data_lock.release()
+        with self.patch_data_lock:
+            for patch_id in commit_list:
+                # Fetch file paths that need to be cleaned up to
+                # free patch storage disk space
+                if self.patch_data.metadata[patch_id].get("restart_script"):
+                    restart_script_path = "%s/%s" % \
+                        (root_scripts_dir,
+                         self.patch_data.metadata[patch_id]["restart_script"])
+                if os.path.exists(restart_script_path):
+                    cleanup_files.add(restart_script_path)
+                patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
+                abs_ostree_tar_dir = package_dir[patch_sw_version]
+                software_tar_path = "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id)
+                if os.path.exists(software_tar_path):
+                    cleanup_files.add(software_tar_path)
 
         # Calculate disk space
         disk_space = 0
-        for rpmfile in cleanup_files:
-            statinfo = os.stat(rpmfile)
+        for file in cleanup_files:
+            statinfo = os.stat(file)
             disk_space += statinfo.st_size
 
         if dry_run:
@@ -1912,25 +1895,13 @@ class PatchController(PatchService):
                     raise MetadataFail(msg)
 
         # Delete the files
-        for contentfile in cleanup_files:
+        for file in cleanup_files:
             try:
-                os.remove(contentfile)
+                os.remove(file)
             except OSError:
-                msg = "Failed to remove: %s" % contentfile
+                msg = "Failed to remove: %s" % file
                 LOG.exception(msg)
                 raise MetadataFail(msg)
-
-        # OSTREE:  this repo update code needs to be re-examined
-        for ver, rdir in repo_dir.items():
-            try:
-                # todo(jcasteli)  determine if ostree change needs additional actions
-                # old code was calling 'createrepo' for rpms
-                output = "OSTREE determined a change occurred rdir=%s" % rdir
-                LOG.info("Repo[%s] updated:\n%s", ver, output)
-            except Exception:
-                msg = "Failed to update the repo for %s" % ver
-                LOG.exception(msg)
-                raise PatchFail(msg)
 
         self.patch_data.load_all()
 

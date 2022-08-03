@@ -557,7 +557,8 @@ class PatchFile(object):
 
     @staticmethod
     def write_patch(patchfile, cert_type=None):
-        # Write the patch file. Assumes we are in a directory containing metadata.tar, and software.tar.
+        # Write the patch file. Assumes we are in a directory containing
+        # metadata.tar and software.tar.
 
         # Generate the metadata tarfile
         tar = tarfile.open("metadata.tar", "w")
