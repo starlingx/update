@@ -2,11 +2,15 @@
 # of appearance. Changing the order has an impact on the overall integration
 # process, which may cause wedges in the gate later.
 
+keystoneauth1
 keystonemiddleware
 lxml
 oslo.config
+oslo.policy
+oslo.serialization
 netaddr
 pecan
 pycryptodomex
 requests_toolbelt
 sh
+WebOb

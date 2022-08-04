@@ -16,104 +16,76 @@
 #
 # Copyright (c) 2014-2022 Wind River Systems, Inc.
 #
+# SPDX-License-Identifier: Apache-2.0
+#
 
 """Policy Engine For Patching."""
 
-import os.path
-
-from sysinv.common import exception
-from sysinv.openstack.common import policy
-
-from cgcs_patch import utils
+from oslo_config import cfg
+from oslo_policy import policy
 
 
-_POLICY_PATH = None
-_POLICY_CACHE = {}
+base_rules = [
+    policy.RuleDefault('admin_required', 'role:admin or is_admin:1',
+                       description='Who is considered an admin'),
+    policy.RuleDefault('admin_api', 'rule:admin_required',
+                       description='admin API requirement'),
+    policy.RuleDefault('default', 'rule:admin_api',
+                       description='default rule'),
+]
+
+CONF = cfg.CONF
+_ENFORCER = None
 
 
-def reset():
-    global _POLICY_PATH
-    global _POLICY_CACHE
-    _POLICY_PATH = None
-    _POLICY_CACHE = {}
-    policy.reset()
+def init(policy_file=None, rules=None,
+         default_rule=None, use_conf=True, overwrite=True):
+    """Init an Enforcer class.
 
+       oslo policy supports change policy rule dynamically.
+       policy.enforce will reload the policy rules if it detects
+       the policy files have been touched.
 
-def init():
-    global _POLICY_PATH
-    global _POLICY_CACHE
-    if not _POLICY_PATH:
-        _POLICY_PATH = '/etc/patching/policy.json'
-        if not os.path.exists(_POLICY_PATH):
-            raise exception.ConfigNotFound(message='/etc/patching/policy.json')
-    utils.read_cached_file(_POLICY_PATH, _POLICY_CACHE,
-                           reload_func=_set_rules)
-
-
-def _set_rules(data):
-    default_rule = "rule:admin_api"
-    rules = policy.Rules.load_rules(data, default_rule, [])
-    policy.set_rules(rules)
-
-
-def enforce(context, action, target, do_raise=True):
-    """Verifies that the action is valid on the target in this context.
-
-       :param context: sysinv context
-       :param action: string representing the action to be checked
-           this should be colon separated for clarity.
-           i.e. ``compute:create_instance``,
-           ``compute:attach_volume``,
-           ``volume:attach_volume``
-       :param target: dictionary representing the object of the action
-           for object creation this should be a dictionary representing the
-           location of the object e.g. ``{'project_id': context.project_id}``
-       :param do_raise: if True (the default), raises PolicyNotAuthorized;
-           if False, returns False
-
-       :raises sysinv.exception.PolicyNotAuthorized: if verification fails
-           and do_raise is True.
-
-       :return: returns a non-False value (not necessarily "True") if
-           authorized, and the exact value False if not authorized and
-           do_raise is False.
+        :param policy_file: Custom policy file to use, if none is
+                            specified, ``conf.policy_file`` will be
+                            used.
+        :param rules: Default dictionary / Rules to use. It will be
+                      considered just in the first instantiation. If
+                      :meth:`load_rules` with ``force_reload=True``,
+                      :meth:`clear` or :meth:`set_rules` with
+                      ``overwrite=True`` is called this will be overwritten.
+        :param default_rule: Default rule to use, conf.default_rule will
+                             be used if none is specified.
+        :param use_conf: Whether to load rules from cache or config file.
+        :param overwrite: Whether to overwrite existing rules when reload rules
+                          from config file.
     """
+    global _ENFORCER
+    if not _ENFORCER:
+        # https://docs.openstack.org/oslo.policy/latest/user/usage.html
+        _ENFORCER = policy.Enforcer(CONF,
+                                    policy_file=policy_file,
+                                    rules=rules,
+                                    default_rule=default_rule,
+                                    use_conf=use_conf,
+                                    overwrite=overwrite)
+        _ENFORCER.register_defaults(base_rules)
+    return _ENFORCER
+
+
+def authorize(rule, target, creds, do_raise=True):
+    """A wrapper around 'authorize' from 'oslo_policy.policy'."""
     init()
+    return _ENFORCER.authorize(rule, target, creds, do_raise=do_raise)
 
-    credentials = context.to_dict()
 
-    # Add the exception arguments if asked to do a raise
-    extra = {}
-    if do_raise:
-        extra.update(exc=exception.PolicyNotAuthorized, action=action)
-
-    return policy.check(action, target, credentials, **extra)
+def default_target(context):
+    return {'project_id': context.project_id, 'user_id': context.user_id}
 
 
 def check_is_admin(context):
-    """Whether or not role contains 'admin' role according to policy setting.
-
+    """Whether or not roles contains 'admin' role according to policy setting.
     """
-    init()
-
-    credentials = context.to_dict()
-    target = credentials
-
-    return policy.check('context_is_admin', target, credentials)
-
-
-@policy.register('context_is_admin')
-class IsAdminCheck(policy.Check):
-    """An explicit check for is_admin."""
-
-    def __init__(self, kind, match):
-        """Initialize the check."""
-
-        self.expected = (match.lower() == 'true')
-
-        super(IsAdminCheck, self).__init__(kind, str(self.expected))
-
-    def __call__(self, target, creds):
-        """Determine whether is_admin matches the requested value."""
-
-        return creds['is_admin'] == self.expected
+    return authorize('context_is_admin',       # rule
+                     default_target(context),  # target
+                     context)                  # creds
