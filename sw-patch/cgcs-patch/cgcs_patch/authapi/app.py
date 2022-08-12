@@ -1,11 +1,10 @@
 """
-Copyright (c) 2014-2017 Wind River Systems, Inc.
+Copyright (c) 2014-2022 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
 
-import configparser
 from oslo_config import cfg
 import pecan
 
@@ -13,7 +12,6 @@ from cgcs_patch.authapi import acl
 from cgcs_patch.authapi import config
 from cgcs_patch.authapi import hooks
 from cgcs_patch.authapi import policy
-
 
 auth_opts = [
     cfg.StrOpt('auth_strategy',
@@ -32,9 +30,6 @@ def get_pecan_config():
 
 
 def setup_app(pecan_config=None, extra_hooks=None):
-    config_parser = configparser.RawConfigParser()
-    config_parser.read('/etc/patching/patching.conf')
-
     policy.init()
 
     app_hooks = [hooks.ConfigHook(),
@@ -47,7 +42,7 @@ def setup_app(pecan_config=None, extra_hooks=None):
         pecan_config = get_pecan_config()
 
     if pecan_config.app.enable_acl:
-        app_hooks.append(hooks.AdminAuthHook())
+        app_hooks.append(hooks.AccessPolicyHook())
 
     pecan.configuration.set_config(dict(pecan_config), overwrite=True)
 
@@ -61,8 +56,10 @@ def setup_app(pecan_config=None, extra_hooks=None):
         guess_content_type_from_ext=False,  # Avoid mime-type lookup
     )
 
+    # config_parser must contain the keystone_auth
     if pecan_config.app.enable_acl:
-        return acl.install(app, config_parser, pecan_config.app.acl_public_routes)
+        CONF.import_group(acl.OPT_GROUP_NAME, acl.OPT_GROUP_PROVIDER)
+        return acl.install(app, CONF, pecan_config.app.acl_public_routes)
 
     return app
 

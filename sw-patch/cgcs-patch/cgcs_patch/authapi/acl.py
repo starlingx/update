@@ -1,16 +1,14 @@
-"""
-Copyright (c) 2014-2017 Wind River Systems, Inc.
+#
+# Copyright (c) 2014-2022 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
 
-SPDX-License-Identifier: Apache-2.0
-
-"""
-
+"""Access Control Lists (ACL's) control access the API server."""
 from cgcs_patch.authapi import auth_token
 
 OPT_GROUP_NAME = 'keystone_authtoken'
-
-
-"""Access Control Lists (ACL's) control access the API server."""
+OPT_GROUP_PROVIDER = 'keystonemiddleware.auth_token'
 
 
 def install(app, conf, public_routes):
@@ -23,8 +21,7 @@ def install(app, conf, public_routes):
     :return: The same WSGI application with ACL installed.
 
     """
-
-    keystone_config = dict(conf.items(OPT_GROUP_NAME))
+    keystone_config = dict(conf.get(OPT_GROUP_NAME))
     return auth_token.AuthTokenMiddleware(app,
                                           conf=keystone_config,
                                           public_api_routes=public_routes)

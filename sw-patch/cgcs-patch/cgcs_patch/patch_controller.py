@@ -2559,6 +2559,13 @@ class PatchControllerMainThread(threading.Thread):
 
 
 def main():
+    # The following call to CONF is to ensure the oslo config
+    # has been called to specify a valid config dir.
+    # Otherwise oslo_policy will fail when it looks for its files.
+    CONF(
+        (),  # Required to load an anonymous configuration
+        default_config_files=['/etc/patching/patching.conf', ]
+    )
     configure_logging()
 
     cfg.read_config()

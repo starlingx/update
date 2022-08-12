@@ -21,12 +21,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 from oslo_config import cfg
+from oslo_serialization import jsonutils
 from pecan import hooks
 from webob import exc
 
-from sysinv.common import context
-from sysinv.openstack.common import policy
-
+from cgcs_patch.authapi.context import RequestContext
+from cgcs_patch.authapi import policy
 from cgcs_patch import utils
 
 
@@ -56,6 +56,9 @@ class ContextHook(hooks.PecanHook):
         The flag is set to True, if X-Roles contains either an administrator
         or admin substring. Otherwise it is set to False.
 
+    X-Project-Name:
+        Used for context.project_name.
+
     """
     def __init__(self, public_api_routes):
         self.public_api_routes = public_api_routes
@@ -66,36 +69,54 @@ class ContextHook(hooks.PecanHook):
         user_id = state.request.headers.get('X-User', user_id)
         tenant = state.request.headers.get('X-Tenant-Id')
         tenant = state.request.headers.get('X-Tenant', tenant)
+        project_name = state.request.headers.get('X-Project-Name')
         domain_id = state.request.headers.get('X-User-Domain-Id')
         domain_name = state.request.headers.get('X-User-Domain-Name')
         auth_token = state.request.headers.get('X-Auth-Token', None)
         creds = {'roles': state.request.headers.get('X-Roles', '').split(',')}
+        catalog_header = state.request.headers.get('X-Service-Catalog')
+        service_catalog = None
+        if catalog_header:
+            try:
+                service_catalog = jsonutils.loads(catalog_header)
+            except ValueError:
+                raise exc.HTTPInternalServerError(
+                    'Invalid service catalog json.')
 
-        is_admin = policy.check('admin', state.request.headers, creds)
+        is_admin = policy.authorize('admin_api', {}, creds, do_raise=False)
 
         path = utils.safe_rstrip(state.request.path, '/')
         is_public_api = path in self.public_api_routes
 
-        state.request.context = context.RequestContext(
+        state.request.context = RequestContext(
             auth_token=auth_token,
             user=user_id,
             tenant=tenant,
             domain_id=domain_id,
             domain_name=domain_name,
             is_admin=is_admin,
-            is_public_api=is_public_api)
+            is_public_api=is_public_api,
+            project_name=project_name,
+            roles=creds['roles'],
+            service_catalog=service_catalog)
 
 
-class AdminAuthHook(hooks.PecanHook):
-    """Verify that the user has admin rights.
-
-    Checks whether the request context is an admin context and
-    rejects the request otherwise.
-
+class AccessPolicyHook(hooks.PecanHook):
+    """Verify that the user has the needed credentials
+       to execute the action.
     """
     def before(self, state):
-        ctx = state.request.context
-        is_admin_api = policy.check('admin_api', {}, ctx.to_dict())
-
-        if not is_admin_api and not ctx.is_public_api:
-            raise exc.HTTPForbidden()
+        controller = state.controller.__self__
+        if hasattr(controller, 'enforce_policy'):
+            controller_method = state.controller.__name__
+            controller.enforce_policy(controller_method,
+                                      state.request)
+        else:
+            context = state.request.context
+            is_admin_api = policy.authorize(
+                'admin_api',
+                {},
+                context.to_dict(),
+                do_raise=False)
+            if not is_admin_api and not context.is_public_api:
+                raise exc.HTTPForbidden()
