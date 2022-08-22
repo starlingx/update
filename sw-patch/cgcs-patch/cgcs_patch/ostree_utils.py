@@ -220,7 +220,7 @@ def fetch_pending_deployment():
     :return: The deployment ID of the pending deployment
     """
 
-    cmd = "ostree admin status |grep pending  |awk '{printf $2}'"
+    cmd = "ostree admin status | grep pending |awk '{printf $2}'"
 
     try:
         output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
@@ -260,3 +260,60 @@ def mount_new_deployment(deployment_dir):
                    % (e.stderr.decode("utf-8"))
         LOG.info(info_msg)
         raise OSTreeCommandFail(msg)
+
+
+def delete_older_deployments():
+    """
+    Delete all older deployments after a reboot to save space
+    """
+    # Sample command and output that is parsed to get the list of
+    # deployment IDs
+    #
+    # Command: ostree admin status | grep debian
+    #
+    # Output:
+    #
+    # * debian 3334dc80691a38c0ba6c519ec4b4b449f8420e98ac4d8bded3436ade56bb229d.2
+    # debian 3334dc80691a38c0ba6c519ec4b4b449f8420e98ac4d8bded3436ade56bb229d.1 (rollback)
+    # debian 3334dc80691a38c0ba6c519ec4b4b449f8420e98ac4d8bded3436ade56bb229d.0
+
+    cmd = "ostree admin status | grep debian"
+
+    try:
+        output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to fetch ostree admin status."
+        info_msg = "OSTree Admin Status Error: return code: %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.info(info_msg)
+        raise OSTreeCommandFail(msg)
+
+    # Store the output of the above command in a string
+    output_string = output.stdout.decode('utf-8')
+
+    # Parse the string to get the latest commit for the ostree
+    split_output_string = output_string.split()
+    deployment_id_list = []
+    for index, deployment_id in enumerate(split_output_string):
+        if deployment_id == "debian":
+            deployment_id_list.append(split_output_string[index + 1])
+
+    # After a reboot, the deployment ID at the 0th index of the list
+    # is always the active deployment and the deployment ID at the
+    # 1st index of the list is always the fallback deployment.
+    # We want to delete all deployments except the two mentioned above.
+    # This means we will undeploy all deployments starting from the
+    # 2nd index of deployment_id_list
+
+    for index in reversed(range(2, len(deployment_id_list))):
+        try:
+            cmd = "ostree admin undeploy %s" % index
+            output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
+            info_log = "Deleted ostree deployment %s" % deployment_id_list[index]
+            LOG.info(info_log)
+        except subprocess.CalledProcessError as e:
+            msg = "Failed to undeploy ostree deployment %s." % deployment_id_list[index]
+            info_msg = "OSTree Undeploy Error: return code: %s , Output: %s" \
+                       % (e.returncode, e.stderr.decode("utf-8"))
+            LOG.info(info_msg)
+            raise OSTreeCommandFail(msg)
