@@ -1,5 +1,6 @@
-usr/sbin
-etc/pmon.d
 etc/init.d
+etc/pmon.d
 lib/systemd/system
+usr/sbin
 usr/share/bash-completion/completions
+usr/share/starlingx/pmon.d

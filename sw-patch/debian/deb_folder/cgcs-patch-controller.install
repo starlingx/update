@@ -1,10 +1,11 @@
+etc/init.d/sw-patch-controller
+etc/init.d/sw-patch-controller-daemon
+etc/pmon.d/sw-patch-controller-daemon.conf
+lib/systemd/system/sw-patch-controller.service
+lib/systemd/system/sw-patch-controller-daemon.service
 usr/sbin/sw-patch
 usr/sbin/sw-patch-controller-daemon
 usr/sbin/sw-patch-controller-daemon-restart
 usr/sbin/upgrade-start-pkg-extract
-etc/pmon.d/sw-patch-controller-daemon.conf
-etc/init.d/sw-patch-controller-daemon
-etc/init.d/sw-patch-controller
-lib/systemd/system/sw-patch-controller-daemon.service
 usr/share/bash-completion/completions/sw-patch
-lib/systemd/system/sw-patch-controller.service
+usr/share/starlingx/pmon.d/sw-patch-controller-daemon.conf
