@@ -7,4 +7,3 @@ etc/init.d/sw-patch
 lib/systemd/system/sw-patch.service
 etc/goenabled.d/patch_check_goenabled.sh
 etc/logrotate.d/patching
-debian/systemd/00-cgcs-patch.preset etc/systemd/system-preset
