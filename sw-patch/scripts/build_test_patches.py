@@ -7,19 +7,23 @@
 """
 Debian Build Test Patches:
 
-Reboot required - all nodes
+PATCH A) Reboot required - all nodes
     Update package - logmgmt
     rebuild the pkg
     build-image to generate a new commit in the build ostree_repo
     build a patch
 
-Patches with dependency (reboot required)
-    TODO:
-    Patch A
+PATCH B) In Service patch
+    Update the metadata
+    Uses the example-restart script
+    Uses the same ostree commit as PATCH A so they can't be applied together
+    build a patch
+
+PATCH C) Patch with dependency (reboot required, depends on PATCH A)
+    build PATCH A
     update package - logmgmt
     build-image to generate a new commit in the build ostree_repo
-    build patch A
-    Patch B (requires A)
+    build Patch C (requires A)
 
 Requires:
     debchange (devscripts) - Tool for maintenance of the debian/changelog file in a source package
@@ -91,6 +95,7 @@ class TestPatchBuilder():
             self.repo_root = os.path.join(self.repo, "cgcs-root")
             self.patch_repo_base = os.path.join(self.repo_root, "stx/update")
             self.sw_version = sw_version
+            self.restart_script = os.path.join(self.patch_repo_base, "patch-scripts/EXAMPLE_0001/scripts/example-restart")
         except TestPatchInitException:
             log.exception("TestPatchBuilder initialization failure")
             sys.exit(1)
@@ -162,11 +167,14 @@ class TestPatchBuilder():
         # build the pkg to apply the change
         self.build_pkg(pkg_name)
 
-    def rr_allnodes_patch(self, pname, requires=False, formal=False):
+    def create_test_patches(self, pname, requires=False, inservice=False, formal=False):
         """
-        Creates a reboot required patch
+        Creates test patches:
+        RR, INSVC and RR_Requires
         param pname: Patch ID and file name
         param requires: If set it will build the 2nd patch
+        param inservice: If set it will build the insvc patch
+        param formal: Signs the patch with formal key
         """
         ostree_clone_name = "ostree_repo_patch"
         patch_builder = PatchBuilder()
@@ -178,7 +186,7 @@ class TestPatchBuilder():
         # build image to trigger a new ostree commit
         self.build_image()
         patch_data = PatchRecipeData()
-        patch_data.patch_id = pname
+        patch_data.patch_id = pname + "_RR_ALL_NODES"
         patch_data.sw_version = self.sw_version
         patch_data.metadata = {
             "SUMMARY": "RR ALL NODES",
@@ -189,11 +197,29 @@ class TestPatchBuilder():
             "UNREMOVABLE": "N",
             "REBOOT_REQUIRED": "Y"
         }
-
         # Create a patch
-        log.info("Creating patch %s", pname)
+        log.info("Creating RR patch %s", patch_data.patch_id)
         patch_builder.create_patch(patch_data, ostree_clone_name, formal)
-        log.info("Patch build done")
+        log.info("RR Patch build done")
+
+        if inservice:
+            patch_data = PatchRecipeData()
+            patch_data.patch_id = pname + "_NRR_INSVC"
+            patch_data.metadata = {
+                "SUMMARY": "IN SVC PATCH",
+                "DESCRIPTION": "Test In Service patch",
+                "INSTALL_INSTRUCTIONS": "Sample instructions",
+                "WARNINGS": "Sample Warning",
+                "STATUS": "DEV",
+                "UNREMOVABLE": "N",
+                "REBOOT_REQUIRED": "N"
+            }
+            patch_data.restart_script["full_path"] = self.restart_script
+            patch_data.restart_script["metadata_name"] = os.path.basename(self.restart_script)
+            log.info("Creating inservice patch %s", patch_data.patch_id)
+            log.info("restart script %s", patch_data.restart_script["full_path"])
+            patch_builder.create_patch(patch_data, ostree_clone_name, formal)
+            log.info("Inservice patch build done")
 
         clone_repo_path = os.path.join(patch_builder.deploy_dir, ostree_clone_name)
         self.__delete_dir(clone_repo_path)
@@ -203,16 +229,25 @@ class TestPatchBuilder():
             patch_builder.prepare_env(ostree_clone_name)
             # Update pkg
             self.update_pkg(pname + "_REQUIRES")
-            log.info("Generating RR Requires patch for all nodes")
             # build image to trigger a new ostree commit
             self.build_image()
             # Update patch ID and set requires
-            patch_data.patch_id = pname + "_REQUIRES"
+            patch_data = PatchRecipeData()
+            patch_data.patch_id = pname + "_RR_ALL_NODES_REQUIRES"
+            patch_data.metadata = {
+                "SUMMARY": "RR ALL NODES REQUIRES",
+                "DESCRIPTION": "Test patch with dependency",
+                "INSTALL_INSTRUCTIONS": "Sample instructions",
+                "WARNINGS": "Sample Warning",
+                "STATUS": "DEV",
+                "UNREMOVABLE": "N",
+                "REBOOT_REQUIRED": "Y"
+            }
             patch_data.requires.append(pname)
             # Create a patch
-            log.info("Creating patch requires patch")
+            log.info("Creating RR Requires patch %s", patch_data.patch_id)
             patch_builder.create_patch(patch_data, ostree_clone_name, formal)
-            log.info("Patch build done")
+            log.info("Requires patch build done")
             self.__delete_dir(clone_repo_path)
 
 
@@ -220,16 +255,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Debian build_test_patches")
 
     parser.add_argument("-sw", "--software-version", type=str, help="Patch Software version, will prefix the patch name", default=None, required=True)
-    parser.add_argument("-r", "--requires", action="store_true", help="Build the 2nd patch which requires the rr_patch")
+    parser.add_argument("-r", "--requires", action="store_true", help="Builds the 2nd patch which requires the rr_patch")
+    parser.add_argument("-i", "--inservice", action="store_true", help="Builds the in service patch")
     parser.add_argument("-f", "--formal", action="store_true", help="Signs the patch with formal key")
     args = parser.parse_args()
     log.debug("Args: %s", args)
 
     try:
         log.info("Building test patches")
-        patch_name = args.software_version + "_RR_ALL_NODES"
+        patch_name = args.software_version
         test_patch_builder = TestPatchBuilder(args.software_version)
-        test_patch_builder.rr_allnodes_patch(patch_name, args.requires, args.formal)
+        test_patch_builder.create_test_patches(patch_name, args.requires, args.inservice, args.formal)
+        log.info("Test patch build completed")
 
     except TestPatchCreationException:
         log.exception("Error while creating test patches")

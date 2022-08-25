@@ -405,6 +405,7 @@ class PatchBuilder(object):
         files = [f for f in os.listdir('.') if os.path.isfile(f)]
         tar = tarfile.open(patch_file, "w:gz")
         for file in files:
+            log.info("Saving file %s", file)
             tar.add(file)
         tar.close()
         log.info("Patch file created %s", patch_file)
@@ -490,8 +491,9 @@ class PatchBuilder(object):
             log.info("Saving restart scripts")
             shutil.copyfile(
                 self.patch_data.restart_script["full_path"],
-                self.patch_data.restart_script["metadata_name"]
+                os.path.join(tmpdir, self.patch_data.restart_script["metadata_name"])
             )
+            subprocess.call(["ls", "-lhrt"])
 
         # Sign and create the .patch file
         self.__sign_and_pack(
