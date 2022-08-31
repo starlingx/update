@@ -31,6 +31,8 @@ from tsconfig.tsconfig import subfunctions
 from tsconfig.tsconfig import SW_VERSION
 
 pidfile_path = "/var/run/patch_agent.pid"
+agent_running_after_reboot_flag = \
+    "/var/run/patch_agent_running_after_reboot"
 node_is_patched_file = "/var/run/node_is_patched"
 node_is_patched_rr_file = "/var/run/node_is_patched_rr"
 patch_installing_file = "/var/run/patch_installing"
@@ -376,7 +378,10 @@ class PatchAgent(PatchService):
 
         return True
 
-    def handle_install(self, verbose_to_stdout=False, disallow_insvc_patch=False):
+    def handle_install(self,
+                       verbose_to_stdout=False,
+                       disallow_insvc_patch=False,
+                       delete_older_deployments=False):
         #
         # The disallow_insvc_patch parameter is set when we're installing
         # the patch during init. At that time, we don't want to deal with
@@ -384,6 +389,9 @@ class PatchAgent(PatchService):
         # a reboot-required when this parameter is set. Rather than running
         # any scripts, the RR flag will be set, which will result in the node
         # being rebooted immediately upon completion of the installation.
+        #
+        # The delete_older_deployments is set when the system has
+        # been rebooted.
         #
 
         LOG.info("Handling install")
@@ -406,6 +414,9 @@ class PatchAgent(PatchService):
 
         self.state = constants.PATCH_AGENT_STATE_INSTALLING
         setflag(patch_installing_file)
+
+        if delete_older_deployments:
+            ostree_utils.delete_older_deployments()
 
         try:
             # Create insvc patch directories
@@ -680,6 +691,11 @@ def main():
 
     pa = PatchAgent()
     pa.query()
+    if os.path.exists(agent_running_after_reboot_flag):
+        delete_older_deployments_flag = False
+    else:
+        setflag(agent_running_after_reboot_flag)
+        delete_older_deployments_flag = True
 
     if len(sys.argv) <= 1:
         pa.run()
@@ -691,7 +707,9 @@ def main():
             LOG.info("Failed install_uuid check via http_port=%s. Trying with default port 80", http_port_real)
             http_port_real = 80
 
-        pa.handle_install(verbose_to_stdout=True, disallow_insvc_patch=True)
+        pa.handle_install(verbose_to_stdout=True,
+                          disallow_insvc_patch=True,
+                          delete_older_deployments=delete_older_deployments_flag)
     elif sys.argv[1] == "--status":
         rc = 0
         if pa.changes:
