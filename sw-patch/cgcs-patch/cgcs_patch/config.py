@@ -66,7 +66,7 @@ def read_config():
     # for ConfigParser. So we'll fake it out.
     ini_str = '[platform_conf]\n' + open(tsc.PLATFORM_CONF_FILE, 'r').read()
     ini_fp = io.StringIO(ini_str)
-    config.readfp(ini_fp)
+    config.read_file(ini_fp)
 
     try:
         value = str(config.get('platform_conf', 'nodetype'))
@@ -75,7 +75,6 @@ def read_config():
         nodetype = value
     except configparser.Error:
         logging.exception("Failed to read nodetype from config")
-        return False
 
 
 def get_mgmt_ip():
@@ -111,7 +110,7 @@ def get_mgmt_iface():
     # for ConfigParser. So we'll fake it out.
     ini_str = '[platform_conf]\n' + open(tsc.PLATFORM_CONF_FILE, 'r').read()
     ini_fp = io.StringIO(ini_str)
-    config.readfp(ini_fp)
+    config.read_file(ini_fp)
 
     try:
         value = str(config.get('platform_conf', 'management_interface'))

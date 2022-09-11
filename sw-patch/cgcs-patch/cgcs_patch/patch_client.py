@@ -1085,7 +1085,7 @@ def patch_upload_dir_req(debug, args):
 
 
 def patch_install_local(debug, args):  # pylint: disable=unused-argument
-    """ This function is used to trigger patch installation prior to configuration """
+    """This function is used to trigger patch installation prior to configuration """
     # Check to see if initial configuration has completed
     if os.path.isfile(INITIAL_CONTROLLER_CONFIG_COMPLETE):
         # Disallow the install

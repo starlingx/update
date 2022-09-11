@@ -24,7 +24,7 @@ def if_nametoindex(name):
 
 
 def gethostbyname(hostname):
-    """ gethostbyname with IPv6 support """
+    """gethostbyname with IPv6 support """
     try:
         return socket.getaddrinfo(hostname, None)[0][4][0]
     except Exception:
@@ -32,7 +32,7 @@ def gethostbyname(hostname):
 
 
 def get_management_version():
-    """ Determine whether management is IPv4 or IPv6 """
+    """Determine whether management is IPv4 or IPv6 """
     controller_ip_string = gethostbyname(constants.CONTROLLER_FLOATING_HOSTNAME)
     if controller_ip_string:
         controller_ip_address = IPAddress(controller_ip_string)
@@ -58,7 +58,7 @@ def get_versioned_address_all():
 
 
 def ip_to_url(ip_address_string):
-    """ Add brackets if an IPv6 address """
+    """Add brackets if an IPv6 address """
     try:
         ip_address = IPAddress(ip_address_string)
         if ip_address.version == constants.ADDRESS_VERSION_IPV6:
@@ -70,7 +70,7 @@ def ip_to_url(ip_address_string):
 
 
 def ip_to_versioned_localhost(ip_address_string):
-    """ Add brackets if an IPv6 address """
+    """Add brackets if an IPv6 address """
     ip_address = IPAddress(ip_address_string)
     if ip_address.version == constants.ADDRESS_VERSION_IPV6:
         return "::1"
@@ -108,8 +108,8 @@ def safe_rstrip(value, chars=None):
 
     """
     if not isinstance(value, str):
-        LOG.warn("Failed to remove trailing character. Returning original "
-                 "object. Supplied object is not a string: %s", value)
+        LOG.warning("Failed to remove trailing character. Returning original "
+                    "object. Supplied object is not a string: %s", value)
         return value
 
     return value.rstrip(chars) or value

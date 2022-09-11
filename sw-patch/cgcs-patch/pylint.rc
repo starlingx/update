@@ -73,7 +73,6 @@ extension-pkg-whitelist=lxml
 # R0915 too-many-statements
 # R1702 too-many-nested-blocks
 # R1705 no-else-return
-# R1710 inconsistent-return-statements
 # R1714 consider-using-in
 # R1715 consider-using-get
 # R1722 consider-using-sys-exit
@@ -89,12 +88,13 @@ extension-pkg-whitelist=lxml
 # W0707 raise-missing-from
 # W1505 deprecated-method
 # W1514 unspecified-encoding
+# W3101 missing-timeout
 disable= C0103,C0114,C0115,C0116,C0201,C0206,C0209,C2801,
          C0301,C0302,C0325,C0411,C0415,
          R0205,R0402,R0801,R0902,R0903,R0904,R0911,
-         R0912,R0913,R0914,R0915,R1702,R1705,R1710,R1714,
+         R0912,R0913,R0914,R0915,R1702,R1705,R1714,
          R1715,R1722,R1724,R1725,R1732,R1735,
-         W0107,W0602,W0603,W0703,W0707,W1505,W1514,W3101
+         W0107,W0602,W0603,W0703,W0707,W1514,W3101
 
 [REPORTS]
 

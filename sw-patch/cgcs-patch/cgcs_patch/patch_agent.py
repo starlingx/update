@@ -344,7 +344,7 @@ class PatchAgent(PatchService):
         self.listener.listen(2)  # Allow two connections, for two controllers
 
     def query(self):
-        """ Check current patch state """
+        """Check current patch state """
         if not check_install_uuid():
             LOG.info("Failed install_uuid check. Skipping query")
             return False
@@ -366,7 +366,7 @@ class PatchAgent(PatchService):
                 try:
                     self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
                 except OSTreeCommandFail:
-                    LOG.warn("Unable to query latest feed commit")
+                    LOG.warning("Unable to query latest feed commit")
                     # latest_feed_commit will remain as None
 
         if self.latest_feed_commit:
@@ -507,7 +507,7 @@ class PatchAgent(PatchService):
         self.query()
 
         if self.changes:
-            LOG.warn("Installing the patch did not change the patch current status")
+            LOG.warning("Installing the patch did not change the patch current status")
 
         # Send a hello to provide a state update
         if self.sock_out is not None:
