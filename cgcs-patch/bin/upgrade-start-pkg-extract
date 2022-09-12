@@ -60,6 +60,22 @@ if [ ! -d ${TGT_BASE_REPO} ]; then
     exit 1
 fi
 
+# Copy files to destination folders on Debian
+if [ -d "${TGT_BASE_REPO}/ostree_repo/" ]; then
+    rsync -ac ${TGT_BASE_REPO}/kickstart/kickstart.cfg ${TGT_BASE_REPO}/ &&
+    rsync -ac ${TGT_BASE_REPO}/pxeboot/bzImage* /var/pxeboot/rel-${TGT_RELEASE}/ &&
+    rsync -ac ${TGT_BASE_REPO}/pxeboot/initrd* /var/pxeboot/rel-${TGT_RELEASE}/ &&
+    rsync -ac ${TGT_BASE_REPO}/pxeboot/pxelinux.cfg.files/*-${TGT_RELEASE} /var/pxeboot/pxelinux.cfg.files/
+    rsync -ac ${TGT_BASE_REPO}/upgrades/pxeboot-update-${TGT_RELEASE}.sh /usr/sbin/
+
+    if [ $? -ne 0 ]; then
+        logger -t $0 "rsync command failed on Debian extracting"
+        exit 1
+    fi
+    exit 0
+fi
+
+# The code below is only used on CentOS and will be removed when CentOS is no longer supported.
 declare TGT_PATCHES_REPO_OPT=""
 if [ -d ${TGT_PATCHES_REPO} ]; then
     TGT_PATCHES_REPO_OPT="--repofrompath updates,${TGT_PATCHES_REPO}"
