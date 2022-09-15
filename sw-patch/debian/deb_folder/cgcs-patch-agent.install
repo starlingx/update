@@ -1,5 +1,4 @@
 etc/init.d/sw-patch-agent
-etc/pmon.d/sw-patch-agent.conf
 lib/systemd/system/sw-patch-agent.service
 usr/sbin/sw-patch-agent
 usr/sbin/sw-patch-agent-restart
