@@ -75,7 +75,7 @@ if [ -d "${TGT_BASE_REPO}/ostree_repo/" ]; then
     exit 0
 fi
 
-# The code below is only used on CenOS and will be removed when CenOS is no longer supported.
+# The code below is only used on CentOS and will be removed when CentOS is no longer supported.
 declare TGT_PATCHES_REPO_OPT=""
 if [ -d ${TGT_PATCHES_REPO} ]; then
     TGT_PATCHES_REPO_OPT="--repofrompath updates,${TGT_PATCHES_REPO}"
