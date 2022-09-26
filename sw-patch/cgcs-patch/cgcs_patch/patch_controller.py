@@ -9,6 +9,7 @@ import gc
 import json
 import os
 import select
+import sh
 import shutil
 import socket
 import subprocess
@@ -711,15 +712,34 @@ class PatchController(PatchService):
             for neighbour in list(self.hosts):
                 if (self.hosts[neighbour].nodetype == "controller" and
                         self.hosts[neighbour].ip == host):
-                    output = subprocess.check_output(["rsync",
-                                                      "-acv",
-                                                      "--delete",
-                                                      "rsync://%s/feed/" % host_url,
-                                                      "%s/" % constants.FEED_OSTREE_BASE_DIR],
-                                                     stderr=subprocess.STDOUT)
-            LOG.info("Synced to mate feed via rsync: %s", output)
+                    LOG.info("Starting feed sync")
+                    # The output is a string that lists the directories
+                    # Example output:
+                    # >>> dir_names = sh.ls("/var/www/pages/feed/")
+                    # >>> dir_names.stdout
+                    # b'rel-22.12  rel-22.5\n'
+                    dir_names = sh.ls(constants.FEED_OSTREE_BASE_DIR)
+
+                    # Convert the output above into a list that can be iterated
+                    # >>> list_of_dirs = dir_names.stdout.decode().rstrip().split()
+                    # >>> print(list_of_dirs)
+                    # ['rel-22.12', 'rel-22.5']
+
+                    list_of_dirs = dir_names.stdout.decode("utf-8").rstrip().split()
+
+                    for rel_dir in list_of_dirs:
+                        feed_ostree = "%s/%s/ostree_repo/" % (constants.FEED_OSTREE_BASE_DIR, rel_dir)
+                        LOG.info("Syncing %s", feed_ostree)
+                        output = subprocess.check_output(["ostree",
+                                                          "--repo=%s" % feed_ostree,
+                                                          "pull",
+                                                          "--depth=-1",
+                                                          "--mirror",
+                                                          "starlingx"],
+                                                         stderr=subprocess.STDOUT)
+            LOG.info("Synced to mate feed via ostree pull: %s", output)
         except subprocess.CalledProcessError:
-            LOG.error("Failed to rsync: %s", output)
+            LOG.error("Failed to make an ostree pull from active controller's feed repo: %s", output)
             return False
 
         self.read_state_file()
