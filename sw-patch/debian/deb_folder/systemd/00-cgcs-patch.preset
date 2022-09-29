@@ -1,4 +1,0 @@
-enable sw-patch-controller.service
-enable sw-patch-controller-daemon.service
-enable sw-patch-agent.service
-enable sw-patch.service
