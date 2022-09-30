@@ -27,7 +27,6 @@ override_dh_install:
 	install -m 755 -d ${DEBIAN_DESTDIR}/etc/logrotate.d
 	install -m 755 -d ${DEBIAN_DESTDIR}/etc/patching
 	install -m 700 -d ${DEBIAN_DESTDIR}/etc/patching/patch-scripts
-	install -m 755 -d ${DEBIAN_DESTDIR}/etc/pmon.d
 	install -m 755 -d ${DEBIAN_DESTDIR}/lib/systemd/system
 	install -m 755 -d ${PMONDIR}
 
@@ -45,10 +44,6 @@ override_dh_install:
 		${DEBIAN_DESTDIR}/etc/patching/patching.conf
 	install -m 644 bin/policy.json \
 		${DEBIAN_DESTDIR}/etc/patching/policy.json
-	install -m 444 bin/pmon-sw-patch-controller-daemon.conf \
-		${DEBIAN_DESTDIR}/etc/pmon.d/sw-patch-controller-daemon.conf
-	install -m 444 bin/pmon-sw-patch-agent.conf \
-		${DEBIAN_DESTDIR}/etc/pmon.d/sw-patch-agent.conf
 	install -m 444 bin/pmon-sw-patch-controller-daemon.conf \
 		${PMONDIR}/sw-patch-controller-daemon.conf
 	install -m 444 bin/pmon-sw-patch-agent.conf \

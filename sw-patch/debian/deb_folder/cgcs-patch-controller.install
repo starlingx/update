@@ -1,6 +1,5 @@
 etc/init.d/sw-patch-controller
 etc/init.d/sw-patch-controller-daemon
-etc/pmon.d/sw-patch-controller-daemon.conf
 lib/systemd/system/sw-patch-controller.service
 lib/systemd/system/sw-patch-controller-daemon.service
 usr/sbin/sw-patch
