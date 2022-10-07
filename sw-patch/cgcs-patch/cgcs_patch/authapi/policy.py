@@ -26,12 +26,16 @@ from oslo_policy import policy
 
 
 base_rules = [
-    policy.RuleDefault('admin_required', 'role:admin or is_admin:1',
-                       description='Who is considered an admin'),
-    policy.RuleDefault('admin_api', 'rule:admin_required',
-                       description='admin API requirement'),
-    policy.RuleDefault('default', 'rule:admin_api',
-                       description='default rule'),
+    policy.RuleDefault('admin_in_system_projects',
+                       'role:admin and (project_name:admin or ' +
+                       'project_name:services)',
+                       description='Admin user in system projects.'),
+    policy.RuleDefault('reader_in_system_projects',
+                       'role:reader and (project_name:admin or ' +
+                       'project_name:services)',
+                       description='Reader user in system projects.'),
+    policy.RuleDefault('default', 'rule:admin_in_system_projects',
+                       description='Default rule.'),
 ]
 
 CONF = cfg.CONF
@@ -77,15 +81,3 @@ def authorize(rule, target, creds, do_raise=True):
     """A wrapper around 'authorize' from 'oslo_policy.policy'."""
     init()
     return _ENFORCER.authorize(rule, target, creds, do_raise=do_raise)
-
-
-def default_target(context):
-    return {'project_id': context.project_id, 'user_id': context.user_id}
-
-
-def check_is_admin(context):
-    """Whether or not roles contains 'admin' role according to policy setting.
-    """
-    return authorize('context_is_admin',       # rule
-                     default_target(context),  # target
-                     context)                  # creds

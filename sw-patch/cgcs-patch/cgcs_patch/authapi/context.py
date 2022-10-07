@@ -31,6 +31,7 @@ class RequestContext(context.RequestContext):
     def to_dict(self):
         value = super(RequestContext, self).to_dict()
         value.update({'is_public_api': self.is_public_api,
+                      'project_name': self.project_name,
                       'service_catalog': self.service_catalog})
         return value
 

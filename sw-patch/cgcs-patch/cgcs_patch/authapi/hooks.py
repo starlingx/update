@@ -73,7 +73,7 @@ class ContextHook(hooks.PecanHook):
         domain_id = state.request.headers.get('X-User-Domain-Id')
         domain_name = state.request.headers.get('X-User-Domain-Name')
         auth_token = state.request.headers.get('X-Auth-Token', None)
-        creds = {'roles': state.request.headers.get('X-Roles', '').split(',')}
+        roles = state.request.headers.get('X-Roles', '').split(',')
         catalog_header = state.request.headers.get('X-Service-Catalog')
         service_catalog = None
         if catalog_header:
@@ -83,7 +83,12 @@ class ContextHook(hooks.PecanHook):
                 raise exc.HTTPInternalServerError(
                     'Invalid service catalog json.')
 
-        is_admin = policy.authorize('admin_api', {}, creds, do_raise=False)
+        credentials = {
+            'project_name': project_name,
+            'roles': roles
+        }
+        is_admin = policy.authorize('admin_in_system_projects', {},
+                                    credentials, do_raise=False)
 
         path = utils.safe_rstrip(state.request.path, '/')
         is_public_api = path in self.public_api_routes
@@ -97,7 +102,7 @@ class ContextHook(hooks.PecanHook):
             is_admin=is_admin,
             is_public_api=is_public_api,
             project_name=project_name,
-            roles=creds['roles'],
+            roles=roles,
             service_catalog=service_catalog)
 
 
@@ -106,17 +111,24 @@ class AccessPolicyHook(hooks.PecanHook):
        to execute the action.
     """
     def before(self, state):
-        controller = state.controller.__self__
-        if hasattr(controller, 'enforce_policy'):
-            controller_method = state.controller.__name__
-            controller.enforce_policy(controller_method,
-                                      state.request)
-        else:
-            context = state.request.context
-            is_admin_api = policy.authorize(
-                'admin_api',
-                {},
-                context.to_dict(),
-                do_raise=False)
-            if not is_admin_api and not context.is_public_api:
-                raise exc.HTTPForbidden()
+        context = state.request.context
+        if not context.is_public_api:
+            controller = state.controller.__self__
+            if hasattr(controller, 'enforce_policy'):
+                try:
+                    controller_method = state.controller.__name__
+                    controller.enforce_policy(controller_method, state.request)
+                except Exception:
+                    raise exc.HTTPForbidden()
+            else:
+                method = state.request.method
+                if method == 'GET':
+                    has_api_access = policy.authorize(
+                        'reader_in_system_projects', {},
+                        context.to_dict(), do_raise=False)
+                else:
+                    has_api_access = policy.authorize(
+                        'admin_in_system_projects', {},
+                        context.to_dict(), do_raise=False)
+                if not has_api_access:
+                    raise exc.HTTPForbidden()
