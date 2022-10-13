@@ -34,9 +34,11 @@ Once the script is done the .patch file can be located at:
 $STX_BUILD_HOME/localdisk/deploy/
 """
 import argparse
+import filecmp
 import hashlib
 import logging
 import tarfile
+import time
 import tempfile
 import os
 import shutil
@@ -297,7 +299,207 @@ class PatchBuilder(object):
         tree = ET.tostring(top)
         outfile.write(minidom.parseString(tree).toprettyxml(indent="  "))
 
-    def __create_delta_dir(self, clone_dir="ostree-clone"):
+    def __reuse_initramfs(self, rootfs_base_dir, rootfs_new_dir):
+        """
+        Try to reuse the initramfs file /usr/lib/ostree-boot/initramfs-xxx and its signature
+        :param rootfs_base_dir: original root filesystem
+        :param rootfs_new_dir: newest root filesystem
+        :return: True if reuse the initramfs.
+        """
+        # Compare the version of package initramfs-trigger, not same, not reuse.
+        if "NO_REUSE_INITRAMFS" in os.environ.keys():
+            return False
+        base_trigger_version = new_trigger_version = ""
+        cmd = f"dpkg --root {rootfs_base_dir} -l initramfs-trigger | tail -n 1"
+        ret = subprocess.check_output(cmd, shell=True).decode(sys.stdout.encoding).strip()
+        if ret:
+            base_trigger_version = ret.split()[2].split(".stx")[0]
+        cmd = f"dpkg --root {rootfs_new_dir} -l initramfs-trigger | tail -n 1"
+        ret = subprocess.check_output(cmd, shell=True).decode(sys.stdout.encoding).strip()
+        if ret:
+            new_trigger_version = ret.split()[2].split(".stx")[0]
+        # If feed rootfs has no package "initramfs-trigger", or the version of this package is not same,
+        # do not reuse the initramfs file.
+        if not new_trigger_version:
+            log.error("New build rootfs %s has no package initramfs-trigger!", rootfs_new_dir)
+            raise Exception("New build rootfs has no package initramfs-trigger!")
+        if not base_trigger_version or base_trigger_version != new_trigger_version:
+            log.info("We can not reuse the initramfs file for the versio of initramfs-trigger changed")
+            return False
+
+        # unpack two initramfs files
+        initramfs_base_dir = initramfs_new_dir = ""
+        os.path.join(os.path.dirname(rootfs_base_dir), "initramfs_base")
+        initramfs_new_dir = os.path.join(os.path.dirname(rootfs_new_dir), "initramfs_new")
+        for initrd_type, hugefs_dir in [("base", rootfs_base_dir), ("new", rootfs_new_dir)]:
+            initramfs_dir = os.path.join(os.path.dirname(hugefs_dir), "initramfs_" + initrd_type)
+            if initrd_type == "base":
+                initramfs_base_dir = initramfs_dir
+            else:
+                initramfs_new_dir = initramfs_dir
+            log.info("Unpack %s initramfs into %s", initrd_type, initramfs_dir)
+            os.mkdir(initramfs_dir)
+            cmd = f"cp {hugefs_dir}/usr/lib/ostree-boot/initramfs-* {initramfs_dir}/initrd.gz"
+            subprocess.call([cmd], shell=True)
+            cmd = f"gunzip {initramfs_dir}/initrd.gz"
+            subprocess.call([cmd], shell=True)
+            os.chdir(initramfs_dir)
+            cmd = "cpio -idm < initrd; rm -f initrd"
+            subprocess.call([cmd], shell=True)
+
+        # compare its log file /var/log/rootfs_install.log
+        base_install_log = os.path.join(initramfs_base_dir, "var/log/rootfs_install.log")
+        new_install_log = os.path.join(initramfs_new_dir, "var/log/rootfs_install.log")
+        if not os.path.exists(new_install_log):
+            log.error("Log file %s does not exist.", new_install_log)
+            raise Exception("Initramfs, install log file does not exist.")
+        if not os.path.exists(base_install_log):
+            log.info("The feed initramfs file has no install log, please careful.")
+        if os.path.exists(base_install_log) and os.path.exists(new_install_log):
+            initramfs_delta_dir = os.path.join(os.path.dirname(rootfs_new_dir), "initramfs_delta")
+            if filecmp.cmp(base_install_log, new_install_log):
+                log.info("Two initramfs have same install log files.")
+            else:
+                log.warning("install log files of two initramfs are NOT same:")
+                log.warning("Log file of feed initramfs: %s", base_install_log)
+                log.warning("Log file of new initramfs: %s", new_install_log)
+
+        os.mkdir(initramfs_delta_dir)
+        # Add "-q" to make the output clean
+        # subprocess.call(["rsync", "-rpgoc", "--compare-dest", initramfs_base_dir + "/", initramfs_new_dir + "/", initramfs_delta_dir + "/"])
+        subprocess.call(["rsync", "-rpgocq", "--compare-dest", initramfs_base_dir + "/", initramfs_new_dir + "/", initramfs_delta_dir + "/"])
+        log.info("The delta folder of two initramfs: %s.", initramfs_delta_dir)
+        log.info("Reuse initramfs files to shrink Debian patch...")
+        # reuse boot-initramfs files and their signature.
+        cmd = " ".join([
+            "rm -f",
+            os.path.join(rootfs_new_dir, 'usr/lib/ostree-boot/initramfs*'),
+            os.path.join(rootfs_new_dir, 'boot/initrd.img*'),
+            os.path.join(rootfs_new_dir, 'var/miniboot/initrd-mini*')
+        ])
+        subprocess.call(cmd, shell=True)
+        cmd = " ".join(["cp -a", os.path.join(rootfs_base_dir, 'usr/lib/ostree-boot/initramfs*'), os.path.join(rootfs_new_dir, 'usr/lib/ostree-boot/')])
+        subprocess.call(cmd, shell=True)
+        cmd = " ".join(["cp -a", os.path.join(rootfs_base_dir, 'var/miniboot/initrd-mini*'), os.path.join(rootfs_new_dir, 'var/miniboot/')])
+        subprocess.call(cmd, shell=True)
+        cmd = " ".join(["cp -a", os.path.join(rootfs_base_dir, 'boot/initrd.img*'), os.path.join(rootfs_new_dir, 'boot/')])
+        subprocess.call(cmd, shell=True)
+        # Find and get checksum of necessary images: kernel_rt_file + kernel_file + vmlinuz_file + initramfs_file
+        ostree_boot_dir = os.path.join(rootfs_new_dir, 'usr/lib/ostree-boot')
+        kernel_rt_file = kernel_file = vmlinuz_file = initramfs_file = ""
+        for file_name in os.listdir(ostree_boot_dir):
+            if not os.path.isfile(os.path.join(ostree_boot_dir, file_name)):
+                continue
+            file_path = os.path.join(ostree_boot_dir, file_name)
+            if file_name.endswith(".sig"):
+                continue
+            if file_name.startswith("vmlinuz-") and file_name.endswith("-amd64"):
+                if file_name.find("-rt-") == -1:
+                    kernel_file = file_path
+                else:
+                    kernel_rt_file = file_path
+                continue
+            if file_name.startswith("vmlinuz-") and len(file_name) == len("vmlinuz-") + 64:
+                vmlinuz_file = file_path
+                continue
+            if file_name.startswith("initramfs-") and len(file_name) == len("initramfs-") + 64:
+                initramfs_file = file_path
+                continue
+        # Any file missed, raise exception.
+        if not kernel_rt_file or not kernel_file or not vmlinuz_file or not initramfs_file:
+            log.error("Miss key file when calculate sha256 checksum")
+            log.info("RT kernel image: %s", kernel_rt_file)
+            log.info("STD kernel image: %s", kernel_file)
+            log.info("vmlinuz image: %s", vmlinuz_file)
+            log.info("initramfs image: %s", initramfs_file)
+            raise Exception("Miss key file when calculate sha256 checksum")
+        # Order: std, rt, vmlinuz, initramfs
+        cmd = " ".join(["cat", kernel_file, kernel_rt_file, vmlinuz_file, initramfs_file, "| sha256sum | cut -d' ' -f 1"])
+        new_checksum = subprocess.check_output(cmd, shell=True).decode(sys.stdout.encoding).strip()
+        log.info("New checksum is %s", new_checksum)
+        vmlinuz_new_name = "vmlinuz-" + new_checksum
+        initramfs_new_name = "initramfs-" + new_checksum
+        os.rename(vmlinuz_file, os.path.join(ostree_boot_dir, vmlinuz_new_name))
+        os.rename(initramfs_file, os.path.join(ostree_boot_dir, initramfs_new_name))
+        return True
+
+    def __create_patch_repo(self, clone_dir="ostree-clone"):
+        """
+        Create the ostree contains delta content
+        Used to compare with the feed ostree repo
+        :param clone_dir: clone dir name
+        """
+        log.info("Creating patch ostree")
+
+        workdir = os.path.join(self.deploy_dir, "patch_work")
+        if os.path.exists(workdir):
+            shutil.rmtree(workdir)
+        os.mkdir(workdir)
+        os.chdir(workdir)
+
+        # Checkout both ostree repos
+        repo_base_dir = clone_dir
+        cmd = f"cat {repo_base_dir}/refs/heads/starlingx"
+        commit_id_base = subprocess.check_output(cmd, shell=True).decode(sys.stdout.encoding).strip()
+        rootfs_base_dir = os.path.join(workdir, "rootfs_base")
+        log.info("Checkout commit %s from base OSTree %s, it may take several minutes.", commit_id_base[:6], repo_base_dir)
+        cmd = f"ostree --repo={repo_base_dir} checkout {commit_id_base} {rootfs_base_dir}"
+        log.info("Command line: %s", cmd)
+        subprocess.call([cmd], shell=True)
+        log.info("Done. Checkout base root fs in %s", rootfs_base_dir)
+
+        repo_new_dir = self.ostree_repo
+        cmd = f"cat {repo_new_dir}/refs/heads/starlingx"
+        commit_id_new = subprocess.check_output(cmd, shell=True).decode(sys.stdout.encoding).strip()
+        rootfs_new_dir = os.path.join(workdir, "rootfs_new")
+        log.info("Checkout commit %s from new OSTree %s, it may take several minutes.", commit_id_new[:6], repo_new_dir)
+        cmd = f"ostree --repo={repo_new_dir} checkout {commit_id_new} {rootfs_new_dir}"
+        log.info("Command line: %s", cmd)
+        subprocess.call([cmd], shell=True)
+        log.info("Done. Checkout new root fs in %s", rootfs_new_dir)
+
+        # Try to reuse files from feed rootfs.
+        try:
+            initrd_reused = self.__reuse_initramfs(rootfs_base_dir, rootfs_new_dir)
+            # Nothing can be reused, just use the self.ostree_repo as the patch repo
+            if not initrd_reused:
+                log.info("No file can be reused, we can just use the original repo: %s", self.ostree_repo)
+                return self.ostree_repo
+        except Exception as e:
+            log.exception("Failed on reusing files of feed repo. %s", e)
+            return self.ostree_repo
+
+        # create patch repo
+        tmp_patch_repo_dir = os.path.join(workdir, "patch_repo_tmp")
+        patch_repo_dir = os.path.join(workdir, "patch_repo")
+        log.info("Create a new OSTree repo in %s, may take a few minutes", patch_repo_dir)
+        cmd = f"ostree --repo={tmp_patch_repo_dir} init --mode=bare"
+        subprocess.call([cmd], shell=True)
+        # Pull history from ostree prepatch (clone_dir)
+        log.info("Pull history from %s.", clone_dir)
+        cmd = f"ostree --repo={tmp_patch_repo_dir} pull-local {clone_dir}"
+        subprocess.call([cmd], shell=True)
+        timestamp = time.asctime()
+        subject = "Commit-id: starlingx-intel-x86-64-" + time.strftime("%Y%m%d%H%M%S", time.localtime())
+        cmd = " ".join(["ostree", "--repo=" + tmp_patch_repo_dir, "commit", "--tree=dir=" + rootfs_new_dir,
+                        "--skip-if-unchanged", "--gpg-sign=Wind-River-Linux-Sample --gpg-homedir=/tmp/.lat_gnupg_root",
+                        "--branch=starlingx", "'--timestamp=" + timestamp + "'",
+                        "'--subject=" + subject + "'",
+                        "'--parent=" + commit_id_base + "'"])
+        subprocess.call([cmd], shell=True)
+        cmd = f"ostree --repo={patch_repo_dir} init --mode=archive-z2"
+        subprocess.call([cmd], shell=True)
+        # Pull with depth=1 to get parent data
+        cmd = f"ostree --repo={patch_repo_dir} pull-local --depth=1 {tmp_patch_repo_dir}"
+        subprocess.call([cmd], shell=True)
+        cmd = f"ostree summary -u --repo={patch_repo_dir}"
+        subprocess.call([cmd], shell=True)
+        log.info("New ostree repo been created: %s", patch_repo_dir)
+        log.info("  Based on bare repo %s", tmp_patch_repo_dir)
+        log.info("    Based on root filesystem %s", rootfs_new_dir)
+        return patch_repo_dir
+
+    def __create_delta_dir(self, patch_repo_dir, clone_dir="ostree-clone"):
         """
         Creates the ostree delta directory
         Contains the changes from the REPO (updated) and the cloned dir (pre update)
@@ -315,7 +517,7 @@ class PatchBuilder(object):
             log.error("Clone dir not found")
             exit(1)
 
-        subprocess.call(["rsync", "-rpgo", "--exclude", ".lock", "--compare-dest", clone_dir, self.ostree_repo + "/", self.delta_dir + "/"])
+        subprocess.call(["rsync", "-rcpgo", "--exclude", ".lock", "--compare-dest", clone_dir, patch_repo_dir + "/", self.delta_dir + "/"])
         log.info("Delta dir created")
 
     def __get_commit_checksum(self, commit_id, repo="ostree_repo"):
@@ -339,6 +541,7 @@ class PatchBuilder(object):
 
         cmd = f"ostree --repo={repo} log starlingx | grep commit | sed \"s/.* //\""
         commits = subprocess.check_output(cmd, shell=True).decode(sys.stdout.encoding).strip().split("\n")
+        log.info("Patch repo commits %s", commits)
 
         if commits[0] == base_sha:
             log.info("base and top commit are the same")
@@ -447,14 +650,17 @@ class PatchBuilder(object):
         # read the base sha from the clone/ga directory
         base_sha = open(os.path.join(clone_dir, "refs/heads/starlingx"), "r").read().strip()
 
+        log.info("Generating delta ostree repository")
+        patch_repo_dir = self.__create_patch_repo(clone_dir=clone_dir)
+
         log.info("Generating delta dir")
-        self.__create_delta_dir(clone_dir=clone_dir)
+        self.__create_delta_dir(patch_repo_dir, clone_dir=clone_dir)
 
         # ostree --repo=ostree_repo show  starlingx | grep -i checksum |  sed "s/.* //"
         cmd = f"ostree --repo={clone_dir} show starlingx | grep -i checksum | sed \"s/.* //\""
         base_checksum = subprocess.check_output(cmd, shell=True).decode(sys.stdout.encoding).strip()
-        # Get commits from DEPLOY_DIR/ostree_repo
-        commits = self.__get_commits_from_base(base_sha, self.ostree_repo)
+        # Get commits from updated ostree repo
+        commits = self.__get_commits_from_base(base_sha, patch_repo_dir)
 
         if commits:
             self.ostree_content = {
