@@ -38,7 +38,9 @@ node_is_patched_rr_file = "/var/run/node_is_patched_rr"
 patch_installing_file = "/var/run/patch_installing"
 patch_failed_file = "/var/run/patch_install_failed"
 node_is_locked_file = "/var/run/.node_locked"
-
+ostree_pull_completed_deployment_pending_file = \
+    "/var/run/ostree_pull_completed_deployment_pending"
+mount_pending_file = "/var/run/mount_pending"
 insvc_patch_scripts = "/run/patching/patch-scripts"
 insvc_patch_flags = "/run/patching/patch-flags"
 insvc_patch_restart_agent = "/run/patching/.restart.patch-agent"
@@ -440,17 +442,26 @@ class PatchAgent(PatchService):
         changed = False
         success = True
 
-        if self.changes:
+        if self.changes or \
+                os.path.exists(ostree_pull_completed_deployment_pending_file) or \
+                os.path.exists(mount_pending_file):
             try:
                 # Pull changes from remote to the sysroot ostree
                 # The remote value is configured inside
                 # "/sysroot/ostree/repo/config" file
                 ostree_utils.pull_ostree_from_remote()
+                setflag(ostree_pull_completed_deployment_pending_file)
+            except OSTreeCommandFail:
+                LOG.exception("Failed to pull changes and create deployment"
+                              "during host-install.")
+                success = False
 
+            try:
                 # Create a new deployment once the changes are pulled
                 ostree_utils.create_deployment()
 
                 changed = True
+                clearflag(ostree_pull_completed_deployment_pending_file)
 
             except OSTreeCommandFail:
                 LOG.exception("Failed to pull changes and create deployment"
@@ -475,7 +486,9 @@ class PatchAgent(PatchService):
                     try:
                         pending_deployment = ostree_utils.fetch_pending_deployment()
                         deployment_dir = constants.OSTREE_BASE_DEPLOYMENT_DIR + pending_deployment
+                        setflag(mount_pending_file)
                         ostree_utils.mount_new_deployment(deployment_dir)
+                        clearflag(mount_pending_file)
                         LOG.info("Running in-service patch-scripts")
                         subprocess.check_output(run_insvc_patch_scripts_cmd, stderr=subprocess.STDOUT)
 
