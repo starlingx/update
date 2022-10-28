@@ -37,6 +37,7 @@
 - job:
     name: py3-bandit
     parent: tox
+    nodeset: ubuntu-focal
     vars:
       tox_envlist: bandit
 
