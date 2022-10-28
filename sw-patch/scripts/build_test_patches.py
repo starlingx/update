@@ -185,8 +185,13 @@ class TestPatchBuilder():
         log.info("Generating RR patch for all nodes")
         # build image to trigger a new ostree commit
         self.build_image()
+
+        rr_patch_name = pname + "_RR_ALL_NODES"
+        insvc_patch_name = pname + "_NRR_INSVC"
+        rr_requires_patch_name = pname + "_RR_ALL_NODES_REQUIRES"
+
         patch_data = PatchRecipeData()
-        patch_data.patch_id = pname + "_RR_ALL_NODES"
+        patch_data.patch_id = rr_patch_name
         patch_data.sw_version = self.sw_version
         patch_data.metadata = {
             "SUMMARY": "RR ALL NODES",
@@ -204,7 +209,8 @@ class TestPatchBuilder():
 
         if inservice:
             patch_data = PatchRecipeData()
-            patch_data.patch_id = pname + "_NRR_INSVC"
+            patch_data.patch_id = insvc_patch_name
+            patch_data.sw_version = self.sw_version
             patch_data.metadata = {
                 "SUMMARY": "IN SVC PATCH",
                 "DESCRIPTION": "Test In Service patch",
@@ -233,7 +239,8 @@ class TestPatchBuilder():
             self.build_image()
             # Update patch ID and set requires
             patch_data = PatchRecipeData()
-            patch_data.patch_id = pname + "_RR_ALL_NODES_REQUIRES"
+            patch_data.patch_id = rr_requires_patch_name
+            patch_data.sw_version = self.sw_version
             patch_data.metadata = {
                 "SUMMARY": "RR ALL NODES REQUIRES",
                 "DESCRIPTION": "Test patch with dependency",
@@ -243,7 +250,7 @@ class TestPatchBuilder():
                 "UNREMOVABLE": "N",
                 "REBOOT_REQUIRED": "Y"
             }
-            patch_data.requires.append(pname)
+            patch_data.requires.append(rr_patch_name)
             # Create a patch
             log.info("Creating RR Requires patch %s", patch_data.patch_id)
             patch_builder.create_patch(patch_data, ostree_clone_name, formal)
