@@ -166,7 +166,7 @@ def pull_ostree_from_remote():
     Pull from remote ostree to sysroot ostree
     """
 
-    cmd = "ostree pull %s --depth=-1" % constants.OSTREE_REMOTE
+    cmd = "ostree pull %s --depth=-1 --mirror" % constants.OSTREE_REMOTE
 
     try:
         subprocess.run(cmd, shell=True, check=True, capture_output=True)
@@ -260,6 +260,15 @@ def mount_new_deployment(deployment_dir):
                    % (e.stderr.decode("utf-8"))
         LOG.info(info_msg)
         raise OSTreeCommandFail(msg)
+    finally:
+        try:
+            sh.mount("/usr/local/kubernetes/current/stage1")
+            sh.mount("/usr/local/kubernetes/current/stage2")
+        except sh.ErrorReturnCode:
+            msg = "Failed to mount kubernetes. Please manually run these commands:\n" \
+                  "sudo mount /usr/local/kubernetes/current/stage1\n" \
+                  "sudo mount /usr/local/kubernetes/current/stage2\n"
+            LOG.info(msg)
 
 
 def delete_older_deployments():
@@ -277,6 +286,7 @@ def delete_older_deployments():
     # debian 3334dc80691a38c0ba6c519ec4b4b449f8420e98ac4d8bded3436ade56bb229d.1 (rollback)
     # debian 3334dc80691a38c0ba6c519ec4b4b449f8420e98ac4d8bded3436ade56bb229d.0
 
+    LOG.info("Inside delete_older_deployments of ostree_utils")
     cmd = "ostree admin status | grep debian"
 
     try:
