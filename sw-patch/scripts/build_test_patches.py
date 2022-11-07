@@ -144,7 +144,7 @@ class TestPatchBuilder():
         """
         cmd = '''
             source import-stx
-            stx shell -c "build-image"
+            stx shell -c "build-image --keep"
         '''
         ret = run_cmd(cmd)
         log.info("Build image return code %s", ret.returncode)
