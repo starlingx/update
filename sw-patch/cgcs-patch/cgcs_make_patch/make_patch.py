@@ -509,6 +509,8 @@ class PatchBuilder(object):
 
         clone_dir = os.path.join(self.deploy_dir, clone_dir)
 
+        os.chdir(self.deploy_dir)
+        # self.delta_dir is 'relative' to self.deploy_dir
         if os.path.isdir(self.delta_dir):
             log.error("Delta dir exists '%s', clean it up and try again", self.delta_dir)
             exit(1)
