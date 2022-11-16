@@ -1,4 +1,4 @@
-#!/bin/python3
+#!/usr/bin/env python3
 #
 # Copyright (c) 2022 Wind River Systems, Inc.
 #
@@ -541,7 +541,7 @@ class PatchBuilder(object):
         """
         commits_from_base = []
 
-        cmd = f"ostree --repo={repo} log starlingx | grep commit | sed \"s/.* //\""
+        cmd = f"ostree --repo={repo} log starlingx | grep \"^commit\" | sed \"s/.* //\""
         commits = subprocess.check_output(cmd, shell=True).decode(sys.stdout.encoding).strip().split("\n")
         log.info("Patch repo commits %s", commits)
 
@@ -635,8 +635,8 @@ class PatchBuilder(object):
         current_sha = open(os.path.join(self.ostree_repo, "refs/heads/starlingx"), "r").read()
         log.info("Current SHA: %s", current_sha)
         log.info("Cloning the directory...")
-        # Clone the ostree_repo dir (ignores the .lock file)
-        subprocess.call(["rsync", "-a", "--exclude", ".lock", self.ostree_repo + "/", clone_dir])
+        # Clone the ostree_repo dir using hard-links (ignores the .lock file)
+        subprocess.call(["rsync", "-a", "--exclude", ".lock", "--link-dest", "../ostree_repo", self.ostree_repo + "/", clone_dir])
         log.info("Prepared ostree repo clone at %s", clone_dir)
 
     def create_patch(self, patch_data: PatchRecipeData, clone_dir="ostree-clone", formal=False):
