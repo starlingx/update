@@ -19,6 +19,9 @@ override_dh_auto_clean:
 
 override_dh_install:
 	python3 setup.py install -f --install-layout=deb --root=${DEBIAN_DESTDIR}
+	python3 setup.py bdist_wheel \
+		--universal \
+		-d $(CURDIR)/debian/cgcs-patch-wheel/usr/share/python-wheels
 
 	install -m 755 -d ${DEBIAN_DESTDIR}/usr/sbin
 	install -m 755 -d ${DEBIAN_DESTDIR}/usr/share/bash-completion/completions

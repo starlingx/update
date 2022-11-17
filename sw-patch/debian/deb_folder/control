@@ -5,7 +5,8 @@ Maintainer: StarlingX Developers <StarlingX-discuss@lists.StarlingX.io>
 Build-Depends: debhelper-compat (= 13),
  dh-python,
  python3-all,
- python3-setuptools
+ python3-setuptools,
+ python3-wheel
 Build-Depends-Indep:
  python3-keystonemiddleware,
  python3-lxml,
@@ -57,3 +58,12 @@ Depends:
  tsconfig
 Description: StarlingX platfom patching (python3)
  StarlingX platform patching system python libraries
+
+Package: cgcs-patch-wheel
+Architecture: all
+Depends: ${python3:Depends}, ${misc:Depends}
+Description: StarlingX - platform patching wheel
+ Starlingx Config Info
+ .
+ This is the support package for the PEP 427 wheel version of the package,
+ required for using pip inside a virtual environment.
