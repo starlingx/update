@@ -464,10 +464,10 @@ class PatchBuilder(object):
             # Nothing can be reused, just use the self.ostree_repo as the patch repo
             if not initrd_reused:
                 log.info("No file can be reused, we can just use the original repo: %s", self.ostree_repo)
-                return self.ostree_repo
+                return self.ostree_repo, False
         except Exception as e:
             log.exception("Failed on reusing files of feed repo. %s", e)
-            return self.ostree_repo
+            return self.ostree_repo, False
 
         # create patch repo
         tmp_patch_repo_dir = os.path.join(workdir, "patch_repo_tmp")
@@ -497,7 +497,7 @@ class PatchBuilder(object):
         log.info("New ostree repo been created: %s", patch_repo_dir)
         log.info("  Based on bare repo %s", tmp_patch_repo_dir)
         log.info("    Based on root filesystem %s", rootfs_new_dir)
-        return patch_repo_dir
+        return patch_repo_dir, True
 
     def __create_delta_dir(self, patch_repo_dir, clone_dir="ostree-clone"):
         """
@@ -653,7 +653,7 @@ class PatchBuilder(object):
         base_sha = open(os.path.join(clone_dir, "refs/heads/starlingx"), "r").read().strip()
 
         log.info("Generating delta ostree repository")
-        patch_repo_dir = self.__create_patch_repo(clone_dir=clone_dir)
+        patch_repo_dir, reuse_initramfs = self.__create_patch_repo(clone_dir=clone_dir)
 
         log.info("Generating delta dir")
         self.__create_delta_dir(patch_repo_dir, clone_dir=clone_dir)
@@ -712,6 +712,16 @@ class PatchBuilder(object):
         os.chdir(self.deploy_dir)
         shutil.rmtree(tmpdir)
         shutil.rmtree(self.delta_dir)
+
+        if reuse_initramfs:
+            # If initramfs is reused it needs to update the ostree_repo commit to match the patch_repo
+            cmd = f"ostree --repo={self.ostree_repo} pull-local \
+                     {patch_repo_dir} starlingx; \
+                        ostree --repo={self.ostree_repo} summary --update"
+            try:
+                subprocess.check_call([cmd], shell=True)
+            except subprocess.CalledProcessError as e:
+                log.exception("Failed pull patch_repo commit into ostree_repo. %s", e.stderr)
 
         log.info("Patch file created %s at %s", self.patch_file_name, self.deploy_dir)
 
