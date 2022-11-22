@@ -166,7 +166,7 @@ def pull_ostree_from_remote():
     Pull from remote ostree to sysroot ostree
     """
 
-    cmd = "ostree pull %s --depth=-1 --mirror" % constants.OSTREE_REMOTE
+    cmd = "ostree pull %s --depth=-1" % constants.OSTREE_REMOTE
 
     try:
         subprocess.run(cmd, shell=True, check=True, capture_output=True)
