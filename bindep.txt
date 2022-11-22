@@ -2,6 +2,5 @@
 # see https://docs.openstack.org/infra/bindep/ for additional information.
 # Do not install python2 rpms in a python3 only environment such as debian-bullseye
 
-python-rpm [platform:dpkg !platform:debian-bullseye]
 python3-rpm [platform:dpkg]
 rpm-python [platform:rpm]
