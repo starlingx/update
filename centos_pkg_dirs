@@ -9,4 +9,5 @@ patch-scripts/EXAMPLE_VIM
 patch-scripts/EXAMPLE_SYSINV
 patch-scripts/EXAMPLE_SERVICE
 patch-scripts/EXAMPLE_KUBELET
+patch-scripts/EXAMPLE_DOCKER
 enable-dev-patch
