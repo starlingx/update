@@ -1,0 +1,42 @@
+#!/bin/bash
+#
+# Copyright (c) 2022 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+#
+# This script provides an in-service patching restart script for
+# docker.service. This supports service and Drop-In file changes by
+# issuing a systemctl daemon reload after the patch is applied.
+#
+
+#
+# The patching subsystem provides a patch-functions bash source file
+# with useful function and variable definitions.
+#
+. /etc/patching/patch-functions
+
+#
+# Declare an overall script return code
+#
+declare -i GLOBAL_RC=$PATCH_STATUS_OK
+
+# Issue a systemd daemon-reload once the rpms have been installed and
+# before the processes have been restarted.
+systemctl daemon-reload
+
+# processes that run on all nodes
+processes_to_restart="dockerd"
+/usr/local/sbin/patch-restart-processes ${processes_to_restart}
+if [ $? != 0 ] ; then
+    loginfo "patching restart failed"
+    loginfo "... process-restart ${processes_to_restart}"
+    exit ${PATCH_STATUS_FAILED}
+fi
+
+#
+# Exit the script with the overall return code
+#
+exit $GLOBAL_RC
+
