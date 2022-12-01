@@ -737,9 +737,14 @@ class PatchController(PatchService):
                                                           "--mirror",
                                                           "starlingx"],
                                                          stderr=subprocess.STDOUT)
+                        output = subprocess.check_output(["ostree",
+                                                          "summary",
+                                                          "--update",
+                                                          "--repo=%s" % feed_ostree],
+                                                         stderr=subprocess.STDOUT)
             LOG.info("Synced to mate feed via ostree pull: %s", output)
         except subprocess.CalledProcessError:
-            LOG.error("Failed to make an ostree pull from active controller's feed repo: %s", output)
+            LOG.error("Failed to sync feed repo between controllers: %s", output)
             return False
 
         self.read_state_file()
@@ -1321,7 +1326,7 @@ class PatchController(PatchService):
                 ostree_utils.update_repo_summary_file(feed_ostree)
 
             except OSTreeCommandFail:
-                LOG.exception("Failure during patch apply for %s.", patch_id)
+                LOG.exception("Failure during patch remove for %s.", patch_id)
 
             try:
                 # Move the metadata to the available dir
