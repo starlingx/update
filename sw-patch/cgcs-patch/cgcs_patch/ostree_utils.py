@@ -5,7 +5,6 @@ SPDX-License-Identifier: Apache-2.0
 
 """
 import logging
-import os.path
 import sh
 import subprocess
 
@@ -246,10 +245,6 @@ def mount_new_deployment(deployment_dir):
      example: /ostree/deploy/debian/deploy/<deployment_id>
     """
     try:
-        if os.path.ismount("/usr"):
-            sh.umount("-l", "/usr")
-        if os.path.ismount("/etc"):
-            sh.umount("-l", "/etc")
         new_usr_mount_dir = "%s/usr" % (deployment_dir)
         new_etc_mount_dir = "%s/etc" % (deployment_dir)
         sh.mount("--bind", "-o", "ro,noatime", new_usr_mount_dir, "/usr")
