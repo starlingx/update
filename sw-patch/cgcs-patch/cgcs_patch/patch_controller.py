@@ -810,6 +810,16 @@ class PatchController(PatchService):
             # patch required (directly or a chain dependency) by the current patch.
             skip_patch = []
             for patch_id in self.patch_data.metadata:
+                # If the patch has no patch_id, it is malformed, skip it.
+                # A future enhancement would be to automatically remove this patch.
+                if patch_id not in self.patch_data.metadata:
+                    LOG.error("Patch data missing for %s", patch_id)
+                    continue
+
+                # If the patch is on a different release than the host, skip it.
+                if self.patch_data.metadata[patch_id]["sw_version"] != self.hosts[ip].sw_version:
+                    continue
+
                 if patch_id not in skip_patch:
                     if self.patch_data.metadata[patch_id]["repostate"] == constants.AVAILABLE and \
                             self.hosts[ip].latest_sysroot_commit == \
@@ -1119,6 +1129,15 @@ class PatchController(PatchService):
                 continue
 
             patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
+
+            # 22.12 is the first version to support ostree
+            # earlier formats will not have "base" and are unsupported
+            if self.patch_data.contents[patch_id].get("base") is None:
+                msg = "%s is an unsupported patch format" % patch_id
+                LOG.info(msg)
+                msg_info += msg + "\n"
+                continue
+
             latest_commit = ""
             try:
                 latest_commit = ostree_utils.get_feed_latest_commit(patch_sw_version)
@@ -1309,25 +1328,35 @@ class PatchController(PatchService):
                 continue
 
             patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
+            # 22.12 is the first version to support ostree
+            # earlier formats will not have "base" and are unsupported
+            # simply move them to 'available and skip to the next patch
+            if self.patch_data.contents[patch_id].get("base") is None:
+                msg = "%s is an unsupported patch format" % patch_id
+                LOG.info(msg)
+                msg_info += msg + "\n"
 
-            # Base commit is fetched from the patch metadata
-            base_commit = self.patch_data.contents[patch_id]["base"]["commit"]
-            feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, patch_sw_version)
-            try:
-                # Reset the ostree HEAD
-                ostree_utils.reset_ostree_repo_head(base_commit, feed_ostree)
+            else:
+                # this is an ostree patch
+                # Base commit is fetched from the patch metadata
+                base_commit = self.patch_data.contents[patch_id]["base"]["commit"]
+                feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, patch_sw_version)
+                try:
+                    # Reset the ostree HEAD
+                    ostree_utils.reset_ostree_repo_head(base_commit, feed_ostree)
 
-                # Delete all commits that belong to this patch
-                for i in range(int(self.patch_data.contents[patch_id]["number_of_commits"])):
-                    commit_to_delete = self.patch_data.contents[patch_id]["commit%s" % (i + 1)]["commit"]
-                    ostree_utils.delete_ostree_repo_commit(commit_to_delete, feed_ostree)
+                    # Delete all commits that belong to this patch
+                    for i in range(int(self.patch_data.contents[patch_id]["number_of_commits"])):
+                        commit_to_delete = self.patch_data.contents[patch_id]["commit%s" % (i + 1)]["commit"]
+                        ostree_utils.delete_ostree_repo_commit(commit_to_delete, feed_ostree)
 
-                # Update the feed ostree summary
-                ostree_utils.update_repo_summary_file(feed_ostree)
+                    # Update the feed ostree summary
+                    ostree_utils.update_repo_summary_file(feed_ostree)
 
-            except OSTreeCommandFail:
-                LOG.exception("Failure during patch remove for %s.", patch_id)
+                except OSTreeCommandFail:
+                    LOG.exception("Failure during patch remove for %s.", patch_id)
 
+            # update metadata
             try:
                 # Move the metadata to the available dir
                 shutil.move("%s/%s-metadata.xml" % (applied_dir, patch_id),
@@ -1338,15 +1367,18 @@ class PatchController(PatchService):
                 LOG.exception(msg)
                 raise MetadataFail(msg)
 
+            # update patchstate and repostate
             self.patch_data.metadata[patch_id]["repostate"] = constants.AVAILABLE
             if len(self.hosts) > 0:
                 self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_REMOVE
             else:
                 self.patch_data.metadata[patch_id]["patchstate"] = constants.UNKNOWN
 
-            # Base Commit in patch metadata.xml file represents the latest commit
-            # after this patch has been removed from the feed repo
-            self.latest_feed_commit = self.patch_data.contents[patch_id]["base"]["commit"]
+            # only update lastest_feed_commit if it is an ostree patch
+            if self.patch_data.contents[patch_id].get("base") is not None:
+                # Base Commit in patch metadata.xml file represents the latest commit
+                # after this patch has been removed from the feed repo
+                self.latest_feed_commit = self.patch_data.contents[patch_id]["base"]["commit"]
 
             self.hosts_lock.acquire()
             self.interim_state[patch_id] = list(self.hosts)
@@ -1399,18 +1431,19 @@ class PatchController(PatchService):
         # Handle operation
         for patch_id in patch_list:
             patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
-            ostree_tar_filename = self.get_ostree_tar_filename(patch_sw_version, patch_id)
-            if not os.path.isfile(ostree_tar_filename):
-                # We're deleting the patch anyway, so the missing file
-                # doesn't really matter
-                continue
 
-            try:
-                os.remove(ostree_tar_filename)
-            except OSError:
-                msg = "Failed to remove ostree tarball %s" % ostree_tar_filename
-                LOG.exception(msg)
-                raise OSTreeTarFail(msg)
+            # Need to support delete of older centos patches (metadata) from upgrades.
+
+            # Delete ostree content if it exists.
+            # RPM based patches (from upgrades) will not have ostree contents
+            ostree_tar_filename = self.get_ostree_tar_filename(patch_sw_version, patch_id)
+            if os.path.isfile(ostree_tar_filename):
+                try:
+                    os.remove(ostree_tar_filename)
+                except OSError:
+                    msg = "Failed to remove ostree tarball %s" % ostree_tar_filename
+                    LOG.exception(msg)
+                    raise OSTreeTarFail(msg)
 
             try:
                 # Delete the metadata

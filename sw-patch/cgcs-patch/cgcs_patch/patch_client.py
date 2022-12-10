@@ -383,10 +383,12 @@ def print_patch_show_result(req):
                         print(textwrap.fill("    {0:<15} ".format("Base commit:") +
                                             contents[patch_id]["base"]["commit"],
                                             width=TERM_WIDTH, subsequent_indent=' ' * 20))
-                    for i in range(int(contents[patch_id]["number_of_commits"])):
-                        print(textwrap.fill("    {0:<15} ".format("Commit%s:" % (i + 1)) +
-                                            contents[patch_id]["commit%s" % (i + 1)]["commit"],
-                                            width=TERM_WIDTH, subsequent_indent=' ' * 20))
+                    if "number_of_commits" in contents[patch_id] and \
+                            contents[patch_id]["number_of_commits"] != "":
+                        for i in range(int(contents[patch_id]["number_of_commits"])):
+                            print(textwrap.fill("    {0:<15} ".format("Commit%s:" % (i + 1)) +
+                                                contents[patch_id]["commit%s" % (i + 1)]["commit"],
+                                                width=TERM_WIDTH, subsequent_indent=' ' * 20))
 
                 print("\n")
 
