@@ -248,7 +248,7 @@ def mount_new_deployment(deployment_dir):
         new_usr_mount_dir = "%s/usr" % (deployment_dir)
         new_etc_mount_dir = "%s/etc" % (deployment_dir)
         sh.mount("--bind", "-o", "ro,noatime", new_usr_mount_dir, "/usr")
-        sh.mount("--bind", "-o", "ro,noatime", new_etc_mount_dir, "/etc")
+        sh.mount("--bind", "-o", "rw,noatime", new_etc_mount_dir, "/etc")
     except sh.ErrorReturnCode as e:
         msg = "Failed to re-mount /usr and /etc."
         info_msg = "OSTree Deployment Mount Error: Output: %s" \
