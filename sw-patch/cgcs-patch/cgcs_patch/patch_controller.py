@@ -729,6 +729,9 @@ class PatchController(PatchService):
 
                     for rel_dir in list_of_dirs:
                         feed_ostree = "%s/%s/ostree_repo/" % (constants.FEED_OSTREE_BASE_DIR, rel_dir)
+                        if not os.path.isdir(feed_ostree):
+                            LOG.info("Skipping feed dir %s", feed_ostree)
+                            continue
                         LOG.info("Syncing %s", feed_ostree)
                         output = subprocess.check_output(["ostree",
                                                           "--repo=%s" % feed_ostree,
