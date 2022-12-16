@@ -68,6 +68,20 @@ def clearflag(fname):
             LOG.exception("Failed to clear %s flag", fname)
 
 
+def pull_restart_scripts_from_controller():
+    # If the rsync fails, it raises an exception to
+    # the caller "handle_install()" and fails the
+    # host-install request for this host
+    output = subprocess.check_output(["rsync",
+                                      "-acv",
+                                      "--delete",
+                                      "--exclude", "tmp",
+                                      "rsync://controller/repo/patch-scripts/",
+                                      "%s/" % insvc_patch_scripts],
+                                     stderr=subprocess.STDOUT)
+    LOG.info("Synced restart scripts from controller: %s", output)
+
+
 def check_install_uuid():
     controller_install_uuid_url = "http://controller:%s/feed/rel-%s/install_uuid" % (http_port_real, SW_VERSION)
     try:
@@ -257,7 +271,6 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
                 resp.reject_reason = 'Node must be locked.'
                 resp.send(sock, addr)
                 return
-
         resp.status = pa.handle_install()
         resp.send(sock, addr)
 
@@ -490,6 +503,7 @@ class PatchAgent(PatchService):
                         ostree_utils.mount_new_deployment(deployment_dir)
                         clearflag(mount_pending_file)
                         LOG.info("Running in-service patch-scripts")
+                        pull_restart_scripts_from_controller()
                         subprocess.check_output(run_insvc_patch_scripts_cmd, stderr=subprocess.STDOUT)
 
                         # Clear the node_is_patched flag, since we've handled it in-service
