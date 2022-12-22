@@ -100,7 +100,29 @@ class PatchClientTestCase(testtools.TestCase):
         self.addCleanup(patcher.stop)
 
 
-class PatchClientHelpTestCase(PatchClientTestCase):
+class PatchClientNonRootMixin(object):
+    """
+    This Mixin Requires self.MOCK_ENV
+
+    Disable printing to stdout
+
+    Every client call invokes exit which raises SystemExit
+    This asserts that happens.
+    """
+
+    def _test_method(self, shell_args=None):
+        with mock.patch.dict(os.environ, self.MOCK_ENV):
+            with mock.patch.object(sys, 'argv', shell_args):
+                # mock 'print' so running unit tests will
+                # not print to the tox output
+                with mock.patch('builtins.print'):
+                    # Every client invocation invokes exit
+                    # which raises SystemExit
+                    self.assertRaises(SystemExit,
+                                      patch_client.main)
+
+
+class PatchClientHelpTestCase(PatchClientTestCase, PatchClientNonRootMixin):
     """Test the sw-patch CLI calls that invoke 'help'
 
     'check_for_os_region_name' is mocked to help determine
@@ -108,41 +130,29 @@ class PatchClientHelpTestCase(PatchClientTestCase):
     circuit and invoke 'help' in failure cases.
     """
 
-    def _test_print_help(self, shell_args=None):
-        with mock.patch.dict(os.environ, self.MOCK_ENV):
-            with mock.patch.object(sys, 'argv',
-                                   shell_args):
-                # mock 'print' so running unit tests will
-                # not print help usage to the tox output
-                with mock.patch('builtins.print'):
-                    # Every client invocation invokes exit
-                    # which raises SystemExit
-                    self.assertRaises(SystemExit,
-                                      patch_client.main)
-
     @mock.patch('cgcs_patch.patch_client.check_for_os_region_name')
     def test_main_no_args_calls_help(self, mock_check):
         """When no arguments are called, this should invoke print_help"""
         shell_args = [self.PROG, ]
-        self._test_print_help(shell_args=shell_args)
+        self._test_method(shell_args=shell_args)
         mock_check.assert_not_called()
 
     @mock.patch('cgcs_patch.patch_client.check_for_os_region_name')
     def test_main_help(self, mock_check):
         """When no arguments are called, this should invoke print_help"""
         shell_args = [self.PROG, "--help"]
-        self._test_print_help(shell_args=shell_args)
+        self._test_method(shell_args=shell_args)
         mock_check.assert_called()
 
     @mock.patch('cgcs_patch.patch_client.check_for_os_region_name')
     def test_main_invalid_action_calls_help(self, mock_check):
         """invalid args should invoke print_help"""
         shell_args = [self.PROG, "invalid_arg"]
-        self._test_print_help(shell_args=shell_args)
+        self._test_method(shell_args=shell_args)
         mock_check.assert_called()
 
 
-class PatchClientQueryTestCase(PatchClientTestCase):
+class PatchClientQueryTestCase(PatchClientTestCase, PatchClientNonRootMixin):
     """Test the sw-patch CLI calls that invoke 'query'"""
 
     TEST_URL_ALL = "http://127.0.0.1:5487/patch/query?show=all"
@@ -168,28 +178,120 @@ class PatchClientQueryTestCase(PatchClientTestCase):
         self.mock_map[self.TEST_URL_APPLIED] = FakeResponse(
             self.TEST_PATCH_DATA_SHOW_APPLIED, 200)
 
-    def _test_query(self, shell_args=None):
-        with mock.patch.dict(os.environ, self.MOCK_ENV):
-            with mock.patch.object(sys, 'argv',
-                                   shell_args):
-                # mock 'print' so running unit tests will
-                # not print to the tox output
-                with mock.patch('builtins.print'):
-                    # Every client invocation invokes exit
-                    # which raises SystemExit
-                    self.assertRaises(SystemExit,
-                                      patch_client.main)
-
     def test_query(self):
         shell_args = [self.PROG, "query"]
-        self._test_query(shell_args=shell_args)
+        self._test_method(shell_args=shell_args)
         self.mock_requests_get.assert_called_with(
             self.TEST_URL_ALL,
             headers=mock.ANY)
 
     def test_query_patch(self):
         shell_args = [self.PROG, "query", "applied"]
-        self._test_query(shell_args=shell_args)
+        self._test_method(shell_args=shell_args)
         self.mock_requests_get.assert_called_with(
             self.TEST_URL_APPLIED,
             headers=mock.ANY)
+
+
+class PatchClientWhatRequiresTestCase(PatchClientTestCase, PatchClientNonRootMixin):
+
+    TEST_URL_VALID = "http://127.0.0.1:5487/patch/what_requires/" + FAKE_PATCH_ID_1
+    TEST_WHAT_REQUIRES_VALID = {
+        "error": "",
+        "info": FAKE_PATCH_ID_1 + " is not required by any patches.\n",
+        "warning": ""
+    }
+
+    TEST_URL_INVALID = "http://127.0.0.1:5487/patch/what_requires/" + FAKE_PATCH_ID_2
+    TEST_WHAT_REQUIRES_INVALID = {
+        "error": "Patch " + FAKE_PATCH_ID_2 + " does not exist\n",
+        "info": "",
+        "warning": ""
+    }
+
+    def setUp(self):
+        super(PatchClientWhatRequiresTestCase, self).setUp()
+        # update the mock_map with a query result
+        self.mock_map[self.TEST_URL_VALID] = FakeResponse(
+            self.TEST_WHAT_REQUIRES_VALID, 200)
+        self.mock_map[self.TEST_URL_INVALID] = FakeResponse(
+            self.TEST_WHAT_REQUIRES_INVALID, 200)
+
+    def test_what_requires(self):
+        shell_args = [self.PROG, "what-requires", FAKE_PATCH_ID_1]
+        self._test_method(shell_args=shell_args)
+        self.mock_requests_get.assert_called_with(
+            self.TEST_URL_VALID,
+            headers=mock.ANY)
+
+    def test_what_requires_debug(self):
+        shell_args = [self.PROG, "--debug", "what-requires", FAKE_PATCH_ID_1]
+        self._test_method(shell_args=shell_args)
+        self.mock_requests_get.assert_called_with(
+            self.TEST_URL_VALID,
+            headers=mock.ANY)
+
+    def test_what_requires_not_found(self):
+        shell_args = [self.PROG, "what-requires", FAKE_PATCH_ID_2]
+        self._test_method(shell_args=shell_args)
+        self.mock_requests_get.assert_called_with(
+            self.TEST_URL_INVALID,
+            headers=mock.ANY)
+
+
+class PatchClientQueryHostsTestCase(PatchClientTestCase, PatchClientNonRootMixin):
+
+    TEST_URL = "http://127.0.0.1:5487/patch/query_hosts"
+    TEST_RESULTS = {'data': [
+        {
+            "allow_insvc_patching": 'true',
+            "hostname": "controller-0",
+            "interim_state": 'false',
+            "ip": "192.168.204.3",
+            "latest_sysroot_commit": "4b26afcf716f1804e70222a5564c2174340c2c6aabae9bcabe3468b2ce309d87",
+            "nodetype": "controller",
+            "patch_current": 'true',
+            "patch_failed": 'false',
+            "requires_reboot": 'false',
+            "secs_since_ack": 17,
+            "stale_details": 'false',
+            "state": "idle",
+            "subfunctions": [
+                "controller",
+                "worker"
+            ],
+            "sw_version": "12.34"
+        },
+        {
+            "allow_insvc_patching": 'true',
+            "hostname": "controller-1",
+            "interim_state": 'false',
+            "ip": "192.168.204.4",
+            "latest_sysroot_commit": "4b26afcf716f1804e70222a5564c2174340c2c6aabae9bcabe3468b2ce309d87",
+            "nodetype": "controller",
+            "patch_current": 'true',
+            "patch_failed": 'false',
+            "requires_reboot": 'false',
+            "secs_since_ack": 17,
+            "stale_details": 'false',
+            "state": "idle",
+            "subfunctions": [
+                "controller",
+                "worker"
+            ],
+            "sw_version": "12.34"
+        }
+    ]}
+
+    def setUp(self):
+        super(PatchClientQueryHostsTestCase, self).setUp()
+        # update the mock_map with a query result
+        self.mock_map[self.TEST_URL] = FakeResponse(
+            self.TEST_RESULTS, 200)
+
+    def test_query_hosts(self):
+        shell_args = [self.PROG, "query-hosts"]
+        self._test_method(shell_args=shell_args)
+        # for some reason, this does not pass a HEADER
+        self.mock_requests_get.assert_called_with(
+            self.TEST_URL)
