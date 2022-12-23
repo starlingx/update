@@ -9,11 +9,7 @@
         - openstack-tox-linters
         - py3-bandit
         - py3-flake8
-        - patch-tox-pylint
-        - patch-tox-py27
-        - patch-tox-py39
         - patch-alarm-tox-pylint
-        - patch-alarm-tox-py27
         - patch-alarm-tox-py39
         - sw-patch-tox-pylint
         - sw-patch-tox-py39
@@ -22,11 +18,7 @@
         - openstack-tox-linters
         - py3-bandit
         - py3-flake8
-        - patch-tox-pylint
-        - patch-tox-py27
-        - patch-tox-py39
         - patch-alarm-tox-pylint
-        - patch-alarm-tox-py27
         - patch-alarm-tox-py39
         - sw-patch-tox-pylint
         - sw-patch-tox-py39
@@ -50,46 +42,6 @@
       - starlingx/fault
     vars:
       tox_envlist: flake8
-
-- job:
-    name: patch-tox-pylint
-    parent: tox
-    nodeset: ubuntu-bionic
-    required-projects:
-      - starlingx/config
-      - starlingx/fault
-    files:
-      - cgcs-patch/cgcs-patch/*
-    vars:
-      tox_envlist: pylint
-      tox_extra_args: -c cgcs-patch/cgcs-patch/tox.ini
-
-- job:
-    name: patch-tox-py27
-    parent: tox
-    nodeset: ubuntu-xenial
-    required-projects:
-      - starlingx/config
-      - starlingx/fault
-    files:
-      - cgcs-patch/cgcs-patch/*
-    vars:
-      tox_envlist: py27
-      tox_extra_args: -c cgcs-patch/cgcs-patch/tox.ini
-
-- job:
-    name: patch-tox-py39
-    parent: tox-py39
-    nodeset: debian-bullseye
-    required-projects:
-      - starlingx/config
-      - starlingx/fault
-    files:
-      - cgcs-patch/cgcs-patch/*
-    vars:
-      tox_envlist: py39
-      python_version: 3.9
-      tox_extra_args: -c cgcs-patch/cgcs-patch/tox.ini
 
 - job:
     name: sw-patch-tox-py39
@@ -123,7 +75,7 @@
 - job:
     name: patch-alarm-tox-pylint
     parent: tox
-    nodeset: ubuntu-xenial
+    nodeset: ubuntu-bionic
     required-projects:
       - starlingx/config
       - starlingx/fault
@@ -131,19 +83,6 @@
       - patch-alarm/patch-alarm/*
     vars:
       tox_envlist: pylint
-      tox_extra_args: -c patch-alarm/patch-alarm/tox.ini
-
-- job:
-    name: patch-alarm-tox-py27
-    parent: tox
-    nodeset: ubuntu-xenial
-    required-projects:
-      - starlingx/config
-      - starlingx/fault
-    files:
-      - patch-alarm/patch-alarm/*
-    vars:
-      tox_envlist: py27
       tox_extra_args: -c patch-alarm/patch-alarm/tox.ini
 
 - job:
