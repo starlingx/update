@@ -1133,7 +1133,7 @@ class PatchController(PatchService):
 
             patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
 
-            # 22.12 is the first version to support ostree
+            # STX R7.0 is the first version to support ostree
             # earlier formats will not have "base" and are unsupported
             if self.patch_data.contents[patch_id].get("base") is None:
                 msg = "%s is an unsupported patch format" % patch_id
@@ -1215,6 +1215,37 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
+    def patch_remove_order(self, patch_ids):
+        # Protect against duplications
+        patch_list = sorted(list(set(patch_ids)))
+
+        # single patch
+        if len(patch_list) == 1:
+            return patch_list
+
+        # versions of patches in the list don't match
+        ver = None
+        for patch_id in patch_list:
+            if ver is None:
+                ver = self.patch_data.metadata[patch_id]["sw_version"]
+            elif self.patch_data.metadata[patch_id]["sw_version"] != ver:
+                return None
+
+        # Multiple patches with require dependencies
+        highest_dependency = 0
+        patch_remove_order = None
+        patch_with_highest_dependency = None
+
+        for patch_id in patch_list:
+            dependency_list = self.get_patch_dependency_list(patch_id)
+            if len(dependency_list) > highest_dependency:
+                highest_dependency = len(dependency_list)
+                patch_with_highest_dependency = patch_id
+                patch_remove_order = dependency_list
+
+        patch_list = [patch_with_highest_dependency] + patch_remove_order
+        return patch_list
+
     def patch_remove_api(self, patch_ids, **kwargs):
         """
         Remove patches, moving patches from applied to available and updating repo
@@ -1225,8 +1256,13 @@ class PatchController(PatchService):
         msg_error = ""
         remove_unremovable = False
 
-        # Protect against duplications
-        patch_list = sorted(list(set(patch_ids)))
+        patch_list = self.patch_remove_order(patch_ids)
+
+        if patch_list is None:
+            msg = "Patch list provided belongs to different software versions."
+            LOG.error(msg)
+            msg_error += msg + "\n"
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         msg = "Removing patches: %s" % ",".join(patch_list)
         LOG.info(msg)
