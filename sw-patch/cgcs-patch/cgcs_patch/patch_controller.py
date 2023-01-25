@@ -1075,6 +1075,18 @@ class PatchController(PatchService):
         if not id_verification:
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
+        # Order patches such that
+        # If P2 requires P1
+        # P3 requires P2
+        # P4 requires P3
+        # Apply order: [P1, P2, P3, P4]
+        # Patch with lowest dependency gets applied first.
+        patch_list = self.patch_apply_remove_order(patch_list, reverse=True)
+
+        msg = "Patch Apply order: %s" % ",".join(patch_list)
+        LOG.info(msg)
+        audit_log_info(msg)
+
         # Check for patches that can't be applied during an upgrade
         upgrade_check = True
         for patch_id in patch_list:
@@ -1215,7 +1227,7 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-    def patch_remove_order(self, patch_ids):
+    def patch_apply_remove_order(self, patch_ids, reverse=False):
         # Protect against duplications
         patch_list = sorted(list(set(patch_ids)))
 
@@ -1244,6 +1256,8 @@ class PatchController(PatchService):
                 patch_remove_order = dependency_list
 
         patch_list = [patch_with_highest_dependency] + patch_remove_order
+        if reverse:
+            patch_list.reverse()
         return patch_list
 
     def patch_remove_api(self, patch_ids, **kwargs):
@@ -1268,7 +1282,7 @@ class PatchController(PatchService):
         if not id_verification:
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-        patch_list = self.patch_remove_order(patch_ids)
+        patch_list = self.patch_apply_remove_order(patch_ids)
 
         if patch_list is None:
             msg = "Patch list provided belongs to different software versions."

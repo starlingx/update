@@ -299,20 +299,26 @@ class CgcsPatchControllerTestCase(testtools.TestCase):
         pc.patch_data.contents = copy.deepcopy(content_obj)
         return metadata_obj["patch_id_list"]
 
-    def test_patch_remove_order_with_dependencies(self):
+    def test_patch_apply_remove_order_with_dependencies(self):
         patch_ids = self.create_patch_data(self.pc, PATCH_LIST_WITH_DEPENDENCIES)
-        patch_list = self.pc.patch_remove_order(patch_ids)
+        patch_list = self.pc.patch_apply_remove_order(patch_ids)
         self.assertEqual(patch_list,
                          ["Fourth_Patch", "Third_Patch", "Second_Patch", "First_Patch"])
 
-    def test_patch_remove_order_different_sw_version(self):
+    def test_patch_apply_remove_order_reverse_with_dependencies(self):
+        patch_ids = self.create_patch_data(self.pc, PATCH_LIST_WITH_DEPENDENCIES)
+        patch_list = self.pc.patch_apply_remove_order(patch_ids, reverse=True)
+        self.assertEqual(patch_list,
+                         ["First_Patch", "Second_Patch", "Third_Patch", "Fourth_Patch"])
+
+    def test_patch_apply_remove_order_different_sw_version(self):
         patch_ids = self.create_patch_data(self.pc, PATCH_LIST_WITH_DIFFERENT_SW_VERSION)
-        patch_list = self.pc.patch_remove_order(patch_ids)
+        patch_list = self.pc.patch_apply_remove_order(patch_ids)
         self.assertIsNone(patch_list)
 
-    def test_patch_remove_order_single_patch(self):
+    def test_patch_apply_remove_order_single_patch(self):
         patch_ids = self.create_patch_data(self.pc, SINGLE_PATCH)
-        patch_list = self.pc.patch_remove_order(patch_ids)
+        patch_list = self.pc.patch_apply_remove_order(patch_ids)
         self.assertEqual(patch_list, ["First_Patch"])
 
     def test_patch_remove_api_different_sw_versions(self):
@@ -320,6 +326,12 @@ class CgcsPatchControllerTestCase(testtools.TestCase):
         response = self.pc.patch_remove_api(patch_ids)
         self.assertEqual(response["error"],
                          "Patch list provided belongs to different software versions.\n")
+
+    def test_patch_remove_api_patch_not_in_metadata(self):
+        patch_ids = self.create_patch_data(self.pc, PATCH_NOT_IN_METADATA)
+        response = self.pc.patch_remove_api(patch_ids)
+        self.assertEqual(response["error"],
+                         "Patch Second_Patch does not exist\n")
 
     def test_patch_remove_api_patch_not_removable(self):
         patch_ids = self.create_patch_data(self.pc, UNREMOVABLE_PATCH)
@@ -488,9 +500,9 @@ class CgcsPatchControllerTestCase(testtools.TestCase):
         response = self.pc.patch_apply_api(patch_ids)
         self.assertEqual(response["info"],
                          "First_Patch is already in the repo\n" +
-                         "Fourth_Patch is already in the repo\n" +
                          "Second_Patch is already in the repo\n" +
-                         "Third_Patch is already in the repo\n")
+                         "Third_Patch is already in the repo\n" +
+                         "Fourth_Patch is already in the repo\n")
 
     def test_patch_apply_api_not_supported(self):
         patch_ids = self.create_patch_data(self.pc,
@@ -499,9 +511,9 @@ class CgcsPatchControllerTestCase(testtools.TestCase):
         response = self.pc.patch_apply_api(patch_ids)
         self.assertEqual(response["info"],
                          "First_Patch is an unsupported patch format\n" +
-                         "Fourth_Patch is an unsupported patch format\n" +
                          "Second_Patch is an unsupported patch format\n" +
-                         "Third_Patch is an unsupported patch format\n")
+                         "Third_Patch is an unsupported patch format\n" +
+                         "Fourth_Patch is an unsupported patch format\n")
 
     @mock.patch.object(LOG, 'exception')
     @mock.patch.object(ostree_utils, 'get_feed_latest_commit')
@@ -536,11 +548,11 @@ class CgcsPatchControllerTestCase(testtools.TestCase):
         self.assertEqual(response["info"],
                          "The base commit basecommit1 for First_Patch does not match " +
                          "the latest commit m on this system.\n" +
-                         "The base commit commitThirdPatch2 for Fourth_Patch does not match " +
-                         "the latest commit o on this system.\n" +
                          "The base commit commitFirstPatch for Second_Patch does not match " +
-                         "the latest commit c on this system.\n" +
+                         "the latest commit o on this system.\n" +
                          "The base commit commitSecondPatch for Third_Patch does not match " +
+                         "the latest commit c on this system.\n" +
+                         "The base commit commitThirdPatch2 for Fourth_Patch does not match " +
                          "the latest commit k on this system.\n")
 
     @mock.patch.object(ostree_utils, 'get_feed_latest_commit')
@@ -619,9 +631,9 @@ class CgcsPatchControllerTestCase(testtools.TestCase):
                                            APPLY_PATCH_SUCCESSULLY,
                                            CONTENTS_WITH_OSTREE_DATA)
         _mock_feed.side_effect = ["basecommit1",
-                                  "commitThirdPatch2",
                                   "commitFirstPatch",
-                                  "commitSecondPatch"]
+                                  "commitSecondPatch",
+                                  "commitThirdPatch2"]
         self.pc.hosts = ["controller-0"]
         self.pc.patch_apply_api(patch_ids)
         self.assertEqual(self.pc.patch_data.metadata["First_Patch"]["repostate"], "Applied")
