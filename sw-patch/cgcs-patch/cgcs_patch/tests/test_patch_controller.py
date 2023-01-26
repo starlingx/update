@@ -6,6 +6,7 @@
 
 import copy
 import mock
+import os
 import shutil
 import tarfile
 import testtools
@@ -15,6 +16,8 @@ from cgcs_patch import ostree_utils
 from cgcs_patch.exceptions import MetadataFail
 from cgcs_patch.exceptions import OSTreeTarFail
 from cgcs_patch.exceptions import OSTreeCommandFail
+from cgcs_patch.exceptions import PatchFail
+from cgcs_patch.exceptions import SemanticFail
 from cgcs_patch.patch_controller import AgentNeighbour
 from cgcs_patch.patch_controller import ControllerNeighbour
 from cgcs_patch.patch_controller import PatchController
@@ -85,18 +88,26 @@ APPLY_PATCH_WITH_DEPENDENCIES = \
 PATCH_LIST_WITH_DEPENDENCIES = \
     {
         "value": {
-            "First_Patch": {"sw_version": "12.34",
+            "First_Patch": {"sw_version": "TEST.SW.VERSION",
                             "requires": [],
-                            "repostate": "Applied"},
-            "Second_Patch": {"sw_version": "12.34",
+                            "repostate": "Applied",
+                            "patchstate": "Applied",
+                            "status": "REL"},
+            "Second_Patch": {"sw_version": "TEST.SW.VERSION",
                              "requires": ["First_Patch"],
-                             "repostate": "Applied"},
-            "Third_Patch": {"sw_version": "12.34",
+                             "repostate": "Applied",
+                             "patchstate": "Applied",
+                             "status": "REL"},
+            "Third_Patch": {"sw_version": "TEST.SW.VERSION",
                             "requires": ["Second_Patch"],
-                            "repostate": "Applied"},
-            "Fourth_Patch": {"sw_version": "12.34",
+                            "repostate": "Applied",
+                            "patchstate": "Applied",
+                            "status": "REL"},
+            "Fourth_Patch": {"sw_version": "TEST.SW.VERSION",
                              "requires": ["Third_Patch"],
-                             "repostate": "Applied"}},
+                             "repostate": "Applied",
+                             "patchstate": "Applied",
+                             "status": "REL"}},
         "patch_id_list": ["First_Patch", "Second_Patch", "Third_Patch", "Fourth_Patch"]
     }
 
@@ -129,7 +140,10 @@ PATCH_NOT_IN_METADATA = \
     {
         "value": {
             "First_Patch": {"sw_version": "12.34",
-                            "requires": []}},
+                            "requires": [],
+                            "patchstate": "Available",
+                            "repostate": "Available",
+                            "status": "REL"}},
         "patch_id_list": ["First_Patch", "Second_Patch"]
     }
 
@@ -178,16 +192,24 @@ PATCH_LIST_AVAILABLE = \
         "value": {
             "First_Patch": {"sw_version": "12.34",
                             "requires": [],
-                            "repostate": "Available"},
+                            "repostate": "Available",
+                            "patchstate": "Available",
+                            "status": "REL"},
             "Second_Patch": {"sw_version": "12.34",
                              "requires": ["First_Patch"],
-                             "repostate": "Available"},
+                             "repostate": "Available",
+                             "patchstate": "Available",
+                             "status": "REL"},
             "Third_Patch": {"sw_version": "12.34",
                             "requires": ["Second_Patch"],
-                            "repostate": "Available"},
+                            "repostate": "Available",
+                            "patchstate": "Available",
+                            "status": "REL"},
             "Fourth_Patch": {"sw_version": "12.34",
                              "requires": ["Third_Patch"],
-                             "repostate": "Available"}},
+                             "repostate": "Available",
+                             "patchstate": "Available",
+                             "status": "REL"}},
         "patch_id_list": ["First_Patch", "Second_Patch", "Third_Patch", "Fourth_Patch"]
     }
 
@@ -208,6 +230,69 @@ PATCH_LIST_APPLIED = \
                              "requires": ["Third_Patch"],
                              "repostate": "Applied"}},
         "patch_id_list": ["First_Patch", "Second_Patch", "Third_Patch", "Fourth_Patch"]
+    }
+
+
+DELETE_APPLIED_PATCH = \
+    {
+        "value": {
+            "First_Patch": {"sw_version": "12.34",
+                            "requires": [],
+                            "patchstate": "Applied",
+                            "repostate": "Applied"}},
+        "patch_id_list": ["First_Patch"]
+    }
+
+
+DELETE_PATCH = \
+    {
+        "value": {
+            "First_Patch": {"sw_version": "12.34",
+                            "requires": [],
+                            "patchstate": "Available",
+                            "repostate": "Available"},
+            "Second_Patch": {"sw_version": "12.34",
+                             "requires": [],
+                             "patchstate": "Available",
+                             "repostate": "Available"}},
+        "patch_id_list": ["First_Patch",
+                          "Second_Patch"]
+    }
+
+
+DELETE_API_RELEASE = \
+    {
+        "value": {
+            "First_Patch": {"sw_version": "12.34",
+                            "requires": [],
+                            "patchstate": "Available",
+                            "repostate": "Available"},
+            "Second_Patch": {"sw_version": "12.34",
+                             "requires": [],
+                             "patchstate": "Available",
+                             "repostate": "Available"},
+            "Third_Patch": {"sw_version": "12.34",
+                            "requires": [],
+                            "patchstate": "Committed",
+                            "repostate": "Committed"},
+            "Fourth_Patch": {"sw_version": "12.34",
+                             "requires": [],
+                             "patchstate": "Applied",
+                             "repostate": "Applied"}},
+        "patch_id_list": ["First_Patch",
+                          "Second_Patch",
+                          "Third_Patch",
+                          "Fourth_Patch"]
+    }
+
+
+NON_REL_PATCH = \
+    {
+        "value": {
+            "First_Patch": {"sw_version": "12.34",
+                            "requires": [],
+                            "status": "DEV"}},
+        "patch_id_list": ["First_Patch"]
     }
 
 
@@ -632,3 +717,217 @@ class CgcsPatchControllerTestCase(testtools.TestCase):
         self.assertEqual(self.pc.patch_data.metadata["Second_Patch"]["patchstate"], "Partial-Apply")
         self.assertEqual(self.pc.patch_data.metadata["Third_Patch"]["patchstate"], "Partial-Apply")
         self.assertEqual(self.pc.patch_data.metadata["Fourth_Patch"]["patchstate"], "Partial-Apply")
+
+    def test_patch_delete_api_does_not_exist(self):
+        patch_ids = self.create_patch_data(self.pc, PATCH_NOT_IN_METADATA)
+        response = self.pc.patch_delete_api(patch_ids)
+        self.assertEqual(response["error"],
+                         "Patch Second_Patch does not exist\n")
+
+    def test_patch_delete_api_applied_patch(self):
+        patch_ids = self.create_patch_data(self.pc, DELETE_APPLIED_PATCH)
+        response = self.pc.patch_delete_api(patch_ids)
+        self.assertEqual(response["error"],
+                         "Patch First_Patch not in Available state\n")
+
+    @mock.patch.object(PatchController, 'get_ostree_tar_filename')
+    @mock.patch.object(LOG, 'exception')
+    @mock.patch.object(os.path, 'isfile')
+    @mock.patch.object(os, 'remove')
+    def test_patch_delete_api_remove_tarball_failure(self,
+                                                     _mock_remove,
+                                                     _mock_isfile,
+                                                     _mock_log_exception,
+                                                     _mock_get_tar_filename):
+        patch_ids = self.create_patch_data(self.pc,
+                                           DELETE_PATCH,
+                                           CONTENTS_WITH_OSTREE_DATA)
+        _mock_get_tar_filename.side_effect = ["file1", "file2"]
+        _mock_isfile.side_effect = "True"
+        _mock_remove.side_effect = OSError("Failed to delete tarball")
+        self.assertRaises(OSTreeTarFail, self.pc.patch_delete_api, patch_ids)
+
+    @mock.patch.object(PatchController, 'get_ostree_tar_filename')
+    @mock.patch.object(LOG, 'exception')
+    @mock.patch.object(os, 'remove')
+    def test_patch_delete_api_remove_metadata_failure(self,
+                                                      _mock_remove,
+                                                      _mock_log_exception,
+                                                      _mock_get_tar_filename):
+        patch_ids = self.create_patch_data(self.pc,
+                                           DELETE_PATCH,
+                                           CONTENTS_WITH_OSTREE_DATA)
+        _mock_get_tar_filename.side_effect = ["file1", "file2"]
+        _mock_remove.side_effect = OSError("Failed to delete metadata")
+        self.assertRaises(MetadataFail, self.pc.patch_delete_api, patch_ids)
+
+    @mock.patch.object(PatchController, 'get_ostree_tar_filename')
+    @mock.patch.object(os, 'remove')
+    def test_patch_delete_api_success(self,
+                                      _mock_get_tar_filename,
+                                      _mock_remove):
+        patch_ids = self.create_patch_data(self.pc,
+                                           DELETE_PATCH,
+                                           CONTENTS_WITH_OSTREE_DATA)
+        _mock_get_tar_filename.side_effect = ["file1", "file2"]
+        response = self.pc.patch_delete_api(patch_ids)
+        self.assertEqual(response["info"],
+                         "First_Patch has been deleted\n" +
+                         "Second_Patch has been deleted\n")
+        self.assertIsNone(self.pc.patch_data.contents.get("First_Patch"))
+        self.assertIsNone(self.pc.patch_data.contents.get("Second_Patch"))
+
+    def test_patch_del_release_api_rejected(self):
+        response = self.pc.patch_del_release_api("TEST.SW.VERSION")
+        self.assertEqual(response["error"],
+                         "Rejected: Requested release TEST.SW.VERSION is running release\n")
+
+    @mock.patch.object(os.path, 'isfile')
+    @mock.patch.object(LOG, 'exception')
+    @mock.patch.object(os, 'remove')
+    def test_patch_del_release_api_cannot_remove_semantic(self,
+                                                          _mock_remove,
+                                                          _mock_log_exception,
+                                                          _mock_isfile):
+        self.create_patch_data(self.pc,
+                               DELETE_PATCH,
+                               CONTENTS_WITH_OSTREE_DATA)
+        _mock_isfile.side_effect = "True"
+        _mock_remove.side_effect = OSError("Failed to remove semantic")
+        self.assertRaises(SemanticFail, self.pc.patch_del_release_api, "12.34")
+
+    @mock.patch.object(os, 'remove')
+    @mock.patch.object(LOG, 'exception')
+    def test_patch_del_release_api_cannot_remove_metadata(self,
+                                                          _mock_log_exception,
+                                                          _mock_remove):
+        self.create_patch_data(self.pc,
+                               DELETE_PATCH,
+                               CONTENTS_WITH_OSTREE_DATA)
+        _mock_remove.side_effect = OSError("Failed to remove metadata")
+        self.assertRaises(MetadataFail, self.pc.patch_del_release_api, "12.34")
+
+    @mock.patch.object(LOG, 'exception')
+    @mock.patch.object(os, 'remove')
+    @mock.patch.object(shutil, 'rmtree')
+    def test_patch_del_release_api_patch_repo_does_not_exist(self,
+                                                             _mock_shutil_rmtree,
+                                                             _mock_remove,
+                                                             _mock_log_exception):
+        self.create_patch_data(self.pc,
+                               DELETE_PATCH,
+                               CONTENTS_WITH_OSTREE_DATA)
+        _mock_shutil_rmtree.side_effect = shutil.Error("Cannot remove package")
+        response = self.pc.patch_del_release_api("12.34")
+        self.assertEqual(response["info"], "Patch repository for 12.34 does not exist\n")
+
+    @mock.patch.object(LOG, 'exception')
+    @mock.patch.object(os, 'remove')
+    @mock.patch.object(os.path, 'exists')
+    @mock.patch.object(shutil, 'rmtree')
+    def test_patch_del_release_api_failed(self,
+                                          _mock_shutil_rmtree,
+                                          _mock_path_exists,
+                                          _mock_remove,
+                                          _mock_log_exception):
+        self.create_patch_data(self.pc,
+                               DELETE_API_RELEASE,
+                               CONTENTS_WITH_OSTREE_DATA)
+        _mock_shutil_rmtree.side_effect = shutil.Error("Cannot remove package")
+        self.pc.patch_del_release_api("12.34")
+        self.assertIsNone(self.pc.patch_data.contents.get("First_Patch"))
+        self.assertIsNone(self.pc.patch_data.contents.get("Second_Patch"))
+
+    def test_patch_query_what_requires_does_not_exist(self):
+        patch_ids = self.create_patch_data(self.pc, PATCH_NOT_IN_METADATA)
+        response = self.pc.patch_query_what_requires(patch_ids)
+        self.assertEqual(response["error"],
+                         "Patch Second_Patch does not exist\n")
+
+    def test_patch_query_what_requires_success(self):
+        patch_ids = self.create_patch_data(self.pc, PATCH_LIST_WITH_DEPENDENCIES)
+        response = self.pc.patch_query_what_requires(patch_ids)
+        self.assertEqual(response["info"],
+                         "First_Patch is required by: Second_Patch\n" +
+                         "Second_Patch is required by: Third_Patch\n" +
+                         "Third_Patch is required by: Fourth_Patch\n" +
+                         "Fourth_Patch is not required by any patches.\n")
+
+    @mock.patch.object(os.path, 'exists')
+    @mock.patch.object(os, 'makedirs')
+    @mock.patch.object(LOG, 'exception')
+    def test_patch_commit_failed_create_dir(self,
+                                            _mock_log,
+                                            _mock_makedirs,
+                                            _mock_exists):
+        patch_ids = self.create_patch_data(self.pc, PATCH_LIST_WITH_DEPENDENCIES)
+        _mock_exists.return_value = False
+        _mock_makedirs.side_effect = os.error("Cannot create directory")
+        self.assertRaises(PatchFail, self.pc.patch_commit, patch_ids)
+
+    @mock.patch.object(os.path, 'exists')
+    @mock.patch.object(LOG, 'exception')
+    def test_patch_commit_failed_non_rel(self,
+                                         _mock_log,
+                                         _mock_exists):
+        patch_ids = self.create_patch_data(self.pc, NON_REL_PATCH)
+        _mock_exists.return_value = True
+        response = self.pc.patch_commit(patch_ids)
+        self.assertEqual(response["error"],
+                         "A commit cannot be performed with non-REL status " +
+                         "patches in the system:\n" +
+                         "    First_Patch\n")
+
+    @mock.patch.object(os.path, 'exists')
+    @mock.patch.object(LOG, 'exception')
+    def test_patch_commit_failed_unrecognized(self,
+                                              _mock_log,
+                                              _mock_exists):
+        patch_ids = self.create_patch_data(self.pc, PATCH_NOT_IN_METADATA)
+        _mock_exists.return_value = True
+        response = self.pc.patch_commit(patch_ids)
+        self.assertEqual(response["error"],
+                         "Second_Patch is unrecognized\n")
+
+    @mock.patch.object(os.path, 'exists')
+    @mock.patch.object(LOG, 'exception')
+    def test_patch_commit_failed_cannot_commit(self,
+                                               _mock_log,
+                                               _mock_exists):
+        patch_ids = self.create_patch_data(self.pc, PATCH_LIST_AVAILABLE)
+        _mock_exists.return_value = True
+        response = self.pc.patch_commit(patch_ids)
+        self.assertEqual(response["error"],
+                         "The following patches are not applied and cannot be committed:\n" +
+                         "    First_Patch\n" +
+                         "    Fourth_Patch\n" +
+                         "    Second_Patch\n" +
+                         "    Third_Patch\n")
+
+    @mock.patch.object(os.path, 'exists')
+    @mock.patch.object(LOG, 'exception')
+    def test_patch_commit_dry_run(self,
+                                  _mock_log,
+                                  _mock_exists):
+        patch_ids = self.create_patch_data(self.pc, PATCH_LIST_WITH_DEPENDENCIES)
+        with mock.patch('os.stat') as _mock_stat:
+            type(_mock_stat.return_value).st_size = mock.PropertyMock(return_value=200000)
+            _mock_exists.return_value = True
+            response = self.pc.patch_commit(patch_ids, dry_run=True)
+            self.assertEqual(response["info"], "This commit operation would free 0.76 MiB")
+
+    @mock.patch.object(os.path, 'exists')
+    @mock.patch.object(LOG, 'exception')
+    @mock.patch.object(shutil, 'move')
+    @mock.patch.object(os, 'remove')
+    def test_patch_commit_success(self,
+                                  _mock_remove,
+                                  _mock_shutil_move,
+                                  _mock_log,
+                                  _mock_exists):
+        patch_ids = self.create_patch_data(self.pc, PATCH_LIST_WITH_DEPENDENCIES)
+        with mock.patch('os.stat') as _mock_stat:
+            type(_mock_stat.return_value).st_size = mock.PropertyMock(return_value=200000)
+            _mock_exists.return_value = True
+            response = self.pc.patch_commit(patch_ids)
+            self.assertEqual(response["info"], "The patches have been committed.")
