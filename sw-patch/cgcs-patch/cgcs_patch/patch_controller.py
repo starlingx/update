@@ -1256,6 +1256,18 @@ class PatchController(PatchService):
         msg_error = ""
         remove_unremovable = False
 
+        # First, verify that all specified patches exist
+        id_verification = True
+        for patch_id in sorted(list(set(patch_ids))):
+            if patch_id not in self.patch_data.metadata:
+                msg = "Patch %s does not exist" % patch_id
+                LOG.error(msg)
+                msg_error += msg + "\n"
+                id_verification = False
+
+        if not id_verification:
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
         patch_list = self.patch_remove_order(patch_ids)
 
         if patch_list is None:
@@ -1270,18 +1282,6 @@ class PatchController(PatchService):
 
         if kwargs.get("removeunremovable") == "yes":
             remove_unremovable = True
-
-        # First, verify that all specified patches exist
-        id_verification = True
-        for patch_id in patch_list:
-            if patch_id not in self.patch_data.metadata:
-                msg = "Patch %s does not exist" % patch_id
-                LOG.error(msg)
-                msg_error += msg + "\n"
-                id_verification = False
-
-        if not id_verification:
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         # See if any of the patches are marked as unremovable
         unremovable_verification = True
