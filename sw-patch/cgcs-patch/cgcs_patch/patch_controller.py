@@ -813,12 +813,6 @@ class PatchController(PatchService):
             # patch required (directly or a chain dependency) by the current patch.
             skip_patch = []
             for patch_id in self.patch_data.metadata:
-                # If the patch has no patch_id, it is malformed, skip it.
-                # A future enhancement would be to automatically remove this patch.
-                if patch_id not in self.patch_data.metadata:
-                    LOG.error("Patch data missing for %s", patch_id)
-                    continue
-
                 # If the patch is on a different release than the host, skip it.
                 if self.patch_data.metadata[patch_id]["sw_version"] != self.hosts[ip].sw_version:
                     continue
