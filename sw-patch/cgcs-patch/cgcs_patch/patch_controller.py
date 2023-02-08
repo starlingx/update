@@ -781,7 +781,7 @@ class PatchController(PatchService):
         if len(self.hosts) == 0:
             for patch_id in self.patch_data.metadata:
                 self.patch_data.metadata[patch_id]["patchstate"] = constants.UNKNOWN
-                return
+            return
 
         # Default to allowing in-service patching
         self.allow_insvc_patching = True

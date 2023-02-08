@@ -943,3 +943,14 @@ class CgcsPatchControllerTestCase(testtools.TestCase):
             _mock_exists.return_value = True
             response = self.pc.patch_commit(patch_ids)
             self.assertEqual(response["info"], "The patches have been committed.")
+
+    def test_check_patch_states_no_hosts(self):
+        self.create_patch_data(self.pc,
+                               PATCH_LIST_AVAILABLE,
+                               CONTENTS_WITH_OSTREE_DATA)
+        self.pc.hosts = []
+        self.pc.check_patch_states()
+        self.assertEqual(self.pc.patch_data.metadata["First_Patch"]["patchstate"], "n/a")
+        self.assertEqual(self.pc.patch_data.metadata["Second_Patch"]["patchstate"], "n/a")
+        self.assertEqual(self.pc.patch_data.metadata["Third_Patch"]["patchstate"], "n/a")
+        self.assertEqual(self.pc.patch_data.metadata["Fourth_Patch"]["patchstate"], "n/a")
