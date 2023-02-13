@@ -17,12 +17,14 @@ from cgcs_patch.exceptions import MetadataFail
 from cgcs_patch.exceptions import OSTreeTarFail
 from cgcs_patch.exceptions import OSTreeCommandFail
 from cgcs_patch.exceptions import PatchFail
+from cgcs_patch.exceptions import PatchMismatchFailure
 from cgcs_patch.exceptions import SemanticFail
 from cgcs_patch.patch_controller import AgentNeighbour
 from cgcs_patch.patch_controller import ControllerNeighbour
 from cgcs_patch.patch_controller import PatchController
 from cgcs_patch.patch_functions import LOG
-
+from cgcs_patch.patch_functions import PatchData
+from cgcs_patch.patch_functions import PatchFile
 
 APPLY_PATCH_SUCCESSULLY = \
     {
@@ -214,22 +216,82 @@ PATCH_LIST_AVAILABLE = \
     }
 
 
+IMPORTED_PATCH = \
+    {
+        "value": {
+            "First_Patch": {"sw_version": "12.34",
+                            "requires": [],
+                            "repostate": "Available",
+                            "patchstate": "Available",
+                            "status": "REL"},
+            "Second_Patch": {"sw_version": "12.34",
+                             "requires": ["First_Patch"],
+                             "repostate": "Available",
+                             "patchstate": "Available",
+                             "status": "REL"},
+            "Third_Patch": {"sw_version": "12.34",
+                            "requires": ["Second_Patch"],
+                            "repostate": "Available",
+                            "patchstate": "Available",
+                            "status": "REL"},
+            "Fourth_Patch": {"sw_version": "12.34",
+                             "requires": ["Third_Patch"],
+                             "repostate": "Available",
+                             "patchstate": "Available",
+                             "status": "REL"},
+            "Fifth_Patch": {"sw_version": "12.34",
+                            "requires": ["Fourth_Patch"],
+                            "repostate": "Available",
+                            "patchstate": "Available",
+                            "status": "REL"}},
+        "patch_id_list": ["First_Patch", "Second_Patch", "Third_Patch", "Fourth_Patch", "Fifth_Patch"]
+    }
+
+
 PATCH_LIST_APPLIED = \
     {
         "value": {
             "First_Patch": {"sw_version": "12.34",
                             "requires": [],
+                            "patchstate": "Applied",
                             "repostate": "Applied"},
             "Second_Patch": {"sw_version": "12.34",
                              "requires": ["First_Patch"],
+                             "patchstate": "Applied",
                              "repostate": "Applied"},
             "Third_Patch": {"sw_version": "12.34",
                             "requires": ["Second_Patch"],
+                            "patchstate": "Applied",
                             "repostate": "Applied"},
             "Fourth_Patch": {"sw_version": "12.34",
                              "requires": ["Third_Patch"],
+                             "patchstate": "Applied",
                              "repostate": "Applied"}},
         "patch_id_list": ["First_Patch", "Second_Patch", "Third_Patch", "Fourth_Patch"]
+    }
+
+
+CHECK_PATCH_STATES = \
+    {
+        "value": {
+            "First_Patch": {"sw_version": "12.34",
+                            "requires": [],
+                            "patchstate": "Applied",
+                            "repostate": "Applied"},
+            "Second_Patch": {"sw_version": "12.34",
+                             "requires": ["First_Patch"],
+                             "patchstate": "Applied",
+                             "repostate": "Applied"},
+            "Third_Patch": {"sw_version": "12.34",
+                            "requires": ["Second_Patch"],
+                            "patchstate": "Available",
+                            "repostate": "Available"},
+            "Fourth_Patch": {"sw_version": "12.34",
+                             "requires": ["Third_Patch"],
+                             "patchstate": "Available",
+                             "repostate": "Available"}},
+        "patch_id_list": ["First_Patch", "Second_Patch",
+                          "Third_Patch", "Fourth_Patch"]
     }
 
 
@@ -250,7 +312,8 @@ DELETE_PATCH = \
             "First_Patch": {"sw_version": "12.34",
                             "requires": [],
                             "patchstate": "Available",
-                            "repostate": "Available"},
+                            "repostate": "Available",
+                            "restart_script": "restart-First-Patch.sh"},
             "Second_Patch": {"sw_version": "12.34",
                              "requires": [],
                              "patchstate": "Available",
@@ -643,7 +706,9 @@ class CgcsPatchControllerTestCase(testtools.TestCase):
     @mock.patch.object(ostree_utils, 'get_feed_latest_commit')
     @mock.patch.object(PatchController, 'get_ostree_tar_filename')
     @mock.patch.object(tarfile, 'open')
+    @mock.patch.object(LOG, 'exception')
     def test_patch_apply_api_tarball_extraction_failure(self,
+                                                        _mock_log,
                                                         _mock_tar_open,
                                                         _mock_get_tar_filename,
                                                         _mock_feed):
@@ -775,13 +840,16 @@ class CgcsPatchControllerTestCase(testtools.TestCase):
 
     @mock.patch.object(PatchController, 'get_ostree_tar_filename')
     @mock.patch.object(os, 'remove')
+    @mock.patch.object(os.path, 'isfile')
     def test_patch_delete_api_success(self,
-                                      _mock_get_tar_filename,
-                                      _mock_remove):
+                                      _mock_is_file,
+                                      _mock_remove,
+                                      _mock_get_tar_filename):
         patch_ids = self.create_patch_data(self.pc,
                                            DELETE_PATCH,
                                            CONTENTS_WITH_OSTREE_DATA)
         _mock_get_tar_filename.side_effect = ["file1", "file2"]
+        _mock_is_file.return_value = True
         response = self.pc.patch_delete_api(patch_ids)
         self.assertEqual(response["info"],
                          "First_Patch has been deleted\n" +
@@ -954,3 +1022,387 @@ class CgcsPatchControllerTestCase(testtools.TestCase):
         self.assertEqual(self.pc.patch_data.metadata["Second_Patch"]["patchstate"], "n/a")
         self.assertEqual(self.pc.patch_data.metadata["Third_Patch"]["patchstate"], "n/a")
         self.assertEqual(self.pc.patch_data.metadata["Fourth_Patch"]["patchstate"], "n/a")
+
+    @mock.patch.object(os.path, 'exists')
+    @mock.patch.object(LOG, 'exception')
+    @mock.patch.object(shutil, 'move')
+    @mock.patch.object(os, 'remove')
+    def test_patch_commit_failed_to_move_metadata(self,
+                                                  _mock_remove,
+                                                  _mock_shutil_move,
+                                                  _mock_log,
+                                                  _mock_exists):
+        patch_ids = self.create_patch_data(self.pc, PATCH_LIST_WITH_DEPENDENCIES)
+        with mock.patch('os.stat') as _mock_stat:
+            type(_mock_stat.return_value).st_size = mock.PropertyMock(return_value=200000)
+            _mock_exists.return_value = True
+            _mock_shutil_move.side_effect = shutil.Error("Failed to move metadata")
+            self.assertRaises(MetadataFail, self.pc.patch_commit, patch_ids)
+
+    @mock.patch.object(os.path, 'exists')
+    @mock.patch.object(LOG, 'exception')
+    @mock.patch.object(shutil, 'move')
+    @mock.patch.object(os, 'remove')
+    def test_patch_commit_failed_to_remove(self,
+                                           _mock_remove,
+                                           _mock_shutil_move,
+                                           _mock_log,
+                                           _mock_exists):
+        patch_ids = self.create_patch_data(self.pc, PATCH_LIST_WITH_DEPENDENCIES)
+        with mock.patch('os.stat') as _mock_stat:
+            type(_mock_stat.return_value).st_size = mock.PropertyMock(return_value=200000)
+            _mock_exists.return_value = True
+            _mock_remove.side_effect = OSError("Failed to remove files")
+            self.assertRaises(MetadataFail, self.pc.patch_commit, patch_ids)
+
+    def test_patch_is_applied_false(self):
+        patch_ids = self.create_patch_data(self.pc, DELETE_API_RELEASE)
+        self.assertEqual(self.pc.is_applied(patch_ids), False)
+
+    def test_patch_is_applied_true(self):
+        patch_ids = self.create_patch_data(self.pc, PATCH_LIST_APPLIED)
+        self.assertEqual(self.pc.is_applied(patch_ids), True)
+
+    def test_patch_is_available_false(self):
+        patch_ids = self.create_patch_data(self.pc, DELETE_API_RELEASE)
+        self.assertEqual(self.pc.is_available(patch_ids), False)
+
+    def test_patch_is_available_true(self):
+        patch_ids = self.create_patch_data(self.pc, PATCH_LIST_AVAILABLE)
+        self.assertEqual(self.pc.is_available(patch_ids), True)
+
+    @mock.patch.object(os.path, 'isfile')
+    def test_patch_import_api_does_not_exist(self,
+                                             _mock_is_file):
+        patch_ids = self.create_patch_data(self.pc, PATCH_LIST_AVAILABLE)
+        _mock_is_file.return_value = False
+        self.assertRaises(PatchFail, self.pc.patch_import_api, patch_ids)
+
+    @mock.patch.object(LOG, 'exception')
+    @mock.patch.object(os.path, 'isfile')
+    @mock.patch.object(os.path, 'exists')
+    @mock.patch.object(os, 'makedirs')
+    def test_patch_import_api_cannot_create_directory(self,
+                                                      _mock_makedirs,
+                                                      _mock_path_exists,
+                                                      _mock_is_file,
+                                                      _mock_log_exception):
+        patch_ids = self.create_patch_data(self.pc, PATCH_LIST_AVAILABLE)
+        _mock_makedirs.side_effect = os.error("Cannot create directory")
+        _mock_is_file.return_value = True
+        _mock_path_exists.side_effect = [True, True, False]
+        self.assertRaises(PatchFail, self.pc.patch_import_api, patch_ids)
+
+    @mock.patch.object(LOG, 'exception')
+    @mock.patch.object(os.path, 'isfile')
+    @mock.patch.object(os.path, 'exists')
+    @mock.patch.object(os, 'makedirs')
+    def test_patch_import_api_patchfail(self,
+                                        _mock_makedirs,
+                                        _mock_path_exists,
+                                        _mock_is_file,
+                                        _mock_log_exception):
+        patch_ids = self.create_patch_data(self.pc,
+                                           DELETE_API_RELEASE,
+                                           CONTENTS_WITH_OSTREE_DATA)
+        # PatchFail error is raised by extact_patch() of patch_function
+        # due to an OSError while executing the read_patch()
+        response = self.pc.patch_import_api(patch_ids)
+        self.assertEqual(response["info"], "Third_Patch is committed. Metadata not updated\n")
+        self.assertEqual(response["error"],
+                         "Failed to import patch First_Patch\n" +
+                         "Failed to import patch Fourth_Patch\n" +
+                         "Failed to import patch Second_Patch\n")
+
+    @mock.patch.object(LOG, 'exception')
+    @mock.patch.object(os.path, 'isfile')
+    @mock.patch.object(os.path, 'exists')
+    @mock.patch.object(os, 'makedirs')
+    @mock.patch.object(PatchData, 'parse_metadata')
+    @mock.patch.object(PatchFile, 'read_patch')
+    def test_patch_import_api_patch_validation_failed(self,
+                                                      _mock_read_patch,
+                                                      _mock_parse_metadata,
+                                                      _mock_makedirs,
+                                                      _mock_path_exists,
+                                                      _mock_is_file,
+                                                      _mock_log_exception):
+        patch_ids = self.create_patch_data(self.pc,
+                                           PATCH_LIST_AVAILABLE,
+                                           CONTENTS_WITH_OSTREE_DATA)
+        # PatchValidationFailure error is raised by extact_patch() of
+        # patch_function due to a KeyError while parsing the metadata
+        response = self.pc.patch_import_api(patch_ids)
+        self.assertEqual(response["info"], "")
+        self.assertEqual(response["error"],
+                         "Patch validation failed for First_Patch:\n" +
+                         "Failed during patch extraction\n" +
+                         "Patch validation failed for Fourth_Patch:\n" +
+                         "Failed during patch extraction\n" +
+                         "Patch validation failed for Second_Patch:\n" +
+                         "Failed during patch extraction\n" +
+                         "Patch validation failed for Third_Patch:\n" +
+                         "Failed during patch extraction\n")
+
+    @mock.patch.object(LOG, 'exception')
+    @mock.patch.object(os.path, 'isfile')
+    @mock.patch.object(os.path, 'exists')
+    @mock.patch.object(os, 'makedirs')
+    @mock.patch.object(PatchFile, 'read_patch')
+    def test_patch_import_api_patch_mismatch_failure(self,
+                                                     _mock_read_patch,
+                                                     _mock_makedirs,
+                                                     _mock_path_exists,
+                                                     _mock_is_file,
+                                                     _mock_log_exception):
+        patch_ids = self.create_patch_data(self.pc,
+                                           PATCH_LIST_AVAILABLE,
+                                           CONTENTS_WITH_OSTREE_DATA)
+        _mock_read_patch.side_effect = PatchMismatchFailure("Patch mismatch failure")
+        response = self.pc.patch_import_api(patch_ids)
+        self.assertEqual(response["info"], "")
+        self.assertEqual(response["error"],
+                         "Contents of First_Patch do not match re-imported patch\n" +
+                         "Contents of Fourth_Patch do not match re-imported patch\n" +
+                         "Contents of Second_Patch do not match re-imported patch\n" +
+                         "Contents of Third_Patch do not match re-imported patch\n")
+
+    @mock.patch.object(LOG, 'exception')
+    @mock.patch.object(os.path, 'isfile')
+    @mock.patch.object(os.path, 'exists')
+    @mock.patch.object(os, 'makedirs')
+    @mock.patch.object(PatchFile, 'extract_patch')
+    def test_patch_import_api_already_imported(self,
+                                               _mock_extract_patch,
+                                               _mock_makedirs,
+                                               _mock_path_exists,
+                                               _mock_is_file,
+                                               _mock_log_exception):
+        patch_ids = self.create_patch_data(self.pc,
+                                           PATCH_LIST_AVAILABLE,
+                                           CONTENTS_WITH_OSTREE_DATA)
+        response = self.pc.patch_import_api(patch_ids)
+        self.assertEqual(response["info"],
+                         "First_Patch is already imported. Updated metadata only\n" +
+                         "Fourth_Patch is already imported. Updated metadata only\n" +
+                         "Second_Patch is already imported. Updated metadata only\n" +
+                         "Third_Patch is already imported. Updated metadata only\n")
+
+    @mock.patch.object(LOG, 'exception')
+    @mock.patch.object(os.path, 'isfile')
+    @mock.patch.object(os.path, 'exists')
+    @mock.patch.object(os, 'makedirs')
+    @mock.patch.object(PatchFile, 'extract_patch')
+    @mock.patch.object(PatchData, 'update_patch')
+    def test_patch_import_api_patch_extension(self,
+                                              _mock_update_patch,
+                                              _mock_extract_patch,
+                                              _mock_makedirs,
+                                              _mock_path_exists,
+                                              _mock_is_file,
+                                              _mock_log_exception):
+        self.create_patch_data(self.pc,
+                               PATCH_LIST_AVAILABLE,
+                               CONTENTS_WITH_OSTREE_DATA)
+        response = self.pc.patch_import_api(["Fifth_Patch"])
+        self.assertEqual(response["error"],
+                         "File must end in .patch extension: Fifth_Patch\n")
+
+    @mock.patch.object(LOG, 'exception')
+    @mock.patch.object(os.path, 'isfile')
+    @mock.patch.object(os.path, 'exists')
+    def test_patch_import_api_patch_fail_during_import(self,
+                                                       _mock_path_exists,
+                                                       _mock_is_file,
+                                                       _mock_log_exception):
+        self.create_patch_data(self.pc,
+                               PATCH_LIST_AVAILABLE,
+                               CONTENTS_WITH_OSTREE_DATA)
+        response = self.pc.patch_import_api(["Fifth_Patch.patch"])
+        self.assertEqual(response["error"],
+                         "Failed to import patch Fifth_Patch\n")
+
+    @mock.patch.object(LOG, 'exception')
+    @mock.patch.object(os.path, 'isfile')
+    @mock.patch.object(os.path, 'exists')
+    @mock.patch.object(PatchData, 'parse_metadata')
+    @mock.patch.object(PatchFile, 'read_patch')
+    def test_patch_import_api_validation_failure_during_import(self,
+                                                               _mock_read_patch,
+                                                               _mock_parse_metadata,
+                                                               _mock_path_exists,
+                                                               _mock_is_file,
+                                                               _mock_log_exception):
+        self.create_patch_data(self.pc,
+                               PATCH_LIST_AVAILABLE,
+                               CONTENTS_WITH_OSTREE_DATA)
+        response = self.pc.patch_import_api(["Fifth_Patch.patch"])
+        self.assertEqual(response["error"],
+                         "Patch validation failed for Fifth_Patch:\n" +
+                         "Failed during patch extraction\n")
+
+    def test_check_patch_states_hosts_up_to_date(self):
+        self.create_patch_data(self.pc,
+                               PATCH_LIST_AVAILABLE,
+                               CONTENTS_WITH_OSTREE_DATA)
+        test_ip1 = '127.0.0.1'
+        test_ip2 = '127.0.0.2'
+        # After initialization, out_of_date is False. This means host is up-to-date
+        an_1 = AgentNeighbour(test_ip1)
+        an_2 = AgentNeighbour(test_ip2)
+        self.pc.hosts = {test_ip1: an_1, test_ip2: an_2}
+        self.pc.check_patch_states()
+        self.assertEqual(self.pc.patch_data.metadata["First_Patch"]["patchstate"], "Available")
+        self.assertEqual(self.pc.patch_data.metadata["Second_Patch"]["patchstate"], "Available")
+        self.assertEqual(self.pc.patch_data.metadata["Third_Patch"]["patchstate"], "Available")
+        self.assertEqual(self.pc.patch_data.metadata["Fourth_Patch"]["patchstate"], "Available")
+
+    def test_check_patch_states_hosts_out_of_date_and_diff_sw_version(self):
+        patch_ids = self.create_patch_data(self.pc,
+                                           DELETE_API_RELEASE,
+                                           CONTENTS_WITH_OSTREE_DATA)
+        test_ip1 = '127.0.0.1'
+        test_ip2 = '127.0.0.2'
+        # After initialization, out_of_date is False. This means host is up-to-date
+        an_1 = AgentNeighbour(test_ip1)
+        an_2 = AgentNeighbour(test_ip2)
+        an_1.out_of_date = True
+        an_2.out_of_date = True
+        self.pc.interim_state = patch_ids
+        self.pc.hosts = {test_ip1: an_1, test_ip2: an_2}
+        self.pc.check_patch_states()
+        self.assertEqual(self.pc.patch_data.metadata["First_Patch"]["patchstate"], "Partial-Remove")
+        self.assertEqual(self.pc.patch_data.metadata["Second_Patch"]["patchstate"], "Partial-Remove")
+        self.assertEqual(self.pc.patch_data.metadata["Third_Patch"]["patchstate"], "Committed")
+        self.assertEqual(self.pc.patch_data.metadata["Fourth_Patch"]["patchstate"], "Partial-Apply")
+
+    def test_check_patch_states_hosts_out_of_date_and_same_sw_version(self):
+        patch_ids = self.create_patch_data(self.pc,
+                                           DELETE_API_RELEASE,
+                                           CONTENTS_WITH_OSTREE_DATA)
+        test_ip1 = '127.0.0.1'
+        test_ip2 = '127.0.0.2'
+        # After initialization, out_of_date is False. This means host is up-to-date
+        an_1 = AgentNeighbour(test_ip1)
+        an_2 = AgentNeighbour(test_ip2)
+        an_1.out_of_date = True
+        an_1.sw_version = "12.34"
+        an_1.latest_sysroot_commit = "commitFirstPatch"
+        an_2.out_of_date = True
+        an_2.sw_version = "12.34"
+        an_2.latest_sysroot_commit = "commitFirstPatch"
+        self.pc.interim_state = patch_ids
+        self.pc.hosts = {test_ip1: an_1, test_ip2: an_2}
+        self.pc.check_patch_states()
+        self.assertEqual(self.pc.patch_data.metadata["First_Patch"]["patchstate"], "Partial-Remove")
+        self.assertEqual(self.pc.patch_data.metadata["Second_Patch"]["patchstate"], "Partial-Remove")
+        self.assertEqual(self.pc.patch_data.metadata["Third_Patch"]["patchstate"], "Committed")
+        self.assertEqual(self.pc.patch_data.metadata["Fourth_Patch"]["patchstate"], "Partial-Apply")
+
+    def test_check_patch_states_with_patch_dependency(self):
+        patch_ids = self.create_patch_data(self.pc,
+                                           APPLY_PATCH_SUCCESSULLY,
+                                           CONTENTS_WITH_OSTREE_DATA)
+        test_ip1 = '127.0.0.1'
+        test_ip2 = '127.0.0.2'
+        # After initialization, out_of_date is False. This means host is up-to-date
+        an_1 = AgentNeighbour(test_ip1)
+        an_2 = AgentNeighbour(test_ip2)
+        an_1.out_of_date = True
+        an_1.sw_version = "12.34"
+        an_1.latest_sysroot_commit = "commitFourthPatch"
+        an_2.out_of_date = True
+        an_2.sw_version = "12.34"
+        an_2.latest_sysroot_commit = "commitFourthPatch"
+        self.pc.interim_state = patch_ids
+        self.pc.hosts = {test_ip1: an_1, test_ip2: an_2}
+        self.pc.check_patch_states()
+        self.assertEqual(self.pc.patch_data.metadata["First_Patch"]["patchstate"], "Partial-Remove")
+        self.assertEqual(self.pc.patch_data.metadata["Second_Patch"]["patchstate"], "Partial-Remove")
+        self.assertEqual(self.pc.patch_data.metadata["Third_Patch"]["patchstate"], "Partial-Remove")
+        self.assertEqual(self.pc.patch_data.metadata["Fourth_Patch"]["patchstate"], "Partial-Remove")
+
+    def test_check_patch_states_with_patch_dependency_combo(self):
+        # First_Patch and Second_Patch are in applied state
+        # Third_Patch and Fourth_Patch are removed
+        self.create_patch_data(self.pc,
+                               CHECK_PATCH_STATES,
+                               CONTENTS_WITH_OSTREE_DATA)
+        test_ip1 = '127.0.0.1'
+        test_ip2 = '127.0.0.2'
+        # After initialization, out_of_date is False. This means host is up-to-date
+        an_1 = AgentNeighbour(test_ip1)
+        an_2 = AgentNeighbour(test_ip2)
+        an_1.out_of_date = True
+        an_1.sw_version = "12.34"
+        an_1.latest_sysroot_commit = "commitFourthPatch"
+        an_2.out_of_date = True
+        an_2.sw_version = "12.34"
+        an_2.latest_sysroot_commit = "commitFourthPatch"
+        self.pc.interim_state = ["Third_Patch", "Fourth_Patch"]
+        self.pc.hosts = {test_ip1: an_1, test_ip2: an_2}
+        self.pc.check_patch_states()
+        self.assertEqual(self.pc.patch_data.metadata["First_Patch"]["patchstate"], "Applied")
+        self.assertEqual(self.pc.patch_data.metadata["Second_Patch"]["patchstate"], "Applied")
+        self.assertEqual(self.pc.patch_data.metadata["Third_Patch"]["patchstate"], "Partial-Remove")
+        self.assertEqual(self.pc.patch_data.metadata["Fourth_Patch"]["patchstate"], "Partial-Remove")
+
+    def test_check_patch_states_patch_data_missing(self):
+        self.create_patch_data(self.pc,
+                               CHECK_PATCH_STATES,
+                               CONTENTS_WITH_OSTREE_DATA)
+        test_ip1 = '127.0.0.1'
+        test_ip2 = '127.0.0.2'
+        # After initialization, out_of_date is False. This means host is up-to-date
+        an_1 = AgentNeighbour(test_ip1)
+        an_2 = AgentNeighbour(test_ip2)
+        an_1.out_of_date = True
+        an_1.sw_version = "12.34"
+        an_1.latest_sysroot_commit = "commitFourthPatch"
+        an_2.out_of_date = True
+        an_2.sw_version = "12.34"
+        an_2.latest_sysroot_commit = "commitFourthPatch"
+        self.pc.interim_state = ["Third_Patch", "Fourth_Patch"]
+        self.pc.hosts = {test_ip1: an_1, test_ip2: an_2}
+        self.pc.check_patch_states()
+        self.assertEqual(self.pc.patch_data.metadata["First_Patch"]["patchstate"], "Applied")
+        self.assertEqual(self.pc.patch_data.metadata["Second_Patch"]["patchstate"], "Applied")
+        self.assertEqual(self.pc.patch_data.metadata["Third_Patch"]["patchstate"], "Partial-Remove")
+        self.assertEqual(self.pc.patch_data.metadata["Fourth_Patch"]["patchstate"], "Partial-Remove")
+
+    def test_get_ostree_tar_filename(self):
+        filename = self.pc.get_ostree_tar_filename("TEST.SW.VERSION", "First_Patch")
+        self.assertEqual(filename, "/opt/patching/packages/TEST.SW.VERSION/First_Patch-software.tar")
+
+    def test_query_no_query_state_or_release(self):
+        self.create_patch_data(self.pc,
+                               CHECK_PATCH_STATES,
+                               CONTENTS_WITH_OSTREE_DATA)
+        # Returns everything if query_state and query_release are not
+        # passed
+        results = self.pc.patch_query_cached()
+        self.assertEqual(True, results == CHECK_PATCH_STATES["value"])
+
+    def test_query_available_patch(self):
+        self.create_patch_data(self.pc,
+                               CHECK_PATCH_STATES,
+                               CONTENTS_WITH_OSTREE_DATA)
+        kwargs = dict({"show": "available"})
+        results = self.pc.patch_query_cached(**kwargs)
+        self.assertEqual(len(results), 2)
+        self.assertIsNone(results.get("First_Patch"))
+        self.assertIsNone(results.get("Second_Patch"))
+        self.assertIsNotNone(results.get("Third_Patch"))
+        self.assertIsNotNone(results.get("Fourth_Patch"))
+
+    def test_query_applied_patch(self):
+        self.create_patch_data(self.pc,
+                               CHECK_PATCH_STATES,
+                               CONTENTS_WITH_OSTREE_DATA)
+        kwargs = dict({"show": "applied"})
+        results = self.pc.patch_query_cached(**kwargs)
+        self.assertEqual(len(results), 2)
+        self.assertIsNotNone(results.get("First_Patch"))
+        self.assertIsNotNone(results.get("Second_Patch"))
+        self.assertIsNone(results.get("Third_Patch"))
+        self.assertIsNone(results.get("Fourth_Patch"))
