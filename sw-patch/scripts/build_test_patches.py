@@ -110,6 +110,7 @@ class TestPatchBuilder():
     """
     Build test patches
     """
+
     def __init__(self, sw_version):
         try:
             self.project = os.environ.get("PROJECT")
@@ -192,6 +193,10 @@ class TestPatchBuilder():
         log.info("Build image return code %s", ret.returncode)
         if ret.returncode != 0:
             raise Exception("Failed to build image")
+
+        # Update gpg
+        log.info("Updating gpg settings")
+        self.add_gpg_pinentry()
 
     def update_logmgmt_pkg(self, pname):
         """
@@ -297,6 +302,34 @@ class TestPatchBuilder():
         ret = run_cmd(cmd)
         if ret.returncode != 0:
             raise Exception("Failed to pull ostree from patch_repo process returned non-zero exit status %i", ret.returncode)
+
+    def add_gpg_pinentry(self):
+        '''
+        Configures the gpg pinentry settings used by ostree commit
+        '''
+        lat_yaml = os.path.join(
+            self.repo_root,
+            "..",
+            "stx-tools/debian-mirror-tools/config/debian/common",
+            "base-bullseye.yaml")
+        with open(lat_yaml) as f:
+            data = yaml.safe_load(f)
+        gpg_id = data["gpg"]["ostree"]["gpgid"]
+        gpg_pass = data["gpg"]["ostree"]["gpg_password"]
+
+        cmd = f'''
+            source import-stx
+            stx shell --container lat -c ' \
+                echo "allow-loopback-pinentry" > /tmp/.lat_gnupg_root/gpg-agent.conf; \
+                echo "default-cache-ttl 34560000" >> /tmp/.lat_gnupg_root/gpg-agent.conf; \
+                echo "maximum-cache-ttl 34560000" >> /tmp/.lat_gnupg_root/gpg-agent.conf; \
+                gpg-connect-agent --homedir /tmp/.lat_gnupg_root reloadagent /bye; \
+                gpg --homedir=/tmp/.lat_gnupg_root -o /dev/null -u {gpg_id} --pinentry=loopback --passphrase {gpg_pass} -s /dev/null;
+            '
+        '''
+        ret = run_cmd(cmd)
+        if ret.returncode != 0:
+            raise Exception("Failed to set gpg pinentry %i", ret.returncode)
 
     def create_test_patches(self, pname, requires=False, inservice=False, formal=False):
         """
