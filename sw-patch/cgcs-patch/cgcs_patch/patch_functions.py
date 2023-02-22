@@ -1,29 +1,23 @@
 """
-Copyright (c) 2014-2022 Wind River Systems, Inc.
+Copyright (c) 2014-2023 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
 
-import getopt
 import glob
 import hashlib
 import logging
 import os
-import platform
 import re
 import shutil
-import subprocess
 import sys
 import tarfile
 import tempfile
 from lxml import etree as ElementTree
-from xml.dom import minidom
 
 from cgcs_patch.patch_verify import verify_files
 from cgcs_patch.patch_verify import cert_type_all
-from cgcs_patch.patch_signing import sign_files
-from cgcs_patch.exceptions import MetadataFail
 from cgcs_patch.exceptions import PatchFail
 from cgcs_patch.exceptions import PatchValidationFailure
 from cgcs_patch.exceptions import PatchMismatchFailure
@@ -124,54 +118,6 @@ def get_md5(path):
     return int(md5.hexdigest(), 16)
 
 
-def add_text_tag_to_xml(parent,
-                        name,
-                        text):
-    """
-    Utility function for adding a text tag to an XML object
-    :param parent: Parent element
-    :param name: Element name
-    :param text: Text value
-    :return:The created element
-    """
-    tag = ElementTree.SubElement(parent, name)
-    tag.text = text
-    return tag
-
-
-def write_xml_file(top,
-                   fname):
-    # Generate the file, in a readable format if possible
-    outfile = open(fname, 'w')
-    rough_xml = ElementTree.tostring(top)
-    if platform.python_version() == "2.7.2":
-        # The 2.7.2 toprettyxml() function unnecessarily indents
-        # childless tags, adding whitespace. In the case of the
-        # yum comps.xml file, it makes the file unusable, so just
-        # write the rough xml
-        outfile.write(rough_xml)
-    else:
-        outfile.write(minidom.parseString(rough_xml).toprettyxml(indent="  "))
-
-
-def get_release_from_patch(patchfile):
-    rel = ""
-    try:
-        cmd = "tar xf %s -O metadata.tar | tar x -O" % patchfile
-        metadata_str = subprocess.check_output(cmd, shell=True)
-        root = ElementTree.fromstring(metadata_str)
-        # Extract release version
-        rel = root.findtext('sw_version')
-    except subprocess.CalledProcessError as e:
-        LOG.error("Failed to run tar command")
-        LOG.error("Command output: %s", e.output)
-        raise e
-    except Exception as e:
-        print("Failed to parse patch software version")
-        raise e
-    return rel
-
-
 class BasePackageData(object):
     """
     Information about the base package data provided by the load
@@ -249,47 +195,6 @@ class PatchData(object):
     def delete_patch(self, patch_id):
         del self.contents[patch_id]
         del self.metadata[patch_id]
-
-    @staticmethod
-    def modify_metadata_text(filename,
-                             key,
-                             value):
-        """
-        Open an xml file, find first element matching 'key' and replace the text with 'value'
-        """
-        new_filename = "%s.new" % filename
-        tree = ElementTree.parse(filename)
-
-        # Prevent a proliferation of carriage returns when we write this XML back out to file.
-        for e in tree.getiterator():
-            if e.text is not None:
-                e.text = e.text.rstrip()
-            if e.tail is not None:
-                e.tail = e.tail.rstrip()
-
-        root = tree.getroot()
-
-        # Make the substitution
-        e = root.find(key)
-        if e is None:
-            msg = "modify_metadata_text: failed to find tag '%s'" % key
-            LOG.error(msg)
-            raise PatchValidationFailure(msg)
-        e.text = value
-
-        # write the modified file
-        outfile = open(new_filename, 'w')
-        rough_xml = ElementTree.tostring(root)
-        if platform.python_version() == "2.7.2":
-            # The 2.7.2 toprettyxml() function unnecessarily indents
-            # childless tags, adding whitespace. In the case of the
-            # yum comps.xml file, it makes the file unusable, so just
-            # write the rough xml
-            outfile.write(rough_xml)
-        else:
-            outfile.write(minidom.parseString(rough_xml).toprettyxml(indent="  "))
-        outfile.close()
-        os.rename(new_filename, filename)
 
     def parse_metadata(self,
                        filename,
@@ -410,205 +315,10 @@ class PatchData(object):
         return value
 
 
-class PatchMetadata(object):
-    """
-    Creating metadata for a single patch
-    """
-    def __init__(self):
-        self.id = None
-        self.sw_version = None
-        self.summary = None
-        self.description = None
-        self.install_instructions = None
-        self.warnings = None
-        self.status = None
-        self.unremovable = None
-        self.reboot_required = None
-        self.apply_active_release_only = None
-        self.requires = []
-        self.contents = {}
-
-    def add_rpm(self,
-                fname):
-        """
-        Add an RPM to the patch
-        :param fname: RPM filename
-        :return:
-        """
-        rpmname = os.path.basename(fname)
-        self.contents[rpmname] = True
-
-    def gen_xml(self,
-                fname="metadata.xml"):
-        """
-        Generate patch metadata XML file
-        :param fname: Path to output file
-        :return:
-        """
-        top = ElementTree.Element('patch')
-
-        add_text_tag_to_xml(top, 'id',
-                            self.id)
-        add_text_tag_to_xml(top, 'sw_version',
-                            self.sw_version)
-        add_text_tag_to_xml(top, 'summary',
-                            self.summary)
-        add_text_tag_to_xml(top, 'description',
-                            self.description)
-        add_text_tag_to_xml(top, 'install_instructions',
-                            self.install_instructions)
-        add_text_tag_to_xml(top, 'warnings',
-                            self.warnings)
-        add_text_tag_to_xml(top, 'status',
-                            self.status)
-        add_text_tag_to_xml(top, 'unremovable',
-                            self.unremovable)
-        add_text_tag_to_xml(top, 'reboot_required',
-                            self.reboot_required)
-        add_text_tag_to_xml(top, 'apply_active_release_only',
-                            self.apply_active_release_only)
-
-        content = ElementTree.SubElement(top, 'contents')
-        for rpmname in sorted(list(self.contents)):
-            add_text_tag_to_xml(content, 'rpm', rpmname)
-
-        req = ElementTree.SubElement(top, 'requires')
-        for req_patch in sorted(self.requires):
-            add_text_tag_to_xml(req, 'req_patch_id', req_patch)
-
-        write_xml_file(top, fname)
-
-
 class PatchFile(object):
     """
     Patch file
     """
-    def __init__(self):
-        self.meta = PatchMetadata()
-        self.rpmlist = {}
-
-    def add_rpm(self,
-                fname):
-        """
-        Add an RPM to the patch
-        :param fname: Path to RPM
-        :param personality: Optional: Node type to which
-                            the package belongs. Can be a
-                            string or a list of strings.
-        :return:
-        """
-        # Add the RPM to the metadata
-        self.meta.add_rpm(fname)
-
-        # Add the RPM to the patch
-        self.rpmlist[os.path.abspath(fname)] = True
-
-    def gen_patch(self, outdir):
-        """
-        Generate the patch file, named PATCHID.patch
-        :param outdir: Output directory for the patch
-        :return:
-        """
-        if not self.rpmlist:
-            raise MetadataFail("Cannot generate empty patch")
-
-        patchfile = "%s/%s.patch" % (outdir, self.meta.id)
-
-        # Create a temporary working directory
-        tmpdir = tempfile.mkdtemp(prefix="patch_")
-
-        # Save the current directory, so we can chdir back after
-        orig_wd = os.getcwd()
-
-        # Change to the tmpdir
-        os.chdir(tmpdir)
-
-        # Copy RPM files to tmpdir
-        for rpmfile in list(self.rpmlist):
-            shutil.copy(rpmfile, tmpdir)
-
-        # add file signatures to RPMs
-        try:
-            subprocess.check_call(["sign-rpms", "-d", tmpdir])
-        except subprocess.CalledProcessError as e:
-            print("Failed to to add file signatures to RPMs. Call to sign-rpms process returned non-zero exit status %i" % e.returncode)
-            os.chdir(orig_wd)
-            shutil.rmtree(tmpdir)
-            raise SystemExit(e.returncode)
-
-        # generate tar file
-        tar = tarfile.open("software.tar", "w")
-        for rpmfile in list(self.rpmlist):
-            tar.add(os.path.basename(rpmfile))
-        tar.close()
-
-        # Generate the metadata xml file
-        self.meta.gen_xml("metadata.xml")
-
-        # assemble the patch
-        PatchFile.write_patch(patchfile)
-
-        # Change back to original working dir
-        os.chdir(orig_wd)
-
-        shutil.rmtree(tmpdir)
-
-        print("Patch is %s" % patchfile)
-
-    @staticmethod
-    def write_patch(patchfile, cert_type=None):
-        # Write the patch file. Assumes we are in a directory containing
-        # metadata.tar and software.tar.
-
-        # Generate the metadata tarfile
-        tar = tarfile.open("metadata.tar", "w")
-        tar.add("metadata.xml")
-        tar.close()
-
-        filelist = ["metadata.tar", "software.tar"]
-        if os.path.exists("semantics.tar"):
-            filelist.append("semantics.tar")
-
-        # Generate the signature file
-        sig = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-        for f in filelist:
-            sig ^= get_md5(f)
-
-        sigfile = open("signature", "w")
-        sigfile.write("%x" % sig)
-        sigfile.close()
-
-        # Generate the detached signature
-        #
-        # Note: if cert_type requests a formal signature, but the signing key
-        #    is not found, we'll instead sign with the 'dev' key and
-        #    need_resign_with_formal is set to True.
-        need_resign_with_formal = sign_files(
-            filelist,
-            detached_signature_file,
-            cert_type=cert_type)
-
-        # Create the patch
-        tar = tarfile.open(patchfile, "w:gz")
-        for f in filelist:
-            tar.add(f)
-        tar.add("signature")
-        tar.add(detached_signature_file)
-        tar.close()
-
-        if need_resign_with_formal:
-            try:
-                # Try to ensure "sign_patch_formal.sh" will be in our PATH
-                if 'MY_REPO' in os.environ:
-                    os.environ['PATH'] += os.pathsep + os.environ['MY_REPO'] + "/build-tools"
-                if 'MY_PATCH_REPO' in os.environ:
-                    os.environ['PATH'] += os.pathsep + os.environ['MY_PATCH_REPO'] + "/build-tools"
-
-                # Note: This can fail if the user is not authorized to sign with the formal key.
-                subprocess.check_call(["sign_patch_formal.sh", patchfile])
-            except subprocess.CalledProcessError as e:
-                print("Failed to sign official patch. Call to sign_patch_formal.sh process returned non-zero exit status %i" % e.returncode)
-                raise SystemExit(e.returncode)
 
     @staticmethod
     def read_patch(path, cert_type=None):
@@ -744,53 +454,6 @@ class PatchFile(object):
         return r
 
     @staticmethod
-    def modify_patch(patch,
-                     key,
-                     value):
-        rc = False
-        abs_patch = os.path.abspath(patch)
-        new_abs_patch = "%s.new" % abs_patch
-
-        # Create a temporary working directory
-        tmpdir = tempfile.mkdtemp(prefix="patch_")
-
-        # Save the current directory, so we can chdir back after
-        orig_wd = os.getcwd()
-
-        # Change to the tmpdir
-        os.chdir(tmpdir)
-
-        try:
-            cert_type = None
-            meta_data = PatchFile.query_patch(abs_patch)
-            if 'cert' in meta_data:
-                cert_type = meta_data['cert']
-            PatchFile.read_patch(abs_patch, cert_type=cert_type)
-            PatchData.modify_metadata_text("metadata.xml", key, value)
-            PatchFile.write_patch(new_abs_patch, cert_type=cert_type)
-            os.rename(new_abs_patch, abs_patch)
-            rc = True
-
-        except PatchValidationFailure as e:
-            raise e
-        except PatchMismatchFailure as e:
-            raise e
-        except tarfile.TarError:
-            msg = "Failed during patch extraction"
-            LOG.exception(msg)
-            raise PatchValidationFailure(msg)
-        except Exception as e:
-            template = "An exception of type {0} occurred. Arguments:\n{1!r}"
-            message = template.format(type(e).__name__, e.args)
-            print(message)
-        finally:
-            # Change back to original working dir
-            os.chdir(orig_wd)
-            shutil.rmtree(tmpdir)
-
-        return rc
-
-    @staticmethod
     def extract_patch(patch,
                       metadata_dir=avail_dir,
                       metadata_only=False,
@@ -889,99 +552,3 @@ class PatchFile(object):
             shutil.rmtree(tmpdir)
 
         return thispatch
-
-
-def patch_build():
-    configure_logging(logtofile=False)
-
-    try:
-        opts, remainder = getopt.getopt(sys.argv[1:],
-                                        '',
-                                        ['id=',
-                                         'release=',
-                                         'summary=',
-                                         'status=',
-                                         'unremovable',
-                                         'reboot-required=',
-                                         'desc=',
-                                         'warn=',
-                                         'inst=',
-                                         'req=',
-                                         'controller=',
-                                         'controller-worker=',
-                                         'controller-worker-lowlatency=',
-                                         'worker=',
-                                         'worker-lowlatency=',
-                                         'storage=',
-                                         'all-nodes=',
-                                         'pre-apply=',
-                                         'pre-remove=',
-                                         'apply-active-release-only'])
-    except getopt.GetoptError:
-        print("Usage: %s [ <args> ] ... <rpm list>"
-              % os.path.basename(sys.argv[0]))
-        print("Options:")
-        print("\t--id <id>               Patch ID")
-        print("\t--release <version>     Platform release version")
-        print("\t--status <status>       Patch Status Code (ie. O, R, V)")
-        print("\t--unremovable           Marks patch as unremovable")
-        print("\t--reboot-required <Y|N> Marks patch as reboot-required (default=Y)")
-        print("\t--summary <summary>     Patch Summary")
-        print("\t--desc <description>    Patch Description")
-        print("\t--warn <warnings>       Patch Warnings")
-        print("\t--inst <instructions>   Patch Install Instructions")
-        print("\t--req <patch_id>        Required Patch")
-        print("\t--controller <rpm>      New package for controller")
-        print("\t--worker <rpm>         New package for worker node")
-        print("\t--worker-lowlatency <rpm>   New package for worker-lowlatency node")
-        print("\t--storage <rpm>         New package for storage node")
-        print("\t--controller-worker <rpm>   New package for combined node")
-        print("\t--controller-worker-lowlatency <rpm>   New package for lowlatency combined node")
-        print("\t--all-nodes <rpm>       New package for all node types")
-        print("\t--pre-apply <script>    Add pre-apply semantic check")
-        print("\t--pre-remove <script>   Add pre-remove semantic check")
-        print("\t--apply-active-release-only   Patch can only be applied if corresponding")
-        print("\t                              release is active")
-
-        exit(1)
-
-    pf = PatchFile()
-
-    # Default the release
-    pf.meta.sw_version = os.environ['PLATFORM_RELEASE']
-
-    for opt, arg in opts:
-        if opt == "--id":
-            pf.meta.id = arg
-        elif opt == "--release":
-            pf.meta.sw_version = arg
-        elif opt == "--summary":
-            pf.meta.summary = arg
-        elif opt == "--status":
-            pf.meta.status = arg
-        elif opt == "--unremovable":
-            pf.meta.unremovable = "Y"
-        elif opt == "--reboot-required":
-            if arg != "Y" and arg != "N":
-                print("The --reboot-required option requires either Y or N as argument.")
-                exit(1)
-            pf.meta.reboot_required = arg
-        elif opt == "--desc":
-            pf.meta.description = arg
-        elif opt == "--warn":
-            pf.meta.warnings = arg
-        elif opt == "--inst":
-            pf.meta.install_instructions = arg
-        elif opt == "--req":
-            pf.meta.requires.append(arg)
-        elif opt == "--apply-active-release-only":
-            pf.meta.apply_active_release_only = "Y"
-
-    if pf.meta.id is None:
-        print("The --id argument is mandatory.")
-        exit(1)
-
-    for rpmfile in remainder:
-        pf.add_rpm(rpmfile)
-
-    pf.gen_patch(outdir=os.getcwd())
