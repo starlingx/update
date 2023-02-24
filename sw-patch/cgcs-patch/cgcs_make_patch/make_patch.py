@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# Copyright (c) 2022 Wind River Systems, Inc.
+# Copyright (c) 2023 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -44,6 +44,7 @@ import os
 import shutil
 import subprocess
 import sys
+import yaml
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 
@@ -480,9 +481,10 @@ class PatchBuilder(object):
         cmd = f"ostree --repo={tmp_patch_repo_dir} pull-local {clone_dir}"
         subprocess.call([cmd], shell=True)
         timestamp = time.asctime()
+        gpg_id = self.__get_yaml_info('gpg.ostree.gpgid')
         subject = "Commit-id: starlingx-intel-x86-64-" + time.strftime("%Y%m%d%H%M%S", time.localtime())
         cmd = " ".join(["ostree", "--repo=" + tmp_patch_repo_dir, "commit", "--tree=dir=" + rootfs_new_dir,
-                        "--skip-if-unchanged", "--gpg-sign=Wind-River-Linux-Sample --gpg-homedir=/tmp/.lat_gnupg_root",
+                        "--skip-if-unchanged", "--gpg-sign=" + gpg_id + " --gpg-homedir=/tmp/.lat_gnupg_root",
                         "--branch=starlingx", "'--timestamp=" + timestamp + "'",
                         "'--subject=" + subject + "'",
                         "'--parent=" + commit_id_base + "'"])
@@ -498,6 +500,26 @@ class PatchBuilder(object):
         log.info("  Based on bare repo %s", tmp_patch_repo_dir)
         log.info("    Based on root filesystem %s", rootfs_new_dir)
         return patch_repo_dir, True
+
+    def __get_yaml_info(self, keys_to_get):
+        """
+        Get data from base-bullseye yaml file
+        :param keys_to_get: keys sequence to get
+        """
+        with open(os.path.join(os.environ["MY_REPO_ROOT_DIR"],
+                               "stx-tools/debian-mirror-tools/config/debian/common/base-bullseye.yaml"), "r") as stream:
+            try:
+                keys = keys_to_get.split('.')
+                data = yaml.safe_load(stream)
+                for key in keys:
+                    data = data.get(key)
+                    if data is None:
+                        log.error("keys sequence '%s' not found in base-bullseye.yaml", keys_to_get)
+                        sys.exit(1)
+            except FileNotFoundError:
+                log.error("base-bullseye.yaml not found")
+                sys.exit(1)
+        return data
 
     def __create_delta_dir(self, patch_repo_dir, clone_dir="ostree-clone"):
         """
