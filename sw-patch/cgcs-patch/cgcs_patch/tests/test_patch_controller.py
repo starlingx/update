@@ -394,6 +394,37 @@ CONTENTS_WITH_OSTREE_DATA = \
     }
 
 
+IMPORTED_PATCH_CONTENTS = \
+    {
+        "First_Patch": {
+            "base": {"commit": "basecommit1"},
+            "number_of_commits": 1,
+            "commit1": {"commit": "commitFirstPatch"}
+        },
+        "Second_Patch": {
+            "base": {"commit": "commitFirstPatch"},
+            "number_of_commits": 1,
+            "commit1": {"commit": "commitSecondPatch"}
+        },
+        "Third_Patch": {
+            "base": {"commit": "commitSecondPatch"},
+            "number_of_commits": 2,
+            "commit1": {"commit": "commitThirdPatch1"},
+            "commit2": {"commit": "commitThirdPatch2"},
+        },
+        "Fourth_Patch": {
+            "base": {"commit": "commitThirdPatch2"},
+            "number_of_commits": 1,
+            "commit1": {"commit": "commitFourthPatch"}
+        },
+        "Fifth_Patch": {
+            "base": {"commit": "commitFourthPatch"},
+            "number_of_commits": 1,
+            "commit1": {"commit": "commitFifthPatch"}
+        }
+    }
+
+
 class CgcsPatchControllerTestCase(testtools.TestCase):
 
     def setUp(self):
@@ -446,6 +477,12 @@ class CgcsPatchControllerTestCase(testtools.TestCase):
         pc.patch_data.metadata = copy.deepcopy(metadata_obj["value"])
         pc.patch_data.contents = copy.deepcopy(content_obj)
         return metadata_obj["patch_id_list"]
+
+    def create_new_standalone_patch_data(self, metadata_obj, content_obj=None):
+        newObj = PatchData()
+        newObj.metadata = copy.deepcopy(metadata_obj["value"])
+        newObj.contents = copy.deepcopy(content_obj)
+        return newObj
 
     def test_patch_apply_remove_order_with_dependencies(self):
         patch_ids = self.create_patch_data(self.pc, PATCH_LIST_WITH_DEPENDENCIES)
@@ -1181,6 +1218,10 @@ class CgcsPatchControllerTestCase(testtools.TestCase):
         patch_ids = self.create_patch_data(self.pc,
                                            PATCH_LIST_AVAILABLE,
                                            CONTENTS_WITH_OSTREE_DATA)
+        new_patch = self.create_new_standalone_patch_data(PATCH_LIST_AVAILABLE,
+                                                          CONTENTS_WITH_OSTREE_DATA)
+        _mock_extract_patch.return_value = new_patch
+
         response = self.pc.patch_import_api(patch_ids)
         self.assertEqual(response["info"],
                          "First_Patch is already imported. Updated metadata only\n" +
@@ -1240,6 +1281,27 @@ class CgcsPatchControllerTestCase(testtools.TestCase):
         self.assertEqual(response["error"],
                          "Patch validation failed for Fifth_Patch:\n" +
                          "Failed during patch extraction\n")
+
+    @mock.patch.object(LOG, 'exception')
+    @mock.patch.object(os.path, 'isfile')
+    @mock.patch.object(os.path, 'exists')
+    @mock.patch.object(PatchData, 'parse_metadata')
+    @mock.patch.object(PatchFile, 'extract_patch')
+    def test_patch_import_api_success(self,
+                                      _mock_extract_patch,
+                                      _mock_parse_metadata,
+                                      _mock_path_exists,
+                                      _mock_is_file,
+                                      _mock_log_exception):
+        self.create_patch_data(self.pc,
+                               PATCH_LIST_AVAILABLE,
+                               CONTENTS_WITH_OSTREE_DATA)
+        new_patch = self.create_new_standalone_patch_data(IMPORTED_PATCH,
+                                                          IMPORTED_PATCH_CONTENTS)
+        _mock_extract_patch.return_value = new_patch
+        response = self.pc.patch_import_api(["Fifth_Patch.patch"])
+        self.assertEqual(response["info"],
+                         "Fifth_Patch is now available\n")
 
     def test_check_patch_states_hosts_up_to_date(self):
         self.create_patch_data(self.pc,
