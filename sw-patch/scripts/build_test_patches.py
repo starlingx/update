@@ -322,7 +322,7 @@ class TestPatchBuilder():
             stx shell --container lat -c ' \
                 echo "allow-loopback-pinentry" > /tmp/.lat_gnupg_root/gpg-agent.conf; \
                 echo "default-cache-ttl 34560000" >> /tmp/.lat_gnupg_root/gpg-agent.conf; \
-                echo "maximum-cache-ttl 34560000" >> /tmp/.lat_gnupg_root/gpg-agent.conf; \
+                echo "max-cache-ttl 34560000" >> /tmp/.lat_gnupg_root/gpg-agent.conf; \
                 gpg-connect-agent --homedir /tmp/.lat_gnupg_root reloadagent /bye; \
                 gpg --homedir=/tmp/.lat_gnupg_root -o /dev/null -u {gpg_id} --pinentry=loopback --passphrase {gpg_pass} -s /dev/null;
             '
