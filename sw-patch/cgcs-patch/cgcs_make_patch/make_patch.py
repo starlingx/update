@@ -476,6 +476,7 @@ class PatchBuilder(object):
         log.info("Create a new OSTree repo in %s, may take a few minutes", patch_repo_dir)
         cmd = f"ostree --repo={tmp_patch_repo_dir} init --mode=bare"
         subprocess.call([cmd], shell=True)
+        self.__check_gnupg_folder()
         # Pull history from ostree prepatch (clone_dir)
         log.info("Pull history from %s.", clone_dir)
         cmd = f"ostree --repo={tmp_patch_repo_dir} pull-local {clone_dir}"
@@ -500,6 +501,35 @@ class PatchBuilder(object):
         log.info("  Based on bare repo %s", tmp_patch_repo_dir)
         log.info("    Based on root filesystem %s", rootfs_new_dir)
         return patch_repo_dir, True
+
+    def __check_gnupg_folder(self):
+        """
+        Check if GPG homedir exists and create it if necessary
+        """
+        gpg_home = "/tmp/.lat_gnupg_root"
+        if not os.path.exists(gpg_home):
+            log.info("Creating %s", gpg_home)
+            os.environ["OECORE_NATIVE_SYSROOT"] = "/opt/LAT/SDK/sysroots/x86_64-wrlinuxsdk-linux"
+            ostree_gpg_id = self.__get_yaml_info("gpg.ostree.gpgid")
+            ostree_gpg_key = self.__get_yaml_info("gpg.ostree.gpgkey")
+            ostree_gpg_pass = self.__get_yaml_info("gpg.ostree.gpg_password")
+            os.makedirs(gpg_home)
+
+            cmd = f"chmod 700 {gpg_home}"
+            subprocess.call([cmd], shell=True)
+            cmd = f"echo allow-loopback-pinentry > {gpg_home}/gpg-agent.conf"
+            subprocess.call([cmd], shell=True)
+            cmd = f"gpg-connect-agent --homedir {gpg_home} reloadagent /bye"
+            subprocess.call([cmd], shell=True)
+            cmd = f"gpg --homedir {gpg_home} --import {ostree_gpg_key}"
+            subprocess.call([cmd], shell=True)
+            cmd = f"gpg --homedir {gpg_home} --list-keys {ostree_gpg_id}"
+            subprocess.call([cmd], shell=True)
+            cmd = f"gpg --homedir={gpg_home} -o /dev/null -u \"{ostree_gpg_id}\" --pinentry=loopback --passphrase {ostree_gpg_pass} -s /dev/null"
+            subprocess.call([cmd], shell=True)
+            log.info("GPG homedir created with success.")
+        else:
+            log.info("GPG home (%s) folder already exist.", gpg_home)
 
     def __get_yaml_info(self, keys_to_get):
         """
