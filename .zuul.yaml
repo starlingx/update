@@ -11,6 +11,8 @@
         - py3-flake8
         - patch-alarm-tox-pylint
         - patch-alarm-tox-py39
+        - stx-software-tox-pylint
+        - stx-software-tox-py39
         - sw-patch-tox-pylint
         - sw-patch-tox-py39
     gate:
@@ -20,6 +22,8 @@
         - py3-flake8
         - patch-alarm-tox-pylint
         - patch-alarm-tox-py39
+        - stx-software-tox-pylint
+        - stx-software-tox-py39
         - sw-patch-tox-pylint
         - sw-patch-tox-py39
     post:
@@ -42,6 +46,29 @@
       - starlingx/fault
     vars:
       tox_envlist: flake8
+
+- job:
+    name: stx-software-tox-py39
+    parent: tox-py39
+    nodeset: debian-bullseye
+    files:
+      - software/*
+    vars:
+      tox_envlist: py39
+      python_version: 3.9
+      tox_extra_args: -c software/tox.ini
+
+- job:
+    name: stx-software-tox-pylint
+    parent: tox
+    nodeset: debian-bullseye
+    files:
+      - software/*
+    vars:
+      tox_envlist: pylint
+      python_version: 3.9
+      tox_extra_args: -c software/tox.ini
+
 
 - job:
     name: sw-patch-tox-py39
