@@ -47,6 +47,7 @@ Architecture: all
 Depends:
  ${misc:Depends},
  ${python3:Depends},
+ gir1.2-ostree-1.0,
  python3-keystonemiddleware,
  python3-lxml,
  python3-oslo.config,
