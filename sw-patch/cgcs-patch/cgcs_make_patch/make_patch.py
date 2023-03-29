@@ -571,8 +571,14 @@ class PatchBuilder(object):
             log.error("Clone dir not found")
             exit(1)
 
-        subprocess.call(["rsync", "-rcpgo", "--exclude=/.lock", "--exclude=/config",
-                        "--compare-dest", clone_dir, patch_repo_dir + "/", self.delta_dir + "/"])
+        subprocess.call(["rsync", "-rcpgo",
+                         "--exclude=/.lock",
+                         "--exclude=/config",
+                         "--no-owner",
+                         "--compare-dest",
+                         clone_dir,
+                         patch_repo_dir + "/",
+                         self.delta_dir + "/"])
         log.info("Delta dir created")
 
     def __get_commit_checksum(self, commit_id, repo="ostree_repo"):
