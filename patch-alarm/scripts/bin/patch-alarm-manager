@@ -11,8 +11,8 @@ import sys
 
 try:
     from patch_alarm import patch_alarm_manager
-except EnvironmentError as e:
-    print >> sys.stderr, "Error importing patch_alarm_manager: ", str(e)
+except BaseException as e:
+    print("Error importing patch_alarm_manager: %s" % str(e), file=sys.stderr)
     sys.exit(1)
 
 patch_alarm_manager.start_polling()

@@ -102,7 +102,7 @@
 - job:
     name: patch-alarm-tox-pylint
     parent: tox
-    nodeset: ubuntu-bionic
+    nodeset: debian-bullseye
     required-projects:
       - starlingx/config
       - starlingx/fault
