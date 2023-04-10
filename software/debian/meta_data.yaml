@@ -1,6 +1,6 @@
 ---
 debname: software
-debver: 1.0.1
+debver: 1.0-1
 src_path: .
 revision:
   dist: $STX_DIST

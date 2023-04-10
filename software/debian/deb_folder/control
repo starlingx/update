@@ -16,5 +16,16 @@ Rules-Requires-Root: no
 
 Package: software
 Architecture: all
+Depends: ${python3:Depends}, ${misc:Depends}
 Description: StarlingX unified software deployment and management
  StarlingX unified software deployment and management.
+
+
+Package: software-wheel
+Architecture: all
+Depends: ${python3:Depends}, ${misc:Depends}, python3-wheel
+Description: StarlingX unified software deployment and management
+ StarlingX unified software deployment and management.
+ .
+ This is the support package for the PEP 427 wheel version of the package,
+ required for using pip inside a virtual environment.
