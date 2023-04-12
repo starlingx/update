@@ -1,0 +1,20 @@
+#!/bin/bash
+#
+# Copyright (c) 2023 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+. /etc/software/software-functions
+
+#
+# Triggering a restart of the software daemons is done by
+# creating a flag file and letting the daemon handle the restart.
+#
+loginfo "Requesting restart of software-agent"
+
+restart_software_agent_flag="/run/software/.restart.software-agent"
+touch $restart_software_agent_flag
+
+exit 0
+

@@ -1,0 +1,15 @@
+/var/log/software.log
+/var/log/software-api.log
+/var/log/software-insvc.log
+{
+        nodateext
+        size 10M
+        start 1
+        rotate 10
+        missingok
+        notifempty
+        compress
+        delaycompress
+        copytruncate
+}
+

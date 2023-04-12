@@ -1,0 +1,16 @@
+[Unit]
+Description=Unified Software Management Agent
+After=syslog.target network-online.target software.service
+Before=pmon.service
+
+[Service]
+Type=forking
+User=root
+ExecStart=/etc/init.d/software-agent start
+ExecStop=/etc/init.d/software-agent stop
+ExecReload=/etc/init.d/software-agent restart
+PIDFile=/var/run/software-agent.pid
+
+[Install]
+WantedBy=multi-user.target
+

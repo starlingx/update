@@ -1,0 +1,15 @@
+[Unit]
+Description=Unified Software Management
+After=syslog.target network-online.target
+Before=software-agent.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/etc/init.d/software start
+RemainAfterExit=yes
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

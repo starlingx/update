@@ -1,0 +1,16 @@
+[Unit]
+Description=Unified Software Management Controller Daemon
+After=syslog.target network-online.target software.service software-controller.service
+Before=pmon.service
+
+[Service]
+Type=forking
+User=root
+ExecStart=/etc/init.d/software-controller-daemon start
+ExecStop=/etc/init.d/software-controller-daemon stop
+ExecReload=/etc/init.d/software-controller-daemon restart
+PIDFile=/var/run/software-controller-daemon.pid
+
+[Install]
+WantedBy=multi-user.target
+

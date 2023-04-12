@@ -1,2 +1,11 @@
-/usr/bin
-/usr/lib/python*/dist-packages/*
+etc/goenabled.d
+etc/init.d
+etc/logrotate.d
+etc/software
+lib/systemd/system
+run/software-tmpdirs.conf
+usr/bin
+usr/lib/python*/dist-packages/*
+usr/sbin
+usr/share/
+

@@ -51,6 +51,8 @@
     name: stx-software-tox-py39
     parent: tox-py39
     nodeset: debian-bullseye
+    required-projects:
+      - starlingx/config
     files:
       - software/*
     vars:
@@ -62,6 +64,8 @@
     name: stx-software-tox-pylint
     parent: tox
     nodeset: debian-bullseye
+    required-projects:
+      - starlingx/config
     files:
       - software/*
     vars:

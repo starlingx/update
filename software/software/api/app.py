@@ -17,7 +17,7 @@ def get_pecan_config():
     cfg_dict = {
         # todo(abailey): add server defaults to config
         "server": {
-            "port": "5490",
+            "port": "5496",
             "host": "127.0.0.1"
         },
         "app": {
@@ -52,3 +52,12 @@ def setup_app(pecan_config=None):
         guess_content_type_from_ext=pecan_config.app.guess_content_type_from_ext
     )
     return app
+
+
+class VersionSelectorApplication(object):
+    def __init__(self):
+        pc = get_pecan_config()
+        self.v1 = setup_app(pecan_config=pc)
+
+    def __call__(self, environ, start_response):
+        return self.v1(environ, start_response)

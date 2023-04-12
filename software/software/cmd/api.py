@@ -18,7 +18,7 @@ from software.api.app import setup_app
 LOG = logging.getLogger(__name__)
 
 # todo(abailey): these need to be part of config
-API_PORT = 5490
+API_PORT = 5496
 # Limit socket blocking to 5 seconds to allow for thread to shutdown
 API_SOCKET_TIMEOUT = 5.0
 

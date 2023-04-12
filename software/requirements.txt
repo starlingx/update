@@ -1,3 +1,12 @@
+keystoneauth1
+keystonemiddleware
+lxml
 oslo.config
-oslo.log
+oslo.policy
+oslo.serialization
+netaddr
 pecan
+pycryptodomex
+requests_toolbelt
+sh
+WebOb

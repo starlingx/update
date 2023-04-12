@@ -2,6 +2,7 @@
 export DH_VERBOSE = 1
 export PYBUILD_NAME = software
 export PBR_VERSION=1.0.0
+PMONDIR := ${ROOT}/usr/share/starlingx/pmon.d
 
 ROOT := $(CURDIR)/debian/tmp
 
@@ -12,5 +13,48 @@ override_dh_install:
 	python3 setup.py install -f --install-layout=deb --root=$(ROOT)
 	python3 setup.py bdist_wheel  --universal  -d $(CURDIR)/debian/$(PYBUILD_NAME)-wheels/usr/share/python-wheels
 	install -d -m 755 $(ROOT)/usr/bin
+	install -d -m 755 $(ROOT)/usr/sbin
+	install -d -m 755 $(ROOT)/run
+	install -d -m 755 $(ROOT)/usr/share/bash-completion/completions
+	install -m 755 -d ${ROOT}/etc/goenabled.d
+	install -m 755 -d ${ROOT}/etc/init.d
+	install -m 755 -d ${ROOT}/etc/logrotate.d
+	install -m 755 -d ${ROOT}/etc/software
+	install -m 755 -d ${ROOT}/etc/software/software-scripts
+	install -m 755 -d ${ROOT}/lib/systemd/system
+	install -m 755 -d ${PMONDIR}
+	install -m 500 service-files/software-controller-daemon-init.sh \
+		${ROOT}/etc/init.d/software-controller-daemon
+	install -m 500 service-files/software-agent-init.sh \
+		${ROOT}/etc/init.d/software-agent
+	install -m 500 service-files/software-init.sh \
+		${ROOT}/etc/init.d/software
+	install -m 500 service-files/software-controller-init.sh \
+		${ROOT}/etc/init.d/software-controller
+	install -m 600 service-files/software.conf \
+		${ROOT}/etc/software/software.conf
+	install -m 644 service-files/policy.json \
+		${ROOT}/etc/software/policy.json
+	install -m 444 service-files/pmon-software-controller-daemon.conf \
+		${PMONDIR}/software-controller-daemon.conf
+	install -m 444 service-files/pmon-software-agent.conf \
+		${PMONDIR}/software-agent.conf
+	install -m 444 service-files/*.service \
+	    ${ROOT}/lib/systemd/system
+	install -m 444 service-files/software.completion \
+	    ${ROOT}/usr/share/bash-completion/completions/software
+	install -m 400 service-files/software-functions \
+		${ROOT}/etc/software/software-functions
+	install -m 444 service-files/software-tmpdirs.conf \
+		${ROOT}/run/software-tmpdirs.conf
+	install -m 500 service-files/run-software-scripts \
+		${ROOT}/usr/sbin/run-software-scripts
+	install -m 500 service-files/software-controller-daemon-restart \
+		${ROOT}/usr/sbin/software-controller-daemon-restart
+	install -m 500 service-files/software-agent-restart \
+		${ROOT}/usr/sbin/software-agent-restart
+	install -m 555 service-files/software_check_goenabled.sh \
+		${ROOT}/etc/goenabled.d/software_check_goenabled.sh
+	install -m 444 service-files/software.logrotate \
+		${ROOT}/etc/logrotate.d/software
 	dh_install
-
