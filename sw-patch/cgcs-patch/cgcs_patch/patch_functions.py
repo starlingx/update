@@ -200,7 +200,7 @@ class BasePackageData(object):
             self.pkgs[sw_rel] = {}
 
         # Clean up deleted data
-        for sw_rel in self.pkgs:
+        for sw_rel in list(self.pkgs):
             if not os.path.exists("%s/rel-%s" % (base_dir, sw_rel)):
                 del self.pkgs[sw_rel]
 
