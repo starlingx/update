@@ -57,7 +57,7 @@ from software.software_functions import patch_dir
 from software.software_functions import repo_root_dir
 from software.software_functions import PatchData
 
-import software.software_config as cfg
+import software.config as cfg
 import software.utils as utils
 
 import software.messages as messages

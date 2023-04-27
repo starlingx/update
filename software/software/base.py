@@ -12,7 +12,7 @@ import sys
 import time
 
 import software.utils as utils
-import software.software_config as cfg
+import software.config as cfg
 import software.constants as constants
 from software.software_functions import LOG
 

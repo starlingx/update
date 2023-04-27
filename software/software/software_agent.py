@@ -18,7 +18,7 @@ import time
 from software import ostree_utils
 from software.software_functions import configure_logging
 from software.software_functions import LOG
-import software.software_config as cfg
+import software.config as cfg
 from software.base import PatchService
 from software.exceptions import OSTreeCommandFail
 import software.utils as utils
