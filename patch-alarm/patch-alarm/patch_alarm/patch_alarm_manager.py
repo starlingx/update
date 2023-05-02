@@ -1,5 +1,5 @@
 """
-Copyright (c) 2014-2021 Wind River Systems, Inc.
+Copyright (c) 2014-2023 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -8,18 +8,19 @@ SPDX-License-Identifier: Apache-2.0
 ###################
 # IMPORTS
 ###################
+import json
 import logging
 import time
-import requests
-import json
 
-from daemon import runner  # pylint: disable=no-name-in-module
-from fm_api import fm_api
+import requests
+
+from daemon import runner
 from fm_api import constants as fm_constants
+from fm_api import fm_api
 
 import cgcs_patch.config as cfg
-from cgcs_patch.patch_functions import configure_logging
 from cgcs_patch.constants import ENABLE_DEV_CERTIFICATE_PATCH_IDENTIFIER
+from cgcs_patch.patch_functions import configure_logging
 
 ###################
 # CONSTANTS
