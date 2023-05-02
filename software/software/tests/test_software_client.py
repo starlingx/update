@@ -128,28 +128,40 @@ class SoftwareClientNonRootMixin(object):
 class SoftwareClientHelpTestCase(SoftwareClientTestCase, SoftwareClientNonRootMixin):
     """Test the sw-patch CLI calls that invoke 'help'
 
-    'check_for_os_region_name' is mocked to help determine
-    which code path is used since many code paths can short
-    circuit and invoke 'help' in failure cases.
+    'check_for_os_region_name' is the first method called
+    after args are parsed
+    print_help is invoked when there is a failure.
     """
 
     @mock.patch('software.software_client.check_for_os_region_name')
-    def test_main_no_args_calls_help(self, mock_check):
-        """When no arguments are called, this should invoke print_help"""
+    @mock.patch('argparse.ArgumentParser.print_help')
+    @mock.patch('argparse.ArgumentParser.print_usage')
+    def test_main_no_args(self, mock_usage, mock_help, mock_check):
+        """When no arguments are called, it should call print_usage"""
         shell_args = [self.PROG, ]
         self._test_method(shell_args=shell_args)
+        mock_usage.assert_called()
+        mock_help.assert_not_called()
         mock_check.assert_not_called()
 
     @mock.patch('software.software_client.check_for_os_region_name')
-    def test_main_help(self, mock_check):
-        """When no arguments are called, this should invoke print_help"""
-        shell_args = [self.PROG, "--help"]
+    @mock.patch('argparse.ArgumentParser.print_help')
+    @mock.patch('argparse.ArgumentParser.print_usage')
+    def test_main_help(self, mock_usage, mock_help, mock_check):
+        """When -h is passed in, this should invoke print_help"""
+        shell_args = [self.PROG, "-h"]
         self._test_method(shell_args=shell_args)
-        mock_check.assert_called()
+        mock_usage.assert_not_called()
+        mock_help.assert_called()
+        mock_check.assert_not_called()
 
     @mock.patch('software.software_client.check_for_os_region_name')
-    def test_main_invalid_action_calls_help(self, mock_check):
-        """invalid args should invoke print_help"""
+    @mock.patch('argparse.ArgumentParser.print_help')
+    @mock.patch('argparse.ArgumentParser.print_usage')
+    def test_main_invalid_action_calls_help(self, mock_usage, mock_help, mock_check):
+        """invalid args should invoke print_usage"""
         shell_args = [self.PROG, "invalid_arg"]
         self._test_method(shell_args=shell_args)
-        mock_check.assert_called()
+        mock_usage.assert_called()
+        mock_help.assert_not_called()
+        mock_check.assert_not_called()
