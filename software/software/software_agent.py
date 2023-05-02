@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 
-from software import ostree_utils
+import software.ostree_utils as ostree_utils
 from software.software_functions import configure_logging
 from software.software_functions import LOG
 import software.config as cfg

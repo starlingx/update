@@ -37,7 +37,7 @@ except Exception:
     SW_VERSION = "unknown"
 
 # Constants
-patch_dir = constants.PATCH_STORAGE_DIR
+patch_dir = constants.SOFTWARE_STORAGE_DIR
 avail_dir = "%s/metadata/available" % patch_dir
 applied_dir = "%s/metadata/applied" % patch_dir
 committed_dir = "%s/metadata/committed" % patch_dir

@@ -762,7 +762,10 @@ def wait_for_install_complete(agent_ip):
             break
         else:
             m = re.search("(Error message:.*)", req.text, re.MULTILINE)
-            print(m.group(0))
+            if m:
+                print(m.group(0))
+            else:
+                print(vars(req))
             rc = 1
             break
 
@@ -773,8 +776,8 @@ def host_install(args):
     rc = 0
     agent_ip = args.agent
 
-    # Issue host_install_async request and poll for results
-    url = "http://%s/software/host_install_async/%s" % (api_addr, agent_ip)
+    # Issue deploy_host request and poll for results
+    url = "http://%s/software/deploy_host/%s" % (api_addr, agent_ip)
 
     if args.force:
         url += "/force"
@@ -849,8 +852,8 @@ def software_deploy_host_req(args):
     rc = 0
     agent_ip = args.agent
 
-    # Issue host_install_async request and poll for results
-    url = "http://%s/software/host_install_async/%s" % (api_addr, agent_ip)
+    # Issue deploy_host request and poll for results
+    url = "http://%s/software/deploy_host/%s" % (api_addr, agent_ip)
 
     if args.force:
         url += "/force"
@@ -1174,6 +1177,14 @@ def register_deploy_commands(commands):
         help='Deploy to a software host'
     )
     cmd.set_defaults(cmd='host')
+    cmd.set_defaults(func=software_deploy_host_req)
+    cmd.add_argument('agent',
+                     help="Agent on which host deploy is triggered")
+    cmd.add_argument('-f',
+                     '--force',
+                     action='store_true',
+                     required=False,
+                     help="Force deploy host")
 
     # --- software deploy list ---------------------------
     cmd = sub_cmds.add_parser(

@@ -85,10 +85,10 @@ class SoftwareControllerMessagesTestCase(testtools.TestCase):
             self.assertIsNotNone(test_obj)
             self.assertIsInstance(test_obj, PatchMessage)
 
-    @mock.patch('software.software_controller.pc', FakeSoftwareController())
+    @mock.patch('software.software_controller.sc', FakeSoftwareController())
     def test_message_class_encode(self):
         """'encode' method populates self.message"""
-        # mock the global software_controller 'pc' variable used by encode
+        # mock the global software_controller 'sc' variable used by encode
 
         # PatchMessageQueryDetailedResp does not support 'encode'
         # so it can be executed, but it will not change the message
@@ -108,7 +108,7 @@ class SoftwareControllerMessagesTestCase(testtools.TestCase):
             test_obj2.decode(test_obj.message)
             # decode does not populate 'message' so nothing to compare
 
-    @mock.patch('software.software_controller.pc', FakeSoftwareController())
+    @mock.patch('software.software_controller.sc', FakeSoftwareController())
     @mock.patch('software.config.agent_mcast_group', FAKE_AGENT_MCAST_GROUP)
     def test_message_class_send(self):
         """'send' writes to a socket"""
@@ -142,7 +142,7 @@ class SoftwareControllerMessagesTestCase(testtools.TestCase):
             if message_class in send_all:
                 mock_sock.sendall.assert_called()
 
-    @mock.patch('software.software_controller.pc', FakeSoftwareController())
+    @mock.patch('software.software_controller.sc', FakeSoftwareController())
     def test_message_class_handle(self):
         """'handle' method tests"""
         addr = [FAKE_CONTROLLER_ADDRESS, ]  # addr is a list

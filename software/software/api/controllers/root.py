@@ -7,14 +7,14 @@ SPDX-License-Identifier: Apache-2.0
 from pecan import expose
 
 from software.exceptions import PatchError
-from software.software_controller import pc
+from software.software_controller import sc
 
 
-class PatchAPIController(object):
+class SoftwareAPIController(object):
 
     @expose('json')
     @expose('query.xml', content_type='application/xml')
-    def host_install_async(self, *args):
+    def deploy_host(self, *args):
         if len(list(args)) == 0:
             return dict(error="Host must be specified for install")
         force = False
@@ -22,7 +22,7 @@ class PatchAPIController(object):
             force = True
 
         try:
-            result = pc.patch_host_install(list(args)[0], force, async_req=True)
+            result = sc.software_deploy_host_api(list(args)[0], force, async_req=True)
         except PatchError as e:
             return dict(error="Error: %s" % str(e))
 
@@ -30,11 +30,11 @@ class PatchAPIController(object):
 
     @expose('json')
     def is_applied(self, *args):
-        return pc.is_applied(list(args))
+        return sc.is_applied(list(args))
 
     @expose('json')
     def is_available(self, *args):
-        return pc.is_available(list(args))
+        return sc.is_available(list(args))
 
 
 class RootController:
@@ -46,5 +46,5 @@ class RootController:
         """index for the root"""
         return "Unified Software Management API, Available versions: /v1"
 
-    patch = PatchAPIController()
-    v1 = PatchAPIController()
+    software = SoftwareAPIController()
+    v1 = SoftwareAPIController()

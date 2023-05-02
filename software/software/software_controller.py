@@ -26,7 +26,7 @@ from wsgiref import simple_server
 
 from oslo_config import cfg as oslo_cfg
 
-from software import ostree_utils
+import software.ostree_utils as ostree_utils
 from software.api import app
 from software.authapi import app as auth_app
 from software.base import PatchService
@@ -69,10 +69,10 @@ CONF = oslo_cfg.CONF
 
 pidfile_path = "/var/run/patch_controller.pid"
 
-pc = None
-state_file = "%s/.controller.state" % constants.PATCH_STORAGE_DIR
+sc = None
+state_file = "%s/.controller.state" % constants.SOFTWARE_STORAGE_DIR
 app_dependency_basename = "app_dependencies.json"
-app_dependency_filename = "%s/%s" % (constants.PATCH_STORAGE_DIR, app_dependency_basename)
+app_dependency_filename = "%s/%s" % (constants.SOFTWARE_STORAGE_DIR, app_dependency_basename)
 
 insvc_patch_restart_controller = "/run/software/.restart.software-controller"
 
@@ -189,15 +189,15 @@ class AgentNeighbour(object):
              "sw_version": self.sw_version,
              "state": self.state}
 
-        global pc
-        if self.out_of_date and not pc.allow_insvc_patching:
+        global sc
+        if self.out_of_date and not sc.allow_insvc_patching:
             d["requires_reboot"] = True
         else:
             d["requires_reboot"] = self.requires_reboot
 
         # Included for future enhancement, to allow per-node determination
         # of in-service patching
-        d["allow_insvc_patching"] = pc.allow_insvc_patching
+        d["allow_insvc_patching"] = sc.allow_insvc_patching
 
         return d
 
@@ -213,12 +213,12 @@ class PatchMessageHello(messages.PatchMessage):
             self.patch_op_counter = data['patch_op_counter']
 
     def encode(self):
-        global pc
+        global sc
         messages.PatchMessage.encode(self)
-        self.message['patch_op_counter'] = pc.patch_op_counter
+        self.message['patch_op_counter'] = sc.patch_op_counter
 
     def handle(self, sock, addr):
-        global pc
+        global sc
         host = addr[0]
         if host == cfg.get_mgmt_ip():
             # Ignore messages from self
@@ -226,16 +226,16 @@ class PatchMessageHello(messages.PatchMessage):
 
         # Send response
         if self.patch_op_counter > 0:
-            pc.handle_nbr_patch_op_counter(host, self.patch_op_counter)
+            sc.handle_nbr_patch_op_counter(host, self.patch_op_counter)
 
         resp = PatchMessageHelloAck()
         resp.send(sock)
 
     def send(self, sock):
-        global pc
+        global sc
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(str.encode(message), (pc.controller_address, cfg.controller_port))
+        sock.sendto(str.encode(message), (sc.controller_address, cfg.controller_port))
 
 
 class PatchMessageHelloAck(messages.PatchMessage):
@@ -247,20 +247,20 @@ class PatchMessageHelloAck(messages.PatchMessage):
         messages.PatchMessage.encode(self)
 
     def handle(self, sock, addr):
-        global pc
+        global sc
 
-        pc.controller_neighbours_lock.acquire()
-        if not addr[0] in pc.controller_neighbours:
-            pc.controller_neighbours[addr[0]] = ControllerNeighbour()
+        sc.controller_neighbours_lock.acquire()
+        if not addr[0] in sc.controller_neighbours:
+            sc.controller_neighbours[addr[0]] = ControllerNeighbour()
 
-        pc.controller_neighbours[addr[0]].rx_ack()
-        pc.controller_neighbours_lock.release()
+        sc.controller_neighbours[addr[0]].rx_ack()
+        sc.controller_neighbours_lock.release()
 
     def send(self, sock):
-        global pc
+        global sc
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(str.encode(message), (pc.controller_address, cfg.controller_port))
+        sock.sendto(str.encode(message), (sc.controller_address, cfg.controller_port))
 
 
 class PatchMessageSyncReq(messages.PatchMessage):
@@ -272,7 +272,7 @@ class PatchMessageSyncReq(messages.PatchMessage):
         messages.PatchMessage.encode(self)
 
     def handle(self, sock, addr):
-        global pc
+        global sc
         host = addr[0]
         if host == cfg.get_mgmt_ip():
             # Ignore messages from self
@@ -281,17 +281,17 @@ class PatchMessageSyncReq(messages.PatchMessage):
         # We may need to do this in a separate thread, so that we continue to process hellos
         LOG.info("Handling sync req")
 
-        pc.sync_from_nbr(host)
+        sc.sync_from_nbr(host)
 
         resp = PatchMessageSyncComplete()
         resp.send(sock)
 
     def send(self, sock):
-        global pc
+        global sc
         LOG.info("sending sync req")
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(str.encode(message), (pc.controller_address, cfg.controller_port))
+        sock.sendto(str.encode(message), (sc.controller_address, cfg.controller_port))
 
 
 class PatchMessageSyncComplete(messages.PatchMessage):
@@ -303,22 +303,22 @@ class PatchMessageSyncComplete(messages.PatchMessage):
         messages.PatchMessage.encode(self)
 
     def handle(self, sock, addr):
-        global pc
+        global sc
         LOG.info("Handling sync complete")
 
-        pc.controller_neighbours_lock.acquire()
-        if not addr[0] in pc.controller_neighbours:
-            pc.controller_neighbours[addr[0]] = ControllerNeighbour()
+        sc.controller_neighbours_lock.acquire()
+        if not addr[0] in sc.controller_neighbours:
+            sc.controller_neighbours[addr[0]] = ControllerNeighbour()
 
-        pc.controller_neighbours[addr[0]].rx_synced()
-        pc.controller_neighbours_lock.release()
+        sc.controller_neighbours[addr[0]].rx_synced()
+        sc.controller_neighbours_lock.release()
 
     def send(self, sock):
-        global pc
+        global sc
         LOG.info("sending sync complete")
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(str.encode(message), (pc.controller_address, cfg.controller_port))
+        sock.sendto(str.encode(message), (sc.controller_address, cfg.controller_port))
 
 
 class PatchMessageHelloAgent(messages.PatchMessage):
@@ -326,19 +326,19 @@ class PatchMessageHelloAgent(messages.PatchMessage):
         messages.PatchMessage.__init__(self, messages.PATCHMSG_HELLO_AGENT)
 
     def encode(self):
-        global pc
+        global sc
         messages.PatchMessage.encode(self)
-        self.message['patch_op_counter'] = pc.patch_op_counter
+        self.message['patch_op_counter'] = sc.patch_op_counter
 
     def handle(self, sock, addr):
         LOG.error("Should not get here")
 
     def send(self, sock):
-        global pc
+        global sc
         self.encode()
         message = json.dumps(self.message)
         local_hostname = utils.ip_to_versioned_localhost(cfg.agent_mcast_group)
-        sock.sendto(str.encode(message), (pc.agent_address, cfg.agent_port))
+        sock.sendto(str.encode(message), (sc.agent_address, cfg.agent_port))
         sock.sendto(str.encode(message), (local_hostname, cfg.agent_port))
 
 
@@ -347,19 +347,19 @@ class PatchMessageSendLatestFeedCommit(messages.PatchMessage):
         messages.PatchMessage.__init__(self, messages.PATCHMSG_SEND_LATEST_FEED_COMMIT)
 
     def encode(self):
-        global pc
+        global sc
         messages.PatchMessage.encode(self)
-        self.message['latest_feed_commit'] = pc.latest_feed_commit
+        self.message['latest_feed_commit'] = sc.latest_feed_commit
 
     def handle(self, sock, addr):
         LOG.error("Should not get here")
 
     def send(self, sock):
-        global pc
+        global sc
         self.encode()
         message = json.dumps(self.message)
         local_hostname = utils.ip_to_versioned_localhost(cfg.agent_mcast_group)
-        sock.sendto(str.encode(message), (pc.agent_address, cfg.agent_port))
+        sock.sendto(str.encode(message), (sc.agent_address, cfg.agent_port))
         sock.sendto(str.encode(message), (local_hostname, cfg.agent_port))
 
 
@@ -396,20 +396,20 @@ class PatchMessageHelloAgentAck(messages.PatchMessage):
         messages.PatchMessage.encode(self)
 
     def handle(self, sock, addr):
-        global pc
+        global sc
 
-        pc.hosts_lock.acquire()
-        if not addr[0] in pc.hosts:
-            pc.hosts[addr[0]] = AgentNeighbour(addr[0])
+        sc.hosts_lock.acquire()
+        if not addr[0] in sc.hosts:
+            sc.hosts[addr[0]] = AgentNeighbour(addr[0])
 
-        pc.hosts[addr[0]].rx_ack(self.agent_hostname,
+        sc.hosts[addr[0]].rx_ack(self.agent_hostname,
                                  self.agent_out_of_date,
                                  self.agent_requires_reboot,
                                  self.query_id,
                                  self.agent_patch_failed,
                                  self.agent_sw_version,
                                  self.agent_state)
-        pc.hosts_lock.release()
+        sc.hosts_lock.release()
 
     def send(self, sock):  # pylint: disable=unused-argument
         LOG.error("Should not get here")
@@ -459,25 +459,25 @@ class PatchMessageQueryDetailedResp(messages.PatchMessage):
         LOG.error("Should not get here")
 
     def handle(self, sock, addr):
-        global pc
+        global sc
 
         ip = addr[0]
-        pc.hosts_lock.acquire()
-        if ip in pc.hosts:
-            pc.hosts[ip].handle_query_detailed_resp(self.latest_sysroot_commit,
+        sc.hosts_lock.acquire()
+        if ip in sc.hosts:
+            sc.hosts[ip].handle_query_detailed_resp(self.latest_sysroot_commit,
                                                     self.nodetype,
                                                     self.agent_sw_version,
                                                     self.subfunctions,
                                                     self.agent_state)
-            for patch_id in list(pc.interim_state):
-                if ip in pc.interim_state[patch_id]:
-                    pc.interim_state[patch_id].remove(ip)
-                    if len(pc.interim_state[patch_id]) == 0:
-                        del pc.interim_state[patch_id]
-            pc.hosts_lock.release()
-            pc.check_patch_states()
+            for patch_id in list(sc.interim_state):
+                if ip in sc.interim_state[patch_id]:
+                    sc.interim_state[patch_id].remove(ip)
+                    if len(sc.interim_state[patch_id]) == 0:
+                        del sc.interim_state[patch_id]
+            sc.hosts_lock.release()
+            sc.check_patch_states()
         else:
-            pc.hosts_lock.release()
+            sc.hosts_lock.release()
 
     def send(self, sock):  # pylint: disable=unused-argument
         LOG.error("Should not get here")
@@ -490,7 +490,7 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
         self.force = False
 
     def encode(self):
-        global pc
+        global sc
         messages.PatchMessage.encode(self)
         self.message['force'] = self.force
 
@@ -523,17 +523,17 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
 
     def handle(self, sock, addr):
         LOG.info("Handling install resp from %s", addr[0])
-        global pc
+        global sc
         # LOG.info("Handling hello ack")
 
-        pc.hosts_lock.acquire()
-        if not addr[0] in pc.hosts:
-            pc.hosts[addr[0]] = AgentNeighbour(addr[0])
+        sc.hosts_lock.acquire()
+        if not addr[0] in sc.hosts:
+            sc.hosts[addr[0]] = AgentNeighbour(addr[0])
 
-        pc.hosts[addr[0]].install_status = self.status
-        pc.hosts[addr[0]].install_pending = False
-        pc.hosts[addr[0]].install_reject_reason = self.reject_reason
-        pc.hosts_lock.release()
+        sc.hosts[addr[0]].install_status = self.status
+        sc.hosts[addr[0]].install_pending = False
+        sc.hosts[addr[0]].install_reject_reason = self.reject_reason
+        sc.hosts_lock.release()
 
     def send(self, sock):  # pylint: disable=unused-argument
         LOG.error("Should not get here")
@@ -554,7 +554,7 @@ class PatchMessageDropHostReq(messages.PatchMessage):
             self.ip = data['ip']
 
     def handle(self, sock, addr):
-        global pc
+        global sc
         host = addr[0]
         if host == cfg.get_mgmt_ip():
             # Ignore messages from self
@@ -564,14 +564,14 @@ class PatchMessageDropHostReq(messages.PatchMessage):
             LOG.error("Received PATCHMSG_DROP_HOST_REQ with no ip: %s", json.dumps(self.data))
             return
 
-        pc.drop_host(self.ip, sync_nbr=False)
+        sc.drop_host(self.ip, sync_nbr=False)
         return
 
     def send(self, sock):
-        global pc
+        global sc
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(str.encode(message), (pc.controller_address, cfg.controller_port))
+        sock.sendto(str.encode(message), (sc.controller_address, cfg.controller_port))
 
 
 class PatchController(PatchService):
@@ -2025,8 +2025,8 @@ class PatchController(PatchService):
         for nbr in list(self.hosts):
             host = self.hosts[nbr].get_dict()
             host["interim_state"] = False
-            for patch_id in list(pc.interim_state):
-                if nbr in pc.interim_state[patch_id]:
+            for patch_id in list(sc.interim_state):
+                if nbr in sc.interim_state[patch_id]:
                     host["interim_state"] = True
 
             output.append(host)
@@ -2084,7 +2084,7 @@ class PatchController(PatchService):
                         msg = "Failed to delete the restart script for %s" % patch_id
                         LOG.exception(msg)
 
-    def patch_host_install(self, host_ip, force, async_req=False):
+    def software_deploy_host_api(self, host_ip, force, async_req=False):
         msg_info = ""
         msg_warning = ""
         msg_error = ""
@@ -2107,7 +2107,7 @@ class PatchController(PatchService):
                 LOG.error("Error in host-install: %s", msg)
                 return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-        msg = "Running host-install for %s (%s), force=%s, async_req=%s" % (host_ip, ip, force, async_req)
+        msg = "Running software deploy host for %s (%s), force=%s, async_req=%s" % (host_ip, ip, force, async_req)
         LOG.info(msg)
         audit_log_info(msg)
 
@@ -2291,7 +2291,7 @@ class PatchController(PatchService):
         try:
             tmpfile, tmpfname = tempfile.mkstemp(
                 prefix=app_dependency_basename,
-                dir=constants.PATCH_STORAGE_DIR)
+                dir=constants.SOFTWARE_STORAGE_DIR)
 
             os.write(tmpfile, json.dumps(self.app_dependencies).encode())
             os.close(tmpfile)
@@ -2471,13 +2471,13 @@ class PatchControllerMainThread(threading.Thread):
         # LOG.info ("Initializing Main thread")
 
     def run(self):
-        global pc
+        global sc
         global thread_death
 
         # LOG.info ("In Main thread")
 
         try:
-            sock_in = pc.setup_socket()
+            sock_in = sc.setup_socket()
 
             while sock_in is None:
                 # Check every thirty seconds?
@@ -2485,18 +2485,18 @@ class PatchControllerMainThread(threading.Thread):
                 # we'll get restarted when the file is updated,
                 # and this should be unnecessary.
                 time.sleep(30)
-                sock_in = pc.setup_socket()
+                sock_in = sc.setup_socket()
 
             # Ok, now we've got our socket. Let's start with a hello!
-            pc.socket_lock.acquire()
+            sc.socket_lock.acquire()
 
             hello = PatchMessageHello()
-            hello.send(pc.sock_out)
+            hello.send(sc.sock_out)
 
             hello_agent = PatchMessageHelloAgent()
-            hello_agent.send(pc.sock_out)
+            hello_agent.send(sc.sock_out)
 
-            pc.socket_lock.release()
+            sc.socket_lock.release()
 
             # Send hello every thirty seconds
             hello_timeout = time.time() + 30.0
@@ -2518,7 +2518,7 @@ class PatchControllerMainThread(threading.Thread):
                     os.remove(insvc_patch_restart_controller)
                     return
 
-                inputs = [pc.sock_in] + agent_query_conns
+                inputs = [sc.sock_in] + agent_query_conns
                 outputs = []
 
                 # LOG.info("Running select, remaining=%d", remaining)
@@ -2528,7 +2528,7 @@ class PatchControllerMainThread(threading.Thread):
                         len(wlist) == 0 and
                         len(xlist) == 0):
                     # Timeout hit
-                    pc.audit_socket()
+                    sc.audit_socket()
 
                 # LOG.info("Checking sockets")
                 for s in rlist:
@@ -2536,11 +2536,11 @@ class PatchControllerMainThread(threading.Thread):
                     addr = None
                     msg = None
 
-                    if s == pc.sock_in:
+                    if s == sc.sock_in:
                         # Receive from UDP
-                        pc.socket_lock.acquire()
+                        sc.socket_lock.acquire()
                         data, addr = s.recvfrom(1024)
-                        pc.socket_lock.release()
+                        sc.socket_lock.release()
                     else:
                         # Receive from TCP
                         while True:
@@ -2603,13 +2603,13 @@ class PatchControllerMainThread(threading.Thread):
                         msg = messages.PatchMessage()
 
                     msg.decode(msgdata)
-                    if s == pc.sock_in:
-                        msg.handle(pc.sock_out, addr)
+                    if s == sc.sock_in:
+                        msg.handle(sc.sock_out, addr)
                     else:
                         msg.handle(s, addr)
 
                     # We can drop the connection after a query response
-                    if msg.msgtype == messages.PATCHMSG_QUERY_DETAILED_RESP and s != pc.sock_in:
+                    if msg.msgtype == messages.PATCHMSG_QUERY_DETAILED_RESP and s != sc.sock_in:
                         agent_query_conns.remove(s)
                         s.shutdown(socket.SHUT_RDWR)
                         s.close()
@@ -2630,38 +2630,38 @@ class PatchControllerMainThread(threading.Thread):
                     hello_timeout = time.time() + 30.0
                     remaining = 30
 
-                    pc.socket_lock.acquire()
+                    sc.socket_lock.acquire()
 
                     hello = PatchMessageHello()
-                    hello.send(pc.sock_out)
+                    hello.send(sc.sock_out)
 
                     hello_agent = PatchMessageHelloAgent()
-                    hello_agent.send(pc.sock_out)
+                    hello_agent.send(sc.sock_out)
 
-                    pc.socket_lock.release()
+                    sc.socket_lock.release()
 
                     # Age out neighbours
-                    pc.controller_neighbours_lock.acquire()
-                    nbrs = list(pc.controller_neighbours)
+                    sc.controller_neighbours_lock.acquire()
+                    nbrs = list(sc.controller_neighbours)
                     for n in nbrs:
                         # Age out controllers after 2 minutes
-                        if pc.controller_neighbours[n].get_age() >= 120:
+                        if sc.controller_neighbours[n].get_age() >= 120:
                             LOG.info("Aging out controller %s from table", n)
-                            del pc.controller_neighbours[n]
-                    pc.controller_neighbours_lock.release()
+                            del sc.controller_neighbours[n]
+                    sc.controller_neighbours_lock.release()
 
-                    pc.hosts_lock.acquire()
-                    nbrs = list(pc.hosts)
+                    sc.hosts_lock.acquire()
+                    nbrs = list(sc.hosts)
                     for n in nbrs:
                         # Age out hosts after 1 hour
-                        if pc.hosts[n].get_age() >= 3600:
+                        if sc.hosts[n].get_age() >= 3600:
                             LOG.info("Aging out host %s from table", n)
-                            del pc.hosts[n]
-                            for patch_id in list(pc.interim_state):
-                                if n in pc.interim_state[patch_id]:
-                                    pc.interim_state[patch_id].remove(n)
+                            del sc.hosts[n]
+                            for patch_id in list(sc.interim_state):
+                                if n in sc.interim_state[patch_id]:
+                                    sc.interim_state[patch_id].remove(n)
 
-                    pc.hosts_lock.release()
+                    sc.hosts_lock.release()
         except Exception:
             # Log all exceptions
             LOG.exception("Error occurred during request processing")
@@ -2690,8 +2690,8 @@ def main():
     # that create directories with tempfile will not use /tmp
     os.environ['TMPDIR'] = '/scratch'
 
-    global pc
-    pc = PatchController()
+    global sc
+    sc = PatchController()
 
     LOG.info("launching")
     api_thread = PatchControllerApiThread()

@@ -5,8 +5,16 @@ SPDX-License-Identifier: Apache-2.0
 
 """
 import logging
+import os
 import sh
+import shutil
 import subprocess
+
+import gi
+gi.require_version('OSTree', '1.0')
+from gi.repository import Gio
+from gi.repository import GLib
+from gi.repository import OSTree
 
 from software import constants
 from software.exceptions import OSTreeCommandFail
@@ -322,3 +330,173 @@ def delete_older_deployments():
                        % (e.returncode, e.stderr.decode("utf-8"))
             LOG.info(info_msg)
             raise OSTreeCommandFail(msg)
+
+
+def checkout_latest_ostree_commit(patch_sw_version):
+    """
+    Checkout the latest feed ostree commit to a temporary folder.
+    """
+    try:
+        repo_src = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR,
+                                              patch_sw_version)
+        src_repo = OSTree.Repo.new(Gio.File.new_for_path(repo_src))
+        src_repo.open(None)
+
+        _, ref = OSTree.Repo.list_refs(src_repo, constants.OSTREE_REF, None)
+        dest_base = constants.SOFTWARE_STORAGE_DIR
+        dest_folder = constants.CHECKOUT_FOLDER
+        fd = os.open(dest_base, os.O_DIRECTORY)
+        is_checked_out = OSTree.Repo.checkout_at(src_repo, None, fd, dest_folder,
+                                                 ref[constants.OSTREE_REF], None)
+        LOG.info("Feed OSTree latest commit checked out %s", is_checked_out)
+        os.close(fd)
+    except GLib.Error as e:
+        msg = "Failed to checkout latest commit to /opt/software/checked_out_commit directory."
+        info_msg = "OSTree Checkout Error: %s" \
+                   % (vars(e))
+        LOG.info(info_msg)
+        raise OSTreeCommandFail(msg)
+    finally:
+        LOG.info("Checked out %s", is_checked_out)
+        os.close(fd)
+
+
+def install_deb_package(package_list):
+    """
+    Installs deb package to a checked out commit.
+    :param package_name: The list of packages to be installed.
+    """
+    real_root = os.open("/", os.O_RDONLY)
+    try:
+        dest_base = constants.SOFTWARE_STORAGE_DIR
+        dest_folder = constants.CHECKOUT_FOLDER
+        dest_location = f"{dest_base}/{dest_folder}"
+        # Copy deb packages
+        tmp_location = f"{dest_location}/var/tmp"
+        package_location = f"{dest_base}/packages"
+        shutil.copy(package_location, tmp_location)
+        os.chroot(dest_location)
+        os.chdir('/')
+        try:
+            subprocess.check_output(["ln", "-sfn", "usr/etc", "etc"], stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            LOG.info("Failed ln command: %s", e.output)
+        # change into the /var/tmp in the chroot
+        os.chdir("/var/tmp")
+
+        # install the debian package'
+        try:
+            for package in package_list:
+                subprocess.check_output(["dpkg", "-i", package], stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            LOG.info("Failed dpkg install command: %s", e.output)
+
+        # still inside the chroot
+        os.chdir('/')
+        if os.path.isdir("/etc"):
+            LOG.info(os.path.isdir("etc"))
+            os.remove("etc")
+    finally:
+        os.fchdir(real_root)
+        os.chroot(".")
+        # now we can safely close this fd
+        os.close(real_root)
+        LOG.info("Exiting chroot")
+        os.chdir("/home/sysadmin")
+        LOG.info("Changed directory to /home/sysadmin")
+
+
+def uninstall_deb_package(package_list):
+    """
+    Uninstalls deb package from a checked out commit.
+    :param package_name: The list of packages to be uninstalled.
+    """
+    real_root = os.open("/", os.O_RDONLY)
+    try:
+        dest_base = constants.SOFTWARE_STORAGE_DIR
+        dest_folder = constants.CHECKOUT_FOLDER
+        dest_location = f"{dest_base}/{dest_folder}"
+        # Copy deb packages
+        tmp_location = f"{dest_location}/var/tmp"
+        package_location = f"{dest_base}/packages"
+        shutil.copy(package_location, tmp_location)
+        os.chroot(dest_location)
+        os.chdir('/')
+        try:
+            subprocess.check_output(["ln", "-sfn", "usr/etc", "etc"], stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            LOG.info("Failed ln command: %s", e.output)
+        # change into the /var/tmp in the chroot
+        os.chdir("/var/tmp")
+
+        # uninstall the debian package'
+        try:
+            # todo(jcasteli): Identify if we need to remove any
+            # /var/lib/dpkg/info/<package>.prerm files
+            for package in package_list:
+                subprocess.check_output(["dpkg", "--purge", package], stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            LOG.info("Failed dpkg purge command: %s", e.output)
+
+        # still inside the chroot
+        os.chdir('/')
+        if os.path.isdir("/etc"):
+            LOG.info(os.path.isdir("etc"))
+            os.remove("etc")
+
+    finally:
+        os.fchdir(real_root)
+        os.chroot(".")
+        # now we can safely close this fd
+        os.close(real_root)
+        LOG.info("Exiting chroot")
+        os.chdir("/home/sysadmin")
+        LOG.info("Changed directory to /home/sysadmin")
+
+
+def write_to_feed_ostree(patch_name, patch_sw_version):
+    """
+    Write a new commit to the feed ostree.
+    """
+    try:
+        repo_src = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR,
+                                              patch_sw_version)
+        src_repo = OSTree.Repo.new(Gio.File.new_for_path(repo_src))
+        src_repo.open(None)
+
+        _, ref = OSTree.Repo.list_refs(src_repo, constants.OSTREE_REF, None)
+
+        OSTree.Repo.prepare_transaction(src_repo, None)
+        OSTree.Repo.scan_hardlinks(src_repo, None)
+        dest_base = constants.SOFTWARE_STORAGE_DIR
+        dest_folder = constants.CHECKOUT_FOLDER
+        dest_location = f"{dest_base}/{dest_folder}"
+
+        build_dir = Gio.File.new_for_path(dest_location)
+        mtree = OSTree.MutableTree()
+        OSTree.Repo.write_directory_to_mtree(src_repo, build_dir, mtree, None, None)
+        write_success, root = OSTree.Repo.write_mtree(src_repo, mtree, None)
+        LOG.info("Writing to mutable tree: %s", write_success)
+        subject = "Patch %s - Deploy Host completed" % (patch_name)
+        commitSuccess, commit = OSTree.Repo.write_commit(src_repo,
+                                                         ref[constants.OSTREE_REF],
+                                                         subject,
+                                                         None,
+                                                         None,
+                                                         root,
+                                                         None)
+        LOG.info("Writing to sysroot ostree: %s", commitSuccess)
+
+        LOG.info("Setting transaction ref")
+        OSTree.Repo.transaction_set_ref(src_repo, None, constants.OSTREE_REF, commit)
+        LOG.info("Commiting ostree transaction")
+        OSTree.Repo.commit_transaction(src_repo, None)
+        LOG.info("Regenerating summary")
+        OSTree.Repo.regenerate_summary(src_repo, None, None)
+
+    except GLib.Error as e:
+        msg = "Failed to write commit to feed ostree repo."
+        info_msg = "OSTree Commit Write Error: %s" \
+                   % (vars(e))
+        LOG.info(info_msg)
+        raise OSTreeCommandFail(msg)
