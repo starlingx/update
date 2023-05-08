@@ -915,9 +915,9 @@ class PatchController(PatchService):
                     LOG.exception(msg)
                     raise PatchFail(msg)
 
-    def patch_import_api(self, patches):
+    def software_release_upload(self, release_files):
         """
-        Import patches
+        Upload software release files
         :return:
         """
         msg_info = ""
@@ -928,12 +928,12 @@ class PatchController(PatchService):
         self.base_pkgdata.loaddirs()
 
         # Protect against duplications
-        patch_list = sorted(list(set(patches)))
+        release_list = sorted(set(release_files))
 
         # First, make sure the specified files exist
-        for patch in patch_list:
-            if not os.path.isfile(patch):
-                raise PatchFail("File does not exist: %s" % patch)
+        for release_file in release_list:
+            if not os.path.isfile(release_file):
+                raise PatchFail("File does not exist: %s" % release_file)
 
         try:
             if not os.path.exists(avail_dir):
@@ -947,23 +947,25 @@ class PatchController(PatchService):
             LOG.exception(msg)
             raise PatchFail(msg)
 
-        msg = "Importing patches: %s" % ",".join(patch_list)
+        msg = "Uploading files: %s" % ",".join(release_list)
         LOG.info(msg)
         audit_log_info(msg)
 
-        for patch in patch_list:
-            msg = "Importing patch: %s" % patch
+        for release_file in release_list:
+            msg = "Uploading release: %s" % release_file
             LOG.info(msg)
             audit_log_info(msg)
 
-            # Get the patch_id from the filename
-            # and check to see if it's already imported
-            (patch_id, ext) = os.path.splitext(os.path.basename(patch))
-            if patch_id in self.patch_data.metadata:
-                if self.patch_data.metadata[patch_id]["repostate"] == constants.APPLIED:
+            # Get the release_id from the filename
+            # and check to see if it's already uploaded
+            # todo(abailey) We should not require the ID as part of the file
+            (release_id, ext) = os.path.splitext(os.path.basename(release_file))
+            # todo(abailey): self.patch_data should be renamed
+            if release_id in self.patch_data.metadata:
+                if self.patch_data.metadata[release_id]["repostate"] == constants.APPLIED:
                     mdir = applied_dir
-                elif self.patch_data.metadata[patch_id]["repostate"] == constants.COMMITTED:
-                    msg = "%s is committed. Metadata not updated" % patch_id
+                elif self.patch_data.metadata[release_id]["repostate"] == constants.COMMITTED:
+                    msg = "%s is committed. Metadata not updated" % release_id
                     LOG.info(msg)
                     msg_info += msg + "\n"
                     continue
@@ -971,63 +973,64 @@ class PatchController(PatchService):
                     mdir = avail_dir
 
                 try:
-                    thispatch = PatchFile.extract_patch(patch,
-                                                        metadata_dir=mdir,
-                                                        metadata_only=True,
-                                                        existing_content=self.patch_data.contents[patch_id],
-                                                        base_pkgdata=self.base_pkgdata)
-                    self.patch_data.update_patch(thispatch)
-                    msg = "%s is already imported. Updated metadata only" % patch_id
+                    # todo(abailey) PatchFile / extract_patch should be renamed
+                    thisrelease = PatchFile.extract_patch(release_file,
+                                                          metadata_dir=mdir,
+                                                          metadata_only=True,
+                                                          existing_content=self.patch_data.contents[release_id],
+                                                          base_pkgdata=self.base_pkgdata)
+                    self.patch_data.update_patch(thisrelease)
+                    msg = "%s is already uploaded. Updated metadata only" % release_id
                     LOG.info(msg)
                     msg_info += msg + "\n"
                 except PatchMismatchFailure:
-                    msg = "Contents of %s do not match re-imported patch" % patch_id
+                    msg = "Contents of %s do not match re-uploaded release" % release_id
                     LOG.exception(msg)
                     msg_error += msg + "\n"
                     continue
                 except PatchValidationFailure as e:
-                    msg = "Patch validation failed for %s" % patch_id
+                    msg = "Release validation failed for %s" % release_id
                     if str(e) is not None and str(e) != '':
                         msg += ":\n%s" % str(e)
                     LOG.exception(msg)
                     msg_error += msg + "\n"
                     continue
                 except PatchFail:
-                    msg = "Failed to import patch %s" % patch_id
+                    msg = "Failed to upload release %s" % release_id
                     LOG.exception(msg)
                     msg_error += msg + "\n"
 
                 continue
 
-            if ext != ".patch":
-                msg = "File must end in .patch extension: %s" \
-                      % os.path.basename(patch)
+            if ext not in [".patch", ".tar", ".iso"]:
+                msg = "File: %s must end in .patch .tar or .iso" \
+                      % os.path.basename(release_file)
                 LOG.exception(msg)
                 msg_error += msg + "\n"
                 continue
 
             try:
-                thispatch = PatchFile.extract_patch(patch,
-                                                    metadata_dir=avail_dir,
-                                                    base_pkgdata=self.base_pkgdata)
+                thisrelease = PatchFile.extract_patch(release_file,
+                                                      metadata_dir=avail_dir,
+                                                      base_pkgdata=self.base_pkgdata)
 
-                msg_info += "%s is now available\n" % patch_id
-                self.patch_data.add_patch(thispatch)
+                msg_info += "%s is now available\n" % release_id
+                self.patch_data.add_patch(thisrelease)
 
-                self.patch_data.metadata[patch_id]["repostate"] = constants.AVAILABLE
+                self.patch_data.metadata[release_id]["repostate"] = constants.AVAILABLE
                 if len(self.hosts) > 0:
-                    self.patch_data.metadata[patch_id]["patchstate"] = constants.AVAILABLE
+                    self.patch_data.metadata[release_id]["patchstate"] = constants.AVAILABLE
                 else:
-                    self.patch_data.metadata[patch_id]["patchstate"] = constants.UNKNOWN
+                    self.patch_data.metadata[release_id]["patchstate"] = constants.UNKNOWN
             except PatchValidationFailure as e:
-                msg = "Patch validation failed for %s" % patch_id
+                msg = "Release validation failed for %s" % release_id
                 if str(e) is not None and str(e) != '':
                     msg += ":\n%s" % str(e)
                 LOG.exception(msg)
                 msg_error += msg + "\n"
                 continue
             except PatchFail:
-                msg = "Failed to import patch %s" % patch_id
+                msg = "Failed to upload release %s" % release_id
                 LOG.exception(msg)
                 msg_error += msg + "\n"
                 continue
@@ -1438,9 +1441,9 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-    def patch_delete_api(self, patch_ids):
+    def software_release_delete_api(self, release_ids):
         """
-        Delete patches
+        Delete release(s)
         :return:
         """
         msg_info = ""
@@ -1448,30 +1451,30 @@ class PatchController(PatchService):
         msg_error = ""
 
         # Protect against duplications
-        patch_list = sorted(list(set(patch_ids)))
+        release_list = sorted(list(set(release_ids)))
 
-        msg = "Deleting patches: %s" % ",".join(patch_list)
+        msg = "Deleting releases: %s" % ",".join(release_list)
         LOG.info(msg)
         audit_log_info(msg)
 
-        # Verify patches exist and are in proper state first
+        # Verify releases exist and are in proper state first
         id_verification = True
-        for patch_id in patch_list:
-            if patch_id not in self.patch_data.metadata:
-                msg = "Patch %s does not exist" % patch_id
+        for release_id in release_list:
+            if release_id not in self.patch_data.metadata:
+                msg = "Release %s does not exist" % release_id
                 LOG.error(msg)
                 msg_error += msg + "\n"
                 id_verification = False
                 continue
 
-            # Get the aggregated patch state, if possible
-            patchstate = constants.UNKNOWN
-            if patch_id in self.patch_data.metadata:
-                patchstate = self.patch_data.metadata[patch_id]["patchstate"]
+            # Get the aggregated release state, if possible
+            releasestate = constants.UNKNOWN
+            if release_id in self.patch_data.metadata:
+                releasestate = self.patch_data.metadata[release_id]["patchstate"]
 
-            if self.patch_data.metadata[patch_id]["repostate"] != constants.AVAILABLE or \
-                    (patchstate != constants.AVAILABLE and patchstate != constants.UNKNOWN):
-                msg = "Patch %s not in Available state" % patch_id
+            if self.patch_data.metadata[release_id]["repostate"] != constants.AVAILABLE or \
+                    (releasestate != constants.AVAILABLE and releasestate != constants.UNKNOWN):
+                msg = "Release %s not in Available state" % release_id
                 LOG.error(msg)
                 msg_error += msg + "\n"
                 id_verification = False
@@ -1481,14 +1484,15 @@ class PatchController(PatchService):
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         # Handle operation
-        for patch_id in patch_list:
-            patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
+        for release_id in release_list:
+            release_sw_version = self.patch_data.metadata[release_id]["sw_version"]
 
             # Need to support delete of older centos patches (metadata) from upgrades.
+            # todo(abailey): do we need to be concerned about this since this component is new.
 
             # Delete ostree content if it exists.
             # RPM based patches (from upgrades) will not have ostree contents
-            ostree_tar_filename = self.get_ostree_tar_filename(patch_sw_version, patch_id)
+            ostree_tar_filename = self.get_ostree_tar_filename(release_sw_version, release_id)
             if os.path.isfile(ostree_tar_filename):
                 try:
                     os.remove(ostree_tar_filename)
@@ -1499,15 +1503,15 @@ class PatchController(PatchService):
 
             try:
                 # Delete the metadata
-                os.remove("%s/%s-metadata.xml" % (avail_dir, patch_id))
+                os.remove("%s/%s-metadata.xml" % (avail_dir, release_id))
             except OSError:
-                msg = "Failed to remove metadata for %s" % patch_id
+                msg = "Failed to remove metadata for %s" % release_id
                 LOG.exception(msg)
                 raise MetadataFail(msg)
 
-            self.delete_restart_script(patch_id)
-            self.patch_data.delete_patch(patch_id)
-            msg = "%s has been deleted" % patch_id
+            self.delete_restart_script(release_id)
+            self.patch_data.delete_patch(release_id)
+            msg = "%s has been deleted" % release_id
             LOG.info(msg)
             msg_info += msg + "\n"
 
@@ -1731,8 +1735,8 @@ class PatchController(PatchService):
         send_commit_to_agent.send(self.sock_out)
         self.socket_lock.release()
 
-    def patch_sync(self):
-        # Increment the patch_op_counter here
+    def software_sync(self):
+        # Increment the software_op_counter here
         self.inc_patch_op_counter()
 
         self.patch_data_lock.acquire()
@@ -1784,7 +1788,7 @@ class PatchController(PatchService):
             LOG.info("Timed out waiting for sync completion")
         return sync_rc
 
-    def patch_query_cached(self, **kwargs):
+    def software_release_query_cached(self, **kwargs):
         query_state = None
         if "show" in kwargs:
             if kwargs["show"] == "available":
@@ -1805,18 +1809,18 @@ class PatchController(PatchService):
             results = self.patch_data.metadata
         else:
             # Filter results
-            for patch_id, data in self.patch_data.metadata.items():
+            for release_id, data in self.patch_data.metadata.items():
                 if query_state is not None and data["repostate"] != query_state:
                     continue
                 if query_release is not None and data["sw_version"] != query_release:
                     continue
-                results[patch_id] = data
+                results[release_id] = data
         self.patch_data_lock.release()
 
         return results
 
-    def patch_query_specific_cached(self, patch_ids):
-        audit_log_info("Patch show")
+    def software_release_query_specific_cached(self, release_ids):
+        audit_log_info("software release show")
 
         results = {"metadata": {},
                    "contents": {},
@@ -1824,16 +1828,16 @@ class PatchController(PatchService):
 
         self.patch_data_lock.acquire()
 
-        for patch_id in patch_ids:
-            if patch_id not in list(self.patch_data.metadata):
-                results["error"] += "%s is unrecognized\n" % patch_id
+        for release_id in release_ids:
+            if release_id not in list(self.patch_data.metadata):
+                results["error"] += "%s is unrecognized\n" % release_id
 
-        for patch_id, data in self.patch_data.metadata.items():
-            if patch_id in patch_ids:
-                results["metadata"][patch_id] = data
-        for patch_id, data in self.patch_data.contents.items():
-            if patch_id in patch_ids:
-                results["contents"][patch_id] = data
+        for release_id, data in self.patch_data.metadata.items():
+            if release_id in release_ids:
+                results["metadata"][release_id] = data
+        for release_id, data in self.patch_data.contents.items():
+            if release_id in release_ids:
+                results["contents"][release_id] = data
 
         self.patch_data_lock.release()
 

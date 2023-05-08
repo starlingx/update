@@ -309,17 +309,17 @@ def release_upload_req(args):
     # Ignore interrupts during this function
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
-    for patchfile in sorted(list(set(releases))):
-        if os.path.isdir(patchfile):
-            print("Error: %s is a directory. Please use upload-dir" % patchfile)
+    for software_file in sorted(list(set(releases))):
+        if os.path.isdir(software_file):
+            print("Error: %s is a directory. Please use upload-dir" % software_file)
             continue
 
-        if not os.path.isfile(patchfile):
-            print("Error: File does not exist: %s" % patchfile)
+        if not os.path.isfile(software_file):
+            print("Error: File does not exist: %s" % software_file)
             continue
 
-        enc = MultipartEncoder(fields={'file': (patchfile,
-                                                open(patchfile, 'rb'),
+        enc = MultipartEncoder(fields={'file': (software_file,
+                                                open(software_file, 'rb'),
                                                 )})
         url = "http://%s/software/upload" % api_addr
         headers = {'Content-Type': enc.content_type}
@@ -334,6 +334,7 @@ def release_upload_req(args):
             print_software_op_result(req)
 
         if check_rc(req) != 0:
+            # We hit a failure.  Update rc but keep looping
             rc = 1
 
     return rc
@@ -436,14 +437,12 @@ def patch_remove_req(args):
 
 def release_delete_req(args):
     # arg.release is a list
-    releases = args.release
+    releases = "/".join(args.release)
 
     # Ignore interrupts during this function
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
-    patches = "/".join(releases)
-
-    url = "http://%s/software/delete/%s" % (api_addr, patches)
+    url = "http://%s/software/delete/%s" % (api_addr, releases)
 
     headers = {}
     append_auth_token_if_required(headers)
@@ -670,6 +669,7 @@ def release_show_req(args):
 
     headers = {}
     append_auth_token_if_required(headers)
+    # todo(abailey): convert this to a GET
     req = requests.post(url, headers=headers)
 
     if args.debug:
@@ -1242,9 +1242,9 @@ def register_release_commands(commands):
     )
     cmd.set_defaults(cmd='delete')
     cmd.set_defaults(func=release_delete_req)
-    cmd.add_argument('--release',
+    cmd.add_argument('release',
                      nargs="+",  # accepts a list
-                     required=True)
+                     help='Release ID to delete')
 
     # --- software release list ---------------------------
     cmd = sub_cmds.add_parser(
@@ -1256,11 +1256,13 @@ def register_release_commands(commands):
     cmd.set_defaults(restricted=False)  # can run non root
     # --release is an optional argument
     cmd.add_argument('--release',
-                     required=False)
+                     required=False,
+                     help='filter against a release ID')
     # --state is an optional argument. default: "all"
     cmd.add_argument('--state',
                      default="all",
-                     required=False)
+                     required=False,
+                     help='filter against a release state')
 
     # --- software release show <release> -----------------
     cmd = sub_cmds.add_parser(
@@ -1270,9 +1272,9 @@ def register_release_commands(commands):
     cmd.set_defaults(cmd='show')
     cmd.set_defaults(func=release_show_req)
     cmd.set_defaults(restricted=False)  # can run non root
-    cmd.add_argument('--release',
+    cmd.add_argument('release',
                      nargs="+",  # accepts a list
-                     required=True)
+                     help='Release ID to show')
 
     # --- software release upload <release> ---------------
     cmd = sub_cmds.add_parser(
@@ -1281,9 +1283,9 @@ def register_release_commands(commands):
     )
     cmd.set_defaults(cmd='upload')
     cmd.set_defaults(func=release_upload_req)
-    cmd.add_argument('--release',
+    cmd.add_argument('release',
                      nargs="+",  # accepts a list
-                     required=True)
+                     help='software releases to upload')
 
     # --- software release upload-dir <release dir> ------
     cmd = sub_cmds.add_parser(
@@ -1292,9 +1294,9 @@ def register_release_commands(commands):
     )
     cmd.set_defaults(cmd='upload-dir')
     cmd.set_defaults(func=release_upload_dir_req)
-    cmd.add_argument('--release',
+    cmd.add_argument('release',
                      nargs="+",  # accepts a list
-                     required=True)
+                     help='directory containing software releases to upload')
 
 
 def setup_argparse():
