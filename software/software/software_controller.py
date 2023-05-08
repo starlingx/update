@@ -1037,198 +1037,6 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-    def patch_apply_api(self, patch_ids, **kwargs):
-        """
-        Apply patches, moving patches from available to applied and updating repo
-        :return:
-        """
-        msg_info = ""
-        msg_warning = ""
-        msg_error = ""
-
-        # Protect against duplications
-        patch_list = sorted(list(set(patch_ids)))
-
-        msg = "Applying patches: %s" % ",".join(patch_list)
-        LOG.info(msg)
-        audit_log_info(msg)
-
-        if "--all" in patch_list:
-            # Set patch_ids to list of all available patches
-            # We're getting this list now, before we load the applied patches
-            patch_list = []
-            for patch_id in sorted(list(self.patch_data.metadata)):
-                if self.patch_data.metadata[patch_id]["repostate"] == constants.AVAILABLE:
-                    patch_list.append(patch_id)
-
-            if len(patch_list) == 0:
-                msg_info += "There are no available patches to be applied.\n"
-                return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
-        # First, verify that all specified patches exist
-        id_verification = True
-        for patch_id in patch_list:
-            if patch_id not in self.patch_data.metadata:
-                msg = "Patch %s does not exist" % patch_id
-                LOG.error(msg)
-                msg_error += msg + "\n"
-                id_verification = False
-
-        if not id_verification:
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
-        # Order patches such that
-        # If P2 requires P1
-        # P3 requires P2
-        # P4 requires P3
-        # Apply order: [P1, P2, P3, P4]
-        # Patch with lowest dependency gets applied first.
-        patch_list = self.patch_apply_remove_order(patch_list, reverse=True)
-
-        msg = "Patch Apply order: %s" % ",".join(patch_list)
-        LOG.info(msg)
-        audit_log_info(msg)
-
-        # Check for patches that can't be applied during an upgrade
-        upgrade_check = True
-        for patch_id in patch_list:
-            if self.patch_data.metadata[patch_id]["sw_version"] != SW_VERSION \
-                    and self.patch_data.metadata[patch_id].get("apply_active_release_only") == "Y":
-                msg = "%s cannot be applied in an upgrade" % patch_id
-                LOG.error(msg)
-                msg_error += msg + "\n"
-                upgrade_check = False
-
-        if not upgrade_check:
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
-        # Next, check the patch dependencies
-        # required_patches will map the required patch to the patches that need it
-        required_patches = {}
-        for patch_id in patch_list:
-            for req_patch in self.patch_data.metadata[patch_id]["requires"]:
-                # Ignore patches in the op set
-                if req_patch in patch_list:
-                    continue
-
-                if req_patch not in required_patches:
-                    required_patches[req_patch] = []
-
-                required_patches[req_patch].append(patch_id)
-
-        # Now verify the state of the required patches
-        req_verification = True
-        for req_patch, iter_patch_list in required_patches.items():
-            if req_patch not in self.patch_data.metadata \
-                    or self.patch_data.metadata[req_patch]["repostate"] == constants.AVAILABLE:
-                msg = "%s is required by: %s" % (req_patch, ", ".join(sorted(iter_patch_list)))
-                msg_error += msg + "\n"
-                LOG.info(msg)
-                req_verification = False
-
-        if not req_verification:
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
-        if kwargs.get("skip-semantic") != "yes":
-            self.run_semantic_check(constants.SEMANTIC_PREAPPLY, patch_list)
-
-        # Start applying the patches
-        for patch_id in patch_list:
-            msg = "Applying patch: %s" % patch_id
-            LOG.info(msg)
-            audit_log_info(msg)
-
-            if self.patch_data.metadata[patch_id]["repostate"] == constants.APPLIED \
-               or self.patch_data.metadata[patch_id]["repostate"] == constants.COMMITTED:
-                msg = "%s is already in the repo" % patch_id
-                LOG.info(msg)
-                msg_info += msg + "\n"
-                continue
-
-            patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
-
-            # STX R7.0 is the first version to support ostree
-            # earlier formats will not have "base" and are unsupported
-            if self.patch_data.contents[patch_id].get("base") is None:
-                msg = "%s is an unsupported patch format" % patch_id
-                LOG.info(msg)
-                msg_info += msg + "\n"
-                continue
-
-            latest_commit = ""
-            try:
-                latest_commit = ostree_utils.get_feed_latest_commit(patch_sw_version)
-            except OSTreeCommandFail:
-                LOG.exception("Failure during commit consistency check for %s.", patch_id)
-
-            if self.patch_data.contents[patch_id]["base"]["commit"] != latest_commit:
-                msg = "The base commit %s for %s does not match the latest commit %s " \
-                      "on this system." \
-                      % (self.patch_data.contents[patch_id]["base"]["commit"],
-                         patch_id,
-                         latest_commit)
-                LOG.info(msg)
-                msg_info += msg + "\n"
-                continue
-
-            ostree_tar_filename = self.get_ostree_tar_filename(patch_sw_version, patch_id)
-
-            # Create a temporary working directory
-            tmpdir = tempfile.mkdtemp(prefix="patch_")
-
-            # Save the current directory, so we can chdir back after
-            orig_wd = os.getcwd()
-
-            # Change to the tmpdir
-            os.chdir(tmpdir)
-
-            try:
-                # Extract the software.tar
-                tar = tarfile.open(ostree_tar_filename)
-                tar.extractall()
-                feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, patch_sw_version)
-                # Copy extracted folders of software.tar to the feed ostree repo
-                shutil.copytree(tmpdir, feed_ostree, dirs_exist_ok=True)
-            except tarfile.TarError:
-                msg = "Failed to extract the ostree tarball for %s" % patch_id
-                LOG.exception(msg)
-                raise OSTreeTarFail(msg)
-            except shutil.Error:
-                msg = "Failed to copy the ostree tarball for %s" % patch_id
-                LOG.exception(msg)
-                raise OSTreeTarFail(msg)
-            finally:
-                # Change back to original working dir
-                os.chdir(orig_wd)
-                shutil.rmtree(tmpdir, ignore_errors=True)
-
-            try:
-                # Move the metadata from avail to applied dir
-                shutil.move("%s/%s-metadata.xml" % (avail_dir, patch_id),
-                            "%s/%s-metadata.xml" % (applied_dir, patch_id))
-
-                msg_info += "%s is now in the repo\n" % patch_id
-            except shutil.Error:
-                msg = "Failed to move the metadata for %s" % patch_id
-                LOG.exception(msg)
-                raise MetadataFail(msg)
-
-            self.patch_data.metadata[patch_id]["repostate"] = constants.APPLIED
-            if len(self.hosts) > 0:
-                self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_APPLY
-            else:
-                self.patch_data.metadata[patch_id]["patchstate"] = constants.UNKNOWN
-
-            # Commit1 in patch metadata.xml file represents the latest commit
-            # after this patch has been applied to the feed repo
-            self.latest_feed_commit = self.patch_data.contents[patch_id]["commit1"]["commit"]
-
-            self.hosts_lock.acquire()
-            self.interim_state[patch_id] = list(self.hosts)
-            self.hosts_lock.release()
-
-        return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
     def patch_apply_remove_order(self, patch_ids, reverse=False):
         # Protect against duplications
         patch_list = sorted(list(set(patch_ids)))
@@ -2088,6 +1896,193 @@ class PatchController(PatchService):
                         msg = "Failed to delete the restart script for %s" % patch_id
                         LOG.exception(msg)
 
+    def software_deploy_create_api(self, deployments: list[str], **kwargs) -> dict:
+        """
+        Create deployment by applying the changes to the feed ostree
+        return: dict of info, warning and error messages
+        """
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
+
+        # Protect against duplications
+        deployment_list = sorted(set(deployments))
+
+        msg = "Creating deployments for: %s" % ",".join(deployment_list)
+        LOG.info(msg)
+        audit_log_info(msg)
+
+        if "--all" in deployment_list:
+            # Set patch_ids to list of all available patches
+            # We're getting this list now, before we load the applied patches
+            patch_list = []
+            for patch_id in sorted(list(self.patch_data.metadata)):
+                if self.patch_data.metadata[patch_id]["repostate"] == constants.AVAILABLE:
+                    patch_list.append(patch_id)
+
+            if len(patch_list) == 0:
+                msg_info += "There are no available patches to be applied.\n"
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Deployments are created for a specific software release version
+        # So we need to verify that all software release versions exist
+        # for the specified deployment list
+        id_verification = True
+        for deployment in deployment_list:
+            if deployment not in self.patch_data.metadata:
+                msg = "Software release version corresponding to the specified deployment " \
+                      "%s does not exist" % deployment
+                LOG.error(msg)
+                msg_error += msg + "\n"
+                id_verification = False
+
+        if not id_verification:
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Order deployment creation such that
+        # If releases are such that R2 requires R1
+        # R3 requires R2
+        # R4 requires R3
+        # Apply order: [R1, R2, R3, R4]
+        # Patch with lowest dependency gets applied first.
+        deployment_list = self.patch_apply_remove_order(deployment_list, reverse=True)
+
+        msg = "Deploy create order: %s" % ",".join(deployment_list)
+        LOG.info(msg)
+        audit_log_info(msg)
+
+        # Check for patches that can't be applied during an upgrade
+        upgrade_check = True
+        for deployment in deployment_list:
+            if self.patch_data.metadata[deployment]["sw_version"] != SW_VERSION \
+                    and self.patch_data.metadata[deployment].get("apply_active_release_only") == "Y":
+                msg = "%s cannot be created during an upgrade" % deployment
+                LOG.error(msg)
+                msg_error += msg + "\n"
+                upgrade_check = False
+
+        if not upgrade_check:
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Next, check the software release version dependencies
+        # required_releases will map the required release to the software release
+        # versions that need it
+        required_releases = {}
+        for release in deployment_list:
+            for req_release in self.patch_data.metadata[release]["requires"]:
+                # Ignore patches in the op set
+                if req_release in deployment_list:
+                    continue
+
+                if req_release not in required_releases:
+                    required_releases[req_release] = []
+
+                required_releases[req_release].append(release)
+
+        # Now verify the state of the required patches
+        req_verification = True
+        for req_release, iter_deployment_list in required_releases.items():
+            if req_release not in self.patch_data.metadata \
+                    or self.patch_data.metadata[req_release]["repostate"] == constants.AVAILABLE:
+                msg = "%s is required by: %s" % (req_release, ", ".join(sorted(iter_deployment_list)))
+                msg_error += msg + "\n"
+                LOG.info(msg)
+                req_verification = False
+
+        if not req_verification:
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        if kwargs.get("skip-semantic") != "yes":
+            self.run_semantic_check(constants.SEMANTIC_PREAPPLY, deployment_list)
+
+        # Start applying the patches
+        for deployment in deployment_list:
+            msg = "Creating deployment for: %s" % deployment
+            LOG.info(msg)
+            audit_log_info(msg)
+
+            if self.patch_data.metadata[deployment]["repostate"] == constants.APPLIED \
+               or self.patch_data.metadata[deployment]["repostate"] == constants.COMMITTED:
+                msg = "%s is already created" % deployment
+                LOG.info(msg)
+                msg_info += msg + "\n"
+                continue
+
+            release_sw_version = self.patch_data.metadata[deployment]["sw_version"]
+
+            latest_commit = ""
+            try:
+                latest_commit = ostree_utils.get_feed_latest_commit(release_sw_version)
+            except OSTreeCommandFail:
+                LOG.exception("Failure during commit consistency check for %s.", deployment)
+
+            if self.patch_data.contents[deployment]["base"]["commit"] != latest_commit:
+                msg = "The base commit %s for %s does not match the latest commit %s " \
+                      "on this system." \
+                      % (self.patch_data.contents[deployment]["base"]["commit"],
+                         deployment,
+                         latest_commit)
+                LOG.info(msg)
+                msg_info += msg + "\n"
+                continue
+
+            ostree_tar_filename = self.get_ostree_tar_filename(release_sw_version, deployment)
+
+            # Create a temporary working directory
+            tmpdir = tempfile.mkdtemp(prefix="deployment_")
+
+            # Save the current directory, so we can chdir back after
+            orig_wd = os.getcwd()
+
+            # Change to the tmpdir
+            os.chdir(tmpdir)
+
+            try:
+                # Extract the software.tar
+                tar = tarfile.open(ostree_tar_filename)
+                tar.extractall()
+                feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, release_sw_version)
+                # Copy extracted folders of software.tar to the feed ostree repo
+                shutil.copytree(tmpdir, feed_ostree, dirs_exist_ok=True)
+            except tarfile.TarError:
+                msg = "Failed to extract the ostree tarball for %s" % deployment
+                LOG.exception(msg)
+                raise OSTreeTarFail(msg)
+            except shutil.Error:
+                msg = "Failed to copy the ostree tarball for %s" % deployment
+                LOG.exception(msg)
+                raise OSTreeTarFail(msg)
+            finally:
+                # Change back to original working dir
+                os.chdir(orig_wd)
+                shutil.rmtree(tmpdir, ignore_errors=True)
+
+            try:
+                # Move the release metadata from avail to applied dir
+                shutil.move("%s/%s-metadata.xml" % (avail_dir, deployment),
+                            "%s/%s-metadata.xml" % (applied_dir, deployment))
+
+                msg_info += "%s is now in the repo\n" % deployment
+            except shutil.Error:
+                msg = "Failed to move the metadata for %s" % deployment
+                LOG.exception(msg)
+                raise MetadataFail(msg)
+
+            self.patch_data.metadata[deployment]["repostate"] = constants.APPLIED
+            if len(self.hosts) > 0:
+                self.patch_data.metadata[deployment]["patchstate"] = constants.PARTIAL_APPLY
+            else:
+                self.patch_data.metadata[deployment]["patchstate"] = constants.UNKNOWN
+
+            # Commit1 in release metadata.xml file represents the latest commit
+            # after this release has been applied to the feed repo
+            self.latest_feed_commit = self.patch_data.contents[deployment]["commit1"]["commit"]
+
+            with self.hosts_lock:
+                self.interim_state[deployment] = list(self.hosts)
+
+        return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
     def software_deploy_host_api(self, host_ip, force, async_req=False):
         msg_info = ""
         msg_warning = ""
@@ -2135,7 +2130,7 @@ class PatchController(PatchService):
 
         if async_req:
             # async_req install requested, so return now
-            msg = "Patch installation request sent to %s." % self.hosts[ip].hostname
+            msg = "Host installation request sent to %s." % self.hosts[ip].hostname
             msg_info += msg + "\n"
             LOG.info("host-install async_req: %s", msg)
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
@@ -2157,17 +2152,17 @@ class PatchController(PatchService):
                 # We got a response
                 resp_rx = True
                 if self.hosts[ip].install_status:
-                    msg = "Patch installation was successful on %s." % self.hosts[ip].hostname
+                    msg = "Host installation was successful on %s." % self.hosts[ip].hostname
                     msg_info += msg + "\n"
                     LOG.info("host-install: %s", msg)
                 elif self.hosts[ip].install_reject_reason:
-                    msg = "Patch installation rejected by %s. %s" % (
+                    msg = "Host installation rejected by %s. %s" % (
                         self.hosts[ip].hostname,
                         self.hosts[ip].install_reject_reason)
                     msg_error += msg + "\n"
                     LOG.error("Error in host-install: %s", msg)
                 else:
-                    msg = "Patch installation failed on %s." % self.hosts[ip].hostname
+                    msg = "Host installation failed on %s." % self.hosts[ip].hostname
                     msg_error += msg + "\n"
                     LOG.error("Error in host-install: %s", msg)
 

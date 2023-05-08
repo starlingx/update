@@ -39,6 +39,23 @@ class SoftwareAPIController(object):
 
     @expose('json')
     @expose('query.xml', content_type='application/xml')
+    def deploy_create(self, *args, **kwargs):
+        if sc.any_patch_host_installing():
+            return dict(error="Rejected: One or more nodes are installing patches.")
+
+        try:
+            result = sc.software_deploy_create_api(list(args), **kwargs)
+        except PatchError as e:
+            return dict(error="Error: %s" % str(e))
+
+        sc.send_latest_feed_commit_to_agent()
+
+        sc.software_sync()
+
+        return result
+
+    @expose('json')
+    @expose('query.xml', content_type='application/xml')
     def deploy_host(self, *args):
         if len(list(args)) == 0:
             return dict(error="Host must be specified for install")

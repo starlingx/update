@@ -848,7 +848,62 @@ def release_upload_dir_req(args):
     return check_rc(req)
 
 
-def software_deploy_host_req(args):
+def deploy_create_req(args):
+
+    # args.deployment is a list
+    deployment = args.deployment
+
+    # Ignore interrupts during this function
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+    # Issue deploy_create request
+    deployments = "/".join(deployment)
+    url = "http://%s/software/deploy_create/%s" % (api_addr, deployments)
+
+    headers = {}
+    append_auth_token_if_required(headers)
+    req = requests.post(url, headers=headers)
+
+    if args.debug:
+        print_result_debug(req)
+    else:
+        print_software_op_result(req)
+
+    return check_rc(req)
+
+
+def deploy_delete_req(args):
+    # args.deployment is a list
+    print(args.deployment)
+    return 1
+
+
+def deploy_precheck_req(args):
+    print(args.deployment)
+    return 1
+
+
+def deploy_start_req(args):
+    print(args.deployment)
+    return 1
+
+
+def deploy_activate_req(args):
+    print(args.deployment)
+    return 1
+
+
+def deploy_complete_req(args):
+    print(args.deployment)
+    return 1
+
+
+def deploy_list_req(args):
+    print(args.deployment)
+    return 1
+
+
+def deploy_host_req(args):
     rc = 0
     agent_ip = args.agent
 
@@ -1126,15 +1181,16 @@ def check_for_os_region_name(args):
 
 def register_deploy_commands(commands):
     """deploy commands
+      - create
+      - delete
+      - precheck
+      - start
+      - host
       - activate
       - complete
-      - host
-      - list
-      - query
-      - start
     non root/sudo users can run:
        - list
-       - query
+       - query-hosts
     Deploy commands are region_restricted, which means
     that they are not permitted to be run in DC
     """
@@ -1157,27 +1213,54 @@ def register_deploy_commands(commands):
     )
     sub_cmds.required = True
 
-    # --- software deploy activate -----------------------
+    # --- software deploy create -----------------------
     cmd = sub_cmds.add_parser(
-        'activate',
-        help='Activate the software deployment'
+        'create',
+        help='Create and prestage a software deployment'
     )
-    cmd.set_defaults(cmd='activate')
+    cmd.set_defaults(cmd='create')
+    cmd.set_defaults(func=deploy_create_req)
+    cmd.add_argument('deployment',
+                     nargs="+",  # accepts a list
+                     help='Deployment ID to create')
 
-    # --- software deploy complete -----------------------
+    # --- software deploy delete -----------------------
     cmd = sub_cmds.add_parser(
-        'complete',
-        help='Complete the software deployment'
+        'delete',
+        help='Delete the software deployment'
     )
-    cmd.set_defaults(cmd='complete')
+    cmd.set_defaults(cmd='delete')
+    cmd.set_defaults(func=deploy_delete_req)
+    cmd.add_argument('deployment',
+                     help='Deployment ID to delete')
+
+    # --- software deploy precheck -----------------------
+    cmd = sub_cmds.add_parser(
+        'precheck',
+        help='Verify whether prerequisites for installing the software deployment are satisfied'
+    )
+    cmd.set_defaults(cmd='precheck')
+    cmd.set_defaults(func=deploy_precheck_req)
+    cmd.add_argument('deployment',
+                     help='Verify prerequisite conditions are met for specified deployment')
+
+    # --- software deploy start --------------------------
+    cmd = sub_cmds.add_parser(
+        'start',
+        help='Start the software deployment'
+    )
+    cmd.set_defaults(cmd='start')
+    cmd.set_defaults(func=deploy_start_req)
+    cmd.add_argument('deployment',
+                     help='Deployment ID to start')
 
     # --- software deploy host ---------------------------
     cmd = sub_cmds.add_parser(
         'host',
-        help='Deploy to a software host'
+        help='Deploy prestaged software deployment to the host'
     )
     cmd.set_defaults(cmd='host')
-    cmd.set_defaults(func=software_deploy_host_req)
+    cmd.set_defaults(func=deploy_host_req)
     cmd.add_argument('agent',
                      help="Agent on which host deploy is triggered")
     cmd.add_argument('-f',
@@ -1186,29 +1269,54 @@ def register_deploy_commands(commands):
                      required=False,
                      help="Force deploy host")
 
+    # --- software deploy activate -----------------------
+    cmd = sub_cmds.add_parser(
+        'activate',
+        help='Activate the software deployment'
+    )
+    cmd.set_defaults(cmd='activate')
+    cmd.set_defaults(func=deploy_activate_req)
+    cmd.add_argument('deployment',
+                     help='Deployment ID to activate')
+
+    # --- software deploy complete -----------------------
+    cmd = sub_cmds.add_parser(
+        'complete',
+        help='Complete the software deployment'
+    )
+    cmd.set_defaults(cmd='complete')
+    cmd.set_defaults(func=deploy_complete_req)
+    cmd.add_argument('deployment',
+                     help='Deployment ID to complete')
+
     # --- software deploy list ---------------------------
     cmd = sub_cmds.add_parser(
         'list',
-        help='List the software deployments'
+        help='List the software deployments and their states'
     )
     cmd.set_defaults(cmd='list')
+    cmd.set_defaults(func=deploy_list_req)
     cmd.set_defaults(restricted=False)  # can run non root
+    # --deployment is an optional argument
+    cmd.add_argument('--deployment',
+                     required=False,
+                     help='List the deployment specified')
+    # --state is an optional argument.
+    # default: "all"
+    # acceptable values: inactive, active, prestaging, prestaged, all
+    cmd.add_argument('--state',
+                     default="all",
+                     required=False,
+                     help='List all deployments that have this state')
 
-    # --- software deploy query <deployment> -------------
+    # --- software deploy query-hosts -------------
     cmd = sub_cmds.add_parser(
-        'query',
-        help='Query a software deployment'
+        'query-hosts',
+        help='Query hosts for software deployment'
     )
-    cmd.set_defaults(cmd='query')
+    cmd.set_defaults(cmd='query-hosts')
+    cmd.set_defaults(func=deploy_query_hosts_req)
     cmd.set_defaults(restricted=False)  # can run non root
-    cmd.add_argument('--deployment', required=True)
-
-    # --- software deploy start --------------------------
-    cmd = sub_cmds.add_parser(
-        'start',
-        help='Start the software deployment'
-    )
-    cmd.set_defaults(cmd='start')
 
 
 def register_release_commands(commands):

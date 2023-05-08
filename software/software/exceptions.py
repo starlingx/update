@@ -65,3 +65,8 @@ class PatchMismatchFailure(PatchError):
 class PatchInvalidRequest(PatchError):
     """Invalid API request."""
     pass
+
+
+class DuplicateDeployment(PatchError):
+    """Duplicate Deployment Error."""
+    pass
