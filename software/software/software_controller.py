@@ -33,11 +33,11 @@ from software.base import PatchService
 from software.exceptions import MetadataFail
 from software.exceptions import OSTreeCommandFail
 from software.exceptions import OSTreeTarFail
-from software.exceptions import PatchError
-from software.exceptions import PatchFail
-from software.exceptions import PatchInvalidRequest
-from software.exceptions import PatchValidationFailure
-from software.exceptions import PatchMismatchFailure
+from software.exceptions import SoftwareError
+from software.exceptions import SoftwareFail
+from software.exceptions import ReleaseInvalidRequest
+from software.exceptions import ReleaseValidationFailure
+from software.exceptions import ReleaseMismatchFailure
 from software.exceptions import SemanticFail
 from software.software_functions import configure_logging
 from software.software_functions import BasePackageData
@@ -889,7 +889,7 @@ class PatchController(PatchService):
         except OSError:
             msg = "Failed to remove restart script for %s" % patch_id
             LOG.exception(msg)
-            raise PatchError(msg)
+            raise SoftwareError(msg)
 
     def run_semantic_check(self, action, patch_list):
         if not os.path.exists(INITIAL_CONFIG_COMPLETE_FLAG):
@@ -915,7 +915,7 @@ class PatchController(PatchService):
                 except subprocess.CalledProcessError as e:
                     msg = "Semantic check failed for %s:\n%s" % (patch_id, e.output)
                     LOG.exception(msg)
-                    raise PatchFail(msg)
+                    raise SoftwareFail(msg)
 
     def software_release_upload(self, release_files):
         """
@@ -935,7 +935,7 @@ class PatchController(PatchService):
         # First, make sure the specified files exist
         for release_file in release_list:
             if not os.path.isfile(release_file):
-                raise PatchFail("File does not exist: %s" % release_file)
+                raise SoftwareFail("File does not exist: %s" % release_file)
 
         try:
             if not os.path.exists(avail_dir):
@@ -947,7 +947,7 @@ class PatchController(PatchService):
         except os.error:
             msg = "Failed to create directories"
             LOG.exception(msg)
-            raise PatchFail(msg)
+            raise SoftwareFail(msg)
 
         msg = "Uploading files: %s" % ",".join(release_list)
         LOG.info(msg)
@@ -985,19 +985,19 @@ class PatchController(PatchService):
                     msg = "%s is already uploaded. Updated metadata only" % release_id
                     LOG.info(msg)
                     msg_info += msg + "\n"
-                except PatchMismatchFailure:
+                except ReleaseMismatchFailure:
                     msg = "Contents of %s do not match re-uploaded release" % release_id
                     LOG.exception(msg)
                     msg_error += msg + "\n"
                     continue
-                except PatchValidationFailure as e:
+                except ReleaseValidationFailure as e:
                     msg = "Release validation failed for %s" % release_id
                     if str(e) is not None and str(e) != '':
                         msg += ":\n%s" % str(e)
                     LOG.exception(msg)
                     msg_error += msg + "\n"
                     continue
-                except PatchFail:
+                except SoftwareFail:
                     msg = "Failed to upload release %s" % release_id
                     LOG.exception(msg)
                     msg_error += msg + "\n"
@@ -1024,14 +1024,14 @@ class PatchController(PatchService):
                     self.patch_data.metadata[release_id]["patchstate"] = constants.AVAILABLE
                 else:
                     self.patch_data.metadata[release_id]["patchstate"] = constants.UNKNOWN
-            except PatchValidationFailure as e:
+            except ReleaseValidationFailure as e:
                 msg = "Release validation failed for %s" % release_id
                 if str(e) is not None and str(e) != '':
                     msg += ":\n%s" % str(e)
                 LOG.exception(msg)
                 msg_error += msg + "\n"
                 continue
-            except PatchFail:
+            except SoftwareFail:
                 msg = "Failed to upload release %s" % release_id
                 LOG.exception(msg)
                 msg_error += msg + "\n"
@@ -1197,7 +1197,7 @@ class PatchController(PatchService):
             shutil.rmtree(repo_dir[release])
             del repo_dir[release]
 
-            raise PatchFail(msg)
+            raise SoftwareFail(msg)
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
@@ -1542,7 +1542,7 @@ class PatchController(PatchService):
         except os.error:
             msg = "Failed to create %s" % committed_dir
             LOG.exception(msg)
-            raise PatchFail(msg)
+            raise SoftwareFail(msg)
 
         failure = False
         recursive = True
@@ -1706,7 +1706,7 @@ class PatchController(PatchService):
                     except shutil.Error:
                         msg = "Failed to copy the restart script for %s" % patch_id
                         LOG.exception(msg)
-                        raise PatchError(msg)
+                        raise SoftwareError(msg)
                 elif self.patch_data.metadata[patch_id].get("restart_script"):
                     try:
                         restart_script_name = self.patch_data.metadata[patch_id]["restart_script"]
@@ -2092,7 +2092,7 @@ class PatchController(PatchService):
                 if ip not in self.hosts:
                     # Translated successfully, but IP isn't in the table.
                     # Raise an exception to drop out to the failure handling
-                    raise PatchError("Host IP (%s) not in table" % ip)
+                    raise SoftwareError("Host IP (%s) not in table" % ip)
             except Exception:
                 self.hosts_lock.release()
                 msg = "Unknown host specified: %s" % host_ip
@@ -2196,7 +2196,7 @@ class PatchController(PatchService):
                 if ip not in self.hosts:
                     # Translated successfully, but IP isn't in the table.
                     # Raise an exception to drop out to the failure handling
-                    raise PatchError("Host IP (%s) not in table" % ip)
+                    raise SoftwareError("Host IP (%s) not in table" % ip)
             except Exception:
                 self.hosts_lock.release()
                 msg = "Unknown host specified: %s" % host_ip
@@ -2266,7 +2266,7 @@ class PatchController(PatchService):
         Handle report of application dependencies
         """
         if "app" not in kwargs:
-            raise PatchInvalidRequest
+            raise ReleaseInvalidRequest
 
         appname = kwargs.get("app")
 
@@ -2292,7 +2292,7 @@ class PatchController(PatchService):
             os.rename(tmpfname, app_dependency_filename)
         except Exception:
             LOG.exception("Failed in report_app_dependencies")
-            raise PatchFail("Internal failure")
+            raise SoftwareFail("Internal failure")
         finally:
             self.patch_data_lock.release()
 

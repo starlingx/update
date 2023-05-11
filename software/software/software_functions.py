@@ -24,9 +24,9 @@ from software.release_verify import verify_files
 from software.release_verify import cert_type_all
 from software.release_signing import sign_files
 from software.exceptions import MetadataFail
-from software.exceptions import PatchFail
-from software.exceptions import PatchValidationFailure
-from software.exceptions import PatchMismatchFailure
+from software.exceptions import ReleaseValidationFailure
+from software.exceptions import ReleaseMismatchFailure
+from software.exceptions import SoftwareFail
 
 import software.constants as constants
 
@@ -274,7 +274,7 @@ class PatchData(object):
         if e is None:
             msg = "modify_metadata_text: failed to find tag '%s'" % key
             LOG.error(msg)
-            raise PatchValidationFailure(msg)
+            raise ReleaseValidationFailure(msg)
         e.text = value
 
         # write the modified file
@@ -646,7 +646,7 @@ class PatchFile(object):
         if sig != expected_sig:
             msg = "Patch failed verification"
             LOG.error(msg)
-            raise PatchValidationFailure(msg)
+            raise ReleaseValidationFailure(msg)
 
         # Verify detached signature
         if os.path.exists(detached_signature_file):
@@ -662,12 +662,12 @@ class PatchFile(object):
                 msg = "Signature check failed"
                 if cert_type is None:
                     LOG.error(msg)
-                raise PatchValidationFailure(msg)
+                raise ReleaseValidationFailure(msg)
         else:
             msg = "Patch has not been signed"
             if cert_type is None:
                 LOG.error(msg)
-            raise PatchValidationFailure(msg)
+            raise ReleaseValidationFailure(msg)
 
         tar = tarfile.open("metadata.tar")
         tar.extractall()
@@ -694,7 +694,7 @@ class PatchFile(object):
                 for cert_type_str in cert_type_all:
                     try:
                         PatchFile.read_patch(abs_patch, cert_type=[cert_type_str])
-                    except PatchValidationFailure:
+                    except ReleaseValidationFailure:
                         pass
                     else:
                         # Successfully opened the file for reading, and we have discovered the cert_type
@@ -724,18 +724,18 @@ class PatchFile(object):
                 if field not in ['id', 'cert']:
                     r[field] = thispatch.query_line(patch_id, field)
 
-        except PatchValidationFailure as e:
+        except ReleaseValidationFailure as e:
             msg = "Patch validation failed during extraction"
             LOG.exception(msg)
             raise e
-        except PatchMismatchFailure as e:
+        except ReleaseMismatchFailure as e:
             msg = "Patch Mismatch during extraction"
             LOG.exception(msg)
             raise e
         except tarfile.TarError:
             msg = "Failed during patch extraction"
             LOG.exception(msg)
-            raise PatchValidationFailure(msg)
+            raise ReleaseValidationFailure(msg)
         finally:
             # Change back to original working dir
             os.chdir(orig_wd)
@@ -771,14 +771,14 @@ class PatchFile(object):
             os.rename(new_abs_patch, abs_patch)
             rc = True
 
-        except PatchValidationFailure as e:
+        except ReleaseValidationFailure as e:
             raise e
-        except PatchMismatchFailure as e:
+        except ReleaseMismatchFailure as e:
             raise e
         except tarfile.TarError:
             msg = "Failed during patch extraction"
             LOG.exception(msg)
-            raise PatchValidationFailure(msg)
+            raise ReleaseValidationFailure(msg)
         except Exception as e:
             template = "An exception of type {0} occurred. Arguments:\n{1!r}"
             message = template.format(type(e).__name__, e.args)
@@ -835,7 +835,7 @@ class PatchFile(object):
                 if not base_pkgdata.check_release(patch_sw_version):
                     msg = "Patch %s software release (%s) is not installed" % (patch_id, patch_sw_version)
                     LOG.exception(msg)
-                    raise PatchValidationFailure(msg)
+                    raise ReleaseValidationFailure(msg)
 
             if metadata_only:
                 # This is a re-import. Ensure the content lines up
@@ -843,7 +843,7 @@ class PatchFile(object):
                         or existing_content != thispatch.contents[patch_id]:
                     msg = "Contents of re-imported patch do not match"
                     LOG.exception(msg)
-                    raise PatchMismatchFailure(msg)
+                    raise ReleaseMismatchFailure(msg)
 
             patch_sw_version = thispatch.metadata[patch_id]["sw_version"]
             abs_ostree_tar_dir = package_dir[patch_sw_version]
@@ -863,26 +863,26 @@ class PatchFile(object):
                 shutil.move(restart_script_name,
                             "%s/%s" % (root_scripts_dir, restart_script_name))
 
-        except PatchValidationFailure as e:
+        except ReleaseValidationFailure as e:
             raise e
-        except PatchMismatchFailure as e:
+        except ReleaseMismatchFailure as e:
             raise e
         except tarfile.TarError:
             msg = "Failed during patch extraction"
             LOG.exception(msg)
-            raise PatchValidationFailure(msg)
+            raise ReleaseValidationFailure(msg)
         except KeyError:
             msg = "Failed during patch extraction"
             LOG.exception(msg)
-            raise PatchValidationFailure(msg)
+            raise ReleaseValidationFailure(msg)
         except OSError:
             msg = "Failed during patch extraction"
             LOG.exception(msg)
-            raise PatchFail(msg)
+            raise SoftwareFail(msg)
         except IOError:  # pylint: disable=duplicate-except
             msg = "Failed during patch extraction"
             LOG.exception(msg)
-            raise PatchFail(msg)
+            raise SoftwareFail(msg)
         finally:
             # Change back to original working dir
             os.chdir(orig_wd)

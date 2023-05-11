@@ -12,8 +12,7 @@ from pecan import expose
 from pecan import request
 import shutil
 
-# todo(abailey): rename PatchError to SoftwareError
-from software.exceptions import PatchError
+from software.exceptions import SoftwareError
 from software.software_controller import sc
 
 # Copies file in 64K chunk size
@@ -30,7 +29,7 @@ class SoftwareAPIController(object):
     def delete(self, *args):
         try:
             result = sc.software_release_delete_api(list(args))
-        except PatchError as e:
+        except SoftwareError as e:
             return dict(error="Error: %s" % str(e))
 
         sc.software_sync()
@@ -45,7 +44,7 @@ class SoftwareAPIController(object):
 
         try:
             result = sc.software_deploy_create_api(list(args), **kwargs)
-        except PatchError as e:
+        except SoftwareError as e:
             return dict(error="Error: %s" % str(e))
 
         sc.send_latest_feed_commit_to_agent()
@@ -62,7 +61,7 @@ class SoftwareAPIController(object):
 
         try:
             result = sc.software_deploy_delete_api(list(args), **kwargs)
-        except PatchError as e:
+        except SoftwareError as e:
             return dict(error="Error: %s" % str(e))
 
         sc.send_latest_feed_commit_to_agent()
@@ -82,7 +81,7 @@ class SoftwareAPIController(object):
 
         try:
             result = sc.software_deploy_host_api(list(args)[0], force, async_req=True)
-        except PatchError as e:
+        except SoftwareError as e:
             return dict(error="Error: %s" % str(e))
 
         return result
@@ -100,7 +99,7 @@ class SoftwareAPIController(object):
     def query(self, **kwargs):
         try:
             pd = sc.software_release_query_cached(**kwargs)
-        except PatchError as e:
+        except SoftwareError as e:
             return dict(error="Error: %s" % str(e))
 
         return dict(pd=pd)
@@ -110,7 +109,7 @@ class SoftwareAPIController(object):
     def show(self, *args):
         try:
             result = sc.software_release_query_specific_cached(list(args))
-        except PatchError as e:
+        except SoftwareError as e:
             return dict(error="Error: %s" % str(e))
 
         return result
@@ -130,7 +129,7 @@ class SoftwareAPIController(object):
 
         try:
             result = sc.software_release_upload([fn])
-        except PatchError as e:
+        except SoftwareError as e:
             os.remove(fn)
             return dict(error=str(e))
         os.remove(fn)
@@ -162,7 +161,7 @@ class SoftwareAPIController(object):
 
         try:
             result = sc.software_release_upload(sorted(files))
-        except PatchError as e:
+        except SoftwareError as e:
             return dict(error=str(e))
         sc.software_sync()
         return result

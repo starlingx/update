@@ -6,67 +6,67 @@ SPDX-License-Identifier: Apache-2.0
 """
 
 
-class PatchError(Exception):
+class SoftwareError(Exception):
     """Base class for software exceptions."""
 
     def __init__(self, message=None):
-        super(PatchError, self).__init__(message)
+        super(SoftwareError, self).__init__(message)
         self.message = message
 
     def __str__(self):
         return self.message or ""
 
 
-class MetadataFail(PatchError):
+class MetadataFail(SoftwareError):
     """Metadata error."""
     pass
 
 
-class ContentFail(PatchError):
+class ContentFail(SoftwareError):
     """Content handling error."""
     pass
 
 
-class OSTreeTarFail(PatchError):
+class OSTreeTarFail(SoftwareError):
     """OSTree Tarball error."""
     pass
 
 
-class OSTreeCommandFail(PatchError):
+class OSTreeCommandFail(SoftwareError):
     """OSTree Commands error."""
     pass
 
 
-class SemanticFail(PatchError):
+class SemanticFail(SoftwareError):
     """Semantic check error."""
     pass
 
 
-class RepoFail(PatchError):
+class RepoFail(SoftwareError):
     """Repo error."""
     pass
 
 
-class PatchFail(PatchError):
-    """General patching error."""
+class SoftwareFail(SoftwareError):
+    """General unified software management error."""
     pass
 
 
-class PatchValidationFailure(PatchError):
-    """Patch validation error."""
+class ReleaseValidationFailure(SoftwareError):
+    """Release validation error."""
     pass
 
 
-class PatchMismatchFailure(PatchError):
-    """Patch validation error."""
+class ReleaseMismatchFailure(SoftwareError):
+    """Release mismatch error."""
     pass
 
 
-class PatchInvalidRequest(PatchError):
+class ReleaseInvalidRequest(SoftwareError):
     """Invalid API request."""
     pass
 
 
-class DuplicateDeployment(PatchError):
+class DuplicateDeployment(SoftwareError):
     """Duplicate Deployment Error."""
     pass
