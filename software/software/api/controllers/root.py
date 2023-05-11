@@ -121,6 +121,11 @@ class SoftwareAPIController(object):
         return result
 
     @expose('json')
+    @expose('query_hosts.xml', content_type='application/xml')
+    def query_hosts(self, *args):  # pylint: disable=unused-argument
+        return dict(data=sc.query_host_cache())
+
+    @expose('json')
     def upload_dir(self, **kwargs):
         # todo(abailey): extensions should be configurable or
         # registered in setup.cfg

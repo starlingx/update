@@ -41,11 +41,11 @@ node_is_locked_file = "/var/run/.node_locked"
 ostree_pull_completed_deployment_pending_file = \
     "/var/run/ostree_pull_completed_deployment_pending"
 mount_pending_file = "/var/run/mount_pending"
-insvc_patch_scripts = "/run/software/software-scripts"
-insvc_patch_flags = "/run/software/software-flags"
-insvc_patch_restart_agent = "/run/software/.restart.software-agent"
+insvc_software_scripts = "/run/software/software-scripts"
+insvc_software_flags = "/run/software/software-flags"
+insvc_software_restart_agent = "/run/software/.restart.software-agent"
 
-run_insvc_patch_scripts_cmd = "/usr/sbin/run-software-scripts"
+run_insvc_software_scripts_cmd = "/usr/sbin/run-software-scripts"
 
 pa = None
 
@@ -76,8 +76,8 @@ def pull_restart_scripts_from_controller():
                                       "-acv",
                                       "--delete",
                                       "--exclude", "tmp",
-                                      "rsync://controller/repo/patch-scripts/",
-                                      "%s/" % insvc_patch_scripts],
+                                      "rsync://controller/repo/software-scripts/",
+                                      "%s/" % insvc_software_scripts],
                                      stderr=subprocess.STDOUT)
     LOG.info("Synced restart scripts from controller: %s", output)
 
@@ -435,10 +435,10 @@ class PatchAgent(PatchService):
 
         try:
             # Create insvc patch directories
-            if not os.path.exists(insvc_patch_scripts):
-                os.makedirs(insvc_patch_scripts, 0o700)
-            if not os.path.exists(insvc_patch_flags):
-                os.makedirs(insvc_patch_flags, 0o700)
+            if not os.path.exists(insvc_software_scripts):
+                os.makedirs(insvc_software_scripts, 0o700)
+            if not os.path.exists(insvc_software_flags):
+                os.makedirs(insvc_software_flags, 0o700)
         except Exception:
             LOG.exception("Failed to create in-service patch directories")
 
@@ -504,7 +504,7 @@ class PatchAgent(PatchService):
                         clearflag(mount_pending_file)
                         LOG.info("Running in-service patch-scripts")
                         pull_restart_scripts_from_controller()
-                        subprocess.check_output(run_insvc_patch_scripts_cmd, stderr=subprocess.STDOUT)
+                        subprocess.check_output(run_insvc_software_scripts_cmd, stderr=subprocess.STDOUT)
 
                         # Clear the node_is_patched flag, since we've handled it in-service
                         clearflag(node_is_patched_file)
@@ -515,10 +515,10 @@ class PatchAgent(PatchService):
                         success = False
 
         # Clear the in-service patch dirs
-        if os.path.exists(insvc_patch_scripts):
-            shutil.rmtree(insvc_patch_scripts, ignore_errors=True)
-        if os.path.exists(insvc_patch_flags):
-            shutil.rmtree(insvc_patch_flags, ignore_errors=True)
+        if os.path.exists(insvc_software_scripts):
+            shutil.rmtree(insvc_software_scripts, ignore_errors=True)
+        if os.path.exists(insvc_software_flags):
+            shutil.rmtree(insvc_software_flags, ignore_errors=True)
 
         if success:
             self.patch_failed = False
@@ -697,15 +697,15 @@ class PatchAgent(PatchService):
                     s.close()
 
             # Check for in-service patch restart flag
-            if os.path.exists(insvc_patch_restart_agent):
+            if os.path.exists(insvc_software_restart_agent):
                 # Make sure it's safe to restart, ie. no reqs queued
                 rlist, wlist, xlist = select.select(inputs, outputs, inputs, 0)
                 if (len(rlist) == 0 and
                         len(wlist) == 0 and
                         len(xlist) == 0):
                     # Restart
-                    LOG.info("In-service patch restart flag detected. Exiting.")
-                    os.remove(insvc_patch_restart_agent)
+                    LOG.info("In-service software restart flag detected. Exiting.")
+                    os.remove(insvc_software_restart_agent)
                     exit(0)
 
 
