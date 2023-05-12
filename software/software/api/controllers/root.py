@@ -41,10 +41,27 @@ class SoftwareAPIController(object):
     @expose('query.xml', content_type='application/xml')
     def deploy_create(self, *args, **kwargs):
         if sc.any_patch_host_installing():
-            return dict(error="Rejected: One or more nodes are installing patches.")
+            return dict(error="Rejected: One or more nodes are installing releases.")
 
         try:
             result = sc.software_deploy_create_api(list(args), **kwargs)
+        except PatchError as e:
+            return dict(error="Error: %s" % str(e))
+
+        sc.send_latest_feed_commit_to_agent()
+
+        sc.software_sync()
+
+        return result
+
+    @expose('json')
+    @expose('query.xml', content_type='application/xml')
+    def deploy_delete(self, *args, **kwargs):
+        if sc.any_patch_host_installing():
+            return dict(error="Rejected: One or more nodes are installing releases.")
+
+        try:
+            result = sc.software_deploy_delete_api(list(args), **kwargs)
         except PatchError as e:
             return dict(error="Error: %s" % str(e))
 

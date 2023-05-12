@@ -827,7 +827,7 @@ class PatchController(PatchService):
                             self.hosts[ip].latest_sysroot_commit == \
                             self.patch_data.contents[patch_id]["commit1"]["commit"]:
                         self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_REMOVE
-                        patch_dependency_list = self.get_patch_dependency_list(patch_id)
+                        patch_dependency_list = self.get_release_dependency_list(patch_id)
                         for req_patch in patch_dependency_list:
                             if self.patch_data.metadata[req_patch]["repostate"] == constants.AVAILABLE:
                                 self.patch_data.metadata[req_patch]["patchstate"] = constants.PARTIAL_REMOVE
@@ -845,22 +845,24 @@ class PatchController(PatchService):
 
         self.hosts_lock.release()
 
-    def get_patch_dependency_list(self, patch_id):
+    def get_release_dependency_list(self, release):
         """
-        Returns a list of patch IDs that are required by this patch.
-        Example: If patch3 requires patch2 and patch2 requires patch1,
-                 then this patch will return ['patch2', 'patch1'] for
-                 input param patch_id='patch3'
-        :param patch_id: The patch ID
+        Returns a list of software releases that are required by this
+        release.
+        Example: If R3 requires R2 and R2 requires R1,
+                 then this patch will return ['R2', 'R1'] for
+                 input param patch_id='R3'
+        :param release: The software release version
         """
-        if not self.patch_data.metadata[patch_id]["requires"]:
+        if not self.patch_data.metadata[release]["requires"]:
             return []
         else:
-            patch_dependency_list = []
-            for req_patch in self.patch_data.metadata[patch_id]["requires"]:
-                patch_dependency_list.append(req_patch)
-                patch_dependency_list = patch_dependency_list + self.get_patch_dependency_list(req_patch)
-            return patch_dependency_list
+            release_dependency_list = []
+            for req_release in self.patch_data.metadata[release]["requires"]:
+                release_dependency_list.append(req_release)
+                release_dependency_list = release_dependency_list + \
+                    self.get_release_dependency_list(req_release)
+            return release_dependency_list
 
     def get_ostree_tar_filename(self, patch_sw_version, patch_id):
         '''
@@ -1037,217 +1039,39 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-    def patch_apply_remove_order(self, patch_ids, reverse=False):
+    def release_apply_remove_order(self, releases, reverse=False):
         # Protect against duplications
-        patch_list = sorted(list(set(patch_ids)))
+        release_list = sorted(set(releases))
 
         # single patch
-        if len(patch_list) == 1:
-            return patch_list
+        if len(release_list) == 1:
+            return release_list
 
-        # versions of patches in the list don't match
+        # major versions of releases in the list don't match
         ver = None
-        for patch_id in patch_list:
+        for release in release_list:
+            release_version = self.patch_data.metadata[release]["sw_version"]
             if ver is None:
-                ver = self.patch_data.metadata[patch_id]["sw_version"]
-            elif self.patch_data.metadata[patch_id]["sw_version"] != ver:
+                ver = utils.get_major_release_version(release_version)
+            elif release_version != ver:
                 return None
 
         # Multiple patches with require dependencies
         highest_dependency = 0
-        patch_remove_order = None
-        patch_with_highest_dependency = None
+        release_remove_order = None
+        release_with_highest_dependency = None
 
-        for patch_id in patch_list:
-            dependency_list = self.get_patch_dependency_list(patch_id)
+        for release in release_list:
+            dependency_list = self.get_release_dependency_list(release)
             if len(dependency_list) > highest_dependency:
                 highest_dependency = len(dependency_list)
-                patch_with_highest_dependency = patch_id
-                patch_remove_order = dependency_list
+                release_with_highest_dependency = release
+                release_remove_order = release_list
 
-        patch_list = [patch_with_highest_dependency] + patch_remove_order
+        release_list = [release_with_highest_dependency] + release_remove_order
         if reverse:
-            patch_list.reverse()
-        return patch_list
-
-    def patch_remove_api(self, patch_ids, **kwargs):
-        """
-        Remove patches, moving patches from applied to available and updating repo
-        :return:
-        """
-        msg_info = ""
-        msg_warning = ""
-        msg_error = ""
-        remove_unremovable = False
-
-        # First, verify that all specified patches exist
-        id_verification = True
-        for patch_id in sorted(list(set(patch_ids))):
-            if patch_id not in self.patch_data.metadata:
-                msg = "Patch %s does not exist" % patch_id
-                LOG.error(msg)
-                msg_error += msg + "\n"
-                id_verification = False
-
-        if not id_verification:
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
-        patch_list = self.patch_apply_remove_order(patch_ids)
-
-        if patch_list is None:
-            msg = "Patch list provided belongs to different software versions."
-            LOG.error(msg)
-            msg_error += msg + "\n"
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
-        msg = "Removing patches: %s" % ",".join(patch_list)
-        LOG.info(msg)
-        audit_log_info(msg)
-
-        if kwargs.get("removeunremovable") == "yes":
-            remove_unremovable = True
-
-        # See if any of the patches are marked as unremovable
-        unremovable_verification = True
-        for patch_id in patch_list:
-            if self.patch_data.metadata[patch_id].get("unremovable") == "Y":
-                if remove_unremovable:
-                    msg = "Unremovable patch %s being removed" % patch_id
-                    LOG.warning(msg)
-                    msg_warning += msg + "\n"
-                else:
-                    msg = "Patch %s is not removable" % patch_id
-                    LOG.error(msg)
-                    msg_error += msg + "\n"
-                    unremovable_verification = False
-            elif self.patch_data.metadata[patch_id]['repostate'] == constants.COMMITTED:
-                msg = "Patch %s is committed and cannot be removed" % patch_id
-                LOG.error(msg)
-                msg_error += msg + "\n"
-                unremovable_verification = False
-
-        if not unremovable_verification:
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
-        # Next, see if any of the patches are required by applied patches
-        # required_patches will map the required patch to the patches that need it
-        required_patches = {}
-        for patch_iter in list(self.patch_data.metadata):
-            # Ignore patches in the op set
-            if patch_iter in patch_list:
-                continue
-
-            # Only check applied patches
-            if self.patch_data.metadata[patch_iter]["repostate"] == constants.AVAILABLE:
-                continue
-
-            for req_patch in self.patch_data.metadata[patch_iter]["requires"]:
-                if req_patch not in patch_list:
-                    continue
-
-                if req_patch not in required_patches:
-                    required_patches[req_patch] = []
-
-                required_patches[req_patch].append(patch_iter)
-
-        if len(required_patches) > 0:
-            for req_patch, iter_patch_list in required_patches.items():
-                msg = "%s is required by: %s" % (req_patch, ", ".join(sorted(iter_patch_list)))
-                msg_error += msg + "\n"
-                LOG.info(msg)
-
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
-        if kwargs.get("skipappcheck") != "yes":
-            # Check application dependencies before removing
-            required_patches = {}
-            for patch_id in patch_list:
-                for appname, iter_patch_list in self.app_dependencies.items():
-                    if patch_id in iter_patch_list:
-                        if patch_id not in required_patches:
-                            required_patches[patch_id] = []
-                        required_patches[patch_id].append(appname)
-
-            if len(required_patches) > 0:
-                for req_patch, app_list in required_patches.items():
-                    msg = "%s is required by application(s): %s" % (req_patch, ", ".join(sorted(app_list)))
-                    msg_error += msg + "\n"
-                    LOG.info(msg)
-
-                return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
-        if kwargs.get("skip-semantic") != "yes":
-            self.run_semantic_check(constants.SEMANTIC_PREREMOVE, patch_list)
-
-        for patch_id in patch_list:
-            msg = "Removing patch: %s" % patch_id
-            LOG.info(msg)
-            audit_log_info(msg)
-
-            if self.patch_data.metadata[patch_id]["repostate"] == constants.AVAILABLE:
-                msg = "%s is not in the repo" % patch_id
-                LOG.info(msg)
-                msg_info += msg + "\n"
-                continue
-
-            patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
-            # 22.12 is the first version to support ostree
-            # earlier formats will not have "base" and are unsupported
-            # simply move them to 'available and skip to the next patch
-            if self.patch_data.contents[patch_id].get("base") is None:
-                msg = "%s is an unsupported patch format" % patch_id
-                LOG.info(msg)
-                msg_info += msg + "\n"
-
-            else:
-                # this is an ostree patch
-                # Base commit is fetched from the patch metadata
-                base_commit = self.patch_data.contents[patch_id]["base"]["commit"]
-                feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, patch_sw_version)
-                try:
-                    # Reset the ostree HEAD
-                    ostree_utils.reset_ostree_repo_head(base_commit, feed_ostree)
-
-                    # Delete all commits that belong to this patch
-                    for i in range(int(self.patch_data.contents[patch_id]["number_of_commits"])):
-                        commit_to_delete = self.patch_data.contents[patch_id]["commit%s" % (i + 1)]["commit"]
-                        ostree_utils.delete_ostree_repo_commit(commit_to_delete, feed_ostree)
-
-                    # Update the feed ostree summary
-                    ostree_utils.update_repo_summary_file(feed_ostree)
-
-                except OSTreeCommandFail:
-                    LOG.exception("Failure during patch remove for %s.", patch_id)
-
-            # update metadata
-            try:
-                # Move the metadata to the available dir
-                shutil.move("%s/%s-metadata.xml" % (applied_dir, patch_id),
-                            "%s/%s-metadata.xml" % (avail_dir, patch_id))
-                msg_info += "%s has been removed from the repo\n" % patch_id
-            except shutil.Error:
-                msg = "Failed to move the metadata for %s" % patch_id
-                LOG.exception(msg)
-                raise MetadataFail(msg)
-
-            # update patchstate and repostate
-            self.patch_data.metadata[patch_id]["repostate"] = constants.AVAILABLE
-            if len(self.hosts) > 0:
-                self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_REMOVE
-            else:
-                self.patch_data.metadata[patch_id]["patchstate"] = constants.UNKNOWN
-
-            # only update lastest_feed_commit if it is an ostree patch
-            if self.patch_data.contents[patch_id].get("base") is not None:
-                # Base Commit in patch metadata.xml file represents the latest commit
-                # after this patch has been removed from the feed repo
-                self.latest_feed_commit = self.patch_data.contents[patch_id]["base"]["commit"]
-
-            self.hosts_lock.acquire()
-            self.interim_state[patch_id] = list(self.hosts)
-            self.hosts_lock.release()
-
-        return dict(info=msg_info, warning=msg_warning, error=msg_error)
+            release_list.reverse()
+        return release_list
 
     def software_release_delete_api(self, release_ids):
         """
@@ -1945,7 +1769,7 @@ class PatchController(PatchService):
         # R4 requires R3
         # Apply order: [R1, R2, R3, R4]
         # Patch with lowest dependency gets applied first.
-        deployment_list = self.patch_apply_remove_order(deployment_list, reverse=True)
+        deployment_list = self.release_apply_remove_order(deployment_list, reverse=True)
 
         msg = "Deploy create order: %s" % ",".join(deployment_list)
         LOG.info(msg)
@@ -2080,6 +1904,176 @@ class PatchController(PatchService):
 
             with self.hosts_lock:
                 self.interim_state[deployment] = list(self.hosts)
+
+        return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+    def software_deploy_delete_api(self, releases: list[str], **kwargs) -> dict:
+        """
+        Remove releases from feed ostree repo
+        :return: dict of info, warning and error messages
+        """
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
+        remove_unremovable = False
+
+        # First, verify that all specified releases exist
+        id_verification = True
+        for release in sorted(set(releases)):
+            if release not in self.patch_data.metadata:
+                msg = "Release %s does not exist" % release
+                LOG.error(msg)
+                msg_error += msg + "\n"
+                id_verification = False
+
+        if not id_verification:
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        release_list = self.release_apply_remove_order(releases)
+
+        if release_list is None:
+            msg = "Release list provided has different major software versions."
+            LOG.error(msg)
+            msg_error += msg + "\n"
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        msg = "Removing release versions: %s" % ",".join(release_list)
+        LOG.info(msg)
+        audit_log_info(msg)
+
+        if kwargs.get("removeunremovable") == "yes":
+            remove_unremovable = True
+
+        # See if any of the patches are marked as unremovable
+        unremovable_verification = True
+        for release in release_list:
+            if self.patch_data.metadata[release].get("unremovable") == "Y":
+                if remove_unremovable:
+                    msg = "Unremovable release %s being removed" % release
+                    LOG.warning(msg)
+                    msg_warning += msg + "\n"
+                else:
+                    msg = "Release %s is not removable" % release
+                    LOG.error(msg)
+                    msg_error += msg + "\n"
+                    unremovable_verification = False
+            elif self.patch_data.metadata[release]['repostate'] == constants.COMMITTED:
+                msg = "Release %s is committed and cannot be removed" % release
+                LOG.error(msg)
+                msg_error += msg + "\n"
+                unremovable_verification = False
+
+        if not unremovable_verification:
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Next, see if any of the releases are required by applied releases
+        # required_releases will map the required release to the releases that need it
+        required_releases = {}
+        for release_iter in list(self.patch_data.metadata):
+            # Ignore patches in the op set
+            if release_iter in release_list:
+                continue
+
+            # Only check applied patches
+            if self.patch_data.metadata[release_iter]["repostate"] == constants.AVAILABLE:
+                continue
+
+            for req_release in self.patch_data.metadata[release_iter]["requires"]:
+                if req_release not in release_list:
+                    continue
+
+                if req_release not in required_releases:
+                    required_releases[req_release] = []
+
+                required_releases[req_release].append(release_iter)
+
+        if len(required_releases) > 0:
+            for req_release, iter_release_list in required_releases.items():
+                msg = "%s is required by: %s" % (req_release, ", ".join(sorted(iter_release_list)))
+                msg_error += msg + "\n"
+                LOG.info(msg)
+
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        if kwargs.get("skipappcheck") != "yes":
+            # Check application dependencies before removing
+            required_releases = {}
+            for release in release_list:
+                for appname, iter_release_list in self.app_dependencies.items():
+                    if release in iter_release_list:
+                        if release not in required_releases:
+                            required_releases[release] = []
+                        required_releases[release].append(appname)
+
+            if len(required_releases) > 0:
+                for req_release, app_list in required_releases.items():
+                    msg = "%s is required by application(s): %s" % (req_release, ", ".join(sorted(app_list)))
+                    msg_error += msg + "\n"
+                    LOG.info(msg)
+
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        if kwargs.get("skip-semantic") != "yes":
+            self.run_semantic_check(constants.SEMANTIC_PREREMOVE, release_list)
+
+        for release in release_list:
+            msg = "Removing release: %s" % release
+            LOG.info(msg)
+            audit_log_info(msg)
+
+            if self.patch_data.metadata[release]["repostate"] == constants.AVAILABLE:
+                msg = "%s is not in the repo" % release
+                LOG.info(msg)
+                msg_info += msg + "\n"
+                continue
+
+            major_release_sw_version = utils.get_major_release_version(
+                self.patch_data.metadata[release]["sw_version"])
+            # this is an ostree patch
+            # Base commit is fetched from the patch metadata
+            base_commit = self.patch_data.contents[release]["base"]["commit"]
+            feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, major_release_sw_version)
+            try:
+                # Reset the ostree HEAD
+                ostree_utils.reset_ostree_repo_head(base_commit, feed_ostree)
+
+                # Delete all commits that belong to this release
+                for i in range(int(self.patch_data.contents[release]["number_of_commits"])):
+                    commit_to_delete = self.patch_data.contents[release]["commit%s" % (i + 1)]["commit"]
+                    ostree_utils.delete_ostree_repo_commit(commit_to_delete, feed_ostree)
+
+                # Update the feed ostree summary
+                ostree_utils.update_repo_summary_file(feed_ostree)
+
+            except OSTreeCommandFail:
+                LOG.exception("Failure while removing release %s.", release)
+
+            # update metadata
+            try:
+                # Move the metadata to the available dir
+                shutil.move("%s/%s-metadata.xml" % (applied_dir, release),
+                            "%s/%s-metadata.xml" % (avail_dir, release))
+                msg_info += "%s has been removed from the repo\n" % release
+            except shutil.Error:
+                msg = "Failed to move the metadata for %s" % release
+                LOG.exception(msg)
+                raise MetadataFail(msg)
+
+            # update patchstate and repostate
+            self.patch_data.metadata[release]["repostate"] = constants.AVAILABLE
+            if len(self.hosts) > 0:
+                self.patch_data.metadata[release]["patchstate"] = constants.PARTIAL_REMOVE
+            else:
+                self.patch_data.metadata[release]["patchstate"] = constants.UNKNOWN
+
+            # only update lastest_feed_commit if it is an ostree patch
+            if self.patch_data.contents[release].get("base") is not None:
+                # Base Commit in this release's metadata.xml file represents the latest commit
+                # after this release has been removed from the feed repo
+                self.latest_feed_commit = self.patch_data.contents[release]["base"]["commit"]
+
+            with self.hosts_lock:
+                self.interim_state[release] = list(self.hosts)
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 

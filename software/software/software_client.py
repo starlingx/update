@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023 Wind River Systems, Inc.
+C opyright (c) 2023 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -874,8 +874,25 @@ def deploy_create_req(args):
 
 def deploy_delete_req(args):
     # args.deployment is a list
-    print(args.deployment)
-    return 1
+    deployment = args.deployment
+
+    # Ignore interrupts during this function
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+    # Issue deploy_delete request
+    deployments = "/".join(deployment)
+    url = "http://%s/software/deploy_delete/%s" % (api_addr, deployments)
+
+    headers = {}
+    append_auth_token_if_required(headers)
+    req = requests.post(url, headers=headers)
+
+    if args.debug:
+        print_result_debug(req)
+    else:
+        print_software_op_result(req)
+
+    return check_rc(req)
 
 
 def deploy_precheck_req(args):
@@ -1232,6 +1249,7 @@ def register_deploy_commands(commands):
     cmd.set_defaults(cmd='delete')
     cmd.set_defaults(func=deploy_delete_req)
     cmd.add_argument('deployment',
+                     nargs="+",
                      help='Deployment ID to delete')
 
     # --- software deploy precheck -----------------------

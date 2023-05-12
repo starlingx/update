@@ -23,6 +23,20 @@ def if_nametoindex(name):
         return 0
 
 
+def get_major_release_version(sw_release_version):
+    """Gets the major release for a given software version """
+    if not sw_release_version:
+        return None
+    else:
+        try:
+            separator = '.'
+            separated_string = sw_release_version.split(separator)
+            major_version = separated_string[0] + separator + separated_string[1]
+            return major_version
+        except Exception:
+            return None
+
+
 def gethostbyname(hostname):
     """gethostbyname with IPv6 support """
     try:
