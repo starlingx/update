@@ -34,9 +34,9 @@ pidfile_path = "/var/run/software_agent.pid"
 agent_running_after_reboot_flag = \
     "/var/run/software_agent_running_after_reboot"
 node_is_patched_file = "/var/run/node_is_patched"
-node_is_patched_rr_file = "/var/run/node_is_patched_rr"
+node_is_software_updated_rr_file = "/var/run/node_is_software_updated_rr"
 patch_installing_file = "/var/run/patch_installing"
-patch_failed_file = "/var/run/patch_install_failed"
+patch_failed_file = "/var/run/software_install_failed"
 node_is_locked_file = "/var/run/.node_locked"
 ostree_pull_completed_deployment_pending_file = \
     "/var/run/ostree_pull_completed_deployment_pending"
@@ -258,7 +258,7 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
         resp = PatchMessageAgentInstallResp()
 
         if not self.force:
-            setflag(node_is_patched_rr_file)
+            setflag(node_is_software_updated_rr_file)
 
         if not os.path.exists(node_is_locked_file):
             if self.force:
@@ -489,11 +489,11 @@ class PatchAgent(PatchService):
                 if verbose_to_stdout:
                     print("This node has been patched.")
 
-                if os.path.exists(node_is_patched_rr_file):
+                if os.path.exists(node_is_software_updated_rr_file):
                     LOG.info("Reboot is required. Skipping patch-scripts")
                 elif disallow_insvc_patch:
                     LOG.info("Disallowing patch-scripts. Treating as reboot-required")
-                    setflag(node_is_patched_rr_file)
+                    setflag(node_is_software_updated_rr_file)
                 else:
                     LOG.info("Mounting the new deployment")
                     try:

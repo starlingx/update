@@ -24,8 +24,9 @@ NAME=$(basename $0)
 . /etc/platform/platform.conf
 
 logfile=/var/log/software.log
-patch_failed_file=/var/run/patch_install_failed
-patched_during_init=/etc/software/.patched_during_init
+software_install_failed_file=/var/run/software_install_failed
+software_updated_during_init_file=/etc/software/.software_updated_during_init
+node_is_software_updated_rr_file=/var/run/node_is_software_updated_rr
 
 # if the system has never been bootstrapped, system_mode is not set
 # treat a non bootstrapped system like it is simplex
@@ -38,26 +39,26 @@ function LOG_TO_FILE {
     echo "`date "+%FT%T.%3N"`: $NAME: $*" >> $logfile
 }
 
-function check_for_rr_patch {
-    if [ -f /var/run/node_is_patched_rr ]; then
-        if [ ! -f ${patched_during_init} ]; then
+function check_for_rr_software_update {
+    if [ -f ${node_is_software_updated_rr_file} ]; then
+        if [ ! -f ${software_updated_during_init_file} ]; then
             echo
-            echo "Node has been patched and requires an immediate reboot."
+            echo "Node has had its software updated and requires an immediate reboot."
             echo
-            LOG_TO_FILE "Node has been patched, with reboot-required flag set. Rebooting"
-            touch ${patched_during_init}
+            LOG_TO_FILE "Node has had its software updated, with reboot-required flag set. Rebooting"
+            touch ${software_updated_during_init_file}
             /sbin/reboot
         else
             echo
-            echo "Node has been patched during init a second consecutive time. Skipping reboot due to possible error"
+            echo "Node has had its software updated during init a second consecutive time. Skipping reboot due to possible error"
             echo
-            LOG_TO_FILE "Node has been patched during init a second consecutive time. Skipping reboot due to possible error"
-            touch ${patch_failed_file}
-            rm -f ${patched_during_init}
+            LOG_TO_FILE "Node has had its software updated during init a second consecutive time. Skipping reboot due to possible error"
+            touch ${software_install_failed_file}
+            rm -f ${software_updated_during_init_file}
             exit 1
         fi
     else
-        rm -f ${patched_during_init}
+        rm -f ${software_updated_during_init_file}
     fi
 }
 
@@ -95,7 +96,7 @@ fi
 
 # For AIO-SX, abort if config is not yet applied and this is running in init
 if [ "${system_mode}" = "simplex" -a ! -f ${INITIAL_CONTROLLER_CONFIG_COMPLETE} -a "$1" = "start" ]; then
-    LOG_TO_FILE "Config is not yet applied. Skipping init patching"
+    LOG_TO_FILE "Config is not yet applied. Skipping init software"
     exit 0
 fi
 
@@ -127,17 +128,17 @@ case "$1" in
     start)
         if [ "${system_mode}" = "simplex" ]; then
             # On a simplex CPE, we need to launch the http server first,
-            # before we can do the patch installation
+            # before we can do the software installation
             LOG_TO_FILE "***** Launching lighttpd *****"
             /etc/init.d/lighttpd start
 
-            LOG_TO_FILE "***** Starting patch operation *****"
-            /usr/sbin/software-agent --install 2>>$logfile
-            if [ -f ${patch_failed_file} ]; then
+            LOG_TO_FILE "***** Starting software operation *****"
+            /usr/bin/software-agent --install 2>>$logfile
+            if [ -f ${software_install_failed_file} ]; then
                 RC=1
-                LOG_TO_FILE "***** Patch operation failed *****"
+                LOG_TO_FILE "***** Software operation failed *****"
             fi
-            LOG_TO_FILE "***** Finished patch operation *****"
+            LOG_TO_FILE "***** Finished software operation *****"
 
             LOG_TO_FILE "***** Shutting down lighttpd *****"
             /etc/init.d/lighttpd stop
@@ -148,28 +149,28 @@ case "$1" in
                 exit 1
             fi
 
-            LOG_TO_FILE "***** Starting patch operation *****"
-            /usr/sbin/software-agent --install 2>>$logfile
-            if [ -f ${patch_failed_file} ]; then
+            LOG_TO_FILE "***** Starting software operation *****"
+            /usr/bin/software-agent --install 2>>$logfile
+            if [ -f ${software_install_failed_file} ]; then
                 RC=1
-                LOG_TO_FILE "***** Patch operation failed *****"
+                LOG_TO_FILE "***** Software operation failed *****"
             fi
-            LOG_TO_FILE "***** Finished patch operation *****"
+            LOG_TO_FILE "***** Finished software operation *****"
         fi
 
-        check_for_rr_patch
+        check_for_rr_software_update
         ;;
     stop)
         # Nothing to do here
         ;;
     restart)
-        LOG_TO_FILE "***** Starting patch operation *****"
-        /usr/sbin/software-agent --install 2>>$logfile
-        if [ -f ${patch_failed_file} ]; then
+        LOG_TO_FILE "***** Starting software operation *****"
+        /usr/bin/software-agent --install 2>>$logfile
+        if [ -f ${software_install_failed_file} ]; then
             RC=1
-            LOG_TO_FILE "***** Patch operation failed *****"
+            LOG_TO_FILE "***** Software operation failed *****"
         fi
-        LOG_TO_FILE "***** Finished patch operation *****"
+        LOG_TO_FILE "***** Finished software operation *****"
         ;;
     *)
         echo "Usage: $0 {start|stop|restart}"
