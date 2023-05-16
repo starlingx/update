@@ -48,9 +48,9 @@ ${hostelem(host)}
             ${h["stale_details"]}
         % endif
         </stale_details>
-        <patch_current>
-        % if h["patch_current"] != "":
-            ${h["patch_current"]}
+        <deployed>
+        % if h["deployed"] != "":
+            ${h["deployed"]}
         % endif
-        </patch_current>
+        </deployed>
     </host></%def>

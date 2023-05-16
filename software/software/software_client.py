@@ -1,5 +1,5 @@
 """
-C opyright (c) 2023 Wind River Systems, Inc.
+Copyright (c) 2023 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -58,8 +58,8 @@ def check_rc(req):
 def print_result_debug(req):
     if req.status_code == 200:
         data = json.loads(req.text)
-        if 'pd' in data:
-            print(json.dumps(data['pd'],
+        if 'sd' in data:
+            print(json.dumps(data['sd'],
                              sort_keys=True,
                              indent=4,
                              separators=(',', ': ')))
@@ -87,79 +87,78 @@ def print_software_op_result(req):
     if req.status_code == 200:
         data = json.loads(req.text)
 
-        if 'pd' in data:
-            pd = data['pd']
+        if 'sd' in data:
+            sd = data['sd']
 
             # Calculate column widths
-            hdr_id = "Patch ID"
+            hdr_release = "Release"
+            hdr_version = "Version"
             hdr_rr = "RR"
-            hdr_rel = "Release"
-            hdr_repo = "Repo State"
-            hdr_state = "Patch State"
+            hdr_state = "State"
+            hdr_deploy_state = "Deploy State"
 
-            width_id = len(hdr_id)
+            width_release = len(hdr_release)
+            width_version = len(hdr_version)
             width_rr = len(hdr_rr)
-            width_rel = len(hdr_rel)
-            width_repo = len(hdr_repo)
             width_state = len(hdr_state)
+            width_deploy_state = len(hdr_deploy_state)
 
-            show_repo = False
+            show_all = False
 
-            for patch_id in list(pd):
-                if len(patch_id) > width_id:
-                    width_id = len(patch_id)
-                if len(pd[patch_id]["sw_version"]) > width_rel:
-                    width_rel = len(pd[patch_id]["sw_version"])
-                if len(pd[patch_id]["repostate"]) > width_repo:
-                    width_repo = len(pd[patch_id]["repostate"])
-                if len(pd[patch_id]["patchstate"]) > width_state:
-                    width_state = len(pd[patch_id]["patchstate"])
-                if pd[patch_id]["patchstate"] == "n/a":
-                    show_repo = True
+            for release_id in list(sd):
+                width_release = max(len(release_id), width_release)
+                width_deploy_state = max(len(sd[release_id]["deploy_state"]), width_deploy_state)
+                width_state = max(len(sd[release_id]["state"]), width_state)
+                if "sw_version" in sd[release_id]:
+                    show_all = True
+                    width_version = max(len(sd[release_id]["sw_version"]), width_version)
 
-            if show_repo:
-                print("{0:^{width_id}}  {1:^{width_rr}}  {2:^{width_rel}}  {3:^{width_repo}}  {4:^{width_state}}".format(
-                    hdr_id, hdr_rr, hdr_rel, hdr_repo, hdr_state,
-                    width_id=width_id, width_rr=width_rr,
-                    width_rel=width_rel, width_repo=width_repo, width_state=width_state))
+            if show_all:
+                print("{0:^{width_release}}  {1:^{width_rr}}  {2:^{width_version}}  {3:^{width_state}}  {4:^{width_deploy_state}}".format(
+                    hdr_release, hdr_rr, hdr_version, hdr_state, hdr_deploy_state,
+                    width_release=width_release, width_rr=width_rr,
+                    width_version=width_version, width_state=width_state, width_deploy_state=width_deploy_state))
 
                 print("{0}  {1}  {2}  {3}  {4}".format(
-                    '=' * width_id, '=' * width_rr, '=' * width_rel, '=' * width_repo, '=' * width_state))
+                    '=' * width_release, '=' * width_rr, '=' * width_version, '=' * width_state, '=' * width_deploy_state))
 
-                for patch_id in sorted(list(pd)):
-                    if "reboot_required" in pd[patch_id]:
-                        rr = pd[patch_id]["reboot_required"]
+                for release_id in sorted(list(sd)):
+                    if "reboot_required" in sd[release_id]:
+                        rr = sd[release_id]["reboot_required"]
                     else:
                         rr = "Y"
 
-                    print("{0:<{width_id}}  {1:^{width_rr}}  {2:^{width_rel}}  {3:^{width_repo}}  {4:^{width_state}}".format(
-                        patch_id,
+                    print("{0:<{width_release}}  {1:^{width_rr}}  {2:^{width_version}}  {3:^{width_state}}  {4:^{width_deploy_state}}".format(
+                        release_id,
                         rr,
-                        pd[patch_id]["sw_version"],
-                        pd[patch_id]["repostate"],
-                        pd[patch_id]["patchstate"],
-                        width_id=width_id, width_rr=width_rr,
-                        width_rel=width_rel, width_repo=width_repo, width_state=width_state))
+                        sd[release_id]["sw_version"],
+                        sd[release_id]["deploy_state"],
+                        sd[release_id]["state"],
+                        width_release=width_release, width_rr=width_rr,
+                        width_version=width_version, width_state=width_state,
+                        width_deploy_state=width_deploy_state))
             else:
-                print("{0:^{width_id}}  {1:^{width_rr}}  {2:^{width_rel}}  {3:^{width_state}}".format(
-                    hdr_id, hdr_rr, hdr_rel, hdr_state,
-                    width_id=width_id, width_rr=width_rr, width_rel=width_rel, width_state=width_state))
+                print("{0:^{width_release}}  {1:^{width_state}}  {2:^{width_deploy_state}}".format(
+                    hdr_release, hdr_state, hdr_deploy_state,
+                    width_release=width_release, width_state=width_state,
+                    width_deploy_state=width_deploy_state))
 
-                print("{0}  {1}  {2}  {3}".format(
-                    '=' * width_id, '=' * width_rr, '=' * width_rel, '=' * width_state))
+                print("{0}  {1}  {2}".format(
+                    '=' * width_release, '=' * width_state, '=' * width_deploy_state))
 
-                for patch_id in sorted(list(pd)):
-                    if "reboot_required" in pd[patch_id]:
-                        rr = pd[patch_id]["reboot_required"]
+                for release_id in sorted(list(sd)):
+                    if "reboot_required" in sd[release_id]:
+                        rr = sd[release_id]["reboot_required"]
                     else:
                         rr = "Y"
 
-                    print("{0:<{width_id}}  {1:^{width_rr}}  {2:^{width_rel}}  {3:^{width_state}}".format(
-                        patch_id,
+                    print("{0:<{width_release}}  {1:^{width_rr}}  {2:^{width_state}}  {3:^{width_deploy_state}}".format(
+                        release_id,
                         rr,
-                        pd[patch_id]["sw_version"],
-                        pd[patch_id]["patchstate"],
-                        width_id=width_id, width_rr=width_rr, width_rel=width_rel, width_state=width_state))
+                        sd[release_id]["state"],
+                        sd[release_id]["deploy_state"],
+                        width_release=width_release, width_rr=width_rr,
+                        width_state=width_state, width_deploy_state=width_deploy_state))
 
             print("")
 
@@ -180,52 +179,52 @@ def print_software_op_result(req):
         print("Error: %s has occurred. %s" % (req.status_code, req.reason))
 
 
-def print_patch_show_result(req):
+def print_release_show_result(req):
     if req.status_code == 200:
         data = json.loads(req.text)
 
         if 'metadata' in data:
-            pd = data['metadata']
+            sd = data['metadata']
             contents = data['contents']
-            for patch_id in sorted(list(pd)):
-                print("%s:" % patch_id)
+            for release_id in sorted(list(sd)):
+                print("%s:" % release_id)
 
-                if "sw_version" in pd[patch_id] and pd[patch_id]["sw_version"] != "":
-                    print(textwrap.fill("    {0:<15} ".format("Release:") + pd[patch_id]["sw_version"],
+                if "sw_version" in sd[release_id] and sd[release_id]["sw_version"] != "":
+                    print(textwrap.fill("    {0:<15} ".format("Version:") + sd[release_id]["sw_version"],
                                         width=TERM_WIDTH, subsequent_indent=' ' * 20))
 
-                if "patchstate" in pd[patch_id] and pd[patch_id]["patchstate"] != "":
-                    print(textwrap.fill("    {0:<15} ".format("Patch State:") + pd[patch_id]["patchstate"],
+                if "state" in sd[release_id] and sd[release_id]["state"] != "":
+                    print(textwrap.fill("    {0:<15} ".format("State:") + sd[release_id]["state"],
                                         width=TERM_WIDTH, subsequent_indent=' ' * 20))
 
-                    if pd[patch_id]["patchstate"] == "n/a":
-                        if "repostate" in pd[patch_id] and pd[patch_id]["repostate"] != "":
-                            print(textwrap.fill("    {0:<15} ".format("Repo State:") + pd[patch_id]["repostate"],
+                    if sd[release_id]["state"] == "n/a":
+                        if "deploy_state" in sd[release_id] and sd[release_id]["deploy_state"] != "":
+                            print(textwrap.fill("    {0:<15} ".format("Deploy State:") + sd[release_id]["deploy_state"],
                                                 width=TERM_WIDTH, subsequent_indent=' ' * 20))
 
-                if "status" in pd[patch_id] and pd[patch_id]["status"] != "":
-                    print(textwrap.fill("    {0:<15} ".format("Status:") + pd[patch_id]["status"],
+                if "status" in sd[release_id] and sd[release_id]["status"] != "":
+                    print(textwrap.fill("    {0:<15} ".format("Status:") + sd[release_id]["status"],
                                         width=TERM_WIDTH, subsequent_indent=' ' * 20))
 
-                if "unremovable" in pd[patch_id] and pd[patch_id]["unremovable"] != "":
-                    print(textwrap.fill("    {0:<15} ".format("Unremovable:") + pd[patch_id]["unremovable"],
+                if "unremovable" in sd[release_id] and sd[release_id]["unremovable"] != "":
+                    print(textwrap.fill("    {0:<15} ".format("Unremovable:") + sd[release_id]["unremovable"],
                                         width=TERM_WIDTH, subsequent_indent=' ' * 20))
 
-                if "reboot_required" in pd[patch_id] and pd[patch_id]["reboot_required"] != "":
-                    print(textwrap.fill("    {0:<15} ".format("RR:") + pd[patch_id]["reboot_required"],
+                if "reboot_required" in sd[release_id] and sd[release_id]["reboot_required"] != "":
+                    print(textwrap.fill("    {0:<15} ".format("RR:") + sd[release_id]["reboot_required"],
                                         width=TERM_WIDTH, subsequent_indent=' ' * 20))
 
-                if "apply_active_release_only" in pd[patch_id] and pd[patch_id]["apply_active_release_only"] != "":
-                    print(textwrap.fill("    {0:<15} ".format("Apply Active Release Only:") + pd[patch_id]["apply_active_release_only"],
+                if "apply_active_release_only" in sd[release_id] and sd[release_id]["apply_active_release_only"] != "":
+                    print(textwrap.fill("    {0:<15} ".format("Apply Active Release Only:") + sd[release_id]["apply_active_release_only"],
                                         width=TERM_WIDTH, subsequent_indent=' ' * 20))
 
-                if "summary" in pd[patch_id] and pd[patch_id]["summary"] != "":
-                    print(textwrap.fill("    {0:<15} ".format("Summary:") + pd[patch_id]["summary"],
+                if "summary" in sd[release_id] and sd[release_id]["summary"] != "":
+                    print(textwrap.fill("    {0:<15} ".format("Summary:") + sd[release_id]["summary"],
                                         width=TERM_WIDTH, subsequent_indent=' ' * 20))
 
-                if "description" in pd[patch_id] and pd[patch_id]["description"] != "":
+                if "description" in sd[release_id] and sd[release_id]["description"] != "":
                     first_line = True
-                    for line in pd[patch_id]["description"].split('\n'):
+                    for line in sd[release_id]["description"].split('\n'):
                         if first_line:
                             print(textwrap.fill("    {0:<15} ".format("Description:") + line,
                                                 width=TERM_WIDTH, subsequent_indent=' ' * 20))
@@ -235,16 +234,16 @@ def print_patch_show_result(req):
                                                 width=TERM_WIDTH, subsequent_indent=' ' * 20,
                                                 initial_indent=' ' * 20))
 
-                if "install_instructions" in pd[patch_id] and pd[patch_id]["install_instructions"] != "":
+                if "install_instructions" in sd[release_id] and sd[release_id]["install_instructions"] != "":
                     print("    Install Instructions:")
-                    for line in pd[patch_id]["install_instructions"].split('\n'):
+                    for line in sd[release_id]["install_instructions"].split('\n'):
                         print(textwrap.fill(line,
                                             width=TERM_WIDTH, subsequent_indent=' ' * 20,
                                             initial_indent=' ' * 20))
 
-                if "warnings" in pd[patch_id] and pd[patch_id]["warnings"] != "":
+                if "warnings" in sd[release_id] and sd[release_id]["warnings"] != "":
                     first_line = True
-                    for line in pd[patch_id]["warnings"].split('\n'):
+                    for line in sd[release_id]["warnings"].split('\n'):
                         if first_line:
                             print(textwrap.fill("    {0:<15} ".format("Warnings:") + line,
                                                 width=TERM_WIDTH, subsequent_indent=' ' * 20))
@@ -254,28 +253,28 @@ def print_patch_show_result(req):
                                                 width=TERM_WIDTH, subsequent_indent=' ' * 20,
                                                 initial_indent=' ' * 20))
 
-                if "requires" in pd[patch_id] and len(pd[patch_id]["requires"]) > 0:
+                if "requires" in sd[release_id] and len(sd[release_id]["requires"]) > 0:
                     print("    Requires:")
-                    for req_patch in sorted(pd[patch_id]["requires"]):
+                    for req_patch in sorted(sd[release_id]["requires"]):
                         print(' ' * 20 + req_patch)
 
-                if "contents" in data and patch_id in data["contents"]:
+                if "contents" in data and release_id in data["contents"]:
                     print("    Contents:\n")
-                    if "number_of_commits" in contents[patch_id] and \
-                            contents[patch_id]["number_of_commits"] != "":
+                    if "number_of_commits" in contents[release_id] and \
+                            contents[release_id]["number_of_commits"] != "":
                         print(textwrap.fill("    {0:<15} ".format("No. of commits:") +
-                                            contents[patch_id]["number_of_commits"],
+                                            contents[release_id]["number_of_commits"],
                                             width=TERM_WIDTH, subsequent_indent=' ' * 20))
-                    if "base" in contents[patch_id] and \
-                            contents[patch_id]["base"]["commit"] != "":
+                    if "base" in contents[release_id] and \
+                            contents[release_id]["base"]["commit"] != "":
                         print(textwrap.fill("    {0:<15} ".format("Base commit:") +
-                                            contents[patch_id]["base"]["commit"],
+                                            contents[release_id]["base"]["commit"],
                                             width=TERM_WIDTH, subsequent_indent=' ' * 20))
-                    if "number_of_commits" in contents[patch_id] and \
-                            contents[patch_id]["number_of_commits"] != "":
-                        for i in range(int(contents[patch_id]["number_of_commits"])):
+                    if "number_of_commits" in contents[release_id] and \
+                            contents[release_id]["number_of_commits"] != "":
+                        for i in range(int(contents[release_id]["number_of_commits"])):
                             print(textwrap.fill("    {0:<15} ".format("Commit%s:" % (i + 1)) +
-                                                contents[patch_id]["commit%s" % (i + 1)]["commit"],
+                                                contents[release_id]["commit%s" % (i + 1)]["commit"],
                                                 width=TERM_WIDTH, subsequent_indent=' ' * 20))
 
                 print("\n")
@@ -340,101 +339,6 @@ def release_upload_req(args):
     return rc
 
 
-def patch_apply_req(args):
-    print("patch_apply_req UNDER CONSTRUCTION")
-
-    # Ignore interrupts during this function
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    extra_opts = []
-
-    if "--skip-semantic" in args:
-        idx = args.index("--skip-semantic")
-
-        # Get rid of the --skip-semantic
-        args.pop(idx)
-
-        # Append the extra opts
-        extra_opts.append("skip-semantic=yes")
-
-    if len(extra_opts) == 0:
-        extra_opts_str = ''
-    else:
-        extra_opts_str = '?%s' % '&'.join(extra_opts)
-
-    patches = "/".join(args)
-    url = "http://%s/software/apply/%s%s" % (api_addr, patches, extra_opts_str)
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.post(url, headers=headers)
-
-    if args.debug:
-        print_result_debug(req)
-    else:
-        print_software_op_result(req)
-
-    return check_rc(req)
-
-
-def patch_remove_req(args):
-    print("patch_remove_req UNDER CONSTRUCTION")
-
-    # Ignore interrupts during this function
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    extra_opts = []
-
-    # The removeunremovable option is hidden and should not be added to help
-    # text or customer documentation. It is for emergency use only - under
-    # supervision of the design team.
-    if "--removeunremovable" in args:
-        idx = args.index("--removeunremovable")
-
-        # Get rid of the --removeunremovable
-        args.pop(idx)
-
-        # Append the extra opts
-        extra_opts.append('removeunremovable=yes')
-
-    if "--skipappcheck" in args:
-        idx = args.index("--skipappcheck")
-
-        # Get rid of the --skipappcheck
-        args.pop(idx)
-
-        # Append the extra opts
-        extra_opts.append("skipappcheck=yes")
-
-    if "--skip-semantic" in args:
-        idx = args.index("--skip-semantic")
-
-        # Get rid of the --skip-semantic
-        args.pop(idx)
-
-        # Append the extra opts
-        extra_opts.append("skip-semantic=yes")
-
-    if len(extra_opts) == 0:
-        extra_opts_str = ''
-    else:
-        extra_opts_str = '?%s' % '&'.join(extra_opts)
-
-    patches = "/".join(args)
-    url = "http://%s/software/remove/%s%s" % (api_addr, patches, extra_opts_str)
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.post(url, headers=headers)
-
-    if args.debug:
-        print_result_debug(req)
-    else:
-        print_software_op_result(req)
-
-    return check_rc(req)
-
-
 def release_delete_req(args):
     # arg.release is a list
     releases = "/".join(args.release)
@@ -494,8 +398,8 @@ def patch_commit_req(args):
         if req.status_code == 200:
             data = json.loads(req.text)
 
-            if 'pd' in data:
-                patch_list = sorted(list(data['pd']))
+            if 'sd' in data:
+                patch_list = sorted(list(data['sd']))
         elif req.status_code == 500:
             print("Failed to get patch list. Aborting...")
             return 1
@@ -505,8 +409,8 @@ def patch_commit_req(args):
             return 0
 
         print("The following patches will be committed:")
-        for patch_id in patch_list:
-            print("    %s" % patch_id)
+        for release_id in patch_list:
+            print("    %s" % release_id)
         print()
 
         patches = "/".join(patch_list)
@@ -523,8 +427,8 @@ def patch_commit_req(args):
 
             if 'patches' in data:
                 print("The following patches will be committed:")
-                for patch_id in sorted(data['patches']):
-                    print("    %s" % patch_id)
+                for release_id in sorted(data['patches']):
+                    print("    %s" % release_id)
                 print()
             else:
                 print("No patches found to commit")
@@ -600,14 +504,14 @@ def print_software_deploy_query_result(req):
         # Calculate column widths
         hdr_hn = "Hostname"
         hdr_ip = "IP Address"
-        hdr_pc = "Patch Current"
+        hdr_dep = "Deployed"
         hdr_rr = "Reboot Required"
         hdr_rel = "Release"
-        hdr_state = "State"
+        hdr_state = "Host State"
 
         width_hn = len(hdr_hn)
         width_ip = len(hdr_ip)
-        width_pc = len(hdr_pc)
+        width_pc = len(hdr_dep)
         width_rr = len(hdr_rr)
         width_rel = len(hdr_rel)
         width_state = len(hdr_state)
@@ -623,24 +527,24 @@ def print_software_deploy_query_result(req):
                 width_state = len(agent["state"])
 
         print("{0:^{width_hn}}  {1:^{width_ip}}  {2:^{width_pc}}  {3:^{width_rr}}  {4:^{width_rel}}  {5:^{width_state}}".format(
-            hdr_hn, hdr_ip, hdr_pc, hdr_rr, hdr_rel, hdr_state,
+            hdr_hn, hdr_ip, hdr_dep, hdr_rr, hdr_rel, hdr_state,
             width_hn=width_hn, width_ip=width_ip, width_pc=width_pc, width_rr=width_rr, width_rel=width_rel, width_state=width_state))
 
         print("{0}  {1}  {2}  {3}  {4}  {5}".format(
             '=' * width_hn, '=' * width_ip, '=' * width_pc, '=' * width_rr, '=' * width_rel, '=' * width_state))
 
         for agent in sorted(agents, key=lambda a: a["hostname"]):
-            patch_current_field = "Yes" if agent["patch_current"] else "No"
+            deployed_field = "Yes" if agent["deployed"] else "No"
             if agent.get("interim_state") is True:
-                patch_current_field = "Pending"
+                deployed_field = "Pending"
 
             if agent["patch_failed"]:
-                patch_current_field = "Failed"
+                deployed_field = "Failed"
 
             print("{0:<{width_hn}}  {1:<{width_ip}}  {2:^{width_pc}}  {3:^{width_rr}}  {4:^{width_rel}}  {5:^{width_state}}".format(
                 agent["hostname"],
                 agent["ip"],
-                patch_current_field,
+                deployed_field,
                 "Yes" if agent["requires_reboot"] else "No",
                 agent["sw_version"],
                 agent["state"],
@@ -675,7 +579,7 @@ def release_show_req(args):
     if args.debug:
         print_result_debug(req)
     else:
-        print_patch_show_result(req)
+        print_release_show_result(req)
 
     return check_rc(req)
 

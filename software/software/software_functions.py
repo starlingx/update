@@ -216,39 +216,39 @@ class BasePackageData(object):
         return self.pkgs[sw_rel][pkgname][arch]
 
 
-class PatchData(object):
+class ReleaseData(object):
     """
-    Aggregated patch data
+    Aggregated release data
     """
     def __init__(self):
         #
-        # The metadata dict stores all metadata associated with a patch.
-        # This dict is keyed on patch_id, with metadata for each patch stored
+        # The metadata dict stores all metadata associated with a release.
+        # This dict is keyed on release_id, with metadata for each release stored
         # in a nested dict. (See parse_metadata method for more info)
         #
         self.metadata = {}
 
         #
-        # The contents dict stores the lists of RPMs provided by each patch,
-        # indexed by patch_id.
+        # The contents dict stores the ostree contents provided by each release,
+        # indexed by release_id.
         #
         self.contents = {}
 
-    def add_patch(self, new_patch):
+    def add_release(self, new_release):
         # We can just use "update" on these dicts because they are indexed by patch_id
-        self.metadata.update(new_patch.metadata)
-        self.contents.update(new_patch.contents)
+        self.metadata.update(new_release.metadata)
+        self.contents.update(new_release.contents)
 
-    def update_patch(self, updated_patch):
-        for patch_id in list(updated_patch.metadata):
-            # Update all fields except repostate
-            cur_repostate = self.metadata[patch_id]['repostate']
-            self.metadata[patch_id].update(updated_patch.metadata[patch_id])
-            self.metadata[patch_id]['repostate'] = cur_repostate
+    def update_release(self, updated_release):
+        for release_id in list(updated_release.metadata):
+            # Update all fields except deploy_state
+            cur_deploy_state = self.metadata[release_id]['deploy_state']
+            self.metadata[release_id].update(updated_release.metadata[release_id])
+            self.metadata[release_id]['deploy_state'] = cur_deploy_state
 
-    def delete_patch(self, patch_id):
-        del self.contents[patch_id]
-        del self.metadata[patch_id]
+    def delete_release(self, release_id):
+        del self.contents[release_id]
+        del self.metadata[release_id]
 
     @staticmethod
     def modify_metadata_text(filename,
@@ -280,25 +280,18 @@ class PatchData(object):
         # write the modified file
         outfile = open(new_filename, 'w')
         rough_xml = ElementTree.tostring(root)
-        if platform.python_version() == "2.7.2":
-            # The 2.7.2 toprettyxml() function unnecessarily indents
-            # childless tags, adding whitespace. In the case of the
-            # yum comps.xml file, it makes the file unusable, so just
-            # write the rough xml
-            outfile.write(rough_xml)
-        else:
-            outfile.write(minidom.parseString(rough_xml).toprettyxml(indent="  "))
+        outfile.write(minidom.parseString(rough_xml).toprettyxml(indent="  "))
         outfile.close()
         os.rename(new_filename, filename)
 
     def parse_metadata(self,
                        filename,
-                       repostate=None):
+                       deploy_state=None):
         """
-        Parse an individual patch metadata XML file
+        Parse an individual release metadata XML file
         :param filename: XML file
-        :param repostate: Indicates Applied, Available, or Committed
-        :return: Patch ID
+        :param deploy_state: Indicates Applied, Available, or Committed
+        :return: Release ID
         """
         tree = ElementTree.parse(filename)
         root = tree.getroot()
@@ -316,19 +309,19 @@ class PatchData(object):
         #    </patch>
         #
 
-        patch_id = root.findtext("id")
-        if patch_id is None:
-            LOG.error("Patch metadata contains no id tag")
+        release_id = root.findtext("id")
+        if release_id is None:
+            LOG.error("Release metadata contains no id tag")
             return None
 
-        self.metadata[patch_id] = {}
+        self.metadata[release_id] = {}
 
-        self.metadata[patch_id]["repostate"] = repostate
+        self.metadata[release_id]["deploy_state"] = deploy_state
 
-        # Patch state is unknown at this point
-        self.metadata[patch_id]["patchstate"] = "n/a"
+        # Release state is unknown at this point
+        self.metadata[release_id]["state"] = "n/a"
 
-        self.metadata[patch_id]["sw_version"] = "unknown"
+        self.metadata[release_id]["sw_version"] = "unknown"
 
         for key in ["status",
                     "unremovable",
@@ -341,72 +334,72 @@ class PatchData(object):
                     "apply_active_release_only"]:
             value = root.findtext(key)
             if value is not None:
-                self.metadata[patch_id][key] = value
+                self.metadata[release_id][key] = value
 
         # Default reboot_required to Y
         rr_value = root.findtext("reboot_required")
         if rr_value is None or rr_value != "N":
-            self.metadata[patch_id]["reboot_required"] = "Y"
+            self.metadata[release_id]["reboot_required"] = "Y"
         else:
-            self.metadata[patch_id]["reboot_required"] = "N"
+            self.metadata[release_id]["reboot_required"] = "N"
 
-        patch_sw_version = self.metadata[patch_id]["sw_version"]
+        release_sw_version = self.metadata[release_id]["sw_version"]
         global package_dir
-        if patch_sw_version not in package_dir:
-            package_dir[patch_sw_version] = "%s/%s" % (root_package_dir, patch_sw_version)
-            repo_dir[patch_sw_version] = "%s/rel-%s" % (repo_root_dir, patch_sw_version)
+        if release_sw_version not in package_dir:
+            package_dir[release_sw_version] = "%s/%s" % (root_package_dir, release_sw_version)
+            repo_dir[release_sw_version] = "%s/rel-%s" % (repo_root_dir, release_sw_version)
 
-        self.metadata[patch_id]["requires"] = []
+        self.metadata[release_id]["requires"] = []
         for req in root.findall("requires"):
-            for req_patch in req.findall("req_patch_id"):
-                self.metadata[patch_id]["requires"].append(req_patch.text)
+            for req_release in req.findall("req_patch_id"):
+                self.metadata[release_id]["requires"].append(req_release.text)
 
-        self.contents[patch_id] = {}
+        self.contents[release_id] = {}
 
         for content in root.findall("contents/ostree"):
-            self.contents[patch_id]["number_of_commits"] = content.findall("number_of_commits")[0].text
-            self.contents[patch_id]["base"] = {}
-            self.contents[patch_id]["base"]["commit"] = content.findall("base/commit")[0].text
-            self.contents[patch_id]["base"]["checksum"] = content.findall("base/checksum")[0].text
-            for i in range(int(self.contents[patch_id]["number_of_commits"])):
-                self.contents[patch_id]["commit%s" % (i + 1)] = {}
-                self.contents[patch_id]["commit%s" % (i + 1)]["commit"] = \
+            self.contents[release_id]["number_of_commits"] = content.findall("number_of_commits")[0].text
+            self.contents[release_id]["base"] = {}
+            self.contents[release_id]["base"]["commit"] = content.findall("base/commit")[0].text
+            self.contents[release_id]["base"]["checksum"] = content.findall("base/checksum")[0].text
+            for i in range(int(self.contents[release_id]["number_of_commits"])):
+                self.contents[release_id]["commit%s" % (i + 1)] = {}
+                self.contents[release_id]["commit%s" % (i + 1)]["commit"] = \
                     content.findall("commit%s/commit" % (i + 1))[0].text
-                self.contents[patch_id]["commit%s" % (i + 1)]["checksum"] = \
+                self.contents[release_id]["commit%s" % (i + 1)]["checksum"] = \
                     content.findall("commit%s/checksum" % (i + 1))[0].text
 
-        return patch_id
+        return release_id
 
     def load_all_metadata(self,
                           loaddir,
-                          repostate=None):
+                          deploy_state=None):
         """
         Parse all metadata files in the specified dir
         :return:
         """
         for fname in glob.glob("%s/*.xml" % loaddir):
-            self.parse_metadata(fname, repostate)
+            self.parse_metadata(fname, deploy_state)
 
     def load_all(self):
         # Reset the data
         self.__init__()
-        self.load_all_metadata(applied_dir, repostate=constants.APPLIED)
-        self.load_all_metadata(avail_dir, repostate=constants.AVAILABLE)
-        self.load_all_metadata(committed_dir, repostate=constants.COMMITTED)
+        self.load_all_metadata(applied_dir, deploy_state=constants.APPLIED)
+        self.load_all_metadata(avail_dir, deploy_state=constants.AVAILABLE)
+        self.load_all_metadata(committed_dir, deploy_state=constants.COMMITTED)
 
     def query_line(self,
-                   patch_id,
+                   release_id,
                    index):
         if index is None:
             return None
 
         if index == "contents":
-            return self.contents[patch_id]
+            return self.contents[release_id]
 
-        if index not in self.metadata[patch_id]:
+        if index not in self.metadata[release_id]:
             return None
 
-        value = self.metadata[patch_id][index]
+        value = self.metadata[release_id][index]
         return value
 
 
@@ -709,7 +702,7 @@ class PatchFile(object):
                 # a magic file exists.
                 PatchFile.read_patch(abs_patch, cert_type=cert_type_all)
 
-            thispatch = PatchData()
+            thispatch = ReleaseData()
             patch_id = thispatch.parse_metadata("metadata.xml")
 
             if field is None or field == "id":
@@ -766,7 +759,7 @@ class PatchFile(object):
             if 'cert' in meta_data:
                 cert_type = meta_data['cert']
             PatchFile.read_patch(abs_patch, cert_type=cert_type)
-            PatchData.modify_metadata_text("metadata.xml", key, value)
+            ReleaseData.modify_metadata_text("metadata.xml", key, value)
             PatchFile.write_patch(new_abs_patch, cert_type=cert_type)
             os.rename(new_abs_patch, abs_patch)
             rc = True
@@ -819,7 +812,7 @@ class PatchFile(object):
             # Open the patch file and extract the contents to the tmpdir
             PatchFile.read_patch(abs_patch)
 
-            thispatch = PatchData()
+            thispatch = ReleaseData()
             patch_id = thispatch.parse_metadata("metadata.xml")
 
             if patch_id is None:

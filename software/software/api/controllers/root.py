@@ -98,11 +98,11 @@ class SoftwareAPIController(object):
     @expose('query.xml', content_type='application/xml')
     def query(self, **kwargs):
         try:
-            pd = sc.software_release_query_cached(**kwargs)
+            sd = sc.software_release_query_cached(**kwargs)
         except SoftwareError as e:
             return dict(error="Error: %s" % str(e))
 
-        return dict(pd=pd)
+        return dict(sd=sd)
 
     @expose('json')
     @expose('show.xml', content_type='application/xml')

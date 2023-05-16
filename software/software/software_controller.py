@@ -55,7 +55,7 @@ from software.software_functions import LOG
 from software.software_functions import audit_log_info
 from software.software_functions import patch_dir
 from software.software_functions import repo_root_dir
-from software.software_functions import PatchData
+from software.software_functions import ReleaseData
 
 import software.config as cfg
 import software.utils as utils
@@ -179,7 +179,7 @@ class AgentNeighbour(object):
     def get_dict(self):
         d = {"ip": self.ip,
              "hostname": self.hostname,
-             "patch_current": not self.out_of_date,
+             "deployed": not self.out_of_date,
              "secs_since_ack": self.get_age(),
              "patch_failed": self.patch_failed,
              "stale_details": self.stale,
@@ -582,7 +582,7 @@ class PatchController(PatchService):
         self.socket_lock = threading.RLock()
         self.controller_neighbours_lock = threading.RLock()
         self.hosts_lock = threading.RLock()
-        self.patch_data_lock = threading.RLock()
+        self.release_data_lock = threading.RLock()
 
         self.hosts = {}
         self.controller_neighbours = {}
@@ -600,8 +600,8 @@ class PatchController(PatchService):
         self.controller_address = None
         self.agent_address = None
         self.patch_op_counter = 1
-        self.patch_data = PatchData()
-        self.patch_data.load_all()
+        self.release_data = ReleaseData()
+        self.release_data.load_all()
         try:
             self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
         except OSTreeCommandFail:
@@ -757,23 +757,20 @@ class PatchController(PatchService):
 
         self.read_state_file()
 
-        self.patch_data_lock.acquire()
-        self.hosts_lock.acquire()
-        self.interim_state = {}
-        self.patch_data.load_all()
-        self.check_patch_states()
-        self.hosts_lock.release()
+        with self.release_data_lock:
+            with self.hosts_lock:
+                self.interim_state = {}
+                self.release_data.load_all()
+                self.check_patch_states()
 
-        if os.path.exists(app_dependency_filename):
-            try:
-                with open(app_dependency_filename, 'r') as f:
-                    self.app_dependencies = json.loads(f.read())
-            except Exception:
-                LOG.exception("Failed to read app dependencies: %s", app_dependency_filename)
-        else:
-            self.app_dependencies = {}
-
-        self.patch_data_lock.release()
+            if os.path.exists(app_dependency_filename):
+                try:
+                    with open(app_dependency_filename, 'r') as f:
+                        self.app_dependencies = json.loads(f.read())
+                except Exception:
+                    LOG.exception("Failed to read app dependencies: %s", app_dependency_filename)
+            else:
+                self.app_dependencies = {}
 
         return True
 
@@ -784,8 +781,8 @@ class PatchController(PatchService):
     def check_patch_states(self):
         # If we have no hosts, we can't be sure of the current patch state
         if len(self.hosts) == 0:
-            for patch_id in self.patch_data.metadata:
-                self.patch_data.metadata[patch_id]["patchstate"] = constants.UNKNOWN
+            for patch_id in self.release_data.metadata:
+                self.release_data.metadata[patch_id]["state"] = constants.UNKNOWN
             return
 
         # Default to allowing in-service patching
@@ -796,51 +793,51 @@ class PatchController(PatchService):
         self.hosts_lock.acquire()
 
         # Initialize patch state data based on repo state and interim_state presence
-        for patch_id in self.patch_data.metadata:
+        for patch_id in self.release_data.metadata:
             if patch_id in self.interim_state:
-                if self.patch_data.metadata[patch_id]["repostate"] == constants.AVAILABLE:
-                    self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_REMOVE
-                elif self.patch_data.metadata[patch_id]["repostate"] == constants.APPLIED:
-                    self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_APPLY
-                if self.patch_data.metadata[patch_id].get("reboot_required") != "N":
+                if self.release_data.metadata[patch_id]["deploy_state"] == constants.AVAILABLE:
+                    self.release_data.metadata[patch_id]["state"] = constants.PARTIAL_REMOVE
+                elif self.release_data.metadata[patch_id]["deploy_state"] == constants.APPLIED:
+                    self.release_data.metadata[patch_id]["state"] = constants.PARTIAL_APPLY
+                if self.release_data.metadata[patch_id].get("reboot_required") != "N":
                     self.allow_insvc_patching = False
             else:
-                self.patch_data.metadata[patch_id]["patchstate"] = \
-                    self.patch_data.metadata[patch_id]["repostate"]
+                self.release_data.metadata[patch_id]["state"] = \
+                    self.release_data.metadata[patch_id]["deploy_state"]
 
         for ip in (ip for ip in list(self.hosts) if self.hosts[ip].out_of_date):
-            # If a host is out-of-date, the patch repostate is APPLIED and the patch's first
+            # If a host is out-of-date, the patch deploy_state is APPLIED and the patch's first
             # commit doesn't match the active sysroot commit on the host, then change
-            # patchstate to PARTIAL-APPLY.
-            # If a host is out-of-date, the patch repostate is AVAILABLE and the patch's first
+            # state to PARTIAL-APPLY.
+            # If a host is out-of-date, the patch deploy_state is AVAILABLE and the patch's first
             # commit is equal to the active sysroot commit on the host, then change the
-            # patchstate to PARTIAL-REMOVE. Additionally, change the patchstates of the
+            # state to PARTIAL-REMOVE. Additionally, change the states of the
             # patch required (directly or a chain dependency) by the current patch.
             skip_patch = []
-            for patch_id in self.patch_data.metadata:
+            for patch_id in self.release_data.metadata:
                 # If the patch is on a different release than the host, skip it.
-                if self.patch_data.metadata[patch_id]["sw_version"] != self.hosts[ip].sw_version:
+                if self.release_data.metadata[patch_id]["sw_version"] != self.hosts[ip].sw_version:
                     continue
 
                 if patch_id not in skip_patch:
-                    if self.patch_data.metadata[patch_id]["repostate"] == constants.AVAILABLE and \
+                    if self.release_data.metadata[patch_id]["deploy_state"] == constants.AVAILABLE and \
                             self.hosts[ip].latest_sysroot_commit == \
-                            self.patch_data.contents[patch_id]["commit1"]["commit"]:
-                        self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_REMOVE
+                            self.release_data.contents[patch_id]["commit1"]["commit"]:
+                        self.release_data.metadata[patch_id]["state"] = constants.PARTIAL_REMOVE
                         patch_dependency_list = self.get_release_dependency_list(patch_id)
                         for req_patch in patch_dependency_list:
-                            if self.patch_data.metadata[req_patch]["repostate"] == constants.AVAILABLE:
-                                self.patch_data.metadata[req_patch]["patchstate"] = constants.PARTIAL_REMOVE
+                            if self.release_data.metadata[req_patch]["deploy_state"] == constants.AVAILABLE:
+                                self.release_data.metadata[req_patch]["state"] = constants.PARTIAL_REMOVE
                             else:
-                                self.patch_data.metadata[req_patch]["patchstate"] = constants.APPLIED
+                                self.release_data.metadata[req_patch]["state"] = constants.APPLIED
                             skip_patch.append(req_patch)
-                    elif self.patch_data.metadata[patch_id]["repostate"] == constants.APPLIED and \
+                    elif self.release_data.metadata[patch_id]["deploy_state"] == constants.APPLIED and \
                             self.hosts[ip].latest_sysroot_commit != \
-                            self.patch_data.contents[patch_id]["commit1"]["commit"]:
-                        self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_APPLY
-                    if self.patch_data.metadata[patch_id].get("reboot_required") != "N" and \
-                            (self.patch_data.metadata[patch_id]["patchstate"] == constants.PARTIAL_APPLY or
-                             self.patch_data.metadata[patch_id]["patchstate"] == constants.PARTIAL_REMOVE):
+                            self.release_data.contents[patch_id]["commit1"]["commit"]:
+                        self.release_data.metadata[patch_id]["state"] = constants.PARTIAL_APPLY
+                    if self.release_data.metadata[patch_id].get("reboot_required") != "N" and \
+                            (self.release_data.metadata[patch_id]["state"] == constants.PARTIAL_APPLY or
+                             self.release_data.metadata[patch_id]["state"] == constants.PARTIAL_REMOVE):
                         self.allow_insvc_patching = False
 
         self.hosts_lock.release()
@@ -854,11 +851,11 @@ class PatchController(PatchService):
                  input param patch_id='R3'
         :param release: The software release version
         """
-        if not self.patch_data.metadata[release]["requires"]:
+        if not self.release_data.metadata[release]["requires"]:
             return []
         else:
             release_dependency_list = []
-            for req_release in self.patch_data.metadata[release]["requires"]:
+            for req_release in self.release_data.metadata[release]["requires"]:
                 release_dependency_list.append(req_release)
                 release_dependency_list = release_dependency_list + \
                     self.get_release_dependency_list(req_release)
@@ -879,10 +876,10 @@ class PatchController(PatchService):
         Deletes the restart script (if any) associated with the patch
         :param patch_id: The patch ID
         '''
-        if not self.patch_data.metadata[patch_id].get("restart_script"):
+        if not self.release_data.metadata[patch_id].get("restart_script"):
             return
 
-        restart_script_path = "%s/%s" % (root_scripts_dir, self.patch_data.metadata[patch_id]["restart_script"])
+        restart_script_path = "%s/%s" % (root_scripts_dir, self.release_data.metadata[patch_id]["restart_script"])
         try:
             # Delete the metadata
             os.remove(restart_script_path)
@@ -898,8 +895,8 @@ class PatchController(PatchService):
 
         # Pass the current patch state to the semantic check as a series of args
         patch_state_args = []
-        for patch_id in list(self.patch_data.metadata):
-            patch_state = '%s=%s' % (patch_id, self.patch_data.metadata[patch_id]["patchstate"])
+        for patch_id in list(self.release_data.metadata):
+            patch_state = '%s=%s' % (patch_id, self.release_data.metadata[patch_id]["state"])
             patch_state_args += ['-p', patch_state]
 
         # Run semantic checks, if any
@@ -962,11 +959,10 @@ class PatchController(PatchService):
             # and check to see if it's already uploaded
             # todo(abailey) We should not require the ID as part of the file
             (release_id, ext) = os.path.splitext(os.path.basename(release_file))
-            # todo(abailey): self.patch_data should be renamed
-            if release_id in self.patch_data.metadata:
-                if self.patch_data.metadata[release_id]["repostate"] == constants.APPLIED:
+            if release_id in self.release_data.metadata:
+                if self.release_data.metadata[release_id]["deploy_state"] == constants.APPLIED:
                     mdir = applied_dir
-                elif self.patch_data.metadata[release_id]["repostate"] == constants.COMMITTED:
+                elif self.release_data.metadata[release_id]["deploy_state"] == constants.COMMITTED:
                     msg = "%s is committed. Metadata not updated" % release_id
                     LOG.info(msg)
                     msg_info += msg + "\n"
@@ -979,9 +975,9 @@ class PatchController(PatchService):
                     thisrelease = PatchFile.extract_patch(release_file,
                                                           metadata_dir=mdir,
                                                           metadata_only=True,
-                                                          existing_content=self.patch_data.contents[release_id],
+                                                          existing_content=self.release_data.contents[release_id],
                                                           base_pkgdata=self.base_pkgdata)
-                    self.patch_data.update_patch(thisrelease)
+                    self.release_data.update_release(thisrelease)
                     msg = "%s is already uploaded. Updated metadata only" % release_id
                     LOG.info(msg)
                     msg_info += msg + "\n"
@@ -1017,13 +1013,13 @@ class PatchController(PatchService):
                                                       base_pkgdata=self.base_pkgdata)
 
                 msg_info += "%s is now available\n" % release_id
-                self.patch_data.add_patch(thisrelease)
+                self.release_data.add_release(thisrelease)
 
-                self.patch_data.metadata[release_id]["repostate"] = constants.AVAILABLE
+                self.release_data.metadata[release_id]["deploy_state"] = constants.AVAILABLE
                 if len(self.hosts) > 0:
-                    self.patch_data.metadata[release_id]["patchstate"] = constants.AVAILABLE
+                    self.release_data.metadata[release_id]["state"] = constants.AVAILABLE
                 else:
-                    self.patch_data.metadata[release_id]["patchstate"] = constants.UNKNOWN
+                    self.release_data.metadata[release_id]["state"] = constants.UNKNOWN
             except ReleaseValidationFailure as e:
                 msg = "Release validation failed for %s" % release_id
                 if str(e) is not None and str(e) != '':
@@ -1050,7 +1046,7 @@ class PatchController(PatchService):
         # major versions of releases in the list don't match
         ver = None
         for release in release_list:
-            release_version = self.patch_data.metadata[release]["sw_version"]
+            release_version = self.release_data.metadata[release]["sw_version"]
             if ver is None:
                 ver = utils.get_major_release_version(release_version)
             elif release_version != ver:
@@ -1092,7 +1088,7 @@ class PatchController(PatchService):
         # Verify releases exist and are in proper state first
         id_verification = True
         for release_id in release_list:
-            if release_id not in self.patch_data.metadata:
+            if release_id not in self.release_data.metadata:
                 msg = "Release %s does not exist" % release_id
                 LOG.error(msg)
                 msg_error += msg + "\n"
@@ -1101,10 +1097,10 @@ class PatchController(PatchService):
 
             # Get the aggregated release state, if possible
             releasestate = constants.UNKNOWN
-            if release_id in self.patch_data.metadata:
-                releasestate = self.patch_data.metadata[release_id]["patchstate"]
+            if release_id in self.release_data.metadata:
+                releasestate = self.release_data.metadata[release_id]["state"]
 
-            if self.patch_data.metadata[release_id]["repostate"] != constants.AVAILABLE or \
+            if self.release_data.metadata[release_id]["deploy_state"] != constants.AVAILABLE or \
                     (releasestate != constants.AVAILABLE and releasestate != constants.UNKNOWN):
                 msg = "Release %s not in Available state" % release_id
                 LOG.error(msg)
@@ -1117,7 +1113,7 @@ class PatchController(PatchService):
 
         # Handle operation
         for release_id in release_list:
-            release_sw_version = self.patch_data.metadata[release_id]["sw_version"]
+            release_sw_version = self.release_data.metadata[release_id]["sw_version"]
 
             # Need to support delete of older centos patches (metadata) from upgrades.
             # todo(abailey): do we need to be concerned about this since this component is new.
@@ -1142,7 +1138,7 @@ class PatchController(PatchService):
                 raise MetadataFail(msg)
 
             self.delete_restart_script(release_id)
-            self.patch_data.delete_patch(release_id)
+            self.release_data.delete_release(release_id)
             msg = "%s has been deleted" % release_id
             LOG.info(msg)
             msg_info += msg + "\n"
@@ -1171,9 +1167,9 @@ class PatchController(PatchService):
         # Refresh data
         self.base_pkgdata.loaddirs()
 
-        self.patch_data.load_all_metadata(avail_dir, repostate=constants.AVAILABLE)
-        self.patch_data.load_all_metadata(applied_dir, repostate=constants.APPLIED)
-        self.patch_data.load_all_metadata(committed_dir, repostate=constants.COMMITTED)
+        self.release_data.load_all_metadata(avail_dir, deploy_state=constants.AVAILABLE)
+        self.release_data.load_all_metadata(applied_dir, deploy_state=constants.APPLIED)
+        self.release_data.load_all_metadata(committed_dir, deploy_state=constants.COMMITTED)
 
         repo_dir[release] = "%s/rel-%s" % (repo_root_dir, release)
 
@@ -1221,13 +1217,13 @@ class PatchController(PatchService):
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         # Delete patch XML files
-        for patch_id in list(self.patch_data.metadata):
-            if self.patch_data.metadata[patch_id]["sw_version"] != release:
+        for patch_id in list(self.release_data.metadata):
+            if self.release_data.metadata[patch_id]["sw_version"] != release:
                 continue
 
-            if self.patch_data.metadata[patch_id]["repostate"] == constants.APPLIED:
+            if self.release_data.metadata[patch_id]["deploy_state"] == constants.APPLIED:
                 mdir = applied_dir
-            elif self.patch_data.metadata[patch_id]["repostate"] == constants.COMMITTED:
+            elif self.release_data.metadata[patch_id]["deploy_state"] == constants.COMMITTED:
                 mdir = committed_dir
             else:
                 mdir = avail_dir
@@ -1251,11 +1247,11 @@ class PatchController(PatchService):
                 msg = "Failed to remove metadata for %s" % patch_id
                 LOG.exception(msg)
 
-                # Refresh patch data
-                self.patch_data = PatchData()
-                self.patch_data.load_all_metadata(avail_dir, repostate=constants.AVAILABLE)
-                self.patch_data.load_all_metadata(applied_dir, repostate=constants.APPLIED)
-                self.patch_data.load_all_metadata(committed_dir, repostate=constants.COMMITTED)
+                # Refresh release data
+                self.release_data = ReleaseData()
+                self.release_data.load_all_metadata(avail_dir, deploy_state=constants.AVAILABLE)
+                self.release_data.load_all_metadata(applied_dir, deploy_state=constants.APPLIED)
+                self.release_data.load_all_metadata(committed_dir, deploy_state=constants.COMMITTED)
 
                 raise MetadataFail(msg)
 
@@ -1279,11 +1275,11 @@ class PatchController(PatchService):
             LOG.info(msg)
             del repo_dir[release]
 
-            # Refresh patch data
-            self.patch_data = PatchData()
-            self.patch_data.load_all_metadata(avail_dir, repostate=constants.AVAILABLE)
-            self.patch_data.load_all_metadata(applied_dir, repostate=constants.APPLIED)
-            self.patch_data.load_all_metadata(committed_dir, repostate=constants.COMMITTED)
+            # Refresh release data
+            self.release_data = ReleaseData()
+            self.release_data.load_all_metadata(avail_dir, deploy_state=constants.AVAILABLE)
+            self.release_data.load_all_metadata(applied_dir, deploy_state=constants.APPLIED)
+            self.release_data.load_all_metadata(committed_dir, deploy_state=constants.COMMITTED)
 
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
@@ -1299,11 +1295,11 @@ class PatchController(PatchService):
         if self.base_pkgdata is not None and release in self.base_pkgdata.pkgs:
             del self.base_pkgdata.pkgs[release]
 
-        # Refresh patch data
-        self.patch_data = PatchData()
-        self.patch_data.load_all_metadata(avail_dir, repostate=constants.AVAILABLE)
-        self.patch_data.load_all_metadata(applied_dir, repostate=constants.APPLIED)
-        self.patch_data.load_all_metadata(committed_dir, repostate=constants.COMMITTED)
+        # Refresh release data
+        self.release_data = ReleaseData()
+        self.release_data.load_all_metadata(avail_dir, deploy_state=constants.AVAILABLE)
+        self.release_data.load_all_metadata(applied_dir, deploy_state=constants.APPLIED)
+        self.release_data.load_all_metadata(committed_dir, deploy_state=constants.COMMITTED)
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
@@ -1323,7 +1319,7 @@ class PatchController(PatchService):
         # First, verify that all specified patches exist
         id_verification = True
         for patch_id in patch_ids:
-            if patch_id not in self.patch_data.metadata:
+            if patch_id not in self.release_data.metadata:
                 msg = "Patch %s does not exist" % patch_id
                 LOG.error(msg)
                 msg_error += msg + "\n"
@@ -1333,8 +1329,8 @@ class PatchController(PatchService):
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         required_patches = {}
-        for patch_iter in list(self.patch_data.metadata):
-            for req_patch in self.patch_data.metadata[patch_iter]["requires"]:
+        for patch_iter in list(self.release_data.metadata):
+            for req_patch in self.release_data.metadata[patch_iter]["requires"]:
                 if req_patch not in patch_ids:
                     continue
 
@@ -1371,10 +1367,10 @@ class PatchController(PatchService):
         # Increment the software_op_counter here
         self.inc_patch_op_counter()
 
-        self.patch_data_lock.acquire()
-        # self.patch_data.load_all()
+        self.release_data_lock.acquire()
+        # self.release_data.load_all()
         self.check_patch_states()
-        self.patch_data_lock.release()
+        self.release_data_lock.release()
 
         if self.sock_out is None:
             return True
@@ -1435,19 +1431,19 @@ class PatchController(PatchService):
             query_release = kwargs["release"]
 
         results = {}
-        self.patch_data_lock.acquire()
+        self.release_data_lock.acquire()
         if query_state is None and query_release is None:
             # Return everything
-            results = self.patch_data.metadata
+            results = self.release_data.metadata
         else:
             # Filter results
-            for release_id, data in self.patch_data.metadata.items():
-                if query_state is not None and data["repostate"] != query_state:
+            for release_id, data in self.release_data.metadata.items():
+                if query_state is not None and data["deploy_state"] != query_state:
                     continue
                 if query_release is not None and data["sw_version"] != query_release:
                     continue
                 results[release_id] = data
-        self.patch_data_lock.release()
+        self.release_data_lock.release()
 
         return results
 
@@ -1458,20 +1454,18 @@ class PatchController(PatchService):
                    "contents": {},
                    "error": ""}
 
-        self.patch_data_lock.acquire()
+        with self.release_data_lock:
 
-        for release_id in release_ids:
-            if release_id not in list(self.patch_data.metadata):
-                results["error"] += "%s is unrecognized\n" % release_id
+            for release_id in release_ids:
+                if release_id not in list(self.release_data.metadata):
+                    results["error"] += "%s is unrecognized\n" % release_id
 
-        for release_id, data in self.patch_data.metadata.items():
-            if release_id in release_ids:
-                results["metadata"][release_id] = data
-        for release_id, data in self.patch_data.contents.items():
-            if release_id in release_ids:
-                results["contents"][release_id] = data
-
-        self.patch_data_lock.release()
+            for release_id, data in self.release_data.metadata.items():
+                if release_id in release_ids:
+                    results["metadata"][release_id] = data
+            for release_id, data in self.release_data.contents.items():
+                if release_id in release_ids:
+                    results["contents"][release_id] = data
 
         return results
 
@@ -1479,22 +1473,20 @@ class PatchController(PatchService):
         dependencies = set()
         patch_added = False
 
-        self.patch_data_lock.acquire()
+        with self.release_data_lock:
 
-        # Add patches to workset
-        for patch_id in sorted(patch_ids):
-            dependencies.add(patch_id)
-            patch_added = True
+            # Add patches to workset
+            for patch_id in sorted(patch_ids):
+                dependencies.add(patch_id)
+                patch_added = True
 
-        while patch_added:
-            patch_added = False
-            for patch_id in sorted(dependencies):
-                for req in self.patch_data.metadata[patch_id]["requires"]:
-                    if req not in dependencies:
-                        dependencies.add(req)
-                        patch_added = recursive
-
-        self.patch_data_lock.release()
+            while patch_added:
+                patch_added = False
+                for patch_id in sorted(dependencies):
+                    for req in self.release_data.metadata[patch_id]["requires"]:
+                        if req not in dependencies:
+                            dependencies.add(req)
+                            patch_added = recursive
 
         return sorted(dependencies)
 
@@ -1512,16 +1504,15 @@ class PatchController(PatchService):
         if kwargs.get("recursive") == "yes":
             recursive = True
 
-        self.patch_data_lock.acquire()
+        with self.release_data_lock:
 
-        # Verify patch IDs
-        for patch_id in sorted(patch_ids):
-            if patch_id not in list(self.patch_data.metadata):
-                errormsg = "%s is unrecognized\n" % patch_id
-                LOG.info("patch_query_dependencies: %s", errormsg)
-                results["error"] += errormsg
-                failure = True
-        self.patch_data_lock.release()
+            # Verify patch IDs
+            for patch_id in sorted(patch_ids):
+                if patch_id not in list(self.release_data.metadata):
+                    errormsg = "%s is unrecognized\n" % patch_id
+                    LOG.info("patch_query_dependencies: %s", errormsg)
+                    results["error"] += errormsg
+                    failure = True
 
         if failure:
             LOG.info("patch_query_dependencies failed")
@@ -1552,11 +1543,10 @@ class PatchController(PatchService):
 
         # Ensure there are only REL patches
         non_rel_list = []
-        self.patch_data_lock.acquire()
-        for patch_id in self.patch_data.metadata:
-            if self.patch_data.metadata[patch_id]['status'] != constants.STATUS_RELEASED:
-                non_rel_list.append(patch_id)
-        self.patch_data_lock.release()
+        with self.release_data_lock:
+            for patch_id in self.release_data.metadata:
+                if self.release_data.metadata[patch_id]['status'] != constants.STATUS_RELEASED:
+                    non_rel_list.append(patch_id)
 
         if len(non_rel_list) > 0:
             errormsg = "A commit cannot be performed with non-REL status patches in the system:\n"
@@ -1566,15 +1556,14 @@ class PatchController(PatchService):
             results["error"] += errormsg
             return results
 
-        # Verify patch IDs
-        self.patch_data_lock.acquire()
-        for patch_id in sorted(patch_ids):
-            if patch_id not in list(self.patch_data.metadata):
-                errormsg = "%s is unrecognized\n" % patch_id
-                LOG.info("patch_commit: %s", errormsg)
-                results["error"] += errormsg
-                failure = True
-        self.patch_data_lock.release()
+        # Verify Release IDs
+        with self.release_data_lock:
+            for patch_id in sorted(patch_ids):
+                if patch_id not in list(self.release_data.metadata):
+                    errormsg = "%s is unrecognized\n" % patch_id
+                    LOG.info("patch_commit: %s", errormsg)
+                    results["error"] += errormsg
+                    failure = True
 
         if failure:
             LOG.info("patch_commit: Failed patch ID check")
@@ -1584,12 +1573,11 @@ class PatchController(PatchService):
 
         # Check patch states
         avail_list = []
-        self.patch_data_lock.acquire()
-        for patch_id in commit_list:
-            if self.patch_data.metadata[patch_id]['patchstate'] != constants.APPLIED \
-                    and self.patch_data.metadata[patch_id]['patchstate'] != constants.COMMITTED:
-                avail_list.append(patch_id)
-        self.patch_data_lock.release()
+        with self.release_data_lock:
+            for patch_id in commit_list:
+                if self.release_data.metadata[patch_id]['state'] != constants.APPLIED \
+                        and self.release_data.metadata[patch_id]['state'] != constants.COMMITTED:
+                    avail_list.append(patch_id)
 
         if len(avail_list) > 0:
             errormsg = "The following patches are not applied and cannot be committed:\n"
@@ -1599,17 +1587,17 @@ class PatchController(PatchService):
             results["error"] += errormsg
             return results
 
-        with self.patch_data_lock:
+        with self.release_data_lock:
             for patch_id in commit_list:
                 # Fetch file paths that need to be cleaned up to
                 # free patch storage disk space
-                if self.patch_data.metadata[patch_id].get("restart_script"):
+                if self.release_data.metadata[patch_id].get("restart_script"):
                     restart_script_path = "%s/%s" % \
                         (root_scripts_dir,
-                         self.patch_data.metadata[patch_id]["restart_script"])
+                         self.release_data.metadata[patch_id]["restart_script"])
                     if os.path.exists(restart_script_path):
                         cleanup_files.add(restart_script_path)
-                patch_sw_version = self.patch_data.metadata[patch_id]["sw_version"]
+                patch_sw_version = self.release_data.metadata[patch_id]["sw_version"]
                 abs_ostree_tar_dir = package_dir[patch_sw_version]
                 software_tar_path = "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id)
                 if os.path.exists(software_tar_path):
@@ -1649,7 +1637,7 @@ class PatchController(PatchService):
                 LOG.exception(msg)
                 raise MetadataFail(msg)
 
-        self.patch_data.load_all()
+        self.release_data.load_all()
 
         results["info"] = "The patches have been committed."
         return results
@@ -1685,13 +1673,13 @@ class PatchController(PatchService):
         return rc
 
     def copy_restart_scripts(self):
-        with self.patch_data_lock:
-            for patch_id in self.patch_data.metadata:
-                if (self.patch_data.metadata[patch_id]["patchstate"] in
+        with self.release_data_lock:
+            for patch_id in self.release_data.metadata:
+                if (self.release_data.metadata[patch_id]["state"] in
                     [constants.PARTIAL_APPLY, constants.PARTIAL_REMOVE]) \
-                   and self.patch_data.metadata[patch_id].get("restart_script"):
+                   and self.release_data.metadata[patch_id].get("restart_script"):
                     try:
-                        restart_script_name = self.patch_data.metadata[patch_id]["restart_script"]
+                        restart_script_name = self.release_data.metadata[patch_id]["restart_script"]
                         restart_script_path = "%s/%s" \
                             % (root_scripts_dir, restart_script_name)
                         dest_path = constants.PATCH_SCRIPTS_STAGING_DIR
@@ -1707,9 +1695,9 @@ class PatchController(PatchService):
                         msg = "Failed to copy the restart script for %s" % patch_id
                         LOG.exception(msg)
                         raise SoftwareError(msg)
-                elif self.patch_data.metadata[patch_id].get("restart_script"):
+                elif self.release_data.metadata[patch_id].get("restart_script"):
                     try:
-                        restart_script_name = self.patch_data.metadata[patch_id]["restart_script"]
+                        restart_script_name = self.release_data.metadata[patch_id]["restart_script"]
                         restart_script_path = "%s/%s" \
                             % (constants.PATCH_SCRIPTS_STAGING_DIR, restart_script_name)
                         if os.path.exists(restart_script_path):
@@ -1740,8 +1728,8 @@ class PatchController(PatchService):
             # Set patch_ids to list of all available patches
             # We're getting this list now, before we load the applied patches
             patch_list = []
-            for patch_id in sorted(list(self.patch_data.metadata)):
-                if self.patch_data.metadata[patch_id]["repostate"] == constants.AVAILABLE:
+            for patch_id in sorted(list(self.release_data.metadata)):
+                if self.release_data.metadata[patch_id]["deploy_state"] == constants.AVAILABLE:
                     patch_list.append(patch_id)
 
             if len(patch_list) == 0:
@@ -1753,7 +1741,7 @@ class PatchController(PatchService):
         # for the specified deployment list
         id_verification = True
         for deployment in deployment_list:
-            if deployment not in self.patch_data.metadata:
+            if deployment not in self.release_data.metadata:
                 msg = "Software release version corresponding to the specified deployment " \
                       "%s does not exist" % deployment
                 LOG.error(msg)
@@ -1778,8 +1766,8 @@ class PatchController(PatchService):
         # Check for patches that can't be applied during an upgrade
         upgrade_check = True
         for deployment in deployment_list:
-            if self.patch_data.metadata[deployment]["sw_version"] != SW_VERSION \
-                    and self.patch_data.metadata[deployment].get("apply_active_release_only") == "Y":
+            if self.release_data.metadata[deployment]["sw_version"] != SW_VERSION \
+                    and self.release_data.metadata[deployment].get("apply_active_release_only") == "Y":
                 msg = "%s cannot be created during an upgrade" % deployment
                 LOG.error(msg)
                 msg_error += msg + "\n"
@@ -1793,7 +1781,7 @@ class PatchController(PatchService):
         # versions that need it
         required_releases = {}
         for release in deployment_list:
-            for req_release in self.patch_data.metadata[release]["requires"]:
+            for req_release in self.release_data.metadata[release]["requires"]:
                 # Ignore patches in the op set
                 if req_release in deployment_list:
                     continue
@@ -1806,8 +1794,8 @@ class PatchController(PatchService):
         # Now verify the state of the required patches
         req_verification = True
         for req_release, iter_deployment_list in required_releases.items():
-            if req_release not in self.patch_data.metadata \
-                    or self.patch_data.metadata[req_release]["repostate"] == constants.AVAILABLE:
+            if req_release not in self.release_data.metadata \
+                    or self.release_data.metadata[req_release]["deploy_state"] == constants.AVAILABLE:
                 msg = "%s is required by: %s" % (req_release, ", ".join(sorted(iter_deployment_list)))
                 msg_error += msg + "\n"
                 LOG.info(msg)
@@ -1825,14 +1813,14 @@ class PatchController(PatchService):
             LOG.info(msg)
             audit_log_info(msg)
 
-            if self.patch_data.metadata[deployment]["repostate"] == constants.APPLIED \
-               or self.patch_data.metadata[deployment]["repostate"] == constants.COMMITTED:
+            if self.release_data.metadata[deployment]["deploy_state"] == constants.APPLIED \
+               or self.release_data.metadata[deployment]["deploy_state"] == constants.COMMITTED:
                 msg = "%s is already created" % deployment
                 LOG.info(msg)
                 msg_info += msg + "\n"
                 continue
 
-            release_sw_version = self.patch_data.metadata[deployment]["sw_version"]
+            release_sw_version = self.release_data.metadata[deployment]["sw_version"]
 
             latest_commit = ""
             try:
@@ -1840,10 +1828,10 @@ class PatchController(PatchService):
             except OSTreeCommandFail:
                 LOG.exception("Failure during commit consistency check for %s.", deployment)
 
-            if self.patch_data.contents[deployment]["base"]["commit"] != latest_commit:
+            if self.release_data.contents[deployment]["base"]["commit"] != latest_commit:
                 msg = "The base commit %s for %s does not match the latest commit %s " \
                       "on this system." \
-                      % (self.patch_data.contents[deployment]["base"]["commit"],
+                      % (self.release_data.contents[deployment]["base"]["commit"],
                          deployment,
                          latest_commit)
                 LOG.info(msg)
@@ -1892,15 +1880,15 @@ class PatchController(PatchService):
                 LOG.exception(msg)
                 raise MetadataFail(msg)
 
-            self.patch_data.metadata[deployment]["repostate"] = constants.APPLIED
+            self.release_data.metadata[deployment]["deploy_state"] = constants.APPLIED
             if len(self.hosts) > 0:
-                self.patch_data.metadata[deployment]["patchstate"] = constants.PARTIAL_APPLY
+                self.release_data.metadata[deployment]["state"] = constants.PARTIAL_APPLY
             else:
-                self.patch_data.metadata[deployment]["patchstate"] = constants.UNKNOWN
+                self.release_data.metadata[deployment]["state"] = constants.UNKNOWN
 
             # Commit1 in release metadata.xml file represents the latest commit
             # after this release has been applied to the feed repo
-            self.latest_feed_commit = self.patch_data.contents[deployment]["commit1"]["commit"]
+            self.latest_feed_commit = self.release_data.contents[deployment]["commit1"]["commit"]
 
             with self.hosts_lock:
                 self.interim_state[deployment] = list(self.hosts)
@@ -1920,7 +1908,7 @@ class PatchController(PatchService):
         # First, verify that all specified releases exist
         id_verification = True
         for release in sorted(set(releases)):
-            if release not in self.patch_data.metadata:
+            if release not in self.release_data.metadata:
                 msg = "Release %s does not exist" % release
                 LOG.error(msg)
                 msg_error += msg + "\n"
@@ -1947,7 +1935,7 @@ class PatchController(PatchService):
         # See if any of the patches are marked as unremovable
         unremovable_verification = True
         for release in release_list:
-            if self.patch_data.metadata[release].get("unremovable") == "Y":
+            if self.release_data.metadata[release].get("unremovable") == "Y":
                 if remove_unremovable:
                     msg = "Unremovable release %s being removed" % release
                     LOG.warning(msg)
@@ -1957,7 +1945,7 @@ class PatchController(PatchService):
                     LOG.error(msg)
                     msg_error += msg + "\n"
                     unremovable_verification = False
-            elif self.patch_data.metadata[release]['repostate'] == constants.COMMITTED:
+            elif self.release_data.metadata[release]['deploy_state'] == constants.COMMITTED:
                 msg = "Release %s is committed and cannot be removed" % release
                 LOG.error(msg)
                 msg_error += msg + "\n"
@@ -1969,16 +1957,16 @@ class PatchController(PatchService):
         # Next, see if any of the releases are required by applied releases
         # required_releases will map the required release to the releases that need it
         required_releases = {}
-        for release_iter in list(self.patch_data.metadata):
+        for release_iter in list(self.release_data.metadata):
             # Ignore patches in the op set
             if release_iter in release_list:
                 continue
 
             # Only check applied patches
-            if self.patch_data.metadata[release_iter]["repostate"] == constants.AVAILABLE:
+            if self.release_data.metadata[release_iter]["deploy_state"] == constants.AVAILABLE:
                 continue
 
-            for req_release in self.patch_data.metadata[release_iter]["requires"]:
+            for req_release in self.release_data.metadata[release_iter]["requires"]:
                 if req_release not in release_list:
                     continue
 
@@ -2021,25 +2009,25 @@ class PatchController(PatchService):
             LOG.info(msg)
             audit_log_info(msg)
 
-            if self.patch_data.metadata[release]["repostate"] == constants.AVAILABLE:
+            if self.release_data.metadata[release]["deploy_state"] == constants.AVAILABLE:
                 msg = "%s is not in the repo" % release
                 LOG.info(msg)
                 msg_info += msg + "\n"
                 continue
 
             major_release_sw_version = utils.get_major_release_version(
-                self.patch_data.metadata[release]["sw_version"])
+                self.release_data.metadata[release]["sw_version"])
             # this is an ostree patch
             # Base commit is fetched from the patch metadata
-            base_commit = self.patch_data.contents[release]["base"]["commit"]
+            base_commit = self.release_data.contents[release]["base"]["commit"]
             feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, major_release_sw_version)
             try:
                 # Reset the ostree HEAD
                 ostree_utils.reset_ostree_repo_head(base_commit, feed_ostree)
 
                 # Delete all commits that belong to this release
-                for i in range(int(self.patch_data.contents[release]["number_of_commits"])):
-                    commit_to_delete = self.patch_data.contents[release]["commit%s" % (i + 1)]["commit"]
+                for i in range(int(self.release_data.contents[release]["number_of_commits"])):
+                    commit_to_delete = self.release_data.contents[release]["commit%s" % (i + 1)]["commit"]
                     ostree_utils.delete_ostree_repo_commit(commit_to_delete, feed_ostree)
 
                 # Update the feed ostree summary
@@ -2059,18 +2047,18 @@ class PatchController(PatchService):
                 LOG.exception(msg)
                 raise MetadataFail(msg)
 
-            # update patchstate and repostate
-            self.patch_data.metadata[release]["repostate"] = constants.AVAILABLE
+            # update state and deploy_state
+            self.release_data.metadata[release]["deploy_state"] = constants.AVAILABLE
             if len(self.hosts) > 0:
-                self.patch_data.metadata[release]["patchstate"] = constants.PARTIAL_REMOVE
+                self.release_data.metadata[release]["state"] = constants.PARTIAL_REMOVE
             else:
-                self.patch_data.metadata[release]["patchstate"] = constants.UNKNOWN
+                self.release_data.metadata[release]["state"] = constants.UNKNOWN
 
             # only update lastest_feed_commit if it is an ostree patch
-            if self.patch_data.contents[release].get("base") is not None:
+            if self.release_data.contents[release].get("base") is not None:
                 # Base Commit in this release's metadata.xml file represents the latest commit
                 # after this release has been removed from the feed repo
-                self.latest_feed_commit = self.patch_data.contents[release]["base"]["commit"]
+                self.latest_feed_commit = self.release_data.contents[release]["base"]["commit"]
 
             with self.hosts_lock:
                 self.interim_state[release] = list(self.hosts)
@@ -2227,37 +2215,33 @@ class PatchController(PatchService):
     def is_applied(self, patch_ids):
         all_applied = True
 
-        self.patch_data_lock.acquire()
+        with self.release_data_lock:
 
-        for patch_id in patch_ids:
-            if patch_id not in self.patch_data.metadata:
-                all_applied = False
-                break
+            for patch_id in patch_ids:
+                if patch_id not in self.release_data.metadata:
+                    all_applied = False
+                    break
 
-            if self.patch_data.metadata[patch_id]["patchstate"] != constants.APPLIED:
-                all_applied = False
-                break
-
-        self.patch_data_lock.release()
+                if self.release_data.metadata[patch_id]["state"] != constants.APPLIED:
+                    all_applied = False
+                    break
 
         return all_applied
 
     def is_available(self, patch_ids):
         all_available = True
 
-        self.patch_data_lock.acquire()
+        with self.release_data_lock:
 
-        for patch_id in patch_ids:
-            if patch_id not in self.patch_data.metadata:
-                all_available = False
-                break
+            for patch_id in patch_ids:
+                if patch_id not in self.release_data.metadata:
+                    all_available = False
+                    break
 
-            if self.patch_data.metadata[patch_id]["patchstate"] != \
-                    constants.AVAILABLE:
-                all_available = False
-                break
-
-        self.patch_data_lock.release()
+                if self.release_data.metadata[patch_id]["state"] != \
+                        constants.AVAILABLE:
+                    all_available = False
+                    break
 
         return all_available
 
@@ -2273,7 +2257,7 @@ class PatchController(PatchService):
         LOG.info("Handling app dependencies report: app=%s, patch_ids=%s",
                  appname, ','.join(patch_ids))
 
-        self.patch_data_lock.acquire()
+        self.release_data_lock.acquire()
 
         if len(patch_ids) == 0:
             if appname in self.app_dependencies:
@@ -2294,7 +2278,7 @@ class PatchController(PatchService):
             LOG.exception("Failed in report_app_dependencies")
             raise SoftwareFail("Internal failure")
         finally:
-            self.patch_data_lock.release()
+            self.release_data_lock.release()
 
         return True
 
@@ -2302,11 +2286,11 @@ class PatchController(PatchService):
         """
         Query application dependencies
         """
-        self.patch_data_lock.acquire()
+        self.release_data_lock.acquire()
 
         data = self.app_dependencies
 
-        self.patch_data_lock.release()
+        self.release_data_lock.release()
 
         return dict(data)
 

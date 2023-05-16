@@ -1,11 +1,11 @@
-% if not pd is UNDEFINED:
-<pd>
-    % if len(pd) > 0:
-    % for patch_id in sorted(pd.keys()):
-${patchelem(patch_id)}
+% if not sd is UNDEFINED:
+<sd>
+    % if len(sd) > 0:
+    % for release_id in sorted(sd.keys()):
+${patchelem(release_id)}
     % endfor
     % endif
-</pd>
+</sd>
 % endif
 % if not info is UNDEFINED or not warning is UNDEFINED or not error is UNDEFINED:
 <info>
@@ -24,72 +24,72 @@ ${error}
 % endif
 </error>
 % endif
-<%def name="patchelem(patch_id)">\
-<%p = pd[patch_id] %>\
-    <patch>
-        <patch_id>
-            ${patch_id}
-        </patch_id>
+<%def name="patchelem(release_id)">\
+<%s = sd[release_id] %>\
+    <release>
+        <release_id>
+            ${release_id}
+        </release_id>
         <status>
-        % if p["status"] != "":
-            ${p["status"]}
+        % if s["status"] != "":
+            ${s["status"]}
         % endif
         </status>
         <sw_version>
-        % if p["sw_version"] != "":
-            ${p["sw_version"]}
+        % if s["sw_version"] != "":
+            ${s["sw_version"]}
         % endif
         </sw_version>
-        <repostate>
-        % if p["repostate"] != "":
-            ${p["repostate"]}
+        <deploy_state>
+        % if s["deploy_state"] != "":
+            ${s["deploy_state"]}
         % endif
-        </repostate>
-        <patchstate>
-        % if p["patchstate"] != "":
-            ${p["patchstate"]}
+        </deploy_state>
+        <state>
+        % if s["state"] != "":
+            ${s["state"]}
         % endif
-        </patchstate>
+        </state>
         <status>
-        % if p["status"] != "":
-            ${p["status"]}
+        % if s["status"] != "":
+            ${s["status"]}
         % endif
         </status>
         <unremovable>
-        % if p["unremovable"] != "":
-            ${p["unremovable"]}
+        % if s["unremovable"] != "":
+            ${s["unremovable"]}
         % endif
         </unremovable>
         <reboot_required>
-        % if p["reboot_required"] != "":
-            ${p["reboot_required"]}
+        % if s["reboot_required"] != "":
+            ${s["reboot_required"]}
         % endif
         </reboot_required>
         <summary>
-        % if p["summary"] != "":
-            ${p["summary"]}
+        % if s["summary"] != "":
+            ${s["summary"]}
         % endif
         </summary>
         <description>
-        % if p["description"] != "":
-            ${p["description"]}
+        % if s["description"] != "":
+            ${s["description"]}
         % endif
         </description>
         <install_instructions>
-        % if p["install_instructions"] != "":
-            ${p["install_instructions"]}
+        % if s["install_instructions"] != "":
+            ${s["install_instructions"]}
         % endif
         </install_instructions>
         <warnings>
-        % if p["warnings"] != "":
-            ${p["warnings"]}
+        % if s["warnings"] != "":
+            ${s["warnings"]}
         % endif
         </warnings>
         <requires>
-        % if "requires" in p and len(p["requires"]) > 0:
-            % for req in sorted(p["requires"]):
-                <patch>${req}</patch>
+        % if "requires" in s and len(s["requires"]) > 0:
+            % for req in sorted(s["requires"]):
+                <release>${req}</release>
             % endfor
         % endif
         </requires>
-    </patch></%def>
+    </release></%def>
