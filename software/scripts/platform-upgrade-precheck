@@ -1,0 +1,184 @@
+#!/usr/bin/python3
+# -*- encoding: utf-8 -*-
+#
+# vim: tabstop=4 shiftwidth=4 softtabstop=4
+#
+# Copyright (c) 2023 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+"""
+Run platform upgrade precheck from sysinv as a standalone executable
+"""
+
+import os
+import socket
+import subprocess
+import sys
+
+
+class HealthUpgrade(object):
+
+    SUCCESS_MSG = 'OK'
+    FAIL_MSG = 'Fail'
+
+    def __init__(self):
+        env = {}
+        with open("/etc/platform/openrc", "r") as f:
+            lines = f.readlines()
+            for line in lines:
+                if "export OS_" in line:
+                    parsed_line = line.lstrip("export ").split("=")
+                    env[parsed_line[0]] = parsed_line[1].strip()
+            try:
+                env["OS_PASSWORD"] = subprocess.check_output(
+                    ["keyring", "get", "CGCS", "admin"],
+                    text=True).strip()
+            except subprocess.CalledProcessError as exc:
+                raise Exception("Unable to get auth information")
+        self._env = env
+
+    # TODO(heitormatsui): implement load precheck for the new software
+    #  management framework when API/database are available
+    def _check_imported_load(self):
+        """Checks if there is a valid load imported for upgrade"""
+        success, upgrade_version = True, "23.09.0"
+        return success, upgrade_version
+
+    # TODO(heitormatsui): implement patch precheck for the new software
+    #  management framework when API/database are available
+    def _check_required_patches(self, upgrade_version):
+        """Checks if required patches for the imported load are installed"""
+        return True, []
+
+    def _check_active_is_controller_0(self):
+        """Checks that active controller is controller-0"""
+        return socket.gethostname() == "controller-0"
+
+    def _check_license(self, version):
+        """Validates the current license is valid for the specified version"""
+        check_binary = "/usr/bin/verify-license"
+        license_file = '/etc/platform/.license'
+
+        with open(os.devnull, "w") as fnull:
+            try:
+                subprocess.check_call([check_binary, license_file, version],  # pylint: disable=not-callable
+                                      stdout=fnull, stderr=fnull)
+            except subprocess.CalledProcessError:
+                return False
+
+        return True
+
+    def _check_kube_version(self):
+        try:
+            output = subprocess.check_output(["system", "kube-version-list", "--nowrap"],  # pylint: disable=not-callable
+                                             env=self._env, text=True)
+        except subprocess.CalledProcessError:
+            return False, "Error checking kubernetes version"
+
+        # output comes in table format, remove headers and last line
+        kubernetes_versions = output.split("\n")[3:-2]
+        # latest version is the last line on the table
+        latest_version = kubernetes_versions[-1].split("|")[1].strip()
+        active_version = None
+        for version in kubernetes_versions:
+            if "active" in version:
+                active_version = version.split("|")[1].strip()
+                break
+        success = active_version == latest_version
+        return success, active_version, latest_version
+
+    def get_system_health(self):
+        try:
+            # "system health-query-kube-upgrade" runs all the required general health checks for
+            # upgrade, that consists on the basic prechecks + k8s nodes/pods/applications prechecks
+            output = subprocess.check_output(["system", "health-query-kube-upgrade"],  # pylint: disable=not-callable
+                                             env=self._env, text=True)
+        except subprocess.CalledProcessError:
+            return False, "Error running general health check"
+        if HealthUpgrade.FAIL_MSG in output:
+            return False, output
+        return True, output
+
+    def get_system_health_upgrade(self):
+        health_ok = True
+        output = ""
+
+        # check k8s version
+        success, active_version, latest_version = self._check_kube_version()
+        if success:
+            output += 'Active kubernetes version is the latest supported version: [%s]\n' \
+                      % (HealthUpgrade.SUCCESS_MSG if success else HealthUpgrade.FAIL_MSG)
+        if not success:
+            if active_version:
+                output += 'Upgrade kubernetes to the latest version: [%s]. ' \
+                          'See "system kube-version-list"\n' % (latest_version)
+            else:
+                output += 'Failed to get version info. Upgrade kubernetes to' \
+                          ' the latest version (%s) and ensure that the ' \
+                          'kubernetes  version information is available in ' \
+                          ' the kubeadm configmap.\n' \
+                          'Also see "system kube-version-list"\n' % (latest_version)
+
+        health_ok = health_ok and success
+
+        # check imported load
+        success, upgrade_version = self._check_imported_load()
+        health_ok = health_ok and success
+        if not success:
+            output += 'No imported load found. Unable to test further\n'
+            return health_ok, output
+
+        # check patches for imported load
+        success, missing_patches = self._check_required_patches(upgrade_version)
+        output += 'Required patches are applied: [%s]\n' \
+                  % (HealthUpgrade.SUCCESS_MSG if success else HealthUpgrade.FAIL_MSG)
+        if not success:
+            output += 'Patches not applied: %s\n' \
+                % ', '.join(missing_patches)
+
+        health_ok = health_ok and success
+
+        # check installed license
+        success = self._check_license(upgrade_version)
+        output += 'License valid for upgrade: [%s]\n' \
+                  % (HealthUpgrade.SUCCESS_MSG if success else HealthUpgrade.FAIL_MSG)
+
+        health_ok = health_ok and success
+
+        # The load is only imported to controller-0. An upgrade can only
+        # be started when controller-0 is active.
+        is_controller_0 = self._check_active_is_controller_0()
+        success = is_controller_0
+        output += \
+            'Active controller is controller-0: [%s]\n' \
+            % (HealthUpgrade.SUCCESS_MSG if success else HealthUpgrade.FAIL_MSG)
+
+        health_ok = health_ok and success
+
+        return health_ok, output
+
+
+def main(argv):
+    health_upgrade = HealthUpgrade()
+
+    # execute general health check
+    health_ok, output = health_upgrade.get_system_health()
+
+    # execute upgrade health check
+    health_upgrade_ok, upgrade_output = health_upgrade.get_system_health_upgrade()
+
+    # combine health checks results and remove extra line break from output
+    health_ok = health_ok and health_upgrade_ok
+    output = output[:-1] + upgrade_output
+
+    # print health check output and exit
+    print(output)
+    if health_ok:
+        return 0
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
