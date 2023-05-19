@@ -458,6 +458,7 @@ class PatchBuilder(object):
         log.info("Command line: %s", cmd)
         subprocess.call([cmd], shell=True)
         log.info("Done. Checkout new root fs in %s", rootfs_new_dir)
+        self.__remove_ssh_host_keys(rootfs_new_dir)
 
         # Try to reuse files from feed rootfs.
         try:
@@ -501,6 +502,24 @@ class PatchBuilder(object):
         log.info("  Based on bare repo %s", tmp_patch_repo_dir)
         log.info("    Based on root filesystem %s", rootfs_new_dir)
         return patch_repo_dir, True
+
+    def __remove_ssh_host_keys(self, rootfs_new_dir):
+        """
+        Delete ssh host-key files inside new rootfs dir
+        :param rootfs_new_dir: rootfs dir name
+        """
+        cmd = " ".join(["rm -f", os.path.join(rootfs_new_dir, 'usr/etc/ssh/ssh_host/ssh_host_rsa_key.pub')])
+        subprocess.call(cmd, shell=True)
+        cmd = " ".join(["rm -f", os.path.join(rootfs_new_dir, 'usr/etc/ssh/ssh_host/ssh_host_rsa_key')])
+        subprocess.call(cmd, shell=True)
+        cmd = " ".join(["rm -f", os.path.join(rootfs_new_dir, 'usr/etc/ssh/ssh_host/ssh_host_ed25519_key.pub')])
+        subprocess.call(cmd, shell=True)
+        cmd = " ".join(["rm -f", os.path.join(rootfs_new_dir, 'usr/etc/ssh/ssh_host/ssh_host_ed25519_key')])
+        subprocess.call(cmd, shell=True)
+        cmd = " ".join(["rm -f", os.path.join(rootfs_new_dir, 'usr/etc/ssh/ssh_host/ssh_host_ecdsa_key.pub')])
+        subprocess.call(cmd, shell=True)
+        cmd = " ".join(["rm -f", os.path.join(rootfs_new_dir, 'usr/etc/ssh/ssh_host/ssh_host_ecdsa_key')])
+        subprocess.call(cmd, shell=True)
 
     def __check_gnupg_folder(self):
         """
