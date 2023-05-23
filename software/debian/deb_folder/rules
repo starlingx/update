@@ -69,7 +69,9 @@ override_dh_install:
 	install -m 444 ${METADATA_FILE} \
         ${ROOT}/etc/software/${METADATA_FILE}
 	install -m 755 scripts/chroot_mounts.sh \
-		${ROOT}/usr/bin/chroot_mounts.sh
+		${ROOT}/usr/sbin/chroot_mounts.sh
 	install -m 444 scripts/ostree_mounts.yaml \
         ${ROOT}/etc/software/ostree_mounts.yaml
+	install -m 755 scripts/create_postgresql_database.sh \
+		${ROOT}/usr/sbin/create_postgresql_database.sh
 	dh_install
