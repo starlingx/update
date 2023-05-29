@@ -47,8 +47,6 @@ class SoftwareAPIController(object):
         except SoftwareError as e:
             return dict(error="Error: %s" % str(e))
 
-        sc.send_latest_feed_commit_to_agent()
-
         sc.software_sync()
 
         return result
@@ -57,18 +55,26 @@ class SoftwareAPIController(object):
     @expose('query.xml', content_type='application/xml')
     def deploy_delete(self, *args, **kwargs):
         if sc.any_patch_host_installing():
-            return dict(error="Rejected: One or more nodes are installing releases.")
+            return dict(error="Rejected: One or more nodes are installing a release.")
 
         try:
             result = sc.software_deploy_delete_api(list(args), **kwargs)
         except SoftwareError as e:
             return dict(error="Error: %s" % str(e))
 
-        sc.send_latest_feed_commit_to_agent()
-
         sc.software_sync()
 
         return result
+
+    @expose('json')
+    @expose('query.xml', content_type='application/xml')
+    def deploy_start(self, *args):
+        if sc.any_patch_host_installing():
+            return dict(error="Rejected: One or more nodes are installing a release.")
+
+        sc.send_latest_feed_commit_to_agent()
+        sc.software_sync()
+        return dict(info="%s is ready to be deployed on all hosts" % list(args)[0])
 
     @expose('json')
     @expose('query.xml', content_type='application/xml')

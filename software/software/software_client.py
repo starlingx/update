@@ -805,8 +805,25 @@ def deploy_precheck_req(args):
 
 
 def deploy_start_req(args):
-    print(args.deployment)
-    return 1
+    # args.deployment is a list
+    deployment = args.deployment
+
+    # Ignore interrupts during this function
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+    # Issue deploy_start request
+    url = "http://%s/software/deploy_start/%s" % (api_addr, deployment)
+
+    headers = {}
+    append_auth_token_if_required(headers)
+    req = requests.post(url, headers=headers)
+
+    if args.debug:
+        print_result_debug(req)
+    else:
+        print_software_op_result(req)
+
+    return check_rc(req)
 
 
 def deploy_activate_req(args):

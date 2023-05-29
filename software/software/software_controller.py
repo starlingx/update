@@ -1662,14 +1662,11 @@ class PatchController(PatchService):
     def any_patch_host_installing(self):
         rc = False
 
-        self.hosts_lock.acquire()
-        for host in self.hosts.values():
-            if host.state == constants.PATCH_AGENT_STATE_INSTALLING:
-                rc = True
-                break
-
-        self.hosts_lock.release()
-
+        with self.hosts_lock:
+            for host in self.hosts.values():
+                if host.state == constants.PATCH_AGENT_STATE_INSTALLING:
+                    rc = True
+                    break
         return rc
 
     def copy_restart_scripts(self):
