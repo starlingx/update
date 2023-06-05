@@ -38,43 +38,31 @@ class SoftwareAPIController(object):
 
     @expose('json')
     @expose('query.xml', content_type='application/xml')
-    def deploy_create(self, *args, **kwargs):
-        if sc.any_patch_host_installing():
-            return dict(error="Rejected: One or more nodes are installing releases.")
-
-        try:
-            result = sc.software_deploy_create_api(list(args), **kwargs)
-        except SoftwareError as e:
-            return dict(error="Error: %s" % str(e))
-
-        sc.software_sync()
-
-        return result
-
-    @expose('json')
-    @expose('query.xml', content_type='application/xml')
-    def deploy_delete(self, *args, **kwargs):
+    def deploy_activate(self, *args):
         if sc.any_patch_host_installing():
             return dict(error="Rejected: One or more nodes are installing a release.")
 
         try:
-            result = sc.software_deploy_delete_api(list(args), **kwargs)
+            result = sc.software_deploy_activate_api(list(args)[0])
         except SoftwareError as e:
             return dict(error="Error: %s" % str(e))
 
         sc.software_sync()
-
         return result
 
     @expose('json')
     @expose('query.xml', content_type='application/xml')
-    def deploy_start(self, *args):
+    def deploy_complete(self, *args):
         if sc.any_patch_host_installing():
             return dict(error="Rejected: One or more nodes are installing a release.")
 
-        sc.send_latest_feed_commit_to_agent()
+        try:
+            result = sc.software_deploy_complete_api(list(args)[0])
+        except SoftwareError as e:
+            return dict(error="Error: %s" % str(e))
+
         sc.software_sync()
-        return dict(info="%s is ready to be deployed on all hosts" % list(args)[0])
+        return result
 
     @expose('json')
     @expose('query.xml', content_type='application/xml')
@@ -93,22 +81,28 @@ class SoftwareAPIController(object):
         return result
 
     @expose('json')
-    def is_applied(self, *args):
-        return sc.is_applied(list(args))
-
-    @expose('json')
-    def is_available(self, *args):
-        return sc.is_available(list(args))
-
-    @expose('json')
     @expose('query.xml', content_type='application/xml')
-    def query(self, **kwargs):
+    def deploy_start(self, *args, **kwargs):
+        if sc.any_patch_host_installing():
+            return dict(error="Rejected: One or more nodes are installing releases.")
+
         try:
-            sd = sc.software_release_query_cached(**kwargs)
+            result = sc.software_deploy_start_api(list(args)[0], **kwargs)
         except SoftwareError as e:
             return dict(error="Error: %s" % str(e))
 
-        return dict(sd=sd)
+        sc.send_latest_feed_commit_to_agent()
+        sc.software_sync()
+
+        return result
+
+    @expose('json')
+    def is_completed(self, *args):
+        return sc.is_completed(list(args))
+
+    @expose('json')
+    def is_uploaded(self, *args):
+        return sc.is_uploaded(list(args))
 
     @expose('json')
     @expose('show.xml', content_type='application/xml')
@@ -143,11 +137,6 @@ class SoftwareAPIController(object):
         return result
 
     @expose('json')
-    @expose('query_hosts.xml', content_type='application/xml')
-    def query_hosts(self, *args):  # pylint: disable=unused-argument
-        return dict(data=sc.query_host_cache())
-
-    @expose('json')
     def upload_dir(self, **kwargs):
         # todo(abailey): extensions should be configurable or
         # registered in setup.cfg
@@ -171,6 +160,21 @@ class SoftwareAPIController(object):
             return dict(error=str(e))
         sc.software_sync()
         return result
+
+    @expose('json')
+    @expose('query.xml', content_type='application/xml')
+    def query(self, **kwargs):
+        try:
+            sd = sc.software_release_query_cached(**kwargs)
+        except SoftwareError as e:
+            return dict(error="Error: %s" % str(e))
+
+        return dict(sd=sd)
+
+    @expose('json')
+    @expose('query_hosts.xml', content_type='application/xml')
+    def query_hosts(self, *args):  # pylint: disable=unused-argument
+        return dict(data=sc.query_host_cache())
 
 
 class RootController:

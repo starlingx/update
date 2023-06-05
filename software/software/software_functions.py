@@ -38,8 +38,15 @@ except Exception:
 
 # Constants
 patch_dir = constants.SOFTWARE_STORAGE_DIR
-avail_dir = "%s/metadata/available" % patch_dir
-applied_dir = "%s/metadata/applied" % patch_dir
+available_dir = "%s/metadata/available" % patch_dir
+unavailable_dir = "%s/metadata/unavailable" % patch_dir
+deploying_start_dir = "%s/metadata/deploying_start" % patch_dir
+deploying_host_dir = "%s/metadata/deploying_host" % patch_dir
+deploying_activate_dir = "%s/metadata/deploying_activate" % patch_dir
+deploying_complete_dir = "%s/metadata/deploying_complete" % patch_dir
+deployed_dir = "%s/metadata/deployed" % patch_dir
+removing_dir = "%s/metadata/removing" % patch_dir
+aborting_dir = "%s/metadata/aborting" % patch_dir
 committed_dir = "%s/metadata/committed" % patch_dir
 semantics_dir = "%s/semantics" % patch_dir
 
@@ -241,10 +248,10 @@ class ReleaseData(object):
 
     def update_release(self, updated_release):
         for release_id in list(updated_release.metadata):
-            # Update all fields except deploy_state
-            cur_deploy_state = self.metadata[release_id]['deploy_state']
+            # Update all fields except state
+            cur_state = self.metadata[release_id]['state']
             self.metadata[release_id].update(updated_release.metadata[release_id])
-            self.metadata[release_id]['deploy_state'] = cur_deploy_state
+            self.metadata[release_id]['state'] = cur_state
 
     def delete_release(self, release_id):
         del self.contents[release_id]
@@ -286,11 +293,11 @@ class ReleaseData(object):
 
     def parse_metadata(self,
                        filename,
-                       deploy_state=None):
+                       state=None):
         """
         Parse an individual release metadata XML file
         :param filename: XML file
-        :param deploy_state: Indicates Applied, Available, or Committed
+        :param state: Indicates Applied, Available, or Committed
         :return: Release ID
         """
         tree = ElementTree.parse(filename)
@@ -316,10 +323,7 @@ class ReleaseData(object):
 
         self.metadata[release_id] = {}
 
-        self.metadata[release_id]["deploy_state"] = deploy_state
-
-        # Release state is unknown at this point
-        self.metadata[release_id]["state"] = "n/a"
+        self.metadata[release_id]["state"] = state
 
         self.metadata[release_id]["sw_version"] = "unknown"
 
@@ -372,20 +376,27 @@ class ReleaseData(object):
 
     def load_all_metadata(self,
                           loaddir,
-                          deploy_state=None):
+                          state=None):
         """
         Parse all metadata files in the specified dir
         :return:
         """
         for fname in glob.glob("%s/*.xml" % loaddir):
-            self.parse_metadata(fname, deploy_state)
+            self.parse_metadata(fname, state)
 
     def load_all(self):
         # Reset the data
         self.__init__()
-        self.load_all_metadata(applied_dir, deploy_state=constants.APPLIED)
-        self.load_all_metadata(avail_dir, deploy_state=constants.AVAILABLE)
-        self.load_all_metadata(committed_dir, deploy_state=constants.COMMITTED)
+        self.load_all_metadata(available_dir, state=constants.AVAILABLE)
+        self.load_all_metadata(unavailable_dir, state=constants.UNAVAILABLE)
+        self.load_all_metadata(deploying_start_dir, state=constants.DEPLOYING_START)
+        self.load_all_metadata(deploying_host_dir, state=constants.DEPLOYING_HOST)
+        self.load_all_metadata(deploying_activate_dir, state=constants.DEPLOYING_ACTIVATE)
+        self.load_all_metadata(deploying_complete_dir, state=constants.DEPLOYING_COMPLETE)
+        self.load_all_metadata(deployed_dir, state=constants.DEPLOYED)
+        self.load_all_metadata(removing_dir, state=constants.REMOVING)
+        self.load_all_metadata(aborting_dir, state=constants.ABORTING)
+        self.load_all_metadata(committed_dir, state=constants.COMMITTED)
 
     def query_line(self,
                    release_id,
@@ -785,7 +796,7 @@ class PatchFile(object):
 
     @staticmethod
     def extract_patch(patch,
-                      metadata_dir=avail_dir,
+                      metadata_dir=available_dir,
                       metadata_only=False,
                       existing_content=None,
                       base_pkgdata=None):

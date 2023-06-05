@@ -95,32 +95,29 @@ def print_software_op_result(req):
             hdr_version = "Version"
             hdr_rr = "RR"
             hdr_state = "State"
-            hdr_deploy_state = "Deploy State"
 
             width_release = len(hdr_release)
             width_version = len(hdr_version)
             width_rr = len(hdr_rr)
             width_state = len(hdr_state)
-            width_deploy_state = len(hdr_deploy_state)
 
             show_all = False
 
             for release_id in list(sd):
                 width_release = max(len(release_id), width_release)
-                width_deploy_state = max(len(sd[release_id]["deploy_state"]), width_deploy_state)
                 width_state = max(len(sd[release_id]["state"]), width_state)
                 if "sw_version" in sd[release_id]:
                     show_all = True
                     width_version = max(len(sd[release_id]["sw_version"]), width_version)
 
             if show_all:
-                print("{0:^{width_release}}  {1:^{width_rr}}  {2:^{width_version}}  {3:^{width_state}}  {4:^{width_deploy_state}}".format(
-                    hdr_release, hdr_rr, hdr_version, hdr_state, hdr_deploy_state,
+                print("{0:^{width_release}}  {1:^{width_rr}}  {2:^{width_version}}  {3:^{width_state}}".format(
+                    hdr_release, hdr_rr, hdr_version, hdr_state,
                     width_release=width_release, width_rr=width_rr,
-                    width_version=width_version, width_state=width_state, width_deploy_state=width_deploy_state))
+                    width_version=width_version, width_state=width_state))
 
-                print("{0}  {1}  {2}  {3}  {4}".format(
-                    '=' * width_release, '=' * width_rr, '=' * width_version, '=' * width_state, '=' * width_deploy_state))
+                print("{0}  {1}  {2}  {3}".format(
+                    '=' * width_release, '=' * width_rr, '=' * width_version, '=' * width_state))
 
                 for release_id in sorted(list(sd)):
                     if "reboot_required" in sd[release_id]:
@@ -128,23 +125,20 @@ def print_software_op_result(req):
                     else:
                         rr = "Y"
 
-                    print("{0:<{width_release}}  {1:^{width_rr}}  {2:^{width_version}}  {3:^{width_state}}  {4:^{width_deploy_state}}".format(
+                    print("{0:<{width_release}}  {1:^{width_rr}}  {2:^{width_version}}  {3:^{width_state}}".format(
                         release_id,
                         rr,
                         sd[release_id]["sw_version"],
-                        sd[release_id]["deploy_state"],
                         sd[release_id]["state"],
                         width_release=width_release, width_rr=width_rr,
-                        width_version=width_version, width_state=width_state,
-                        width_deploy_state=width_deploy_state))
+                        width_version=width_version, width_state=width_state))
             else:
-                print("{0:^{width_release}}  {1:^{width_state}}  {2:^{width_deploy_state}}".format(
-                    hdr_release, hdr_state, hdr_deploy_state,
-                    width_release=width_release, width_state=width_state,
-                    width_deploy_state=width_deploy_state))
+                print("{0:^{width_release}}  {1:^{width_state}}".format(
+                    hdr_release, hdr_state,
+                    width_release=width_release, width_state=width_state))
 
-                print("{0}  {1}  {2}".format(
-                    '=' * width_release, '=' * width_state, '=' * width_deploy_state))
+                print("{0}  {1}".format(
+                    '=' * width_release, '=' * width_state))
 
                 for release_id in sorted(list(sd)):
                     if "reboot_required" in sd[release_id]:
@@ -152,13 +146,12 @@ def print_software_op_result(req):
                     else:
                         rr = "Y"
 
-                    print("{0:<{width_release}}  {1:^{width_rr}}  {2:^{width_state}}  {3:^{width_deploy_state}}".format(
+                    print("{0:<{width_release}}  {1:^{width_rr}}  {2:^{width_state}}".format(
                         release_id,
                         rr,
                         sd[release_id]["state"],
-                        sd[release_id]["deploy_state"],
                         width_release=width_release, width_rr=width_rr,
-                        width_state=width_state, width_deploy_state=width_deploy_state))
+                        width_state=width_state))
 
             print("")
 
@@ -196,11 +189,6 @@ def print_release_show_result(req):
                 if "state" in sd[release_id] and sd[release_id]["state"] != "":
                     print(textwrap.fill("    {0:<15} ".format("State:") + sd[release_id]["state"],
                                         width=TERM_WIDTH, subsequent_indent=' ' * 20))
-
-                    if sd[release_id]["state"] == "n/a":
-                        if "deploy_state" in sd[release_id] and sd[release_id]["deploy_state"] != "":
-                            print(textwrap.fill("    {0:<15} ".format("Deploy State:") + sd[release_id]["deploy_state"],
-                                                width=TERM_WIDTH, subsequent_indent=' ' * 20))
 
                 if "status" in sd[release_id] and sd[release_id]["status"] != "":
                     print(textwrap.fill("    {0:<15} ".format("Status:") + sd[release_id]["status"],
@@ -752,60 +740,13 @@ def release_upload_dir_req(args):
     return check_rc(req)
 
 
-def deploy_create_req(args):
-
-    # args.deployment is a list
-    deployment = args.deployment
-
-    # Ignore interrupts during this function
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    # Issue deploy_create request
-    deployments = "/".join(deployment)
-    url = "http://%s/software/deploy_create/%s" % (api_addr, deployments)
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.post(url, headers=headers)
-
-    if args.debug:
-        print_result_debug(req)
-    else:
-        print_software_op_result(req)
-
-    return check_rc(req)
-
-
-def deploy_delete_req(args):
-    # args.deployment is a list
-    deployment = args.deployment
-
-    # Ignore interrupts during this function
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    # Issue deploy_delete request
-    deployments = "/".join(deployment)
-    url = "http://%s/software/deploy_delete/%s" % (api_addr, deployments)
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.post(url, headers=headers)
-
-    if args.debug:
-        print_result_debug(req)
-    else:
-        print_software_op_result(req)
-
-    return check_rc(req)
-
-
 def deploy_precheck_req(args):
     print(args.deployment)
     return 1
 
 
 def deploy_start_req(args):
-    # args.deployment is a list
+    # args.deployment is a string
     deployment = args.deployment
 
     # Ignore interrupts during this function
@@ -827,13 +768,47 @@ def deploy_start_req(args):
 
 
 def deploy_activate_req(args):
-    print(args.deployment)
-    return 1
+    # args.deployment is a string
+    deployment = args.deployment
+
+    # Ignore interrupts during this function
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+    # Issue deploy_start request
+    url = "http://%s/software/deploy_activate/%s" % (api_addr, deployment)
+
+    headers = {}
+    append_auth_token_if_required(headers)
+    req = requests.post(url, headers=headers)
+
+    if args.debug:
+        print_result_debug(req)
+    else:
+        print_software_op_result(req)
+
+    return check_rc(req)
 
 
 def deploy_complete_req(args):
-    print(args.deployment)
-    return 1
+    # args.deployment is a string
+    deployment = args.deployment
+
+    # Ignore interrupts during this function
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+    # Issue deploy_complete request
+    url = "http://%s/software/deploy_complete/%s" % (api_addr, deployment)
+
+    headers = {}
+    append_auth_token_if_required(headers)
+    req = requests.post(url, headers=headers)
+
+    if args.debug:
+        print_result_debug(req)
+    else:
+        print_software_op_result(req)
+
+    return check_rc(req)
 
 
 def deploy_list_req(args):
@@ -1119,8 +1094,6 @@ def check_for_os_region_name(args):
 
 def register_deploy_commands(commands):
     """deploy commands
-      - create
-      - delete
       - precheck
       - start
       - host
@@ -1150,28 +1123,6 @@ def register_deploy_commands(commands):
         metavar=''
     )
     sub_cmds.required = True
-
-    # --- software deploy create -----------------------
-    cmd = sub_cmds.add_parser(
-        'create',
-        help='Create and prestage a software deployment'
-    )
-    cmd.set_defaults(cmd='create')
-    cmd.set_defaults(func=deploy_create_req)
-    cmd.add_argument('deployment',
-                     nargs="+",  # accepts a list
-                     help='Deployment ID to create')
-
-    # --- software deploy delete -----------------------
-    cmd = sub_cmds.add_parser(
-        'delete',
-        help='Delete the software deployment'
-    )
-    cmd.set_defaults(cmd='delete')
-    cmd.set_defaults(func=deploy_delete_req)
-    cmd.add_argument('deployment',
-                     nargs="+",
-                     help='Deployment ID to delete')
 
     # --- software deploy precheck -----------------------
     cmd = sub_cmds.add_parser(
