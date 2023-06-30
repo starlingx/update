@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# Copyright (c) 2022 Wind River Systems, Inc.
+# Copyright (c) 2023 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -111,7 +111,7 @@ class TestPatchBuilder():
     Build test patches
     """
 
-    def __init__(self, sw_version):
+    def __init__(self, sw_version, time_out):
         try:
             self.project = os.environ.get("PROJECT")
             self.build_home = os.environ.get("STX_BUILD_HOME")
@@ -121,6 +121,7 @@ class TestPatchBuilder():
             self.patch_repo_base = os.path.join(self.repo_root, "stx", "update")
             self.patch_tools_dir = os.path.join(self.patch_repo_base, "sw-patch", "cgcs-patch", "cgcs_make_patch")
             self.sw_version = sw_version
+            self.time_out = time_out
         except TestPatchInitException:
             log.exception("TestPatchBuilder initialization failure")
             sys.exit(1)
@@ -166,15 +167,19 @@ class TestPatchBuilder():
         """
         Build package(s)
         """
+        extra_args = ''
+        if self.time_out:
+            extra_args = f'export REPOMGR_REQ_TIMEOUT_FACTOR={self.time_out};'
+
         if pkg_name:
             cmd = f'''
                 source import-stx
-                stx shell -c "build-pkgs -c -p {pkg_name}"
+                stx shell -c "{extra_args}build-pkgs -c -p {pkg_name}"
             '''
         else:
-            cmd = '''
+            cmd = f'''
                 source import-stx
-                stx shell -c "build-pkgs --parallel 10"
+                stx shell -c "{extra_args}build-pkgs --parallel 10"
             '''
         ret = run_cmd(cmd)
         log.info("Build pkgs return code %s", ret.returncode)
@@ -487,13 +492,15 @@ if __name__ == "__main__":
     parser.add_argument("-r", "--requires", action="store_true", help="Builds the 2nd patch which requires the rr_patch")
     parser.add_argument("-i", "--inservice", action="store_true", help="Builds the in service patch")
     parser.add_argument("-f", "--formal", action="store_true", help="Signs the patch with formal key")
+    parser.add_argument("-o", "--time-out", type=str, help="Set the timeout multiplier. \
+                        For example: set it to 5 can increase the timeout value by 5 times", default=None)
     args = parser.parse_args()
     log.debug("Args: %s", args)
 
     try:
         log.info("Building test patches")
         sw_version = args.software_version
-        test_patch_builder = TestPatchBuilder(args.software_version)
+        test_patch_builder = TestPatchBuilder(args.software_version, args.time_out)
         if args.type == "default":
             test_patch_builder.create_test_patches(sw_version, args.requires, args.inservice, args.formal)
         elif args.type == "kernel":
