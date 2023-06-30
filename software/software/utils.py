@@ -37,6 +37,25 @@ def get_major_release_version(sw_release_version):
             return None
 
 
+def compare_release_version(sw_release_version_1, sw_release_version_2):
+    """Compares release versions and returns True if first is higher than second """
+    if not sw_release_version_1 or not sw_release_version_2:
+        return None
+    else:
+        try:
+            separator = '.'
+            separated_string_1 = sw_release_version_1.split(separator)
+            separated_string_2 = sw_release_version_2.split(separator)
+            if len(separated_string_1) != len(separated_string_2):
+                return None
+            for index, val in enumerate(separated_string_1):
+                if int(val) > int(separated_string_2[index]):
+                    return True
+            return False
+        except Exception:
+            return None
+
+
 def gethostbyname(hostname):
     """gethostbyname with IPv6 support """
     try:

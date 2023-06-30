@@ -40,11 +40,6 @@ ${error}
             ${s["sw_version"]}
         % endif
         </sw_version>
-        <deploy_state>
-        % if s["deploy_state"] != "":
-            ${s["deploy_state"]}
-        % endif
-        </deploy_state>
         <state>
         % if s["state"] != "":
             ${s["state"]}

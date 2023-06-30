@@ -47,11 +47,6 @@ ${showpatch(release_id)}
             ${r["sw_version"]}
         % endif
         </sw_version>
-        <deploy_state>
-        % if r["deploy_state"] != "":
-            ${r["deploy_state"]}
-        % endif
-        </deploy_state>
         <state>
         % if r["state"] != "":
             ${r["state"]}
