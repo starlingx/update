@@ -29,6 +29,7 @@ from software.exceptions import ReleaseMismatchFailure
 from software.exceptions import SoftwareFail
 
 import software.constants as constants
+import software.utils as utils
 
 try:
     # The tsconfig module is only available at runtime
@@ -347,7 +348,8 @@ class ReleaseData(object):
         else:
             self.metadata[release_id]["reboot_required"] = "N"
 
-        release_sw_version = self.metadata[release_id]["sw_version"]
+        release_sw_version = utils.get_major_release_version(
+            self.metadata[release_id]["sw_version"])
         global package_dir
         if release_sw_version not in package_dir:
             package_dir[release_sw_version] = "%s/%s" % (root_package_dir, release_sw_version)
@@ -835,9 +837,10 @@ class PatchFile(object):
 
             if not metadata_only and base_pkgdata is not None:
                 # Run version validation tests first
-                patch_sw_version = thispatch.metadata[patch_id]["sw_version"]
+                patch_sw_version = utils.get_major_release_version(
+                    thispatch.metadata[patch_id]["sw_version"])
                 if not base_pkgdata.check_release(patch_sw_version):
-                    msg = "Patch %s software release (%s) is not installed" % (patch_id, patch_sw_version)
+                    msg = "Software version %s for release %s is not installed" % (patch_sw_version, patch_id)
                     LOG.exception(msg)
                     raise ReleaseValidationFailure(msg)
 
@@ -849,7 +852,8 @@ class PatchFile(object):
                     LOG.exception(msg)
                     raise ReleaseMismatchFailure(msg)
 
-            patch_sw_version = thispatch.metadata[patch_id]["sw_version"]
+            patch_sw_version = utils.get_major_release_version(
+                thispatch.metadata[patch_id]["sw_version"])
             abs_ostree_tar_dir = package_dir[patch_sw_version]
             if not os.path.exists(abs_ostree_tar_dir):
                 os.makedirs(abs_ostree_tar_dir)

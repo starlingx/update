@@ -1107,7 +1107,8 @@ class PatchController(PatchService):
 
         # Handle operation
         for release_id in release_list:
-            release_sw_version = self.release_data.metadata[release_id]["sw_version"]
+            release_sw_version = utils.get_major_release_version(
+                self.release_data.metadata[release_id]["sw_version"])
 
             # Need to support delete of older centos patches (metadata) from upgrades.
             # todo(abailey): do we need to be concerned about this since this component is new.
@@ -1775,6 +1776,7 @@ class PatchController(PatchService):
                     self.interim_state[release] = list(self.hosts)
 
         elif operation == "remove":
+            removed = False
             deployment_list = self.release_apply_remove_order(deployment, running_sw_version)
             msg = "Deploy start order for remove operation: %s" % ",".join(deployment_list)
             LOG.info(msg)
@@ -1829,6 +1831,7 @@ class PatchController(PatchService):
                 self.run_semantic_check(constants.SEMANTIC_PREREMOVE, deployment_list)
 
             for release in deployment_list:
+                removed = True
                 msg = "Removing release: %s" % release
                 LOG.info(msg)
                 audit_log_info(msg)
@@ -1865,10 +1868,6 @@ class PatchController(PatchService):
                     metadata_dir = DEPLOY_STATE_METADATA_DIR_DICT[deploystate]
                     shutil.move("%s/%s-metadata.xml" % (metadata_dir, release),
                                 "%s/%s-metadata.xml" % (removing_dir, release))
-                    deploystate = self.release_data.metadata[deployment]["state"]
-                    metadata_dir = DEPLOY_STATE_METADATA_DIR_DICT[deploystate]
-                    shutil.move("%s/%s-metadata.xml" % (metadata_dir, deployment),
-                                "%s/%s-metadata.xml" % (deploying_start_dir, deployment))
                     msg_info += "%s has been removed from the repo\n" % release
                 except shutil.Error:
                     msg = "Failed to move the metadata for %s" % release
@@ -1878,10 +1877,8 @@ class PatchController(PatchService):
                 # update state
                 if len(self.hosts) > 0:
                     self.release_data.metadata[release]["state"] = constants.REMOVING
-                    self.release_data.metadata[deployment]["state"] = constants.DEPLOYING_START
                 else:
                     self.release_data.metadata[release]["state"] = constants.UNKNOWN
-                    self.release_data.metadata[deployment]["state"] = constants.UNKNOWN
 
                 # only update lastest_feed_commit if it is an ostree patch
                 if self.release_data.contents[release].get("base") is not None:
@@ -1891,6 +1888,23 @@ class PatchController(PatchService):
 
                 with self.hosts_lock:
                     self.interim_state[release] = list(self.hosts)
+
+            if removed:
+                try:
+                    metadata_dir = DEPLOY_STATE_METADATA_DIR_DICT[deploystate]
+                    shutil.move("%s/%s-metadata.xml" % (metadata_dir, deployment),
+                                "%s/%s-metadata.xml" % (deploying_start_dir, deployment))
+                    msg_info += "Deployment started for %s\n" % deployment
+                except shutil.Error:
+                    msg = "Failed to move the metadata for %s" % deployment
+                    LOG.exception(msg)
+                    raise MetadataFail(msg)
+
+                # update state
+                if len(self.hosts) > 0:
+                    self.release_data.metadata[deployment]["state"] = constants.DEPLOYING_START
+                else:
+                    self.release_data.metadata[deployment]["state"] = constants.UNKNOWN
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 

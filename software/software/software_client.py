@@ -1209,94 +1209,6 @@ def register_deploy_commands(commands):
     cmd.set_defaults(restricted=False)  # can run non root
 
 
-def register_release_commands(commands):
-    """release commands
-      - delete
-      - list
-      - show
-      - upload
-      - upload-dir
-    non root/sudo users can run:
-       - show
-       - list
-    """
-    cmd_area = 'release'
-    cmd_parser = commands.add_parser(
-        cmd_area,
-        help='Software Release',
-        epilog="StarlingX Unified Software Deployment"
-    )
-    cmd_parser.set_defaults(cmd_area=cmd_area)
-    sub_cmds = cmd_parser.add_subparsers(
-        title='Software Release Commands',
-        metavar=''
-    )
-    sub_cmds.required = True
-
-    # -- software release delete <release> ---------------
-    cmd = sub_cmds.add_parser(
-        'delete',
-        help='Delete the software release'
-    )
-    cmd.set_defaults(cmd='delete')
-    cmd.set_defaults(func=release_delete_req)
-    cmd.add_argument('release',
-                     nargs="+",  # accepts a list
-                     help='Release ID to delete')
-
-    # --- software release list ---------------------------
-    cmd = sub_cmds.add_parser(
-        'list',
-        help='List the software releases'
-    )
-    cmd.set_defaults(cmd='list')
-    cmd.set_defaults(func=release_list_req)
-    cmd.set_defaults(restricted=False)  # can run non root
-    # --release is an optional argument
-    cmd.add_argument('--release',
-                     required=False,
-                     help='filter against a release ID')
-    # --state is an optional argument. default: "all"
-    cmd.add_argument('--state',
-                     default="all",
-                     required=False,
-                     help='filter against a release state')
-
-    # --- software release show <release> -----------------
-    cmd = sub_cmds.add_parser(
-        'show',
-        help='Show the software release'
-    )
-    cmd.set_defaults(cmd='show')
-    cmd.set_defaults(func=release_show_req)
-    cmd.set_defaults(restricted=False)  # can run non root
-    cmd.add_argument('release',
-                     nargs="+",  # accepts a list
-                     help='Release ID to show')
-
-    # --- software release upload <release> ---------------
-    cmd = sub_cmds.add_parser(
-        'upload',
-        help='Upload a software release'
-    )
-    cmd.set_defaults(cmd='upload')
-    cmd.set_defaults(func=release_upload_req)
-    cmd.add_argument('release',
-                     nargs="+",  # accepts a list
-                     help='software releases to upload')
-
-    # --- software release upload-dir <release dir> ------
-    cmd = sub_cmds.add_parser(
-        'upload-dir',
-        help='Upload a software release dir'
-    )
-    cmd.set_defaults(cmd='upload-dir')
-    cmd.set_defaults(func=release_upload_dir_req)
-    cmd.add_argument('release',
-                     nargs="+",  # accepts a list
-                     help='directory containing software releases to upload')
-
-
 def setup_argparse():
     parser = argparse.ArgumentParser(prog="software",
                                      description="Unified Software Management",
@@ -1323,8 +1235,70 @@ def setup_argparse():
     commands = parser.add_subparsers(title='Commands', metavar='')
     commands.required = True
 
+    # -- software delete <release> ---------------
+    cmd = commands.add_parser(
+        'delete',
+        help='Delete the software release'
+    )
+    cmd.set_defaults(cmd='delete')
+    cmd.set_defaults(func=release_delete_req)
+    cmd.add_argument('release',
+                     nargs="+",  # accepts a list
+                     help='Release ID to delete')
+
+    # --- software list ---------------------------
+    cmd = commands.add_parser(
+        'list',
+        help='List the software releases'
+    )
+    cmd.set_defaults(cmd='list')
+    cmd.set_defaults(func=release_list_req)
+    cmd.set_defaults(restricted=False)  # can run non root
+    # --release is an optional argument
+    cmd.add_argument('--release',
+                     required=False,
+                     help='filter against a release ID')
+    # --state is an optional argument. default: "all"
+    cmd.add_argument('--state',
+                     default="all",
+                     required=False,
+                     help='filter against a release state')
+
+    # --- software show <release> -----------------
+    cmd = commands.add_parser(
+        'show',
+        help='Show the software release'
+    )
+    cmd.set_defaults(cmd='show')
+    cmd.set_defaults(func=release_show_req)
+    cmd.set_defaults(restricted=False)  # can run non root
+    cmd.add_argument('release',
+                     nargs="+",  # accepts a list
+                     help='Release ID to show')
+
+    # --- software upload <release> ---------------
+    cmd = commands.add_parser(
+        'upload',
+        help='Upload a software release'
+    )
+    cmd.set_defaults(cmd='upload')
+    cmd.set_defaults(func=release_upload_req)
+    cmd.add_argument('release',
+                     nargs="+",  # accepts a list
+                     help='software releases to upload')
+
+    # --- software upload-dir <release dir> ------
+    cmd = commands.add_parser(
+        'upload-dir',
+        help='Upload a software release dir'
+    )
+    cmd.set_defaults(cmd='upload-dir')
+    cmd.set_defaults(func=release_upload_dir_req)
+    cmd.add_argument('release',
+                     nargs="+",  # accepts a list
+                     help='directory containing software releases to upload')
+
     register_deploy_commands(commands)
-    register_release_commands(commands)
     return parser
 
 
