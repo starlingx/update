@@ -24,6 +24,7 @@ from software.release_verify import verify_files
 from software.release_verify import cert_type_all
 from software.release_signing import sign_files
 from software.exceptions import MetadataFail
+from software.exceptions import ReleaseUploadFailure
 from software.exceptions import ReleaseValidationFailure
 from software.exceptions import ReleaseMismatchFailure
 from software.exceptions import SoftwareFail
@@ -31,31 +32,19 @@ from software.exceptions import SoftwareFail
 import software.constants as constants
 import software.utils as utils
 
+
 try:
     # The tsconfig module is only available at runtime
     from tsconfig.tsconfig import SW_VERSION
 except Exception:
     SW_VERSION = "unknown"
 
-# Constants
-patch_dir = constants.SOFTWARE_STORAGE_DIR
-available_dir = "%s/metadata/available" % patch_dir
-unavailable_dir = "%s/metadata/unavailable" % patch_dir
-deploying_start_dir = "%s/metadata/deploying_start" % patch_dir
-deploying_host_dir = "%s/metadata/deploying_host" % patch_dir
-deploying_activate_dir = "%s/metadata/deploying_activate" % patch_dir
-deploying_complete_dir = "%s/metadata/deploying_complete" % patch_dir
-deployed_dir = "%s/metadata/deployed" % patch_dir
-removing_dir = "%s/metadata/removing" % patch_dir
-aborting_dir = "%s/metadata/aborting" % patch_dir
-committed_dir = "%s/metadata/committed" % patch_dir
-semantics_dir = "%s/semantics" % patch_dir
 
 # these next 4 variables may need to change to support ostree
 repo_root_dir = "/var/www/pages/updates"
 repo_dir = {SW_VERSION: "%s/rel-%s" % (repo_root_dir, SW_VERSION)}
 
-root_package_dir = "%s/packages" % patch_dir
+root_package_dir = "%s/packages" % constants.SOFTWARE_STORAGE_DIR
 root_scripts_dir = "/opt/software/software-scripts"
 package_dir = {SW_VERSION: "%s/%s" % (root_package_dir, SW_VERSION)}
 
@@ -184,6 +173,7 @@ class BasePackageData(object):
     """
     Information about the base package data provided by the load
     """
+
     def __init__(self):
         self.pkgs = {}
         self.loaddirs()
@@ -228,6 +218,7 @@ class ReleaseData(object):
     """
     Aggregated release data
     """
+
     def __init__(self):
         #
         # The metadata dict stores all metadata associated with a release.
@@ -389,16 +380,18 @@ class ReleaseData(object):
     def load_all(self):
         # Reset the data
         self.__init__()
-        self.load_all_metadata(available_dir, state=constants.AVAILABLE)
-        self.load_all_metadata(unavailable_dir, state=constants.UNAVAILABLE)
-        self.load_all_metadata(deploying_start_dir, state=constants.DEPLOYING_START)
-        self.load_all_metadata(deploying_host_dir, state=constants.DEPLOYING_HOST)
-        self.load_all_metadata(deploying_activate_dir, state=constants.DEPLOYING_ACTIVATE)
-        self.load_all_metadata(deploying_complete_dir, state=constants.DEPLOYING_COMPLETE)
-        self.load_all_metadata(deployed_dir, state=constants.DEPLOYED)
-        self.load_all_metadata(removing_dir, state=constants.REMOVING)
-        self.load_all_metadata(aborting_dir, state=constants.ABORTING)
-        self.load_all_metadata(committed_dir, state=constants.COMMITTED)
+        self.load_all_metadata(constants.AVAILABLE_DIR, state=constants.AVAILABLE)
+        self.load_all_metadata(constants.UNAVAILABLE_DIR, state=constants.UNAVAILABLE)
+        self.load_all_metadata(constants.DEPLOYING_START_DIR, state=constants.DEPLOYING_START)
+        self.load_all_metadata(constants.DEPLOYING_HOST_DIR, state=constants.DEPLOYING_HOST)
+        self.load_all_metadata(constants.DEPLOYING_ACTIVATE_DIR, state=constants.DEPLOYING_ACTIVATE)
+        self.load_all_metadata(constants.DEPLOYING_COMPLETE_DIR, state=constants.DEPLOYING_COMPLETE)
+        self.load_all_metadata(constants.DEPLOYED_DIR, state=constants.DEPLOYED)
+        self.load_all_metadata(constants.REMOVING_DIR, state=constants.REMOVING)
+        self.load_all_metadata(constants.ABORTING_DIR, state=constants.ABORTING)
+        self.load_all_metadata(constants.COMMITTED_DIR, state=constants.COMMITTED)
+
+        # load the release metadata from feed directory or filesystem db
 
     def query_line(self,
                    release_id,
@@ -420,6 +413,7 @@ class PatchMetadata(object):
     """
     Creating metadata for a single patch
     """
+
     def __init__(self):
         self.id = None
         self.sw_version = None
@@ -489,6 +483,7 @@ class PatchFile(object):
     """
     Patch file
     """
+
     def __init__(self):
         self.meta = PatchMetadata()
         self.rpmlist = {}
@@ -798,7 +793,7 @@ class PatchFile(object):
 
     @staticmethod
     def extract_patch(patch,
-                      metadata_dir=available_dir,
+                      metadata_dir=constants.AVAILABLE_DIR,
                       metadata_only=False,
                       existing_content=None,
                       base_pkgdata=None):
@@ -993,3 +988,50 @@ def patch_build():
         pf.add_rpm(rpmfile)
 
     pf.gen_patch(outdir=os.getcwd())
+
+
+def mount_iso_load(iso_path, temp_dir):
+    """
+    Mount load and return metadata file
+    """
+    mount_dir = tempfile.mkdtemp(dir=temp_dir)
+    with open(os.devnull, "w") as devnull:
+        try:
+            subprocess.check_call(["mount", "-o", "loop", iso_path, mount_dir],
+                                  stdout=devnull, stderr=devnull)
+        except subprocess.CalledProcessError:
+            raise ReleaseUploadFailure("Mount failure for "
+                                       "iso %s" % iso_path)
+    return mount_dir
+
+
+def unmount_iso_load(iso_path):
+    """
+    Unmount iso load
+    """
+    with open(os.devnull, "w") as devnull:
+        try:
+            subprocess.check_call(["unmount", "-l", iso_path],
+                                  stdout=devnull, stderr=devnull)
+        except subprocess.CalledProcessError:
+            pass
+
+
+def read_upgrade_metadata(mounted_dir):
+    """
+    Read upgrade metadata file
+    """
+    try:
+        root = ElementTree.parse(mounted_dir + "/upgrades/metadata.xml").getroot()
+    except IOError:
+        raise MetadataFail("Failed to read /upgrades/metadata.xml file")
+
+    to_release = root.findtext("version")
+    supported_from_releases = []
+    supported_upgrades = root.find("supported_upgrades").findall("upgrade")
+    for upgrade in supported_upgrades:
+        supported_from_releases.append({
+            "version": upgrade.findtext("version"),
+            "required_patch": upgrade.findtext("required_patch"),
+        })
+    return to_release, supported_from_releases

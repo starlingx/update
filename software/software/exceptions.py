@@ -57,8 +57,18 @@ class ReleaseValidationFailure(SoftwareError):
     pass
 
 
+class UpgradeNotSupported(SoftwareError):
+    """Upgrade not supported error."""
+    pass
+
+
 class ReleaseMismatchFailure(SoftwareError):
     """Release mismatch error."""
+    pass
+
+
+class ReleaseUploadFailure(SoftwareError):
+    """Release upload error."""
     pass
 
 

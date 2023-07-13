@@ -5,6 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 """
 import logging
+import shutil
 from netaddr import IPAddress
 import os
 import socket
@@ -146,3 +147,58 @@ def safe_rstrip(value, chars=None):
         return value
 
     return value.rstrip(chars) or value
+
+
+def save_temp_file(file_item, temp_dir=constants.SCRATCH_DIR):
+    """Save a temporary file
+    param file_item: file to save
+    param temp_dir: directory to save file in
+    """
+    try:
+        if not os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            os.makedirs(temp_dir)
+    except Exception:
+        raise Exception("Failed to create directory {}".format(temp_dir))
+
+    file_name = file_item.filename
+    try:
+        file_item.file.seek(0, os.SEEK_END)
+        file_size = file_item.file.tell()
+        avail_space = shutil.disk_usage(temp_dir).free
+        if file_size > avail_space:
+            LOG.error("Not enough space to save file %s in %s \n \
+                Available %s bytes. File size %s", file_name, temp_dir, avail_space, file_size)
+    except Exception:
+        LOG.exception("Failed to get file size in bytes for %s or disk space for %s", file_item, temp_dir)
+
+    saved_file = os.path.join(temp_dir, os.path.basename(file_name))
+    try:
+        with open(saved_file, 'wb') as destination_file:
+            destination_file.write(file_item.value)
+    except Exception:
+        LOG.exception("Failed to save file %s", file_name)
+
+
+def delete_temp_file(file_name, temp_dir=constants.SCRATCH_DIR):
+    """Delete a temporary file
+    param file_name: file to delete
+    param temp_dir: directory to delete file from
+    """
+    try:
+        os.remove(os.path.join(temp_dir, os.path.basename(file_name)))
+    except Exception:
+        LOG.exception("Failed to delete file %s", file_name)
+
+
+def get_all_files(temp_dir=constants.SCRATCH_DIR):
+    """Get all files in a directory
+    param temp_dir: directory to get files from
+    return: list of files
+    """
+    try:
+        files = os.listdir(temp_dir)
+        return [os.path.join(temp_dir, file) for file in files]
+    except Exception:
+        LOG.exception("Failed to get files from %s", temp_dir)
+        return []

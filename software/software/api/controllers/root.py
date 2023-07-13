@@ -14,10 +14,8 @@ import shutil
 
 from software.exceptions import SoftwareError
 from software.software_controller import sc
-
-# Copies file in 64K chunk size
-# A larger chunk size can be used to improve the copy speed
-CHUNK_SIZE = 64
+import software.utils as utils
+import software.constants as constants
 
 LOG = log.getLogger(__name__)
 
@@ -127,24 +125,30 @@ class SoftwareAPIController(object):
     @expose('json')
     @expose('query.xml', content_type='application/xml')
     def upload(self):
-        assert isinstance(request.POST['file'], cgi.FieldStorage)
-        fileitem = request.POST['file']
-        if not fileitem.filename:
-            return dict(error="Error: No file uploaded")
-
-        fn = '/scratch/' + os.path.basename(fileitem.filename)
-        fdst = open(fn, 'wb')
-        shutil.copyfileobj(fileitem.file, fdst, CHUNK_SIZE)
-        fdst.close()
+        request_data = list(request.POST.items())
+        temp_dir = os.path.join(constants.SCRATCH_DIR, 'upload_files')
 
         try:
-            result = sc.software_release_upload([fn])
-        except SoftwareError as e:
-            os.remove(fn)
+            if len(request_data) == 0:
+                raise SoftwareError("No files uploaded")
+            # Protect against duplications
+            uploaded_files = sorted(set(request_data))
+            # Save all uploaded files to /scratch dir
+            for file_item in uploaded_files:
+                assert isinstance(file_item[1], cgi.FieldStorage)
+                utils.save_temp_file(file_item[1], temp_dir)
+
+            # Get all uploaded files from /scratch dir
+            uploaded_files = utils.get_all_files(temp_dir)
+            # Process uploaded files
+            return sc.software_release_upload(uploaded_files)
+
+        except Exception as e:
             return dict(error=str(e))
-        os.remove(fn)
-        sc.software_sync()
-        return result
+        finally:
+            # Remove all uploaded files from /scratch dir
+            sc.software_sync()
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     @expose('json')
     def upload_dir(self, **kwargs):

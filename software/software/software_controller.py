@@ -31,6 +31,7 @@ from software.api import app
 from software.authapi import app as auth_app
 from software.base import PatchService
 from software.exceptions import MetadataFail
+from software.exceptions import UpgradeNotSupported
 from software.exceptions import OSTreeCommandFail
 from software.exceptions import OSTreeTarFail
 from software.exceptions import SoftwareError
@@ -39,30 +40,19 @@ from software.exceptions import ReleaseInvalidRequest
 from software.exceptions import ReleaseValidationFailure
 from software.exceptions import ReleaseMismatchFailure
 from software.software_functions import configure_logging
+from software.software_functions import mount_iso_load
+from software.software_functions import read_upgrade_metadata
 from software.software_functions import BasePackageData
-from software.software_functions import available_dir
-from software.software_functions import unavailable_dir
-from software.software_functions import deploying_start_dir
-from software.software_functions import deploying_host_dir
-from software.software_functions import deploying_activate_dir
-from software.software_functions import deploying_complete_dir
-from software.software_functions import deployed_dir
-from software.software_functions import aborting_dir
-from software.software_functions import removing_dir
-from software.software_functions import committed_dir
 from software.software_functions import PatchFile
 from software.software_functions import package_dir
 from software.software_functions import repo_dir
 from software.software_functions import root_scripts_dir
-from software.software_functions import semantics_dir
-
 from software.software_functions import SW_VERSION
 from software.software_functions import LOG
 from software.software_functions import audit_log_info
-from software.software_functions import patch_dir
 from software.software_functions import repo_root_dir
 from software.software_functions import ReleaseData
-
+from software.release_verify import verify_files
 import software.config as cfg
 import software.utils as utils
 
@@ -94,16 +84,16 @@ keep_running = True
 
 DEPLOY_STATE_METADATA_DIR_DICT = \
     {
-        constants.AVAILABLE: available_dir,
-        constants.UNAVAILABLE: unavailable_dir,
-        constants.DEPLOYING_START: deploying_start_dir,
-        constants.DEPLOYING_HOST: deploying_host_dir,
-        constants.DEPLOYING_ACTIVATE: deploying_activate_dir,
-        constants.DEPLOYING_COMPLETE: deploying_complete_dir,
-        constants.DEPLOYED: deployed_dir,
-        constants.REMOVING: removing_dir,
-        constants.ABORTING: aborting_dir,
-        constants.COMMITTED: committed_dir,
+        constants.AVAILABLE: constants.AVAILABLE_DIR,
+        constants.UNAVAILABLE: constants.UNAVAILABLE_DIR,
+        constants.DEPLOYING_START: constants.DEPLOYING_START_DIR,
+        constants.DEPLOYING_HOST: constants.DEPLOYING_HOST_DIR,
+        constants.DEPLOYING_ACTIVATE: constants.DEPLOYING_ACTIVATE_DIR,
+        constants.DEPLOYING_COMPLETE: constants.DEPLOYING_COMPLETE_DIR,
+        constants.DEPLOYED: constants.DEPLOYED_DIR,
+        constants.REMOVING: constants.REMOVING_DIR,
+        constants.ABORTING: constants.ABORTING_DIR,
+        constants.COMMITTED: constants.COMMITTED_DIR,
     }
 # Limit socket blocking to 5 seconds to allow for thread to shutdown
 api_socket_timeout = 5.0
@@ -717,7 +707,7 @@ class PatchController(PatchService):
                                               "--delete",
                                               "--exclude", "tmp",
                                               "rsync://%s/software/" % host_url,
-                                              "%s/" % patch_dir],
+                                              "%s/" % constants.SOFTWARE_STORAGE_DIR],
                                              stderr=subprocess.STDOUT)
             LOG.info("Synced to mate software via rsync: %s", output)
         except subprocess.CalledProcessError as e:
@@ -889,7 +879,7 @@ class PatchController(PatchService):
 
         # Run semantic checks, if any
         for patch_id in patch_list:
-            semchk = os.path.join(semantics_dir, action, patch_id)
+            semchk = os.path.join(constants.SEMANTICS_DIR, action, patch_id)
 
             if os.path.exists(semchk):
                 try:
@@ -960,8 +950,8 @@ class PatchController(PatchService):
             if self.release_data.metadata[release]["state"] == constants.DEPLOYING_START:
                 self.release_data.metadata[release]["state"] = constants.DEPLOYED
                 try:
-                    shutil.move("%s/%s-metadata.xml" % (deploying_start_dir, release),
-                                "%s/%s-metadata.xml" % (deployed_dir, release))
+                    shutil.move("%s/%s-metadata.xml" % (constants.DEPLOYING_START_DIR, release),
+                                "%s/%s-metadata.xml" % (constants.DEPLOYED_DIR, release))
                 except shutil.Error:
                     msg = "Failed to move the metadata for %s" % release
                     LOG.exception(msg)
@@ -969,8 +959,8 @@ class PatchController(PatchService):
             elif self.release_data.metadata[release]["state"] == constants.REMOVING:
                 self.release_data.metadata[release]["state"] = constants.AVAILABLE
                 try:
-                    shutil.move("%s/%s-metadata.xml" % (removing_dir, release),
-                                "%s/%s-metadata.xml" % (available_dir, release))
+                    shutil.move("%s/%s-metadata.xml" % (constants.REMOVING_DIR, release),
+                                "%s/%s-metadata.xml" % (constants.AVAILABLE_DIR, release))
                 except shutil.Error:
                     msg = "Failed to move the metadata for %s" % release
                     LOG.exception(msg)
@@ -980,6 +970,163 @@ class PatchController(PatchService):
         msg_info += "Please reboot before continuing with configuration."
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+    def _process_upload_upgrade_files(self, upgrade_files, release_data):
+        '''
+        Process the uploaded upgrade files
+        :param upgrade_files: dict of upgrade files
+        :param release_data: ReleaseData object
+        :return: info, warning, error messages
+        '''
+        local_info = ""
+        local_warning = ""
+        local_error = ""
+        try:
+            if not verify_files([upgrade_files[constants.ISO_EXTENSION]],
+                                upgrade_files[constants.SIG_EXTENSION]):
+                raise ReleaseValidationFailure("Invalid signature file")
+
+            iso_file = upgrade_files.get(constants.ISO_EXTENSION)
+
+            # Mount the iso file after signature verification
+            iso_mount_dir = mount_iso_load(iso_file, constants.TMP_DIR)
+            LOG.info("Mounted iso file %s to %s", iso_file, iso_mount_dir)
+
+            # Read the metadata from the iso file
+            to_release, supported_from_releases = read_upgrade_metadata(iso_mount_dir)
+            LOG.info("Reading metadata from iso file %s completed", iso_file)
+            # Validate that the current release is supported to upgrade to the new release
+            supported_versions = [v.get("version") for v in supported_from_releases]
+            if SW_VERSION not in supported_versions:
+                raise UpgradeNotSupported("Current release %s not supported to upgrade to %s"
+                                          % (SW_VERSION, to_release))
+
+            os.makedirs(constants.AVAILABLE_DIR, exist_ok=True)
+            stx_release_metadata_file = "STX_%s_GA-metadata.xml" % to_release
+            abs_stx_release_metadata_file = os.path.join(iso_mount_dir,
+                                                         'upgrades',
+                                                         stx_release_metadata_file)
+            # Update the release metadata
+            release_data.parse_metadata(abs_stx_release_metadata_file, state=constants.AVAILABLE)
+
+            # Copy stx release metadata.xml to available metadata dir
+            shutil.copyfile(abs_stx_release_metadata_file,
+                            os.path.join(constants.AVAILABLE_DIR, stx_release_metadata_file))
+            LOG.info("Copied %s to %s", abs_stx_release_metadata_file, constants.AVAILABLE_DIR)
+
+            # TODO(Shawn Li): Add filesystem db to track the upgrade files
+
+        except ReleaseValidationFailure:
+            msg = "Upgrade file signature verification failed"
+            LOG.exception(msg)
+            local_error += msg + "\n"
+        except UpgradeNotSupported:
+            msg = "Upgrade is not supported for current release %s" % SW_VERSION
+            LOG.exception(msg)
+            local_error += msg + "\n"
+        except shutil.Error:
+            msg = "Failed to copy the release %s metadata file to %s" % (to_release, constants.AVAILABLE_DIR)
+            LOG.exception(msg)
+            local_error += msg + "\n"
+            raise SoftwareError(msg)
+        except Exception as e:
+            msg = "Failed to process upgrade files. Error: %s" % str(e)
+            LOG.exception(msg)
+            local_error += msg + "\n"
+
+        return local_info, local_warning, local_error
+
+    def _process_upload_patch_files(self, patch_files):
+        '''
+        Process the uploaded patch files
+        :param patch_files: list of patch files
+        :return: info, warning, error messages
+        '''
+
+        local_info = ""
+        local_warning = ""
+        local_error = ""
+        try:
+            # Create the directories
+            for state_dir in constants.DEPLOY_STATE_METADATA_DIR:
+                os.makedirs(state_dir, exist_ok=True)
+        except os.error:
+            msg = "Failed to create directories"
+            LOG.exception(msg)
+            raise SoftwareFail(msg)
+
+        for patch_file in patch_files:
+
+            # Get the release_id from the filename
+            # and check to see if it's already uploaded
+            # todo(abailey) We should not require the ID as part of the file
+            (release_id, _) = os.path.splitext(os.path.basename(patch_file))
+            patch_metadata = self.release_data.metadata.get(release_id, None)
+
+            if patch_metadata:
+                if patch_metadata["state"] != constants.AVAILABLE:
+                    msg = "%s is being or has already been deployed." % release_id
+                    LOG.info(msg)
+                    local_info += msg + "\n"
+                elif patch_metadata["state"] == constants.COMMITTED:
+                    msg = "%s is committed. Metadata not updated" % release_id
+                    LOG.info(msg)
+                    local_info += msg + "\n"
+                else:
+                    try:
+                        # todo(abailey) PatchFile / extract_patch should be renamed
+                        this_release = PatchFile.extract_patch(patch_file,
+                                                               metadata_dir=constants.AVAILABLE_DIR,
+                                                               metadata_only=True,
+                                                               existing_content=self.release_data.contents[release_id],
+                                                               base_pkgdata=self.base_pkgdata)
+                        self.release_data.update_release(this_release)
+                        msg = "%s is already uploaded. Updated metadata only" % release_id
+                        LOG.info(msg)
+                        local_info += msg + "\n"
+                    except ReleaseMismatchFailure:
+                        msg = "Contents of %s do not match re-uploaded release" % release_id
+                        LOG.exception(msg)
+                        local_error += msg + "\n"
+                    except ReleaseValidationFailure as e:
+                        msg = "Release validation failed for %s" % release_id
+                        if str(e) is not None and str(e) != '':
+                            msg += ":\n%s" % str(e)
+                        LOG.exception(msg)
+                        local_error += msg + "\n"
+                    except SoftwareFail:
+                        msg = "Failed to upload release %s" % release_id
+                        LOG.exception(msg)
+                        local_error += msg + "\n"
+            else:
+                try:
+                    this_release = PatchFile.extract_patch(patch_file,
+                                                           metadata_dir=constants.AVAILABLE_DIR,
+                                                           base_pkgdata=self.base_pkgdata)
+
+                    local_info += "%s is now uploaded\n" % release_id
+                    self.release_data.add_release(this_release)
+
+                    if not os.path.isfile(INITIAL_CONTROLLER_CONFIG_COMPLETE):
+                        self.release_data.metadata[release_id]["state"] = constants.AVAILABLE
+                    elif len(self.hosts) > 0:
+                        self.release_data.metadata[release_id]["state"] = constants.AVAILABLE
+                    else:
+                        self.release_data.metadata[release_id]["state"] = constants.UNKNOWN
+                except ReleaseValidationFailure as e:
+                    msg = "Release validation failed for %s" % release_id
+                    if str(e) is not None and str(e) != '':
+                        msg += ":\n%s" % str(e)
+                    LOG.exception(msg)
+                    local_error += msg + "\n"
+                    continue
+                except SoftwareFail:
+                    msg = "Failed to upload release %s" % release_id
+                    LOG.exception(msg)
+                    local_error += msg + "\n"
+                    continue
+
+        return local_info, local_warning, local_error
 
     def software_release_upload(self, release_files):
         """
@@ -993,130 +1140,40 @@ class PatchController(PatchService):
         # Refresh data, if needed
         self.base_pkgdata.loaddirs()
 
-        # Protect against duplications
-        release_list = sorted(set(release_files))
-
-        # First, make sure the specified files exist
-        for release_file in release_list:
-            if not os.path.isfile(release_file):
-                raise SoftwareFail("File does not exist: %s" % release_file)
-
-        try:
-            if not os.path.exists(available_dir):
-                os.makedirs(available_dir)
-            if not os.path.exists(unavailable_dir):
-                os.makedirs(unavailable_dir)
-            if not os.path.exists(deploying_start_dir):
-                os.makedirs(deploying_start_dir)
-            if not os.path.exists(deploying_host_dir):
-                os.makedirs(deploying_host_dir)
-            if not os.path.exists(deploying_activate_dir):
-                os.makedirs(deploying_activate_dir)
-            if not os.path.exists(deploying_complete_dir):
-                os.makedirs(deploying_complete_dir)
-            if not os.path.exists(deployed_dir):
-                os.makedirs(deployed_dir)
-            if not os.path.exists(removing_dir):
-                os.makedirs(removing_dir)
-            if not os.path.exists(aborting_dir):
-                os.makedirs(aborting_dir)
-            if not os.path.exists(committed_dir):
-                os.makedirs(committed_dir)
-        except os.error:
-            msg = "Failed to create directories"
-            LOG.exception(msg)
-            raise SoftwareFail(msg)
-
-        msg = "Uploading files: %s" % ",".join(release_list)
-        LOG.info(msg)
+        msg = "Uploading files: %s" % ",".join(release_files)
         audit_log_info(msg)
 
-        for release_file in release_list:
-            msg = "Uploading release: %s" % release_file
-            LOG.info(msg)
-            audit_log_info(msg)
+        # We now need to put the files in the category (patch or upgrade)
+        patch_files = []
+        upgrade_files = {}
 
-            # Get the release_id from the filename
-            # and check to see if it's already uploaded
-            # todo(abailey) We should not require the ID as part of the file
-            (release_id, ext) = os.path.splitext(os.path.basename(release_file))
-            if release_id in self.release_data.metadata:
-                if self.release_data.metadata[release_id]["state"] != constants.AVAILABLE:
-                    msg = "%s is being or has already been deployed." % release_id
-                    LOG.info(msg)
-                    msg_info += msg + "\n"
-                    continue
-                elif self.release_data.metadata[release_id]["state"] == constants.COMMITTED:
-                    msg = "%s is committed. Metadata not updated" % release_id
-                    LOG.info(msg)
-                    msg_info += msg + "\n"
-                    continue
-                else:
-                    mdir = available_dir
+        for uploaded_file in release_files:
+            (_, ext) = os.path.splitext(uploaded_file)
+            if ext in [constants.PATCH_EXTENSION]:
+                patch_files.append(uploaded_file)
+            elif ext == constants.ISO_EXTENSION:
+                upgrade_files[constants.ISO_EXTENSION] = uploaded_file
+            elif ext == constants.SIG_EXTENSION:
+                upgrade_files[constants.SIG_EXTENSION] = uploaded_file
+            else:
+                LOG.exception("The file extension is not supported. Supported extensions include .patch, .iso and .sig")
 
-                try:
-                    # todo(abailey) PatchFile / extract_patch should be renamed
-                    thisrelease = PatchFile.extract_patch(release_file,
-                                                          metadata_dir=mdir,
-                                                          metadata_only=True,
-                                                          existing_content=self.release_data.contents[release_id],
-                                                          base_pkgdata=self.base_pkgdata)
-                    self.release_data.update_release(thisrelease)
-                    msg = "%s is already uploaded. Updated metadata only" % release_id
-                    LOG.info(msg)
-                    msg_info += msg + "\n"
-                except ReleaseMismatchFailure:
-                    msg = "Contents of %s do not match re-uploaded release" % release_id
-                    LOG.exception(msg)
-                    msg_error += msg + "\n"
-                    continue
-                except ReleaseValidationFailure as e:
-                    msg = "Release validation failed for %s" % release_id
-                    if str(e) is not None and str(e) != '':
-                        msg += ":\n%s" % str(e)
-                    LOG.exception(msg)
-                    msg_error += msg + "\n"
-                    continue
-                except SoftwareFail:
-                    msg = "Failed to upload release %s" % release_id
-                    LOG.exception(msg)
-                    msg_error += msg + "\n"
+        if len(upgrade_files) == 1:  # Only one upgrade file uploaded
+            msg = "Missing upgrade file or signature file"
+            LOG.error(msg)
+            msg_error += msg + "\n"
+        elif len(upgrade_files) == 2:  # Two upgrade files uploaded
+            tmp_info, tmp_warning, tmp_error = self._process_upload_upgrade_files(upgrade_files,
+                                                                                  self.release_data)
+            msg_info += tmp_info
+            msg_warning += tmp_warning
+            msg_error += tmp_error
 
-                continue
-
-            if ext not in [".patch", ".tar", ".iso"]:
-                msg = "File: %s must end in .patch .tar or .iso" \
-                      % os.path.basename(release_file)
-                LOG.exception(msg)
-                msg_error += msg + "\n"
-                continue
-
-            try:
-                thisrelease = PatchFile.extract_patch(release_file,
-                                                      metadata_dir=available_dir,
-                                                      base_pkgdata=self.base_pkgdata)
-
-                msg_info += "%s is now uploaded\n" % release_id
-                self.release_data.add_release(thisrelease)
-
-                if not os.path.isfile(INITIAL_CONTROLLER_CONFIG_COMPLETE):
-                    self.release_data.metadata[release_id]["state"] = constants.AVAILABLE
-                elif len(self.hosts) > 0:
-                    self.release_data.metadata[release_id]["state"] = constants.AVAILABLE
-                else:
-                    self.release_data.metadata[release_id]["state"] = constants.UNKNOWN
-            except ReleaseValidationFailure as e:
-                msg = "Release validation failed for %s" % release_id
-                if str(e) is not None and str(e) != '':
-                    msg += ":\n%s" % str(e)
-                LOG.exception(msg)
-                msg_error += msg + "\n"
-                continue
-            except SoftwareFail:
-                msg = "Failed to upload release %s" % release_id
-                LOG.exception(msg)
-                msg_error += msg + "\n"
-                continue
+        if len(patch_files) > 0:
+            tmp_info, tmp_warning, tmp_error = self._process_upload_patch_files(patch_files)
+            msg_info += tmp_info
+            msg_warning += tmp_warning
+            msg_error += tmp_error
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
@@ -1250,16 +1307,16 @@ class PatchController(PatchService):
         # Refresh data
         self.base_pkgdata.loaddirs()
 
-        self.release_data.load_all_metadata(available_dir, state=constants.AVAILABLE)
-        self.release_data.load_all_metadata(unavailable_dir, state=constants.UNAVAILABLE)
-        self.release_data.load_all_metadata(deploying_start_dir, state=constants.DEPLOYING_START)
-        self.release_data.load_all_metadata(deploying_host_dir, state=constants.DEPLOYING_HOST)
-        self.release_data.load_all_metadata(deploying_activate_dir, state=constants.DEPLOYING_ACTIVATE)
-        self.release_data.load_all_metadata(deploying_complete_dir, state=constants.DEPLOYING_COMPLETE)
-        self.release_data.load_all_metadata(deployed_dir, state=constants.DEPLOYED)
-        self.release_data.load_all_metadata(removing_dir, state=constants.REMOVING)
-        self.release_data.load_all_metadata(aborting_dir, state=constants.ABORTING)
-        self.release_data.load_all_metadata(committed_dir, state=constants.COMMITTED)
+        self.release_data.load_all_metadata(constants.AVAILABLE_DIR, state=constants.AVAILABLE)
+        self.release_data.load_all_metadata(constants.UNAVAILABLE_DIR, state=constants.UNAVAILABLE)
+        self.release_data.load_all_metadata(constants.DEPLOYING_START_DIR, state=constants.DEPLOYING_START)
+        self.release_data.load_all_metadata(constants.DEPLOYING_HOST_DIR, state=constants.DEPLOYING_HOST)
+        self.release_data.load_all_metadata(constants.DEPLOYING_ACTIVATE_DIR, state=constants.DEPLOYING_ACTIVATE)
+        self.release_data.load_all_metadata(constants.DEPLOYING_COMPLETE_DIR, state=constants.DEPLOYING_COMPLETE)
+        self.release_data.load_all_metadata(constants.DEPLOYED_DIR, state=constants.DEPLOYED)
+        self.release_data.load_all_metadata(constants.REMOVING_DIR, state=constants.REMOVING)
+        self.release_data.load_all_metadata(constants.ABORTING_DIR, state=constants.ABORTING)
+        self.release_data.load_all_metadata(constants.COMMITTED_DIR, state=constants.COMMITTED)
 
         repo_dir[release] = "%s/rel-%s" % (repo_root_dir, release)
 
@@ -1526,10 +1583,10 @@ class PatchController(PatchService):
         audit_log_info(msg)
 
         try:
-            if not os.path.exists(committed_dir):
-                os.makedirs(committed_dir)
+            if not os.path.exists(constants.COMMITTED_DIR):
+                os.makedirs(constants.COMMITTED_DIR)
         except os.error:
-            msg = "Failed to create %s" % committed_dir
+            msg = "Failed to create %s" % constants.COMMITTED_DIR
             LOG.exception(msg)
             raise SoftwareFail(msg)
 
@@ -1616,8 +1673,8 @@ class PatchController(PatchService):
         # Move the metadata to the committed dir
         for patch_id in commit_list:
             metadata_fname = "%s-metadata.xml" % patch_id
-            deployed_fname = os.path.join(deployed_dir, metadata_fname)
-            committed_fname = os.path.join(committed_dir, metadata_fname)
+            deployed_fname = os.path.join(constants.DEPLOYED_DIR, metadata_fname)
+            committed_fname = os.path.join(constants.COMMITTED_DIR, metadata_fname)
             if os.path.exists(deployed_fname):
                 try:
                     shutil.move(deployed_fname, committed_fname)
@@ -1841,7 +1898,7 @@ class PatchController(PatchService):
                     deploystate = self.release_data.metadata[release]["state"]
                     metadata_dir = DEPLOY_STATE_METADATA_DIR_DICT[deploystate]
                     shutil.move("%s/%s-metadata.xml" % (metadata_dir, release),
-                                "%s/%s-metadata.xml" % (deploying_start_dir, release))
+                                "%s/%s-metadata.xml" % (constants.DEPLOYING_START_DIR, release))
 
                     msg_info += "%s is now in the repo\n" % release
                 except shutil.Error:
@@ -1955,7 +2012,7 @@ class PatchController(PatchService):
                     deploystate = self.release_data.metadata[release]["state"]
                     metadata_dir = DEPLOY_STATE_METADATA_DIR_DICT[deploystate]
                     shutil.move("%s/%s-metadata.xml" % (metadata_dir, release),
-                                "%s/%s-metadata.xml" % (removing_dir, release))
+                                "%s/%s-metadata.xml" % (constants.REMOVING_DIR, release))
                     msg_info += "%s has been removed from the repo\n" % release
                 except shutil.Error:
                     msg = "Failed to move the metadata for %s" % release
@@ -1983,7 +2040,7 @@ class PatchController(PatchService):
                 try:
                     metadata_dir = DEPLOY_STATE_METADATA_DIR_DICT[deploystate]
                     shutil.move("%s/%s-metadata.xml" % (metadata_dir, deployment),
-                                "%s/%s-metadata.xml" % (deploying_start_dir, deployment))
+                                "%s/%s-metadata.xml" % (constants.DEPLOYING_START_DIR, deployment))
                     msg_info += "Deployment started for %s\n" % deployment
                 except shutil.Error:
                     msg = "Failed to move the metadata for %s" % deployment
@@ -2019,8 +2076,8 @@ class PatchController(PatchService):
                 if self.release_data.metadata[release_id]["state"] == constants.DEPLOYING_ACTIVATE:
                     self.release_data.metadata[release_id]["state"] = constants.DEPLOYING_COMPLETE
                     try:
-                        shutil.move("%s/%s-metadata.xml" % (deploying_activate_dir, release_id),
-                                    "%s/%s-metadata.xml" % (deploying_complete_dir, release_id))
+                        shutil.move("%s/%s-metadata.xml" % (constants.DEPLOYING_ACTIVATE_DIR, release_id),
+                                    "%s/%s-metadata.xml" % (constants.DEPLOYING_COMPLETE_DIR, release_id))
                     except shutil.Error:
                         msg = "Failed to move the metadata for %s" % release_id
                         LOG.exception(msg)
@@ -2033,8 +2090,8 @@ class PatchController(PatchService):
                 if self.release_data.metadata[release_id]["state"] == constants.REMOVING:
                     self.release_data.metadata[release_id]["state"] = constants.AVAILABLE
                     try:
-                        shutil.move("%s/%s-metadata.xml" % (removing_dir, release_id),
-                                    "%s/%s-metadata.xml" % (available_dir, release_id))
+                        shutil.move("%s/%s-metadata.xml" % (constants.REMOVING_DIR, release_id),
+                                    "%s/%s-metadata.xml" % (constants.AVAILABLE_DIR, release_id))
                         msg_info += "%s is available\n" % release_id
                     except shutil.Error:
                         msg = "Failed to move the metadata for %s" % release_id
@@ -2044,8 +2101,8 @@ class PatchController(PatchService):
                     self.release_data.metadata[release_id]["state"] = constants.DEPLOYED
 
                     try:
-                        shutil.move("%s/%s-metadata.xml" % (deploying_complete_dir, release_id),
-                                    "%s/%s-metadata.xml" % (deployed_dir, release_id))
+                        shutil.move("%s/%s-metadata.xml" % (constants.DEPLOYING_COMPLETE, release_id),
+                                    "%s/%s-metadata.xml" % (constants.DEPLOYED_DIR, release_id))
                         msg_info += "%s has been deployed\n" % release_id
                     except shutil.Error:
                         msg = "Failed to move the metadata for %s" % release_id
@@ -2068,8 +2125,8 @@ class PatchController(PatchService):
             msg_info += msg + "\n"
         else:
             try:
-                shutil.move("%s/%s-metadata.xml" % (deploying_host_dir, release),
-                            "%s/%s-metadata.xml" % (deploying_activate_dir, release))
+                shutil.move("%s/%s-metadata.xml" % (constants.DEPLOYING_HOST_DIR, release),
+                            "%s/%s-metadata.xml" % (constants.DEPLOYING_ACTIVATE_DIR, release))
             except shutil.Error:
                 msg = "Failed to move the metadata for %s" % release
                 LOG.exception(msg)
@@ -2133,8 +2190,8 @@ class PatchController(PatchService):
             for release in sorted(list(self.release_data.metadata)):
                 if self.release_data.metadata[release]["state"] == constants.DEPLOYING_START:
                     try:
-                        shutil.move("%s/%s-metadata.xml" % (deploying_start_dir, release),
-                                    "%s/%s-metadata.xml" % (deploying_host_dir, release))
+                        shutil.move("%s/%s-metadata.xml" % (constants.DEPLOYING_START_DIR, release),
+                                    "%s/%s-metadata.xml" % (constants.DEPLOYING_HOST_DIR, release))
                         msg_info += "%s has been activated\n" % release
                     except shutil.Error:
                         msg = "Failed to move the metadata for %s" % release
@@ -2189,8 +2246,8 @@ class PatchController(PatchService):
         for release in sorted(list(self.release_data.metadata)):
             if self.release_data.metadata[release]["state"] == constants.DEPLOYING_START:
                 try:
-                    shutil.move("%s/%s-metadata.xml" % (deploying_start_dir, release),
-                                "%s/%s-metadata.xml" % (deploying_host_dir, release))
+                    shutil.move("%s/%s-metadata.xml" % (constants.DEPLOYING_START_DIR, release),
+                                "%s/%s-metadata.xml" % (constants.DEPLOYING_HOST_DIR, release))
                     msg_info += "%s has been activated\n" % release
                 except shutil.Error:
                     msg = "Failed to move the metadata for %s" % release
