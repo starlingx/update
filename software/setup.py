@@ -6,4 +6,3 @@
 import setuptools
 
 setuptools.setup()
-

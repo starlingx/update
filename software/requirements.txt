@@ -1,3 +1,4 @@
+argcomplete
 keystoneauth1
 keystonemiddleware
 lxml

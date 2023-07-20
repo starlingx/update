@@ -4,6 +4,8 @@ Copyright (c) 2023 Wind River Systems, Inc.
 SPDX-License-Identifier: Apache-2.0
 
 """
+# PYTHON_ARGCOMPLETE_OK
+import argcomplete
 import argparse
 import json
 import os
@@ -1307,6 +1309,7 @@ def main():
 
     rc = 0
     parser = setup_argparse()
+    argcomplete.autocomplete(parser)
     args = parser.parse_args()
     dc_request = check_for_os_region_name(args)
 
