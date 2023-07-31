@@ -14,6 +14,7 @@ from socket import if_nametoindex as if_nametoindex_func
 
 import software.constants as constants
 
+from software.exceptions import StateValidationFailure
 
 LOG = logging.getLogger('main_logger')
 
@@ -271,3 +272,23 @@ def load_from_json_file(file):
     except Exception as e:
         LOG.error("Problem reading from %s: %s", file, e)
         return None
+
+
+def check_state(state, states):
+    """
+    Check if the given state is one of the defined states in the Enum.
+    :param state: String value.
+    :param states: An Enum object.
+    """
+    if not state in states.__members__:
+        msg = "State %s not in valid states: %s" % (state, list(states.__members__.keys()))
+        LOG.exception(msg)
+        raise StateValidationFailure(msg)
+
+
+def check_instances(params: list, instance):
+    for p in params:
+        if not isinstance(p, instance):
+            msg = "Param %s must be type: %s" % (p, instance)
+            LOG.exception(msg)
+            raise ValueError(msg)

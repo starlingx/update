@@ -90,3 +90,8 @@ class ReleaseIsoDeleteFailure(SoftwareError):
 class SysinvClientNotInitialized(SoftwareError):
     """Sysinv Client Not Initialized Error."""
     pass
+
+
+class StateValidationFailure(SoftwareError):
+    """State Validation Failure"""
+    pass
