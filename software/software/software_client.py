@@ -1033,7 +1033,7 @@ def get_auth_token_and_endpoint(region_name):
     sess = session.Session(auth=auth)
     try:
         token = auth.get_token(sess)
-        endpoint = auth.get_endpoint(sess, service_type='software',
+        endpoint = auth.get_endpoint(sess, service_type='usm',
                                      interface='internal',
                                      region_name=region_name)
     except (exceptions.http.Unauthorized, exceptions.EndpointNotFound) as e:
