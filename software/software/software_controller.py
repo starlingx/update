@@ -55,6 +55,7 @@ from software.software_functions import package_dir
 from software.software_functions import repo_dir
 from software.software_functions import root_scripts_dir
 from software.software_functions import semantics_dir
+
 from software.software_functions import SW_VERSION
 from software.software_functions import LOG
 from software.software_functions import audit_log_info
@@ -69,6 +70,7 @@ import software.messages as messages
 import software.constants as constants
 
 from tsconfig.tsconfig import INITIAL_CONFIG_COMPLETE_FLAG
+from tsconfig.tsconfig import INITIAL_CONTROLLER_CONFIG_COMPLETE
 
 CONF = oslo_cfg.CONF
 
@@ -80,6 +82,9 @@ app_dependency_basename = "app_dependencies.json"
 app_dependency_filename = "%s/%s" % (constants.SOFTWARE_STORAGE_DIR, app_dependency_basename)
 
 insvc_patch_restart_controller = "/run/software/.restart.software-controller"
+
+ETC_HOSTS_FILE_PATH = "/etc/hosts"
+ETC_HOSTS_BACKUP_FILE_PATH = "/etc/hosts.patchbak"
 
 stale_hosts = []
 pending_queries = []
@@ -897,10 +902,89 @@ class PatchController(PatchService):
                     LOG.exception(msg)
                     raise SoftwareFail(msg)
 
+    def software_install_local_api(self):
+        """
+        Trigger patch installation prior to configuration
+        :return: dict of info, warning and error messages
+        """
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
+
+        # Check to see if initial configuration has completed
+        if os.path.isfile(INITIAL_CONTROLLER_CONFIG_COMPLETE):
+            # Disallow the install
+            msg = "This command can only be used before initial system configuration."
+            LOG.exception(msg)
+            raise SoftwareFail(msg)
+
+        update_hosts_file = False
+
+        # Check to see if the controller hostname is already known.
+        if not utils.gethostbyname(constants.CONTROLLER_FLOATING_HOSTNAME):
+            update_hosts_file = True
+
+        # To allow software installation to occur before configuration, we need
+        # to alias controller to localhost
+        # There is a HOSTALIASES feature that would be preferred here, but it
+        # unfortunately requires dnsmasq to be running, which it is not at this point.
+
+        if update_hosts_file:
+            # Make a backup of /etc/hosts
+            try:
+                shutil.copy2(ETC_HOSTS_FILE_PATH, ETC_HOSTS_BACKUP_FILE_PATH)
+            except Exception:
+                msg = f"Error occurred while copying {ETC_HOSTS_FILE_PATH}."
+                LOG.exception(msg)
+                raise SoftwareFail(msg)
+
+        # Update /etc/hosts
+        with open(ETC_HOSTS_FILE_PATH, 'a') as f:
+            f.write("127.0.0.1 controller\n")
+
+        # Run the software install
+        try:
+            # Use the restart option of the sw-patch init script, which will
+            # install patches but won't automatically reboot if the RR flag is set
+            subprocess.check_output(['/etc/init.d/sw-patch', 'restart'])
+        except subprocess.CalledProcessError:
+            msg = "Failed to install patches."
+            LOG.exception(msg)
+            raise SoftwareFail(msg)
+
+        if update_hosts_file:
+            # Restore /etc/hosts
+            os.rename(ETC_HOSTS_BACKUP_FILE_PATH, ETC_HOSTS_FILE_PATH)
+
+        for release in sorted(list(self.release_data.metadata)):
+            if self.release_data.metadata[release]["state"] == constants.DEPLOYING_START:
+                self.release_data.metadata[release]["state"] = constants.DEPLOYED
+                try:
+                    shutil.move("%s/%s-metadata.xml" % (deploying_start_dir, release),
+                                "%s/%s-metadata.xml" % (deployed_dir, release))
+                except shutil.Error:
+                    msg = "Failed to move the metadata for %s" % release
+                    LOG.exception(msg)
+                    raise MetadataFail(msg)
+            elif self.release_data.metadata[release]["state"] == constants.REMOVING:
+                self.release_data.metadata[release]["state"] = constants.AVAILABLE
+                try:
+                    shutil.move("%s/%s-metadata.xml" % (removing_dir, release),
+                                "%s/%s-metadata.xml" % (available_dir, release))
+                except shutil.Error:
+                    msg = "Failed to move the metadata for %s" % release
+                    LOG.exception(msg)
+                    raise MetadataFail(msg)
+
+        msg_info += "Software installation is complete.\n"
+        msg_info += "Please reboot before continuing with configuration."
+
+        return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
     def software_release_upload(self, release_files):
         """
         Upload software release files
-        :return:
+        :return: dict of info, warning and error messages
         """
         msg_info = ""
         msg_warning = ""
@@ -1015,7 +1099,9 @@ class PatchController(PatchService):
                 msg_info += "%s is now uploaded\n" % release_id
                 self.release_data.add_release(thisrelease)
 
-                if len(self.hosts) > 0:
+                if not os.path.isfile(INITIAL_CONTROLLER_CONFIG_COMPLETE):
+                    self.release_data.metadata[release_id]["state"] = constants.AVAILABLE
+                elif len(self.hosts) > 0:
                     self.release_data.metadata[release_id]["state"] = constants.AVAILABLE
                 else:
                     self.release_data.metadata[release_id]["state"] = constants.UNKNOWN
@@ -1067,7 +1153,7 @@ class PatchController(PatchService):
     def software_release_delete_api(self, release_ids):
         """
         Delete release(s)
-        :return:
+        :return: dict of info, warning and error messages
         """
         msg_info = ""
         msg_warning = ""
@@ -1145,7 +1231,7 @@ class PatchController(PatchService):
     def patch_init_release_api(self, release):
         """
         Create an empty repo for a new release
-        :return:
+        :return: dict of info, warning and error messages
         """
         msg_info = ""
         msg_warning = ""
@@ -1204,7 +1290,7 @@ class PatchController(PatchService):
     def patch_query_what_requires(self, patch_ids):
         """
         Query the known patches to see which have dependencies on the specified patches
-        :return:
+        :return: dict of info, warning and error messages
         """
         msg_info = ""
         msg_warning = ""
@@ -1763,7 +1849,9 @@ class PatchController(PatchService):
                     LOG.exception(msg)
                     raise MetadataFail(msg)
 
-                if len(self.hosts) > 0:
+                if not os.path.isfile(INITIAL_CONTROLLER_CONFIG_COMPLETE):
+                    self.release_data.metadata[release]["state"] = constants.DEPLOYING_START
+                elif len(self.hosts) > 0:
                     self.release_data.metadata[release]["state"] = constants.DEPLOYING_START
                 else:
                     self.release_data.metadata[release]["state"] = constants.UNKNOWN
@@ -1875,7 +1963,9 @@ class PatchController(PatchService):
                     raise MetadataFail(msg)
 
                 # update state
-                if len(self.hosts) > 0:
+                if not os.path.isfile(INITIAL_CONTROLLER_CONFIG_COMPLETE):
+                    self.release_data.metadata[release]["state"] = constants.REMOVING
+                elif len(self.hosts) > 0:
                     self.release_data.metadata[release]["state"] = constants.REMOVING
                 else:
                     self.release_data.metadata[release]["state"] = constants.UNKNOWN
@@ -1901,7 +1991,9 @@ class PatchController(PatchService):
                     raise MetadataFail(msg)
 
                 # update state
-                if len(self.hosts) > 0:
+                if not os.path.isfile(INITIAL_CONTROLLER_CONFIG_COMPLETE):
+                    self.release_data.metadata[deployment]["state"] = constants.DEPLOYING_START
+                elif len(self.hosts) > 0:
                     self.release_data.metadata[deployment]["state"] = constants.DEPLOYING_START
                 else:
                     self.release_data.metadata[deployment]["state"] = constants.UNKNOWN

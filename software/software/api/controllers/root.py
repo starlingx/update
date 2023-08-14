@@ -97,6 +97,16 @@ class SoftwareAPIController(object):
         return result
 
     @expose('json')
+    @expose('query.xml', content_type='application/xml')
+    def install_local(self):
+        try:
+            result = sc.software_install_local_api()
+        except SoftwareError as e:
+            return dict(error="Error: %s" % str(e))
+
+        return result
+
+    @expose('json')
     def is_completed(self, *args):
         return sc.is_completed(list(args))
 

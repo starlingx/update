@@ -12,6 +12,7 @@ import os
 import re
 import requests
 import signal
+import software.constants as constants
 import subprocess
 import sys
 import textwrap
@@ -19,8 +20,6 @@ import time
 
 from requests_toolbelt import MultipartEncoder
 from urllib.parse import urlparse
-
-import software.constants as constants
 
 from tsconfig.tsconfig import SW_VERSION as RUNNING_SW_VERSION
 
@@ -716,6 +715,24 @@ def drop_host(args):
     return check_rc(req)
 
 
+def install_local(args):  # pylint: disable=unused-argument
+    # Ignore interrupts during this function
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+    url = "http://%s/software/install_local" % (api_addr)
+
+    headers = {}
+    append_auth_token_if_required(headers)
+    req = requests.get(url, headers=headers)
+
+    if args.debug:
+        print_result_debug(req)
+    else:
+        print_software_op_result(req)
+
+    return check_rc(req)
+
+
 def release_upload_dir_req(args):
     # arg.release is a list
     release_dirs = args.release
@@ -1247,6 +1264,16 @@ def setup_argparse():
     cmd.add_argument('release',
                      nargs="+",  # accepts a list
                      help='Release ID to delete')
+
+    # -- software install-local ---------------
+    cmd = commands.add_parser(
+        'install-local',
+        help='Trigger patch install/remove on the local host. ' +
+             'This command can only be used for patch installation ' +
+             'prior to initial configuration.'
+    )
+    cmd.set_defaults(cmd='install-local')
+    cmd.set_defaults(func=install_local)
 
     # --- software list ---------------------------
     cmd = commands.add_parser(
