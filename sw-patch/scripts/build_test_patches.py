@@ -81,7 +81,7 @@ SAMPLE_RR_XML = "patch_recipe_rr_sample.xml"
 SAMPLE_INSVC_XML = "patch_recipe_insvc_sample.xml"
 
 # IN Service restart scripts
-RESTART_SCRIPT = "patch-scripts/EXAMPLE_0001/scripts/example-restart"
+RESTART_SCRIPT = "patch-scripts/EXAMPLE_0002/scripts/example-cgcs-patch-restart"
 RESTART_FAILURE_SCRIPT = "patch-scripts/test-patches/INSVC_RESTART_FAILURE/scripts/restart-failure"
 
 
