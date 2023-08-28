@@ -25,6 +25,26 @@ LOG = log.getLogger(__name__)
 class SoftwareAPIController(object):
 
     @expose('json')
+    def commit_patch(self, *args):
+        try:
+            result = sc.patch_commit(list(args))
+        except SoftwareError as e:
+            return dict(error=str(e))
+
+        sc.software_sync()
+
+        return result
+
+    @expose('json')
+    def commit_dry_run(self, *args):
+        try:
+            result = sc.patch_commit(list(args), dry_run=True)
+        except SoftwareError as e:
+            return dict(error=str(e))
+
+        return result
+
+    @expose('json')
     @expose('query.xml', content_type='application/xml')
     def delete(self, *args):
         try:

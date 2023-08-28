@@ -15,11 +15,6 @@ try:
 except Exception:
     pass
 
-CLI_OPT_ALL = '--all'
-CLI_OPT_DRY_RUN = '--dry-run'
-CLI_OPT_RECURSIVE = '--recursive'
-CLI_OPT_RELEASE = '--release'
-
 ADDRESS_VERSION_IPV4 = 4
 ADDRESS_VERSION_IPV6 = 6
 CONTROLLER_FLOATING_HOSTNAME = "controller"

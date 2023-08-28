@@ -1595,7 +1595,8 @@ class PatchController(PatchService):
                          self.release_data.metadata[patch_id]["restart_script"])
                     if os.path.exists(restart_script_path):
                         cleanup_files.add(restart_script_path)
-                patch_sw_version = self.release_data.metadata[patch_id]["sw_version"]
+                patch_sw_version = utils.get_major_release_version(
+                    self.release_data.metadata[patch_id]["sw_version"])
                 abs_ostree_tar_dir = package_dir[patch_sw_version]
                 software_tar_path = "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id)
                 if os.path.exists(software_tar_path):

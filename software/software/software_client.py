@@ -349,37 +349,25 @@ def release_delete_req(args):
     return check_rc(req)
 
 
-def patch_commit_req(args):
-    print("patch_commit_req UNDER CONSTRUCTION")
+def commit_patch_req(args):
 
     # Ignore interrupts during this function
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
-    dry_run = False
-    if constants.CLI_OPT_DRY_RUN in args:
-        dry_run = True
-        args.remove(constants.CLI_OPT_DRY_RUN)
-
-    all_patches = False
-    if constants.CLI_OPT_ALL in args:
-        all_patches = True
-        args.remove(constants.CLI_OPT_ALL)
-
     # Default to running release
     # this all needs to be changed
     relopt = RUNNING_SW_VERSION
-    release = args.release
 
     headers = {}
     append_auth_token_if_required(headers)
-    if release and not all_patches:
+    if args.sw_version and not args.all:
         # Disallow
-        print("Use of --release option requires --all")
+        print("Use of --sw-version option requires --all")
         return 1
-    elif all_patches:
+    elif args.all:
         # Get a list of all patches
         extra_opts = "&release=%s" % relopt
-        url = "http://%s/software/query?show=all%s" % (api_addr, extra_opts)
+        url = "http://%s/software/query?show=patch%s" % (api_addr, extra_opts)
 
         req = requests.get(url, headers=headers)
 
@@ -398,13 +386,14 @@ def patch_commit_req(args):
             return 0
 
         print("The following patches will be committed:")
-        for release_id in patch_list:
-            print("    %s" % release_id)
+        for patch_id in patch_list:
+            print("    %s" % patch_id)
         print()
 
         patches = "/".join(patch_list)
     else:
-        patches = "/".join(args)
+        # args.patch is a list
+        patches = "/".join(args.patch)
 
         # First, get a list of dependencies and ask for confirmation
         url = "http://%s/software/query_dependencies/%s?recursive=yes" % (api_addr, patches)
@@ -437,7 +426,7 @@ def patch_commit_req(args):
         print("Aborting...")
         return 1
 
-    if dry_run:
+    if args.dry_run:
         return 0
 
     print()
@@ -451,7 +440,7 @@ def patch_commit_req(args):
         print("Aborting...")
         return 1
 
-    url = "http://%s/software/commit/%s" % (api_addr, patches)
+    url = "http://%s/software/commit_patch/%s" % (api_addr, patches)
     req = requests.post(url, headers=headers)
 
     if args.debug:
@@ -1253,6 +1242,31 @@ def setup_argparse():
 
     commands = parser.add_subparsers(title='Commands', metavar='')
     commands.required = True
+
+    # -- software commit-patch <release> ---------------
+    cmd = commands.add_parser(
+        'commit-patch',
+        help='Commit patches to free disk space. WARNING: This action is irreversible!'
+    )
+    cmd.set_defaults(cmd='commit-patch')
+    cmd.set_defaults(func=commit_patch_req)
+    cmd.add_argument('patch',
+                     nargs="+",  # accepts a list
+                     help='Patch ID/s to commit')
+    # --dry-run is an optional argument
+    cmd.add_argument('--dry-run',
+                     action='store_true',
+                     required=False,
+                     help='Check the space savings without committing the patch')
+    # --all is an optional argument
+    cmd.add_argument('--all',
+                     action='store_true',
+                     required=False,
+                     help='Commit all the applied patches')
+    # --sw-version is an optional argument
+    cmd.add_argument('--sw-version',
+                     required=False,
+                     help='Software release version')
 
     # -- software delete <release> ---------------
     cmd = commands.add_parser(
