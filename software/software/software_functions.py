@@ -1078,3 +1078,29 @@ def get_sysinv_client(token, endpoint):
         msg = "Failed to get sysinv client. Error: %s" % str(e)
         LOG.exception(msg)
         raise SysinvClientNotInitialized(msg)
+
+
+def collect_current_load_for_hosts():
+    load_data = {
+        "current_loads": []
+    }
+    try:
+        token, endpoint = get_endpoints_token()
+        sysinv_client = get_sysinv_client(token=token, endpoint=endpoint)
+        host_list = sysinv_client.ihost.list()
+        for ihost in host_list:
+            software_load = ihost.software_load
+            hostname = ihost.hostname
+            load_data["current_loads"].append({
+                "hostname": hostname,
+                "running_release": software_load
+            })
+        if os.path.exists(constants.SOFTWARE_JSON_FILE):
+            data = utils.load_from_json_file(constants.SOFTWARE_JSON_FILE)
+        else:
+            data = {}
+        data.update(load_data)
+        utils.save_to_json_file(constants.SOFTWARE_JSON_FILE, load_data)
+        LOG.info("Collect current load for hosts successfully.")
+    except Exception as err:
+        LOG.error("Error in collect current load for hosts: %s", err)

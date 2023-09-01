@@ -40,6 +40,7 @@ from software.exceptions import ReleaseInvalidRequest
 from software.exceptions import ReleaseValidationFailure
 from software.exceptions import ReleaseMismatchFailure
 from software.exceptions import ReleaseIsoDeleteFailure
+from software.software_functions import collect_current_load_for_hosts
 from software.software_functions import configure_logging
 from software.software_functions import mount_iso_load
 from software.software_functions import unmount_iso_load
@@ -1832,6 +1833,9 @@ class PatchController(PatchService):
         # Order for apply operation: [R3, R4]
         # Order for remove operation: [R3]
         if operation == "apply":
+
+            collect_current_load_for_hosts()
+
             # reverse = True is used for apply operation
             deployment_list = self.release_apply_remove_order(deployment, running_sw_version, reverse=True)
 

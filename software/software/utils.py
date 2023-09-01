@@ -4,6 +4,7 @@ Copyright (c) 2023 Wind River Systems, Inc.
 SPDX-License-Identifier: Apache-2.0
 
 """
+import json
 import logging
 import shutil
 from netaddr import IPAddress
@@ -250,3 +251,23 @@ def get_auth_token_and_endpoint(user: dict, service_type: str, region_name: str,
     except Exception as e:
         LOG.exception("Failed to get token and endpoint. Error: %s", str(e))
         raise
+
+
+def save_to_json_file(file, data):
+    try:
+        with open(file, "w") as f:
+            json.dump(data, f)
+    except Exception as e:
+        LOG.error("Problem saving file %s: %s", file, e)
+
+
+def load_from_json_file(file):
+    try:
+        with open(file, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        LOG.error("File %s not found", file)
+        return None
+    except Exception as e:
+        LOG.error("Problem reading from %s: %s", file, e)
+        return None
