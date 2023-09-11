@@ -1,0 +1,5 @@
+apt-ostree (0.1-1) UNRELEASED; urgency=medium
+
+  * Initial release.
+
+ -- Chuck Short <charles.short@windriver.com>  Tue, 25 Jul 2023 10:51:26 -0400

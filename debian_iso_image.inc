@@ -1,5 +1,8 @@
 # List of packages to be included/installed in ISO
 
+#apt-ostree
+python3-apt-ostree
+
 #cgcs-patch
 cgcs-patch-agent
 cgcs-patch-controller
