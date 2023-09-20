@@ -297,7 +297,10 @@ def release_upload_req(args):
     # Ignore interrupts during this function
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
+    to_upload_files = {}
+
     for software_file in sorted(list(set(releases))):
+
         if os.path.isdir(software_file):
             print("Error: %s is a directory. Please use upload-dir" % software_file)
             continue
@@ -306,24 +309,29 @@ def release_upload_req(args):
             print("Error: File does not exist: %s" % software_file)
             continue
 
-        enc = MultipartEncoder(fields={'file': (software_file,
-                                                open(software_file, 'rb'),
-                                                )})
-        url = "http://%s/software/upload" % api_addr
-        headers = {'Content-Type': enc.content_type}
-        append_auth_token_if_required(headers)
-        req = requests.post(url,
-                            data=enc,
-                            headers=headers)
+        file_name, ext = os.path.splitext(software_file)
+        if ext not in constants.SUPPORTED_UPLOAD_FILE_EXT:
+            print("Error: File type not supported: %s" % file_name)
+            continue
 
-        if args.debug:
-            print_result_debug(req)
-        else:
-            print_software_op_result(req)
+        to_upload_files[software_file] = (software_file, open(software_file, 'rb'))
 
-        if check_rc(req) != 0:
-            # We hit a failure.  Update rc but keep looping
-            rc = 1
+    encoder = MultipartEncoder(fields=to_upload_files)
+    url = "http://%s/software/upload" % api_addr
+    headers = {'Content-Type': encoder.content_type}
+    append_auth_token_if_required(headers)
+    req = requests.post(url,
+                        data=encoder,
+                        headers=headers)
+
+    if args.debug:
+        print_result_debug(req)
+    else:
+        print_software_op_result(req)
+
+    if check_rc(req) != 0:
+        # We hit a failure.  Update rc but keep looping
+        rc = 1
 
     return rc
 
