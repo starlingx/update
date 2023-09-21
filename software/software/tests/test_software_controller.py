@@ -6,6 +6,7 @@
 import unittest
 from unittest.mock import MagicMock
 from unittest.mock import patch
+from unittest.mock import call
 from software import constants
 
 from software.software_controller import PatchController
@@ -28,7 +29,11 @@ class TestSoftwareController(unittest.TestCase):
     @patch('software.software_controller.read_upgrade_metadata')
     @patch('software.software_functions.shutil.copyfile')
     @patch('os.makedirs')
+    @patch('software.software_functions.shutil.copytree')
+    @patch('software.software_controller.unmount_iso_load')
     def test_process_upload_upgrade_files(self,
+                                          mock_unmount_iso_load,  # pylint: disable=unused-argument
+                                          mock_copytree,  # pylint: disable=unused-argument
                                           mock_makedirs,  # pylint: disable=unused-argument
                                           mock_copyfile,  # pylint: disable=unused-argument
                                           mock_read_upgrade_metadata,
@@ -64,6 +69,15 @@ class TestSoftwareController(unittest.TestCase):
 
         # Verify that the expected methods were called on the ReleaseData object
         release_data.parse_metadata.assert_called_once_with('/mnt/iso/upgrades/STX_2.0_GA-metadata.xml', state='available')
+
+        # Verify that the expected files were copied to the expected directories
+        mock_copyfile.assert_called_once_with('/mnt/iso/upgrades/STX_2.0_GA-metadata.xml',
+                                              constants.AVAILABLE_DIR + '/STX_2.0_GA-metadata.xml')
+        expected_calls = [call(constants.AVAILABLE_DIR, exist_ok=True),
+                          call(constants.UPGRADES_DIR, exist_ok=True)]
+        self.assertEqual(mock_makedirs.call_count, 2)
+        mock_makedirs.assert_has_calls(expected_calls)
+        mock_unmount_iso_load.assert_called_once_with('/mnt/iso')
 
     @patch('software.software_controller.PatchController.__init__', return_value=None)
     @patch('software.software_controller.verify_files')

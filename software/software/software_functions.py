@@ -1011,7 +1011,7 @@ def unmount_iso_load(iso_path):
     """
     with open(os.devnull, "w") as devnull:
         try:
-            subprocess.check_call(["unmount", "-l", iso_path],
+            subprocess.check_call(["umount", "-l", iso_path],
                                   stdout=devnull, stderr=devnull)
         except subprocess.CalledProcessError:
             pass
