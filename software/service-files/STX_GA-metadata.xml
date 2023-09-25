@@ -1,0 +1,18 @@
+<?xml version="1.0" ?>
+<patch>
+  <id>STX_xxxPLATFORM_RELEASExxx_GA</id>
+  <sw_version>xxxPLATFORM_RELEASExxx</sw_version>
+  <summary>STX xxxPLATFORM_RELEASExxx GA release</summary>
+  <description>STX xxxPLATFORM_RELEASExxx major GA release</description>
+  <install_instructions/>
+  <warnings/>
+  <status>REL</status>
+  <unremovable>Y</unremovable>
+  <reboot_required>Y</reboot_required>
+  <apply_active_release_only/>
+  <contents>
+  </contents>
+  <requires>
+  </requires>
+  <semantics/>
+</patch>
