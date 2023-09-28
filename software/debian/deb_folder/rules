@@ -21,7 +21,6 @@ override_dh_install:
 	install -d -m 755 $(ROOT)/usr/bin
 	install -d -m 755 $(ROOT)/usr/sbin
 	install -d -m 755 $(ROOT)/run
-	install -d -m 755 $(ROOT)/usr/share/bash-completion/completions
 	install -m 755 -d ${ROOT}/etc/goenabled.d
 	install -m 755 -d ${ROOT}/etc/init.d
 	install -m 755 -d ${ROOT}/etc/logrotate.d
@@ -47,8 +46,6 @@ override_dh_install:
 		${PMONDIR}/software-agent.conf
 	install -m 444 service-files/*.service \
 	    ${ROOT}/lib/systemd/system
-	install -m 444 service-files/software.completion \
-	    ${ROOT}/usr/share/bash-completion/completions/software
 	install -m 400 service-files/software-functions \
 		${ROOT}/etc/software/software-functions
 	install -m 444 service-files/software-tmpdirs.conf \

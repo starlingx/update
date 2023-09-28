@@ -1,4 +1,5 @@
 enable-dev-patch
 patch-alarm
 software
+software-client
 sw-patch

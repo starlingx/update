@@ -10,7 +10,7 @@ import sys
 import testtools
 from unittest import mock
 
-from software import software_client
+from software_client import software_client
 
 
 API_PORT = "5493"
@@ -131,7 +131,7 @@ class SoftwareClientHelpTestCase(SoftwareClientTestCase, SoftwareClientNonRootMi
     print_help is invoked when there is a failure.
     """
 
-    @mock.patch('software.software_client.check_for_os_region_name')
+    @mock.patch('software_client.software_client.check_for_os_region_name')
     @mock.patch('argparse.ArgumentParser.print_help')
     @mock.patch('argparse.ArgumentParser.print_usage')
     def test_main_no_args(self, mock_usage, mock_help, mock_check):
@@ -142,7 +142,7 @@ class SoftwareClientHelpTestCase(SoftwareClientTestCase, SoftwareClientNonRootMi
         mock_help.assert_not_called()
         mock_check.assert_not_called()
 
-    @mock.patch('software.software_client.check_for_os_region_name')
+    @mock.patch('software_client.software_client.check_for_os_region_name')
     @mock.patch('argparse.ArgumentParser.print_help')
     @mock.patch('argparse.ArgumentParser.print_usage')
     def test_main_help(self, mock_usage, mock_help, mock_check):
@@ -153,7 +153,7 @@ class SoftwareClientHelpTestCase(SoftwareClientTestCase, SoftwareClientNonRootMi
         mock_help.assert_called()
         mock_check.assert_not_called()
 
-    @mock.patch('software.software_client.check_for_os_region_name')
+    @mock.patch('software_client.software_client.check_for_os_region_name')
     @mock.patch('argparse.ArgumentParser.print_help')
     @mock.patch('argparse.ArgumentParser.print_usage')
     def test_main_invalid_action_calls_help(self, mock_usage, mock_help, mock_check):

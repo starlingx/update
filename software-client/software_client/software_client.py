@@ -12,7 +12,7 @@ import os
 import re
 import requests
 import signal
-import software.constants as constants
+import software_client.constants as constants
 import subprocess
 import sys
 import textwrap

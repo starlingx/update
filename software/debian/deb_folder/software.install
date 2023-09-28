@@ -7,5 +7,3 @@ run/software-tmpdirs.conf
 usr/bin
 usr/lib/python*/dist-packages/*
 usr/sbin
-usr/share/
-

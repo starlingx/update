@@ -1,0 +1,10 @@
+argcomplete
+keystoneauth1
+keystonemiddleware
+oslo.config
+oslo.policy
+oslo.serialization
+netaddr
+pecan
+requests_toolbelt
+WebOb

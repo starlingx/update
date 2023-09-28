@@ -1,0 +1,9 @@
+---
+debname: software-client
+debver: 1.0-1
+src_path: .
+revision:
+  dist: $STX_DIST
+  PKG_GITREVCOUNT: true
+  GITREVCOUNT:
+    BASE_SRCREV: d923bfaa381e2143bc5b961fe2a50a8deb6ee393

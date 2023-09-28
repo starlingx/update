@@ -14,3 +14,4 @@ python3-patch-alarm
 
 #software
 software
+software-client

@@ -1,0 +1,18 @@
+#!/usr/bin/make -f
+export DH_VERBOSE = 1
+export PYBUILD_NAME = software-client
+export PBR_VERSION=1.0.0
+
+ROOT := $(CURDIR)/debian/tmp
+
+%:
+	dh $@ --with python3 --buildsystem=pybuild
+
+override_dh_install:
+	python3 setup.py install -f --install-layout=deb --root=$(ROOT)
+	python3 setup.py bdist_wheel  --universal  -d $(CURDIR)/debian/$(PYBUILD_NAME)-wheels/usr/share/python-wheels
+	install -d -m 755 $(ROOT)/usr/share/bash-completion/completions
+	install -m 755 -d ${ROOT}/etc/software-client
+	install -m 444 service-files/software_client.completion \
+	    ${ROOT}/usr/share/bash-completion/completions/software
+	dh_install
