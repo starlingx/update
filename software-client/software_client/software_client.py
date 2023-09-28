@@ -757,8 +757,25 @@ def release_upload_dir_req(args):
 
 
 def deploy_precheck_req(args):
-    print(args.deployment)
-    return 1
+    # args.deployment is a string
+    deployment = args.deployment
+
+    # args.region is a string
+    region_name = args.region_name
+
+    # Issue deploy_precheck request
+    url = "http://%s/software/deploy_precheck/%s?region_name=%s" % (api_addr, deployment, region_name)
+
+    headers = {}
+    append_auth_token_if_required(headers)
+    req = requests.post(url, headers=headers)
+
+    if args.debug:
+        print_result_debug(req)
+    else:
+        print_software_op_result(req)
+
+    return check_rc(req)
 
 
 def deploy_start_req(args):
@@ -1148,7 +1165,11 @@ def register_deploy_commands(commands):
     cmd.set_defaults(cmd='precheck')
     cmd.set_defaults(func=deploy_precheck_req)
     cmd.add_argument('deployment',
-                     help='Verify prerequisite conditions are met for specified deployment')
+                     help='Verify if prerequisites are met for this Deployment ID')
+    cmd.add_argument('--region_name',
+                     default='RegionOne',
+                     required=False,
+                     help='Run precheck against a subcloud')
 
     # --- software deploy start --------------------------
     cmd = sub_cmds.add_parser(

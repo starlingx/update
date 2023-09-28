@@ -25,7 +25,7 @@ mgmt_if = None
 nodetype = None
 platform_conf_mtime = 0
 software_conf_mtime = 0
-software_conf = '/etc/software/software.conf'
+software_conf = constants.SOFTWARE_CONFIG_FILE_LOCAL
 
 # setup a shareable config
 CONF = cfg.CONF
