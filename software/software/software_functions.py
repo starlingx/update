@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from oslo_config import cfg as oslo_cfg
 from lxml import etree as ElementTree
 from xml.dom import minidom
 
@@ -28,6 +29,7 @@ from software.exceptions import ReleaseUploadFailure
 from software.exceptions import ReleaseValidationFailure
 from software.exceptions import ReleaseMismatchFailure
 from software.exceptions import SoftwareFail
+from software.exceptions import SysinvClientNotInitialized
 
 import software.constants as constants
 import software.utils as utils
@@ -39,6 +41,7 @@ try:
 except Exception:
     SW_VERSION = "unknown"
 
+CONF = oslo_cfg.CONF
 
 # these next 4 variables may need to change to support ostree
 repo_root_dir = "/var/www/pages/updates"
@@ -1035,3 +1038,43 @@ def read_upgrade_metadata(mounted_dir):
             "required_patch": upgrade.findtext("required_patch"),
         })
     return to_release, supported_from_releases
+
+
+def get_endpoints_token(config=None, service_type="platform"):
+    try:
+        if not config:
+            keystone_conf = CONF.get('keystone_authtoken')
+        else:
+            keystone_conf = config
+        user = {
+            'auth_url': keystone_conf["auth_url"] + '/v3',
+            'username': keystone_conf["username"],
+            'password': keystone_conf["password"],
+            'project_name': keystone_conf["project_name"],
+            'user_domain_name': keystone_conf["user_domain_name"],
+            'project_domain_name': keystone_conf["project_domain_name"],
+        }
+        region_name = keystone_conf["region_name"]
+        token, endpoint = utils.get_auth_token_and_endpoint(user=user,
+                                                            service_type=service_type,
+                                                            region_name=region_name,
+                                                            interface='public')
+        return token, endpoint
+    except Exception as e:
+        LOG.error("Failed to get '%s' endpoint. Error: %s", service_type, str(e))
+        return None, None
+
+
+def get_sysinv_client(token, endpoint):
+    try:
+        from cgtsclient import client
+        sysinv_client = client.Client(version='1', endpoint=endpoint, token=token, timeout=600)
+        return sysinv_client
+    except ImportError:
+        msg = "Failed to import cgtsclient"
+        LOG.exception(msg)
+        raise ImportError(msg)
+    except Exception as e:
+        msg = "Failed to get sysinv client. Error: %s" % str(e)
+        LOG.exception(msg)
+        raise SysinvClientNotInitialized(msg)
