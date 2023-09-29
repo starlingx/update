@@ -1,9 +1,10 @@
 """
-Copyright (c) 2014-2022 Wind River Systems, Inc.
+Copyright (c) 2014-2023 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
+import gc
 import json
 import os
 import random
@@ -545,6 +546,9 @@ class PatchAgent(PatchService):
         if self.sock_out is not None:
             hello_ack = PatchMessageHelloAgentAck()
             hello_ack.send(self.sock_out)
+
+        # Call python garbage collector to ensure the removal of cleared flags
+        gc.collect()
 
         # Indicate if the method was successful
         # success means no change needed, or a change worked.
