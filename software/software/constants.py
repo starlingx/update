@@ -32,6 +32,7 @@ REMOVING_DIR = "%s/metadata/removing" % SOFTWARE_STORAGE_DIR
 ABORTING_DIR = "%s/metadata/aborting" % SOFTWARE_STORAGE_DIR
 COMMITTED_DIR = "%s/metadata/committed" % SOFTWARE_STORAGE_DIR
 SEMANTICS_DIR = "%s/semantics" % SOFTWARE_STORAGE_DIR
+UPGRADES_DIR = "%s/upgrades" % SOFTWARE_STORAGE_DIR
 
 DEPLOY_STATE_METADATA_DIR = \
     [

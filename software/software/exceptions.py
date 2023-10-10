@@ -80,3 +80,7 @@ class ReleaseInvalidRequest(SoftwareError):
 class DuplicateDeployment(SoftwareError):
     """Duplicate Deployment Error."""
     pass
+
+class ReleaseIsoDeleteFailure(SoftwareError):
+    """Release iso delete error."""
+    pass

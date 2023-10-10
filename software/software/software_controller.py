@@ -39,8 +39,10 @@ from software.exceptions import SoftwareFail
 from software.exceptions import ReleaseInvalidRequest
 from software.exceptions import ReleaseValidationFailure
 from software.exceptions import ReleaseMismatchFailure
+from software.exceptions import ReleaseIsoDeleteFailure
 from software.software_functions import configure_logging
 from software.software_functions import mount_iso_load
+from software.software_functions import unmount_iso_load
 from software.software_functions import read_upgrade_metadata
 from software.software_functions import BasePackageData
 from software.software_functions import PatchFile
@@ -1001,20 +1003,30 @@ class PatchController(PatchService):
                 raise UpgradeNotSupported("Current release %s not supported to upgrade to %s"
                                           % (SW_VERSION, to_release))
 
+            # After successful validation, copy metadata.xml to /opt/software/metadata/available
             os.makedirs(constants.AVAILABLE_DIR, exist_ok=True)
             stx_release_metadata_file = "STX_%s_GA-metadata.xml" % to_release
             abs_stx_release_metadata_file = os.path.join(iso_mount_dir,
                                                          'upgrades',
                                                          stx_release_metadata_file)
-            # Update the release metadata
-            release_data.parse_metadata(abs_stx_release_metadata_file, state=constants.AVAILABLE)
 
             # Copy stx release metadata.xml to available metadata dir
             shutil.copyfile(abs_stx_release_metadata_file,
                             os.path.join(constants.AVAILABLE_DIR, stx_release_metadata_file))
             LOG.info("Copied %s to %s", abs_stx_release_metadata_file, constants.AVAILABLE_DIR)
 
-            # TODO(Shawn Li): Add filesystem db to track the upgrade files
+            # Copy the iso file to /opt/software/upgrades/rel-<release>
+            os.makedirs(constants.UPGRADES_DIR, exist_ok=True)
+            to_release_iso_dir = os.path.join(constants.UPGRADES_DIR, ("rel-%s" % to_release))
+            shutil.copytree(iso_mount_dir, to_release_iso_dir)
+            LOG.info("Copied iso file %s to %s", iso_file, to_release_iso_dir)
+
+            # Update the release metadata
+            release_data.parse_metadata(abs_stx_release_metadata_file, state=constants.AVAILABLE)
+            LOG.info("Updated release metadata for %s", to_release)
+
+            # Unmount the iso file.
+            unmount_iso_load(iso_mount_dir)
 
         except ReleaseValidationFailure:
             msg = "Upgrade file signature verification failed"
@@ -1224,7 +1236,7 @@ class PatchController(PatchService):
         audit_log_info(msg)
 
         # Verify releases exist and are in proper state first
-        id_verification = True
+        id_verification = all(release_id in self.release_data.metadata for release_id in release_list)
         for release_id in release_list:
             if release_id not in self.release_data.metadata:
                 msg = "Release %s does not exist" % release_id
@@ -1234,9 +1246,12 @@ class PatchController(PatchService):
                 continue
 
             deploystate = self.release_data.metadata[release_id]["state"]
-            ignore_states = [constants.AVAILABLE, constants.DEPLOYING_START,
-                             constants.DEPLOYING_ACTIVATE, constants.DEPLOYING_COMPLETE,
-                             constants.DEPLOYING_HOST, constants.DEPLOYED]
+            ignore_states = [constants.AVAILABLE,
+                             constants.DEPLOYING_START,
+                             constants.DEPLOYING_ACTIVATE,
+                             constants.DEPLOYING_COMPLETE,
+                             constants.DEPLOYING_HOST,
+                             constants.DEPLOYED]
 
             if deploystate not in ignore_states:
                 msg = "Release %s is active and cannot be deleted." % release_id
@@ -1266,6 +1281,16 @@ class PatchController(PatchService):
                     msg = "Failed to remove ostree tarball %s" % ostree_tar_filename
                     LOG.exception(msg)
                     raise OSTreeTarFail(msg)
+
+            # Delete upgrade iso file in folder
+            to_release_iso_dir = os.path.join(constants.UPGRADES_DIR, ("rel-%s" % release_sw_version))
+            if os.path.isdir(to_release_iso_dir):
+                try:
+                    shutil.rmtree(to_release_iso_dir)
+                except OSError:
+                    msg = "Failed to remove release iso %s folder" % to_release_iso_dir
+                    LOG.exception(msg)
+                    raise ReleaseIsoDeleteFailure(msg)
 
             try:
                 # Delete the metadata
