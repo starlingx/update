@@ -81,6 +81,12 @@ class DuplicateDeployment(SoftwareError):
     """Duplicate Deployment Error."""
     pass
 
+
 class ReleaseIsoDeleteFailure(SoftwareError):
     """Release iso delete error."""
+    pass
+
+
+class SysinvClientNotInitialized(SoftwareError):
+    """Sysinv Client Not Initialized Error."""
     pass

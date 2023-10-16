@@ -202,3 +202,51 @@ def get_all_files(temp_dir=constants.SCRATCH_DIR):
     except Exception:
         LOG.exception("Failed to get files from %s", temp_dir)
         return []
+
+
+def get_auth_token_and_endpoint(user: dict, service_type: str, region_name: str, interface: str):
+    """Get the auth token and endpoint for a service
+
+    :param user: user dict
+    :param service_type: service type
+    :param region_name: region name
+    :param interface: interface type
+    :return: auth token and endpoint
+    """
+
+    from keystoneauth1 import exceptions
+    from keystoneauth1 import identity
+    from keystoneauth1 import session
+
+    required_user_keys = ['auth_url',
+                          'username',
+                          'password',
+                          'project_name',
+                          'user_domain_name',
+                          'project_domain_name']
+    if not all(key in user for key in required_user_keys):
+        raise Exception("Missing required key(s) to authenticate to Keystone")
+
+    try:
+        LOG.info("Authenticating for service type: %s, region name: %s, interface: %s",
+                 service_type,
+                 region_name,
+                 interface)
+        auth = identity.Password(
+            auth_url=user['auth_url'],
+            username=user['username'],
+            password=user['password'],
+            project_name=user['project_name'],
+            user_domain_name=user['user_domain_name'],
+            project_domain_name=user['project_domain_name']
+        )
+        sess = session.Session(auth=auth)
+        return sess.get_token(), sess.get_endpoint(service_type=service_type,
+                                                   region_name=region_name,
+                                                   interface=interface)
+    except exceptions.http.Unauthorized:
+        LOG.error("Failed to authenticate to Keystone. Request unauthorized")
+        raise
+    except Exception as e:
+        LOG.exception("Failed to get token and endpoint. Error: %s", str(e))
+        raise
