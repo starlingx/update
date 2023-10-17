@@ -1015,9 +1015,9 @@ class PatchController(PatchService):
                             os.path.join(constants.AVAILABLE_DIR, stx_release_metadata_file))
             LOG.info("Copied %s to %s", abs_stx_release_metadata_file, constants.AVAILABLE_DIR)
 
-            # Copy the iso file to /opt/software/upgrades/rel-<release>
-            os.makedirs(constants.UPGRADES_DIR, exist_ok=True)
-            to_release_iso_dir = os.path.join(constants.UPGRADES_DIR, ("rel-%s" % to_release))
+            # Copy the iso file to /var/www/pages/feed/rel-<release>
+            os.makedirs(constants.FEED_OSTREE_BASE_DIR, exist_ok=True)
+            to_release_iso_dir = os.path.join(constants.FEED_OSTREE_BASE_DIR, ("rel-%s" % to_release))
             shutil.copytree(iso_mount_dir, to_release_iso_dir)
             LOG.info("Copied iso file %s to %s", iso_file, to_release_iso_dir)
 
@@ -1283,7 +1283,7 @@ class PatchController(PatchService):
                     raise OSTreeTarFail(msg)
 
             # Delete upgrade iso file in folder
-            to_release_iso_dir = os.path.join(constants.UPGRADES_DIR, ("rel-%s" % release_sw_version))
+            to_release_iso_dir = os.path.join(constants.FEED_OSTREE_BASE_DIR, ("rel-%s" % release_sw_version))
             if os.path.isdir(to_release_iso_dir):
                 try:
                     shutil.rmtree(to_release_iso_dir)

@@ -74,7 +74,7 @@ class TestSoftwareController(unittest.TestCase):
         mock_copyfile.assert_called_once_with('/mnt/iso/upgrades/STX_2.0_GA-metadata.xml',
                                               constants.AVAILABLE_DIR + '/STX_2.0_GA-metadata.xml')
         expected_calls = [call(constants.AVAILABLE_DIR, exist_ok=True),
-                          call(constants.UPGRADES_DIR, exist_ok=True)]
+                          call(constants.FEED_OSTREE_BASE_DIR, exist_ok=True)]
         self.assertEqual(mock_makedirs.call_count, 2)
         mock_makedirs.assert_has_calls(expected_calls)
         mock_unmount_iso_load.assert_called_once_with('/mnt/iso')
