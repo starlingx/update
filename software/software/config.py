@@ -21,6 +21,7 @@ agent_mcast_group = None
 controller_port = 0
 agent_port = 0
 api_port = 0
+alt_postgresql_port = 0
 mgmt_if = None
 nodetype = None
 platform_conf_mtime = 0
@@ -78,6 +79,7 @@ def read_config():
         'api_port': "5493",
         'controller_port': "5494",
         'agent_port': "5495",
+        'alt_postgresql_port': "6666",
     }
 
     global controller_mcast_group
@@ -85,6 +87,7 @@ def read_config():
     global api_port
     global controller_port
     global agent_port
+    global alt_postgresql_port
 
     config = configparser.ConfigParser(defaults)
 
@@ -98,6 +101,7 @@ def read_config():
     api_port = config.getint('runtime', 'api_port')
     controller_port = config.getint('runtime', 'controller_port')
     agent_port = config.getint('runtime', 'agent_port')
+    alt_postgresql_port = config.getint('runtime', 'alt_postgresql_port')
 
     # The platform.conf file has no section headers, which causes problems
     # for ConfigParser. So we'll fake it out.

@@ -59,6 +59,7 @@ from software.software_functions import ReleaseData
 from software.release_verify import verify_files
 import software.config as cfg
 import software.utils as utils
+from software.sysinv_utils import get_k8s_ver
 
 from software.db.api import get_instance
 
@@ -1849,34 +1850,30 @@ class PatchController(PatchService):
                         msg = "Failed to delete the restart script for %s" % patch_id
                         LOG.exception(msg)
 
-    def software_deploy_precheck_api(self, deployment: str, force: bool, **kwargs) -> dict:
+    def _deploy_precheck(self, release_version: str, force: bool, region_name: str = "RegionOne") -> dict:
         """
         Verify if system is capable to upgrade to a specified deployment
         return: dict of info, warning and error messages
         """
+
         msg_info = ""
         msg_warning = ""
         msg_error = ""
 
-        # We need to verify that the software release exists
-        release = self.release_data.metadata.get(deployment, None)
-        if not release:
-            msg = "Software release version corresponding to the specified deployment " \
-                  "%s does not exist." % deployment
-            LOG.error(msg)
-            msg_error += msg + "\n"
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
-        # Check if software release directory location exists
-        release_version = utils.get_major_release_version(release["sw_version"])
-        deployment_dir = os.path.join(constants.FEED_OSTREE_BASE_DIR, "rel-%s" % release_version)
+        # TODO(bqian) when the deploy-precheck script is moved to /opt/software/rel-<ver>/,
+        # change the code below to call the right script with patch number in <ver>
+        rel_ver = utils.get_major_release_version(release_version)
+        rel_path = "rel-%s" % rel_ver
+        deployment_dir = os.path.join(constants.FEED_OSTREE_BASE_DIR, rel_path)
         precheck_script = os.path.join(deployment_dir, "upgrades",
                                        constants.SOFTWARE_DEPLOY_FOLDER, "deploy-precheck")
         if not os.path.isdir(deployment_dir) or not os.path.isfile(precheck_script):
             msg = "Upgrade files for deployment %s are not present on the system, " \
-                  "cannot proceed with the precheck." % deployment
+                  "cannot proceed with the precheck." % rel_ver
             LOG.error(msg)
-            msg_error += msg + "\n"
+            msg_error = "Fail to perform deploy precheck. " \
+                        "Uploaded release may have been damaged." \
+                        "Try delete and re-upload the release.\n"
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         # parse local config file to pass parameters to precheck script
@@ -1890,10 +1887,11 @@ class PatchController(PatchService):
             project_name = ks_section["project_name"]
             user_domain_name = ks_section["user_domain_name"]
             project_domain_name = ks_section["project_domain_name"]
-            region_name = kwargs["region_name"]
         except Exception as e:
             msg = "Error parsing config file: %s." % str(e)
-            msg_error += msg + "\n"
+            LOG.error(msg)
+            msg_error = "Fail to perform deploy precheck. Internal error has occured." \
+                        "Try lock and unlock the controller for recovery.\n"
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         # TODO(heitormatsui) if different region was passed as parameter then
@@ -1927,6 +1925,69 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
+    def software_deploy_precheck_api(self, deployment: str, force: bool, **kwargs) -> dict:
+        """
+        Verify if system is capable to upgrade to a specified deployment
+        return: dict of info, warning and error messages
+        """
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
+
+        # We need to verify that the software release exists
+        release = self.release_data.metadata.get(deployment, None)
+        if not release:
+            msg = "Software release version corresponding to the specified release " \
+                  "%s does not exist. " % deployment
+            LOG.error(msg)
+            msg_error += "Software release version corresponding to the specified " \
+                         "release %s does not exist. " \
+                         "Try deleting and re-uploading the software for " \
+                         "recovery." % deployment
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Check if software release directory location exists
+        region_name = kwargs["region_name"]
+        release_version = release["sw_version"]
+        return self._deploy_precheck(release_version, force, region_name)
+
+    def _deploy_upgrade_start(self, to_release):
+        LOG.info("start deploy upgrade to %s from %s" % (to_release, SW_VERSION))
+        cmd_path = "/usr/sbin/software-deploy/software-deploy-start"
+        major_to_release = utils.get_major_release_version(to_release)
+        k8s_ver = get_k8s_ver()
+        postgresql_port = str(cfg.alt_postgresql_port)
+        feed = os.path.join(constants.FEED_DIR,
+                            "rel-%s/ostree_repo" % major_to_release)
+        commit_id = None
+
+        LOG.info("k8s version %s" % k8s_ver)
+        upgrade_start_cmd = [cmd_path, SW_VERSION, major_to_release, k8s_ver, postgresql_port,
+                             feed]
+        if commit_id is not None:
+            upgrade_start_cmd.append(commit_id)
+        # pass in keystone auth through environment variables
+        # OS_AUTH_URL, OS_USERNAME, OS_PASSWORD, OS_PROJECT_NAME, OS_USER_DOMAIN_NAME,
+        # OS_PROJECT_DOMAIN_NAME, OS_REGION_NAME are in env variables.
+        keystone_auth = CONF.get('keystone_authtoken')
+        env = {}
+        env["OS_AUTH_URL"] = keystone_auth["auth_url"] + '/v3'
+        env["OS_USERNAME"] = keystone_auth["username"]
+        env["OS_PASSWORD"] = keystone_auth["password"]
+        env["OS_PROJECT_NAME"] = keystone_auth["project_name"]
+        env["OS_USER_DOMAIN_NAME"] = keystone_auth["user_domain_name"]
+        env["OS_PROJECT_DOMAIN_NAME"] = keystone_auth["project_domain_name"]
+        env["OS_REGION_NAME"] = keystone_auth["region_name"]
+
+        try:
+            LOG.info("starting subprocess %s" % ' '.join(upgrade_start_cmd))
+            subprocess.Popen(' '.join(upgrade_start_cmd), start_new_session=True, shell=True, env=env)
+            LOG.info("subprocess started")
+            return True
+        except subprocess.SubprocessError as e:
+            LOG.error("Failed to start command: %s. Error %s" % (' '.join(upgrade_start_cmd), e))
+            return False
+
     def software_deploy_start_api(self, deployment: str, **kwargs) -> dict:
         """
         Start deployment by applying the changes to the feed ostree
@@ -1936,14 +1997,37 @@ class PatchController(PatchService):
         msg_warning = ""
         msg_error = ""
 
+        # TODO(bqian) to create a separate function to check a release is uploaded and
+        # all materials exist. raise proper exception if not.
         # We need to verify that the software release exists
-        if deployment not in self.release_data.metadata:
-            msg = "Software release version corresponding to the specified deployment " \
-                  "%s does not exist" % deployment
+        release = self.release_data.metadata.get(deployment, None)
+        if not release:
+            msg = "Software release version corresponding to the specified release " \
+                  "%s does not exist. " % deployment
             LOG.error(msg)
-            msg_error += msg + "\n"
+            msg_error += "Software release version corresponding to the specified " \
+                         "release %s does not exist. " \
+                         "Try delete and re-upload the software for " \
+                         "recovery." % deployment
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
+        if utils.is_upgrade_deploy(SW_VERSION, release["sw_version"]):
+            to_release = release["sw_version"]
+            ret = self._deploy_precheck(to_release, False)
+            if ret["error"]:
+                ret["error"] = "The following issues have been detected which prevent " \
+                               "deploying %s\n" % deployment + \
+                               ret["error"]
+                ret["error"] += "Please fix above issues then retry the deploy.\n"
+                return ret
+
+            collect_current_load_for_hosts()
+            if self._deploy_upgrade_start(to_release):
+                msg_info = "Deployment for %s started" % deployment
+            else:
+                msg_error = "Deployment for %s failed to start" % deployment
+
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
         # Identify if this is apply or remove operation
         # todo(jcasteli) Remove once the logic to include major release version
         # in release list is implemented

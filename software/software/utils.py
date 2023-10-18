@@ -10,6 +10,8 @@ import re
 import shutil
 from netaddr import IPAddress
 import os
+from oslo_config import cfg as oslo_cfg
+from packaging import version
 import socket
 from socket import if_nametoindex as if_nametoindex_func
 
@@ -17,7 +19,9 @@ import software.constants as constants
 
 from software.exceptions import StateValidationFailure
 
+
 LOG = logging.getLogger('main_logger')
+CONF = oslo_cfg.CONF
 
 
 def if_nametoindex(name):
@@ -306,6 +310,41 @@ def check_instances(params: list, instance):
             raise ValueError(msg)
 
 
+def get_endpoints_token(config=None, service_type="platform"):
+    try:
+        if not config:
+            keystone_conf = CONF.get('keystone_authtoken')
+        else:
+            keystone_conf = config
+        user = {
+            'auth_url': keystone_conf["auth_url"] + '/v3',
+            'username': keystone_conf["username"],
+            'password': keystone_conf["password"],
+            'project_name': keystone_conf["project_name"],
+            'user_domain_name': keystone_conf["user_domain_name"],
+            'project_domain_name': keystone_conf["project_domain_name"],
+        }
+        region_name = keystone_conf["region_name"]
+        token, endpoint = get_auth_token_and_endpoint(user=user,
+                                                      service_type=service_type,
+                                                      region_name=region_name,
+                                                      interface='public')
+        return token, endpoint
+    except Exception as e:
+        LOG.error("Failed to get '%s' endpoint. Error: %s", service_type, str(e))
+        return None, None
+
+
+def is_upgrade_deploy(from_release, to_release):
+    from_ver = version.Version(from_release)
+    to_ver = version.Version(to_release)
+
+    if from_ver.major == to_ver.major and from_ver.minor == to_ver.minor:
+        return False
+    else:
+        return True
+
+
 def get_software_filesystem_data():
     if os.path.exists(constants.SOFTWARE_JSON_FILE):
         return load_from_json_file(constants.SOFTWARE_JSON_FILE)
@@ -319,8 +358,8 @@ def validate_versions(versions):
     :param versions: list of versions
     :raise: ValueError if version is invalid
     """
-    for version in versions:
-        if not re.match(r'[0-9]+\.[0-9]+(\.[0-9]+)?$', version):
-            msg = "Invalid version: %s" % version
+    for ver in versions:
+        if not re.match(r'[0-9]+\.[0-9]+(\.[0-9]+)?$', ver):
+            msg = "Invalid version: %s" % ver
             LOG.exception(msg)
             raise ValueError(msg)
