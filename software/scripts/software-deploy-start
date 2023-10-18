@@ -1,0 +1,108 @@
+# !/bin/bash
+#
+# Copyright (c) 2023 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+# This script is to start a major release deployment. It does the following:
+# 1. collect data from running system for migration,
+# 2. create bind mounts to deployment directory
+# 3. copy necessary data to deployment directory
+# 4. in chroot, start 2nd instance of PostgreSQL database service
+# 5. perform data migration
+#
+
+# TODO: centralize USM upgrade scripts output into one single log
+exec > /var/log/deploy_start.log 2>&1
+
+
+usage()
+{
+    echo "usage: $0 from_ver to_ver k8s_ver postgresql_port feed [commit_id|latest_commit]"
+}
+
+if [ $# -lt 5 ]; then
+    usage
+    exit 1
+fi
+
+from_ver="$1"
+to_ver="$2"
+k8s_ver="$3"
+port="$4"
+feed="$5"
+feed_url="file://${feed}"
+if [ $# -eq 6 ]; then
+    commit_id="$6"
+else
+    commit_id=''
+fi
+
+k8s_ver=$(echo ${k8s_ver} | sed 's/^v//')
+rootdir="/sysroot/upgrade/sysroot"
+repo="/sysroot/upgrade/ostree_repo"
+instbr="starlingx"
+
+handle_error() {
+    local exit_code="$1"
+    local error_message="$2"
+
+    echo "Error: ${error_message}" >&2
+    echo "Please check the error details and take appropriate action for recovery." >&2
+
+    exit ${exit_code}
+}
+
+if [ -e ${rootdir} ]; then
+        echo "${rootdir} already exists. Please ensure to clean up environment to continue." >&2
+        exit 1
+fi
+
+if [ -e ${repo} ]; then
+        echo "${repo} already exists. Please ensure to clean up environment to continue." >&2
+        exit 1
+fi
+
+# TODO(bqian) below ostree operations will be replaced by apt-ostree
+sudo mkdir ${repo} -p
+
+sudo ostree --repo=${repo} init --mode=archive || handle_error $? "Failed to init repo"
+sudo ostree --repo=${repo} remote add ${instbr} ${feed_url} --no-gpg-verify || handle_error $? "Failed to remote add repo"
+sudo ostree --repo=${repo} pull --depth=-1 --mirror ${instbr}:${instbr} || handle_error $? "Failed to pull repo"
+
+if [ -z ${commit_id} ]; then
+    # get commit id, only latest for now
+    commit_id=$(ostree rev-parse --repo=${repo} ${instbr})
+    echo "latest commit id ${commit_id}"
+    if [ -z "${commit_id}" ]; then
+        handle_error 1 "Failed to retrieve commit id"
+    fi
+fi
+
+echo "checkout commit id ${commit_id}"
+
+sudo ostree --repo=${repo} checkout ${commit_id} ${rootdir} || handle_error $? "Failed to checkout ${commit_id}"
+
+# create proper mounts on deploy file system
+sudo ${rootdir}/usr/sbin/software-deploy/chroot_mounts.sh ${rootdir} || handle_error $? "Failed to mount required mount points"
+
+sudo mount --bind ${rootdir}/usr/local/kubernetes/${k8s_ver} ${rootdir}/usr/local/kubernetes/current
+sudo cp /etc/kubernetes/admin.conf ${rootdir}/etc/kubernetes/
+
+# TODO: need to switch back to /opt/software/${to_ver}/bin/prep-data-migration
+#  for running with apt-ostree in the future, when the script is copied to versioned directory
+#  at software upload, such as: DATA_PREP_SCRIPT="/opt/software/${to_ver}/bin/prep-data-migration"
+DATA_PREP_SCRIPT="/usr/sbin/software-deploy/prep-data-migration"
+# OS_AUTH_URL, OS_USERNAME, OS_PASSWORD, OS_PROJECT_NAME, OS_USER_DOMAIN_NAME,
+# OS_PROJECT_DOMAIN_NAME, OS_REGION_NAME are in env variables.
+cmd_line=${DATA_PREP_SCRIPT}
+cmd_line+=" --rootdir=${rootdir} --from_release=${from_ver} --to_release=${to_ver}"
+cmd_line+=" --auth_url=${OS_AUTH_URL} --username=${OS_USERNAME} --password=${OS_PASSWORD}"
+cmd_line+=" --project_name=${OS_PROJECT_NAME} --user_domain_name=${OS_USER_DOMAIN_NAME}"
+cmd_line+=" --project_domain_name=${OS_PROJECT_DOMAIN_NAME} --region_name=${OS_REGION_NAME}"
+
+${cmd_line} || handle_error $? "Failed to extract data for migration"
+
+sudo chroot ${rootdir} /usr/sbin/software-deploy/create_postgresql_database.sh ${port} || handle_error $? "Failed to start 2nd instance of postgresql"
+sudo chroot ${rootdir} /usr/bin/software-migrate ${from_ver} ${to_ver} ${port} || handle_error $? "Failed to migrate data"
