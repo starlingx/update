@@ -1,0 +1,332 @@
+#!/usr/bin/python3
+# -*- encoding: utf-8 -*-
+#
+# vim: tabstop=4 shiftwidth=4 softtabstop=4
+#
+# Copyright (c) 2023 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+"""
+Run platform upgrade prep data migration as a standalone executable
+"""
+
+import logging as LOG
+import os
+import re
+import subprocess
+import sys
+
+import upgrade_utils
+
+
+POSTGRES_PATH = '/var/lib/postgresql'
+DISTRIBUTED_CLOUD_ROLE_SYSTEMCONTROLLER = 'systemcontroller'
+SERVICE_TYPE_IDENTITY = 'identity'
+PLATFORM_PATH = "/opt/platform"
+ETCD_PATH = '/opt/etcd'
+RABBIT_PATH = '/var/lib/rabbitmq'
+KUBERNETES_CONF_PATH = "/etc/kubernetes"
+KUBERNETES_ADMIN_CONF_FILE = "admin.conf"
+
+
+class DataMigration(object):
+
+    def __init__(self, rootdir, from_release, to_release, keystone_config):
+        try:
+            token, endpoint = upgrade_utils.get_token_endpoint(config=keystone_config,
+                                                               service_type="platform")
+            _sysinv_client = upgrade_utils.get_sysinv_client(token=token,
+                                                             endpoint=endpoint)
+
+            system_attributes = _sysinv_client.isystem.list()[0]
+            self.distributed_cloud_role = system_attributes.distributed_cloud_role
+            self.shared_services = system_attributes.capabilities.get('shared_services', '')
+
+        except Exception:
+            LOG.exception("Failed to get host attributes from sysinv")
+            raise
+
+        postgres_dest_dir = os.path.join(POSTGRES_PATH, "upgrade")
+        try:
+            os.makedirs(postgres_dest_dir, 0o755, exist_ok=True)
+        except OSError:
+            LOG.exception("Failed to create upgrade export directory %s." %
+                          postgres_dest_dir)
+            raise
+
+        self.postgres_dest_dir = postgres_dest_dir
+        self.from_release = from_release
+        self.to_release = to_release
+        self.rootdir = rootdir
+
+    def export_postgres(self):
+        """
+        Export postgres databases
+        """
+        devnull = open(os.devnull, 'w')
+        try:
+            upgrade_databases, upgrade_database_skip_tables = self._get_upgrade_databases()
+            # Dump roles, table spaces and schemas for databases.
+            subprocess.check_call([('sudo -u postgres pg_dumpall --clean ' +
+                                    '--schema-only > %s/%s' %
+                                    (self.postgres_dest_dir, 'postgres.postgreSql.config'))],
+                                  shell=True, stderr=devnull)
+
+            # Dump data for databases.
+            for _a, db_elem in enumerate(upgrade_databases):
+
+                db_cmd = 'sudo -u postgres pg_dump --format=plain --inserts '
+                db_cmd += '--disable-triggers --data-only %s ' % db_elem
+
+                for _b, table_elem in \
+                        enumerate(upgrade_database_skip_tables[db_elem]):
+                    db_cmd += '--exclude-table=%s ' % table_elem
+
+                db_cmd += '> %s/%s.postgreSql.data' % (self.postgres_dest_dir, db_elem)
+
+                subprocess.check_call([db_cmd], shell=True, stderr=devnull)
+            LOG.info("Exporting postgres databases completed")
+        except subprocess.CalledProcessError:
+            LOG.exception("Failed to export postgres databases for upgrade.")
+            raise
+        finally:
+            devnull.close()
+
+    def _get_upgrade_databases(self):
+        """Gets the list of databases to be upgraded
+        :returns: the list of databases to be upgraded
+        """
+
+        system_role = self.distributed_cloud_role
+        shared_services = self.shared_services
+
+        UPGRADE_DATABASES = ('postgres',
+                             'template1',
+                             'sysinv',
+                             'barbican',
+                             'fm',
+                             )
+
+        UPGRADE_DATABASE_SKIP_TABLES = {'postgres': (),
+                                        'template1': (),
+                                        'sysinv': (),
+                                        'barbican': (),
+                                        'fm': ('alarm',),
+                                        }
+
+        if system_role == DISTRIBUTED_CLOUD_ROLE_SYSTEMCONTROLLER:
+            UPGRADE_DATABASES += ('dcmanager', 'dcorch',)
+            UPGRADE_DATABASE_SKIP_TABLES.update({
+                'dcmanager': (),
+                'dcorch': ('service', 'orch_job', 'orch_request',)
+            })
+
+        if SERVICE_TYPE_IDENTITY not in shared_services:
+            UPGRADE_DATABASES += ('keystone',)
+            UPGRADE_DATABASE_SKIP_TABLES.update({'keystone': ('token',)})
+
+        return UPGRADE_DATABASES, UPGRADE_DATABASE_SKIP_TABLES
+
+    def export_vim(self):
+        """
+        Export VIM databases
+        """
+
+        devnull = open(os.devnull, 'w')
+        try:
+            vim_cmd = ("nfv-vim-manage db-dump-data -d %s -f %s" %
+                       (os.path.join(PLATFORM_PATH, 'nfv/vim', self.from_release),
+                        os.path.join(self.postgres_dest_dir, 'vim.data')))
+            subprocess.check_call([vim_cmd], shell=True, stderr=devnull)
+            LOG.info("Exporting VIM completed")
+        except subprocess.CalledProcessError:
+            LOG.exception("Failed to export VIM databases for upgrade.")
+            raise
+        finally:
+            devnull.close()
+
+    def export_etcd(self):
+        """
+        Create symlink to etcd directory
+        """
+        etcd_to_dir = os.path.join(ETCD_PATH, self.to_release)
+        etcd_from_dir = os.path.join(ETCD_PATH, self.from_release)
+        if not os.path.islink(etcd_to_dir) and not os.path.exists(etcd_to_dir):
+            os.symlink(etcd_from_dir, etcd_to_dir)
+        LOG.info("Creating symlink %s to %s completed", etcd_to_dir, etcd_from_dir)
+
+    def copy_kubernetes_conf(self):
+        """
+        Copy /etc/kubernetes/admin.conf to $rootdir/usr/etc/kubernetes/
+        """
+        devnull = open(os.devnull, 'w')
+        try:
+            from_k8s_admin_file = os.path.join(KUBERNETES_CONF_PATH, KUBERNETES_ADMIN_CONF_FILE)
+            to_k8s_admin_file_dir = os.path.join(self.rootdir, "usr", *KUBERNETES_CONF_PATH.split("/"))
+            os.makedirs(to_k8s_admin_file_dir, exist_ok=True)
+            subprocess.check_call(
+                ["cp", from_k8s_admin_file, to_k8s_admin_file_dir], stdout=devnull)
+            LOG.info("Copied %s to %s completed", from_k8s_admin_file, to_k8s_admin_file_dir)
+        except subprocess.CalledProcessError:
+            LOG.exception("Failed to copy %s", from_k8s_admin_file)
+            raise
+        finally:
+            devnull.close()
+
+    def update_branding(self):
+        """
+        Remove branding tar files from the release N+1 directory as branding
+        files are not compatible between releases.
+        """
+        devnull = open(os.devnull, 'w')
+        try:
+            branding_files = os.path.join(
+                PLATFORM_PATH, "config", self.to_release, "branding", "*.tgz")
+            subprocess.check_call(["rm -f %s" % branding_files], shell=True,
+                                  stdout=devnull)
+            LOG.info("Removed branding files %s completed", branding_files)
+        except subprocess.CalledProcessError:
+            LOG.exception("Failed to remove branding files %s", branding_files)
+            raise
+        finally:
+            devnull.close()
+
+    def export_etc(self):
+        """
+        Export /etc directory to $rootdir/etc
+        """
+        src_dirs = ["platform", "sudoers.d"]
+        src_files = ["passwd", "shadow", "sudoers", "resolv.conf"]
+        devnull = open(os.devnull, 'w')
+        try:
+            # Create $rootdir/etc directory
+            etc_dest_dir = os.path.join(self.rootdir, "etc")
+            os.makedirs(etc_dest_dir, 0o755, exist_ok=True)
+
+            # Copy /etc/platform and /etc/sudoers.d directories
+            for src_dir in src_dirs:
+                temp_src_dir = os.path.join("/etc", src_dir)
+                temp_dest_dir = os.path.join(etc_dest_dir, src_dir)
+                os.makedirs(temp_dest_dir, 0o755, exist_ok=True)
+                subprocess.check_call(["cp", "-r", temp_src_dir, temp_dest_dir],
+                                      stdout=devnull)
+                LOG.info("Copied files in %s to %s completed", temp_src_dir, temp_dest_dir)
+            # Copy /etc/passwd, /etc/shadow, /etc/sudoers, /etc/resolv.conf files
+            for src_file in src_files:
+                temp_src_file = os.path.join("/etc", src_file)
+                temp_dest_file = os.path.join(etc_dest_dir, src_file)
+                subprocess.check_call(["cp", temp_src_file, temp_dest_file],
+                                      stdout=devnull)
+                LOG.info("Copied %s to %s completed", temp_src_file, temp_dest_file)
+        except subprocess.CalledProcessError:
+            LOG.exception("Failed to copy etc files %s.", src_files)
+            raise
+        except Exception as e:
+            LOG.exception("Failed to export /etc directory. Error: %s.", str(e))
+            raise
+        finally:
+            devnull.close()
+
+
+def parse_arguments(sys_argv) -> dict:
+    pattern = re.compile(r'--(\w+)=(.*)')
+    args = {}
+    for arg in sys_argv:
+        match = pattern.match(arg)
+        if match:
+            args[match.group(1)] = match.group(2)
+    return args
+
+
+def get_keystone_config(args: dict) -> dict:
+    keystone_config = {}
+
+    required_keystone_config = ["auth_url",
+                                "username",
+                                "password",
+                                "project_name",
+                                "user_domain_name",
+                                "project_domain_name",
+                                "region_name"]
+    for config in required_keystone_config:
+        if config not in args:
+            LOG.error("keystone configuration %s is not provided" % config)
+            raise Exception("keystone configuration %s is not provided" % config)
+        keystone_config[config] = args[config]
+    return keystone_config
+
+
+def print_usage(script_name):
+    print("Usage: %s --rootdir=<rootdir> --from_release=<from_release> --to_release=<to_release> "
+          "--auth_url=<auth_url> --username=<username> --password=<password> "
+          "--project_name=<project_name>"
+          "--user_domain_name=<user_domain_name> --project_domain_name=<project_domain_name> "
+          "--region_name=<region_name>" % script_name)
+
+
+def main(sys_argv):
+    args = parse_arguments(sys_argv)
+    try:
+        rootdir = args["rootdir"]
+        from_release = args["from_release"]
+        to_release = args["to_release"]
+    except KeyError as e:
+        msg = "%s is not provided" % str(e)
+        LOG.error(msg)
+        print(msg)
+        print_usage(sys_argv[0])
+        return 1
+
+    if rootdir is None or from_release is None or to_release is None:
+        msg = "rootdir, from_release, or to_release are missing"
+        LOG.error(msg)
+        print(msg)
+        print_usage(sys_argv[0])
+        return 1
+
+    try:
+        keystone_config = get_keystone_config(args)
+    except Exception:
+        LOG.exception("Failed to get keystone configuration")
+        return 1
+
+    data_migration = DataMigration(rootdir, from_release, to_release, keystone_config)
+
+    LOG.info("Running data migration from %s to %s" % (from_release, to_release))
+
+    try:
+        # export postgres databases
+        data_migration.export_postgres()
+
+        # Export VIM database
+        data_migration.export_vim()
+
+        # Point N+1 etcd to N for now. We will migrate when both controllers are
+        # running N+1, during the swact back to controller-0. This solution will
+        # present some problems when we do upgrade etcd, so further development
+        # will be required at that time.
+        data_migration.export_etcd()
+
+        # Copy /etc/kubernetes/admin.conf to $rootdir/usr/etc/kubernetes/
+        data_migration.copy_kubernetes_conf()
+
+        # Remove branding tar files from the release N+1 directory as branding
+        # files are not compatible between releases.
+        data_migration.update_branding()
+
+        # Export /etc directory to $rootdir/etc
+        data_migration.export_etc()
+
+        LOG.info("Data migration completed successfully.")
+
+    except Exception as e:
+        LOG.exception("Data migration failed.")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    LOG.basicConfig(filename='/var/log/prep-data-migration.log', level=LOG.INFO)
+    sys.exit(main(sys.argv))
