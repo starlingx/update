@@ -2409,38 +2409,55 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-    def is_completed(self, release_ids):
-        all_completed = True
+    def is_available(self, release_ids):
+        all_available = True
 
         with self.release_data_lock:
 
             for release_id in release_ids:
                 if release_id not in self.release_data.metadata:
-                    all_completed = False
-                    break
-
-                if self.release_data.metadata[release_id]["state"] != constants.DEPLOYED:
-                    all_completed = False
-                    break
-
-        return all_completed
-
-    def is_uploaded(self, release_ids):
-        all_uploaded = True
-
-        with self.release_data_lock:
-
-            for release_id in release_ids:
-                if release_id not in self.release_data.metadata:
-                    all_uploaded = False
+                    all_available = False
                     break
 
                 if self.release_data.metadata[release_id]["state"] != \
                         constants.AVAILABLE:
-                    all_uploaded = False
+                    all_available = False
                     break
 
-        return all_uploaded
+        return all_available
+
+    def is_deployed(self, release_ids):
+        all_deployed = True
+
+        with self.release_data_lock:
+
+            for release_id in release_ids:
+                if release_id not in self.release_data.metadata:
+                    all_deployed = False
+                    break
+
+                if self.release_data.metadata[release_id]["state"] != constants.DEPLOYED:
+                    all_deployed = False
+                    break
+
+        return all_deployed
+
+    def is_committed(self, release_ids):
+        all_committed = True
+
+        with self.release_data_lock:
+
+            for release_id in release_ids:
+                if release_id not in self.release_data.metadata:
+                    all_committed = False
+                    break
+
+                if self.release_data.metadata[release_id]["state"] != \
+                        constants.COMMITTED:
+                    all_committed = False
+                    break
+
+        return all_committed
 
     def report_app_dependencies(self, patch_ids, **kwargs):
         """

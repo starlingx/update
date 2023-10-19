@@ -288,6 +288,78 @@ def software_command_not_implemented_yet(args):
     return 1
 
 
+def release_is_available_req(args):
+
+    releases = "/".join(args.release)
+    url = "http://%s/software/is_available/%s" % (api_addr, releases)
+
+    headers = {}
+    append_auth_token_if_required(headers)
+    req = requests.post(url, headers=headers)
+
+    rc = 1
+
+    if req.status_code == 200:
+        result = json.loads(req.text)
+        print(result)
+        if result is True:
+            rc = 0
+    elif req.status_code == 500:
+        print("An internal error has occurred. Please check /var/log/software.log for details")
+    else:
+        print("Error: %s has occurred. %s" % (req.status_code, req.reason))
+    
+    return rc
+
+
+def release_is_deployed_req(args):
+
+    releases = "/".join(args.release)
+    url = "http://%s/software/is_deployed/%s" % (api_addr, releases)
+
+    headers = {}
+    append_auth_token_if_required(headers)
+    req = requests.post(url, headers=headers)
+
+    rc = 1
+
+    if req.status_code == 200:
+        result = json.loads(req.text)
+        print(result)
+        if result is True:
+            rc = 0
+    elif req.status_code == 500:
+        print("An internal error has occurred. Please check /var/log/software.log for details")
+    else:
+        print("Error: %s has occurred. %s" % (req.status_code, req.reason))
+
+    return rc
+
+
+def release_is_committed_req(args):
+
+    releases = "/".join(args.release)
+    url = "http://%s/software/is_committed/%s" % (api_addr, releases)
+
+    headers = {}
+    append_auth_token_if_required(headers)
+    req = requests.post(url, headers=headers)
+
+    rc = 1
+
+    if req.status_code == 200:
+        result = json.loads(req.text)
+        print(result)
+        if result is True:
+            rc = 0
+    elif req.status_code == 500:
+        print("An internal error has occurred. Please check /var/log/software.log for details")
+    else:
+        print("Error: %s has occurred. %s" % (req.status_code, req.reason))
+
+    return rc
+
+
 def release_upload_req(args):
     rc = 0
 
@@ -919,64 +991,6 @@ def patch_del_release(args):
     return check_rc(req)
 
 
-def patch_is_applied_req(args):
-    releases = args.releases
-    patches = "/".join(releases)
-    url = "http://%s/software/is_applied/%s" % (api_addr, patches)
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.post(url, headers=headers)
-
-    rc = 1
-
-    if req.status_code == 200:
-        result = json.loads(req.text)
-        print(result)
-        if result is True:
-            rc = 0
-    elif req.status_code == 500:
-        print("An internal error has occurred. Please check /var/log/software.log for details")
-    else:
-        m = re.search("(Error message:.*)", req.text, re.MULTILINE)
-        if m:
-            print(m.group(0))
-        else:
-            print("%s %s" % (req.status_code, req.reason))
-        rc = 1
-
-    return rc
-
-
-def patch_is_available_req(args):
-    releases = args.releases
-    patches = "/".join(releases)
-    url = "http://%s/software/is_available/%s" % (api_addr, patches)
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.post(url, headers=headers)
-
-    rc = 1
-
-    if req.status_code == 200:
-        result = json.loads(req.text)
-        print(result)
-        if result is True:
-            rc = 0
-    elif req.status_code == 500:
-        print("An internal error has occurred. Please check /var/log/software.log for details")
-    else:
-        m = re.search("(Error message:.*)", req.text, re.MULTILINE)
-        if m:
-            print(m.group(0))
-        else:
-            print("%s %s" % (req.status_code, req.reason))
-        rc = 1
-
-    return rc
-
-
 def patch_report_app_dependencies_req(args):  # pylint: disable=unused-argument
     extra_opts = [args.app]
     extra_opts_str = '?%s' % '&'.join(extra_opts)
@@ -1317,6 +1331,39 @@ def setup_argparse():
     )
     cmd.set_defaults(cmd='install-local')
     cmd.set_defaults(func=install_local)
+
+    # --- software is-available <release> ------
+    cmd = commands.add_parser(
+        'is-available',
+        help='Query Available state for list of releases. Returns True if all are Available, False otherwise.'
+    )
+    cmd.set_defaults(cmd='is-available')
+    cmd.set_defaults(func=release_is_available_req)
+    cmd.add_argument('release',
+                     nargs="+",  # accepts a list
+                     help='List of releases')
+
+    # --- software is-committed <release> ------
+    cmd = commands.add_parser(
+        'is-committed',
+        help='Query Committed state for list of releases. Returns True if all are Committed, False otherwise.'
+    )
+    cmd.set_defaults(cmd='is-committed')
+    cmd.set_defaults(func=release_is_committed_req)
+    cmd.add_argument('release',
+                     nargs="+",  # accepts a list
+                     help='List of releases')
+
+    # --- software is-deployed  <release> ------
+    cmd = commands.add_parser(
+        'is-deployed',
+        help='Query Deployed state for list of releases. Returns True if all are Deployed, False otherwise.'
+    )
+    cmd.set_defaults(cmd='is-deployed')
+    cmd.set_defaults(func=release_is_deployed_req)
+    cmd.add_argument('release',
+                     nargs="+",  # accepts a list
+                     help='List of releases')
 
     # --- software list ---------------------------
     cmd = commands.add_parser(

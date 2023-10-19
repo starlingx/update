@@ -135,12 +135,16 @@ class SoftwareAPIController(object):
         return result
 
     @expose('json')
-    def is_completed(self, *args):
-        return sc.is_completed(list(args))
+    def is_available(self, *args):
+        return sc.is_available(list(args))
 
     @expose('json')
-    def is_uploaded(self, *args):
-        return sc.is_uploaded(list(args))
+    def is_committed(self, *args):
+        return sc.is_committed(list(args))
+
+    @expose('json')
+    def is_deployed(self, *args):
+        return sc.is_deployed(list(args))
 
     @expose('json')
     @expose('show.xml', content_type='application/xml')
