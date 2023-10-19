@@ -20,6 +20,7 @@ ADDRESS_VERSION_IPV6 = 6
 CONTROLLER_FLOATING_HOSTNAME = "controller"
 
 SOFTWARE_STORAGE_DIR = "/opt/software"
+SOFTWARE_CONFIG_FILE_LOCAL = "/etc/software/software.conf"
 
 AVAILABLE_DIR = "%s/metadata/available" % SOFTWARE_STORAGE_DIR
 UNAVAILABLE_DIR = "%s/metadata/unavailable" % SOFTWARE_STORAGE_DIR
@@ -99,5 +100,14 @@ SIG_EXTENSION = ".sig"
 PATCH_EXTENSION = ".patch"
 SUPPORTED_UPLOAD_FILE_EXT = [ISO_EXTENSION, SIG_EXTENSION, PATCH_EXTENSION]
 SCRATCH_DIR = "/scratch"
+RELEASE_METADATA_FILE = "STX_%s_GA-metadata.xml"
+
+CONTROLLER_HOSTNAME = 'controller'
+CONTROLLER_0_HOSTNAME = '%s-0' % CONTROLLER_HOSTNAME
+CONTROLLER_1_HOSTNAME = '%s-1' % CONTROLLER_HOSTNAME
+
+# Precheck constants
+LICENSE_FILE = "/etc/platform/.license"
+VERIFY_LICENSE_BINARY = "/usr/bin/verify-license"
 
 SOFTWARE_JSON_FILE = "/opt/software/software.json"

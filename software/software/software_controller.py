@@ -1787,6 +1787,79 @@ class PatchController(PatchService):
                         msg = "Failed to delete the restart script for %s" % patch_id
                         LOG.exception(msg)
 
+    def software_deploy_precheck_api(self, deployment: str, **kwargs) -> dict:
+        """
+        Verify if system is capable to upgrade to a specified deployment
+        return: dict of info, warning and error messages
+        """
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
+
+        # We need to verify that the software release exists
+        release = self.release_data.metadata.get(deployment, None)
+        if not release:
+            msg = "Software release version corresponding to the specified deployment " \
+                  "%s does not exist." % deployment
+            LOG.error(msg)
+            msg_error += msg + "\n"
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Check if software release directory location exists
+        release_version = utils.get_major_release_version(release["sw_version"])
+        deployment_dir = "%s/rel-%s" % (constants.FEED_OSTREE_BASE_DIR, release_version)
+        precheck_script = "%s/upgrades/deploy-precheck" % deployment_dir
+        if not os.path.isdir(deployment_dir) or not os.path.isfile(precheck_script):
+            msg = "Upgrade files for deployment %s are not present on the system, " \
+                  "cannot proceed with the precheck." % deployment
+            LOG.error(msg)
+            msg_error += msg + "\n"
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # parse local config file to pass parameters to precheck script
+        try:
+            cp = configparser.ConfigParser()
+            cp.read(constants.SOFTWARE_CONFIG_FILE_LOCAL)
+            ks_section = cp["keystone_authtoken"]
+            auth_url = ks_section["auth_url"]
+            username = ks_section["username"]
+            password = ks_section["password"]
+            project_name = ks_section["project_name"]
+            user_domain_name = ks_section["user_domain_name"]
+            project_domain_name = ks_section["project_domain_name"]
+            region_name = kwargs["region_name"]
+        except Exception as e:
+            msg = "Error parsing config file: %s." % str(e)
+            msg_error += msg + "\n"
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # TODO(heitormatsui) if different region was passed as parameter then
+        #  need to discover the subcloud auth_url to pass to precheck script
+        if region_name != "RegionOne":
+            pass
+
+        # Call precheck from the deployment files
+        precheck_return = subprocess.run(
+            [precheck_script,
+             "--auth_url=%s" % auth_url,
+             "--username=%s" % username,
+             "--password=%s" % password,
+             "--project_name=%s" % project_name,
+             "--user_domain_name=%s" % user_domain_name,
+             "--project_domain_name=%s" % project_domain_name,
+             "--region_name=%s" % region_name],
+            stderr=subprocess.STDOUT,
+            stdout=subprocess.PIPE,
+            check=False,
+            text=True,
+        )
+        if precheck_return.returncode != 0:
+            msg_error += precheck_return.stdout
+        else:
+            msg_info += precheck_return.stdout
+
+        return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
     def software_deploy_start_api(self, deployment: str, **kwargs) -> dict:
         """
         Start deployment by applying the changes to the feed ostree
