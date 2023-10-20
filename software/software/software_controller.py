@@ -2204,7 +2204,7 @@ class PatchController(PatchService):
                     self.release_data.metadata[release_id]["state"] = constants.DEPLOYED
 
                     try:
-                        shutil.move("%s/%s-metadata.xml" % (constants.DEPLOYING_COMPLETE, release_id),
+                        shutil.move("%s/%s-metadata.xml" % (constants.DEPLOYING_COMPLETE_DIR, release_id),
                                     "%s/%s-metadata.xml" % (constants.DEPLOYED_DIR, release_id))
                         msg_info += "%s has been deployed\n" % release_id
                     except shutil.Error:
