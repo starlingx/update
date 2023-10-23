@@ -737,18 +737,29 @@ def release_upload_dir_req(args):
     # Ignore interrupts during this function
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
-    dirlist = {}
-    i = 0
-    for d in sorted(list(set(release_dirs))):
-        dirlist["dir%d" % i] = os.path.abspath(d)
-        i += 1
+    to_upload_files = {}
+    raw_files = []
 
-    url = "http://%s/software/upload_dir" % api_addr
+    # Find all files that need to be uploaded in given directories
+    for release_dir in release_dirs:
+        raw_files = [f for f in os.listdir(release_dir)
+                     if os.path.isfile(os.path.join(release_dir, f))]
 
-    headers = {}
+        # Get absolute path of files
+        raw_files = [os.path.abspath(os.path.join(release_dir, f)) for f in raw_files]
+
+    for software_file in sorted(set(raw_files)):
+        _, ext = os.path.splitext(software_file)
+        if ext in constants.SUPPORTED_UPLOAD_FILE_EXT:
+            to_upload_files[software_file] = (software_file, open(software_file, 'rb'))
+
+    encoder = MultipartEncoder(fields=to_upload_files)
+    url = "http://%s/software/upload" % api_addr
+    headers = {'Content-Type': encoder.content_type}
     append_auth_token_if_required(headers)
-    req = requests.post(url, params=dirlist, headers=headers)
-
+    req = requests.post(url,
+                        data=encoder,
+                        headers=headers)
     if args.debug:
         print_result_debug(req)
     else:
