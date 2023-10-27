@@ -95,3 +95,15 @@ class SysinvClientNotInitialized(SoftwareError):
 class StateValidationFailure(SoftwareError):
     """State Validation Failure"""
     pass
+
+class DeployDoNotExist(SoftwareError):
+    """Deploy Do Not Exist"""
+    pass
+
+class DeployAlreadyExist(SoftwareError):
+    """Deploy Already Exist"""
+    pass
+
+class ReleaseVersionDoNotExist(SoftwareError):
+    """Release Version Do Not Exist"""
+    pass

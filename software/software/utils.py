@@ -269,6 +269,10 @@ def load_from_json_file(file):
     except FileNotFoundError:
         LOG.error("File %s not found", file)
         return None
+    # Avoid error to read an empty file
+    except ValueError:
+        return {}
+
     except Exception as e:
         LOG.error("Problem reading from %s: %s", file, e)
         return None
@@ -289,6 +293,13 @@ def check_state(state, states):
 def check_instances(params: list, instance):
     for p in params:
         if not isinstance(p, instance):
-            msg = "Param %s must be type: %s" % (p, instance)
+            msg = "Param with value %s must be type: %s" % (p, instance)
             LOG.exception(msg)
             raise ValueError(msg)
+
+def get_software_filesystem_data():
+    if os.path.exists(constants.SOFTWARE_JSON_FILE):
+        data = load_from_json_file(constants.SOFTWARE_JSON_FILE)
+    else:
+        data = {}
+    return data
