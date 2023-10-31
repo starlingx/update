@@ -1,0 +1,26 @@
+From 7d128dc42ef511492550f538d85fcdaa74f2f38c Mon Sep 17 00:00:00 2001
+From: Charles Short <charles.short@windriver.com>
+Date: Mon, 27 Nov 2023 21:16:07 -0500
+Subject: [PATCH 1/4] Set default directory
+
+Signed-off-by: Charles Short <charles.short@windriver.com>
+---
+ apt_ostree/cmd/options.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/apt_ostree/cmd/options.py b/apt_ostree/cmd/options.py
+index 3ee9675..34512bc 100644
+--- a/apt_ostree/cmd/options.py
++++ b/apt_ostree/cmd/options.py
+@@ -36,7 +36,7 @@ def workspace_option(f):
+         "--workspace",
+         help="Path to the apt-ostree workspace",
+         nargs=1,
+-        default="/var/tmp/apt-ostree",
++        default="/scratch/apt-ostree",
+         required=True,
+         callback=callback
+     )(f)
+-- 
+2.25.1
+
