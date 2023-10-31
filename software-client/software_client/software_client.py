@@ -764,7 +764,10 @@ def deploy_precheck_req(args):
     region_name = args.region_name
 
     # Issue deploy_precheck request
-    url = "http://%s/software/deploy_precheck/%s?region_name=%s" % (api_addr, deployment, region_name)
+    url = "http://%s/software/deploy_precheck/%s" % (api_addr, deployment)
+    if args.force:
+        url += "/force"
+    url += "?region_name=%s" % region_name
 
     headers = {}
     append_auth_token_if_required(headers)
@@ -1166,6 +1169,11 @@ def register_deploy_commands(commands):
     cmd.set_defaults(func=deploy_precheck_req)
     cmd.add_argument('deployment',
                      help='Verify if prerequisites are met for this Deployment ID')
+    cmd.add_argument('-f',
+                     '--force',
+                     action='store_true',
+                     required=False,
+                     help='Allow bypassing non-critical checks')
     cmd.add_argument('--region_name',
                      default='RegionOne',
                      required=False,

@@ -101,8 +101,12 @@ class SoftwareAPIController(object):
     @expose('json')
     @expose('query.xml', content_type='application/xml')
     def deploy_precheck(self, *args, **kwargs):
+        force = False
+        if 'force' in list(args):
+            force = True
+
         try:
-            result = sc.software_deploy_precheck_api(list(args)[0], **kwargs)
+            result = sc.software_deploy_precheck_api(list(args)[0], force, **kwargs)
         except SoftwareError as e:
             return dict(error="Error: %s" % str(e))
 
