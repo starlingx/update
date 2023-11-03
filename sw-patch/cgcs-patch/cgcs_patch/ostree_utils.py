@@ -11,6 +11,7 @@ import os
 import sh
 import shutil
 import subprocess
+import time
 
 from cgcs_patch import constants
 from cgcs_patch.exceptions import OSTreeCommandFail
@@ -299,12 +300,18 @@ def mount_new_deployment(deployment_dir):
         new_etc_mount_dir = "%s/etc" % (deployment_dir)
         sh.mount("--bind", "-o", "ro,noatime", new_usr_mount_dir, "/usr")
         sh.mount("--bind", "-o", "rw,noatime", new_etc_mount_dir, "/etc")
-    except sh.ErrorReturnCode as e:
-        msg = "Failed to re-mount /usr and /etc."
-        info_msg = "OSTree Deployment Mount Error: Output: %s" \
-                   % (e.stderr.decode("utf-8"))
-        LOG.info(info_msg)
-        raise OSTreeCommandFail(msg)
+    except sh.ErrorReturnCode:
+        LOG.warning("Mount failed. Retrying to mount /usr and /etc again after 5 secs.")
+        time.sleep(5)
+        try:
+            sh.mount("--bind", "-o", "ro,noatime", new_usr_mount_dir, "/usr")
+            sh.mount("--bind", "-o", "rw,noatime", new_etc_mount_dir, "/etc")
+        except sh.ErrorReturnCode as e:
+            msg = "Failed to re-mount /usr and /etc."
+            info_msg = "OSTree Deployment Mount Error: Output: %s" \
+                       % (e.stderr.decode("utf-8"))
+            LOG.warning(info_msg)
+            raise OSTreeCommandFail(msg)
     finally:
         try:
             sh.mount("/usr/local/kubernetes/current/stage1")
