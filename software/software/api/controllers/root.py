@@ -209,8 +209,12 @@ class SoftwareAPIController(object):
 
     @expose('json')
     @expose('query_hosts.xml', content_type='application/xml')
-    def query_hosts(self, *args):  # pylint: disable=unused-argument
-        return dict(data=sc.query_host_cache())
+    def host_list(self, *args):  # pylint: disable=unused-argument
+        try:
+            query_hosts = sc.deploy_host_list()
+        except Exception as e:
+            return dict(error=str(e))
+        return dict(data=query_hosts)
 
 
 class RootController:
