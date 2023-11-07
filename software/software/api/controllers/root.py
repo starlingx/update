@@ -5,7 +5,6 @@ SPDX-License-Identifier: Apache-2.0
 
 """
 import cgi
-import glob
 import os
 from oslo_log import log
 from pecan import expose
@@ -187,31 +186,6 @@ class SoftwareAPIController(object):
             # Remove all uploaded files from /scratch dir
             sc.software_sync()
             shutil.rmtree(temp_dir, ignore_errors=True)
-
-    @expose('json')
-    def upload_dir(self, **kwargs):
-        # todo(abailey): extensions should be configurable or
-        # registered in setup.cfg
-        extensions = ['*.patch', '*.tar', '*.iso']
-        files = []
-        # todo(abailey): investigate an alternative to glob
-        for path in kwargs.values():
-            LOG.info("upload-dir: Uploading software from: %s", path)
-            for ext in extensions:
-                for f in glob.glob(path + "/" + ext):
-                    if os.path.isfile(f):
-                        LOG.info("upload-dir: Uploading : %s", f)
-                        files.append(f)
-
-        if len(files) == 0:
-            return dict(error="No software found matching %s" % extensions)
-
-        try:
-            result = sc.software_release_upload(sorted(files))
-        except SoftwareError as e:
-            return dict(error=str(e))
-        sc.software_sync()
-        return result
 
     @expose('json')
     @expose('query.xml', content_type='application/xml')
