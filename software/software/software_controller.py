@@ -1787,7 +1787,7 @@ class PatchController(PatchService):
                         msg = "Failed to delete the restart script for %s" % patch_id
                         LOG.exception(msg)
 
-    def software_deploy_precheck_api(self, deployment: str, **kwargs) -> dict:
+    def software_deploy_precheck_api(self, deployment: str, force: bool, **kwargs) -> dict:
         """
         Verify if system is capable to upgrade to a specified deployment
         return: dict of info, warning and error messages
@@ -1838,16 +1838,20 @@ class PatchController(PatchService):
         if region_name != "RegionOne":
             pass
 
+        cmd = [precheck_script,
+               "--auth_url=%s" % auth_url,
+               "--username=%s" % username,
+               "--password=%s" % password,
+               "--project_name=%s" % project_name,
+               "--user_domain_name=%s" % user_domain_name,
+               "--project_domain_name=%s" % project_domain_name,
+               "--region_name=%s" % region_name]
+        if force:
+            cmd.append("--force")
+
         # Call precheck from the deployment files
         precheck_return = subprocess.run(
-            [precheck_script,
-             "--auth_url=%s" % auth_url,
-             "--username=%s" % username,
-             "--password=%s" % password,
-             "--project_name=%s" % project_name,
-             "--user_domain_name=%s" % user_domain_name,
-             "--project_domain_name=%s" % project_domain_name,
-             "--region_name=%s" % region_name],
+            cmd,
             stderr=subprocess.STDOUT,
             stdout=subprocess.PIPE,
             check=False,

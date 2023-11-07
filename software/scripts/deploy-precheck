@@ -32,6 +32,8 @@ class HealthCheck(object):
     FAIL_MSG = 'Fail'
 
     def __init__(self, config):
+        self._config = config
+
         # get sysinv token, endpoint and client
         self._sysinv_token, self._sysinv_endpoint = \
             upgrade_utils.get_token_endpoint(config, service_type="platform")
@@ -42,7 +44,8 @@ class HealthCheck(object):
             upgrade_utils.get_token_endpoint(config, service_type="usm")
 
     def run_health_check(self):
-        output = self._sysinv_client.health.get_kube_upgrade() + "\n"
+        force = self._config.get("force", False)
+        output = self._sysinv_client.health.get_kube_upgrade(relaxed=force)
         if HealthCheck.FAIL_MSG in output:
             return False, output
         return True, output
@@ -208,10 +211,15 @@ def parse_config(args):
     for i in range(1, len(args)):
         try:
             sep = args[i].find("=")
-            key = args[i][:sep].lstrip("-")
-            value = args[i][sep+1:]
-            if key in required_keystone_config:
-                config[key] = value
+            # for params in --key=value format
+            if sep > 0:
+                key = args[i][:sep].lstrip("-")
+                value = args[i][sep+1:]
+            # for params in --key format
+            else:
+                key = args[i].lstrip("-")
+                value = True
+            config[key] = value
         except ValueError:
             print("Invalid parameter format: %s" % args[i])
             return None
@@ -227,7 +235,7 @@ def main(argv=None):
         print("Please provide keystone_authtoken configuration.\n"
               "usage: deploy-precheck --auth_url=<auth_url> --username=<username> "
               "--password=<password> --project_name=<project_name> --user_domain_name=<user_domain_name> "
-              "--project_domain_name=<project_domain_name> --region_name=<region_name>")
+              "--project_domain_name=<project_domain_name> --region_name=<region_name> [--force]")
         return 1
 
     general_health_check = HealthCheck(config)
@@ -239,9 +247,9 @@ def main(argv=None):
     # execute upgrade-specific health check
     upgrade_health_ok, upgrade_output = upgrade_health_check.run_health_check()
 
-    # combine health check results and remove extra line break from output
+    # combine health check results removing extra line breaks/blank spaces from the output
     health_ok = general_health_ok and upgrade_health_ok
-    output = general_output[:-1] + upgrade_output
+    output = general_output.strip() + "\n" + upgrade_output.strip()
 
     # print health check output and exit
     print(output)
