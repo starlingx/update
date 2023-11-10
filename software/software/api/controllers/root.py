@@ -115,11 +115,14 @@ class SoftwareAPIController(object):
     @expose('json')
     @expose('query.xml', content_type='application/xml')
     def deploy_start(self, *args, **kwargs):
+        # if --force is provided
+        force = 'force' in list(args)
+
         if sc.any_patch_host_installing():
             return dict(error="Rejected: One or more nodes are installing releases.")
 
         try:
-            result = sc.software_deploy_start_api(list(args)[0], **kwargs)
+            result = sc.software_deploy_start_api(list(args)[0], force, **kwargs)
         except SoftwareError as e:
             return dict(error="Error: %s" % str(e))
 

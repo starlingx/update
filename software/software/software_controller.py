@@ -1992,7 +1992,7 @@ class PatchController(PatchService):
             LOG.error("Failed to start command: %s. Error %s" % (' '.join(upgrade_start_cmd), e))
             return False
 
-    def software_deploy_start_api(self, deployment: str, **kwargs) -> dict:
+    def software_deploy_start_api(self, deployment: str, force: bool, **kwargs) -> dict:
         """
         Start deployment by applying the changes to the feed ostree
         return: dict of info, warning and error messages
@@ -2017,7 +2017,7 @@ class PatchController(PatchService):
 
         if utils.is_upgrade_deploy(SW_VERSION, release["sw_version"]):
             to_release = release["sw_version"]
-            ret = self._deploy_precheck(to_release, False)
+            ret = self._do_deploy_precheck(to_release, force)
             if ret["error"]:
                 ret["error"] = "The following issues have been detected which prevent " \
                                "deploying %s\n" % deployment + \

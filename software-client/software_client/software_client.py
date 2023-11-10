@@ -899,7 +899,10 @@ def deploy_start_req(args):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     # Issue deploy_start request
-    url = "http://%s/software/deploy_start/%s" % (api_addr, deployment)
+    if args.force:
+        url = "http://%s/software/deploy_start/%s/force" % (api_addr, deployment)
+    else:
+        url = "http://%s/software/deploy_start/%s" % (api_addr, deployment)
 
     headers = {}
     append_auth_token_if_required(headers)
@@ -1271,6 +1274,11 @@ def register_deploy_commands(commands):
     cmd.set_defaults(func=deploy_start_req)
     cmd.add_argument('deployment',
                      help='Deployment ID to start')
+    cmd.add_argument('-f',
+                     '--force',
+                     action='store_true',
+                     required=False,
+                     help='Allow bypassing non-critical checks')
 
     # --- software deploy host ---------------------------
     cmd = sub_cmds.add_parser(
