@@ -1309,6 +1309,9 @@ class PatchController(PatchService):
             LOG.info(msg)
             msg_info += msg + "\n"
 
+        # Refresh data, if needed
+        self.base_pkgdata.loaddirs()
+
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     def patch_init_release_api(self, release):

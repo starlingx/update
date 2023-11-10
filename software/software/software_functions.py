@@ -201,9 +201,12 @@ class BasePackageData(object):
             self.pkgs[sw_rel] = {}
 
         # Clean up deleted data
+        deleted_releases = []
         for sw_rel in self.pkgs:
             if not os.path.exists("%s/rel-%s" % (base_dir, sw_rel)):
-                del self.pkgs[sw_rel]
+                deleted_releases.append(sw_rel)
+        for sw_rel in deleted_releases:
+            del self.pkgs[sw_rel]
 
     def check_release(self, sw_rel):
         return (sw_rel in self.pkgs)
