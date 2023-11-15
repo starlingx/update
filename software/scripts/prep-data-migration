@@ -88,8 +88,9 @@ class DataMigration(object):
 
                 subprocess.check_call([db_cmd], shell=True, stderr=devnull)
             LOG.info("Exporting postgres databases completed")
-        except subprocess.CalledProcessError:
-            LOG.exception("Failed to export postgres databases for upgrade.")
+        except subprocess.CalledProcessError as cpe:
+            LOG.exception("Failed to export postgres databases for upgrade.\nReturn code: %s, Error: %s.",
+                          cpe.returncode, cpe.output)
             raise
         finally:
             devnull.close()
@@ -141,8 +142,9 @@ class DataMigration(object):
                         os.path.join(self.postgres_dest_dir, 'vim.data')))
             subprocess.check_call([vim_cmd], shell=True, stderr=devnull)
             LOG.info("Exporting VIM completed")
-        except subprocess.CalledProcessError:
-            LOG.exception("Failed to export VIM databases for upgrade.")
+        except subprocess.CalledProcessError as cpe:
+            LOG.exception("Failed to export VIM databases for upgrade.\nReturn code: %s. Error: %s.",
+                          cpe.returncode, cpe.output)
             raise
         finally:
             devnull.close()
@@ -169,8 +171,9 @@ class DataMigration(object):
             subprocess.check_call(
                 ["cp", from_k8s_admin_file, to_k8s_admin_file_dir], stdout=devnull)
             LOG.info("Copied %s to %s completed", from_k8s_admin_file, to_k8s_admin_file_dir)
-        except subprocess.CalledProcessError:
-            LOG.exception("Failed to copy %s", from_k8s_admin_file)
+        except subprocess.CalledProcessError as cpe:
+            LOG.exception("Failed to copy %s.\nReturn code: %s. Error: %s.",
+                          from_k8s_admin_file, cpe.returncode, cpe.output)
             raise
         finally:
             devnull.close()
@@ -187,8 +190,9 @@ class DataMigration(object):
             subprocess.check_call(["rm -f %s" % branding_files], shell=True,
                                   stdout=devnull)
             LOG.info("Removed branding files %s completed", branding_files)
-        except subprocess.CalledProcessError:
-            LOG.exception("Failed to remove branding files %s", branding_files)
+        except subprocess.CalledProcessError as cpe:
+            LOG.exception("Failed to remove branding files %s.\nReturn code: %s. Error: %s.",
+                          branding_files, cpe.returncode, cpe.output)
             raise
         finally:
             devnull.close()
@@ -208,11 +212,9 @@ class DataMigration(object):
             # Copy /etc/platform and /etc/sudoers.d directories
             for src_dir in src_dirs:
                 temp_src_dir = os.path.join("/etc", src_dir)
-                temp_dest_dir = os.path.join(etc_dest_dir, src_dir)
-                os.makedirs(temp_dest_dir, 0o755, exist_ok=True)
-                subprocess.check_call(["cp", "-r", temp_src_dir, temp_dest_dir],
+                subprocess.check_call(["cp", "-r", temp_src_dir, etc_dest_dir],
                                       stdout=devnull)
-                LOG.info("Copied files in %s to %s completed", temp_src_dir, temp_dest_dir)
+                LOG.info("Copied files in %s to %s/%s completed", temp_src_dir, etc_dest_dir, src_dir)
             # Copy /etc/passwd, /etc/shadow, /etc/sudoers, /etc/resolv.conf files
             for src_file in src_files:
                 temp_src_file = os.path.join("/etc", src_file)
@@ -220,8 +222,9 @@ class DataMigration(object):
                 subprocess.check_call(["cp", temp_src_file, temp_dest_file],
                                       stdout=devnull)
                 LOG.info("Copied %s to %s completed", temp_src_file, temp_dest_file)
-        except subprocess.CalledProcessError:
-            LOG.exception("Failed to copy etc files %s.", src_files)
+        except subprocess.CalledProcessError as cpe:
+            LOG.exception("Failed to copy etc files %s.\nReturn code: %s. Error: %s.",
+                          src_files, cpe.returncode, cpe.output)
             raise
         except Exception as e:
             LOG.exception("Failed to export /etc directory. Error: %s.", str(e))
