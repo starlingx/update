@@ -1,0 +1,10 @@
+---
+- "{{ OSTREE_DEPLOYMENT_BRANCH }}/usr/etc:{{ OSTREE_DEPLOYMENT_BRANCH }}/etc"
+- "/dev:{{ OSTREE_DEPLOYMENT_BRANCH }}/dev"
+- "/proc:{{ OSTREE_DEPLOYMENT_BRANCH }}/proc"
+- "/opt/platform:{{ OSTREE_DEPLOYMENT_BRANCH }}/opt/platform"
+- "/var/lib/rabbitmq:{{ OSTREE_DEPLOYMENT_BRANCH }}/var/lib/rabbitmq"
+- "/var/log:{{ OSTREE_DEPLOYMENT_BRANCH }}/var/log"
+- >
+  "/var/lib/postgresql/upgrade:
+  {{ OSTREE_DEPLOYMENT_BRANCH }}/var/lib/postgresql/upgrade"

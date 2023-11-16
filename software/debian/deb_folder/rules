@@ -68,4 +68,8 @@ override_dh_install:
 		${ROOT}/usr/sbin/prep-data-migration
 	install -m 444 ${METADATA_FILE} \
         ${ROOT}/etc/software/${METADATA_FILE}
+	install -m 755 scripts/chroot_mounts.sh \
+		${ROOT}/usr/bin/chroot_mounts.sh
+	install -m 444 scripts/ostree_mounts.yaml \
+        ${ROOT}/etc/software/ostree_mounts.yaml
 	dh_install
