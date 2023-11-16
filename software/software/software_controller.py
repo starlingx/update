@@ -1284,20 +1284,30 @@ class PatchController(PatchService):
                     raise OSTreeTarFail(msg)
 
             # Delete upgrade iso file in folder
+            # TODO(heitormatsui): treat the prepatched iso scenario
+            metadata_file = "%s-metadata.xml" % release_id
+            delete_feed = False
             to_release_iso_dir = os.path.join(constants.FEED_OSTREE_BASE_DIR, ("rel-%s" % release_sw_version))
             if os.path.isdir(to_release_iso_dir):
-                try:
-                    shutil.rmtree(to_release_iso_dir)
-                except OSError:
-                    msg = "Failed to remove release iso %s folder" % to_release_iso_dir
-                    LOG.exception(msg)
-                    raise ReleaseIsoDeleteFailure(msg)
+                # check if the release being deleted is related to this feed
+                if os.path.isfile("%s/upgrades/%s" % (to_release_iso_dir, metadata_file)):
+                    delete_feed = True
+                if delete_feed:
+                    try:
+                        shutil.rmtree(to_release_iso_dir)
+                    except OSError:
+                        msg = "Failed to remove release iso %s folder" % to_release_iso_dir
+                        LOG.exception(msg)
+                        raise ReleaseIsoDeleteFailure(msg)
+                    msg = "Deleted feed directory %s" % to_release_iso_dir
+                    LOG.info(msg)
+                    msg_info += msg + "\n"
 
             try:
                 # Delete the metadata
                 deploystate = self.release_data.metadata[release_id]["state"]
                 metadata_dir = DEPLOY_STATE_METADATA_DIR_DICT[deploystate]
-                os.remove("%s/%s-metadata.xml" % (metadata_dir, release_id))
+                os.remove("%s/%s" % (metadata_dir, metadata_file))
             except OSError:
                 msg = "Failed to remove metadata for %s" % release_id
                 LOG.exception(msg)
