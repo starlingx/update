@@ -6,6 +6,7 @@
 # This is an utility module used by standalone USM upgrade scripts
 # that runs on the FROM-side context but using TO-side code base
 #
+import re
 
 from keystoneauth1 import exceptions
 from keystoneauth1 import identity
@@ -70,3 +71,60 @@ def get_sysinv_client(token, endpoint):
     except Exception as e:
         msg = "Failed to get sysinv client. Error: %s" % str(e)
         raise Exception(msg)
+
+
+def get_keystone_config(args: dict) -> dict:
+    """Returns keystone config
+
+    :param args: Dict containing Keystone configuration parameters.
+    """
+    keystone_config = {}
+
+    required_keystone_config = ["auth_url",
+                                "username",
+                                "password",
+                                "project_name",
+                                "user_domain_name",
+                                "project_domain_name",
+                                "region_name"]
+    for config in required_keystone_config:
+        if config not in args:
+            raise Exception("keystone configuration %s is not provided" % config)
+        keystone_config[config] = args[config]
+    return keystone_config
+
+
+def parse_arguments(sys_argv: list) -> dict:
+    """Returns a dict containing parsed key-value
+
+    :param sys_argv: List of system arguments to be parsed
+    """
+    pattern = re.compile(r'--(\w+)=(.*)')
+    args = {}
+    for arg in sys_argv:
+        match = pattern.match(arg)
+        if match:
+            args[match.group(1)] = match.group(2)
+    return args
+
+
+def print_usage(script_name, extra_args=""):
+    """Prints the usage instructions for the script with optional additional arguments.
+
+    :param script_name: The name of the script.
+    :param extra_args: Additional arguments to be included.
+    """
+    print("Usage: %s --rootdir=<rootdir> --from_release=<from_release> --to_release=<to_release> "
+          "--auth_url=<auth_url> --username=<username> --password=<password> "
+          "--project_name=<project_name>"
+          "--user_domain_name=<user_domain_name> --project_domain_name=<project_domain_name> "
+          "--region_name=<region_name> %s" % script_name, extra_args)
+
+
+def get_system_info(sysinv_client):
+    """Returns system type and system mode
+
+    :param sysinv_client: Sysinv client instance.
+    """
+    system_info = sysinv_client.isystem.list()[0]
+    return system_info.system_type, system_info.system_mode

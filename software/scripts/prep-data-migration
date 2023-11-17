@@ -14,7 +14,6 @@ Run platform upgrade prep data migration as a standalone executable
 
 import logging as LOG
 import os
-import re
 import subprocess
 import sys
 
@@ -233,44 +232,8 @@ class DataMigration(object):
             devnull.close()
 
 
-def parse_arguments(sys_argv) -> dict:
-    pattern = re.compile(r'--(\w+)=(.*)')
-    args = {}
-    for arg in sys_argv:
-        match = pattern.match(arg)
-        if match:
-            args[match.group(1)] = match.group(2)
-    return args
-
-
-def get_keystone_config(args: dict) -> dict:
-    keystone_config = {}
-
-    required_keystone_config = ["auth_url",
-                                "username",
-                                "password",
-                                "project_name",
-                                "user_domain_name",
-                                "project_domain_name",
-                                "region_name"]
-    for config in required_keystone_config:
-        if config not in args:
-            LOG.error("keystone configuration %s is not provided" % config)
-            raise Exception("keystone configuration %s is not provided" % config)
-        keystone_config[config] = args[config]
-    return keystone_config
-
-
-def print_usage(script_name):
-    print("Usage: %s --rootdir=<rootdir> --from_release=<from_release> --to_release=<to_release> "
-          "--auth_url=<auth_url> --username=<username> --password=<password> "
-          "--project_name=<project_name>"
-          "--user_domain_name=<user_domain_name> --project_domain_name=<project_domain_name> "
-          "--region_name=<region_name>" % script_name)
-
-
 def main(sys_argv):
-    args = parse_arguments(sys_argv)
+    args = upgrade_utils.parse_arguments(sys_argv)
     try:
         rootdir = args["rootdir"]
         from_release = args["from_release"]
@@ -279,18 +242,18 @@ def main(sys_argv):
         msg = "%s is not provided" % str(e)
         LOG.error(msg)
         print(msg)
-        print_usage(sys_argv[0])
+        upgrade_utils.print_usage(sys_argv[0])
         return 1
 
     if rootdir is None or from_release is None or to_release is None:
         msg = "rootdir, from_release, or to_release are missing"
         LOG.error(msg)
         print(msg)
-        print_usage(sys_argv[0])
+        upgrade_utils.print_usage(sys_argv[0])
         return 1
 
     try:
-        keystone_config = get_keystone_config(args)
+        keystone_config = upgrade_utils.get_keystone_config(args)
     except Exception:
         LOG.exception("Failed to get keystone configuration")
         return 1

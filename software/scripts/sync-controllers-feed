@@ -1,0 +1,92 @@
+#!/usr/bin/python3
+# -*- encoding: utf-8 -*-
+#
+# vim: tabstop=4 shiftwidth=4 softtabstop=4
+#
+# Copyright (c) 2023 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+"""
+Run feed synchronization between controllers
+"""
+
+import logging as LOG
+import subprocess
+import sys
+
+import upgrade_utils
+
+CONTROLLER_1_HOSTNAME = "controller-1"
+SYSTEM_MODE_SIMPLEX = "simplex"
+
+
+def sync_controllers(to_release, feed, controller):
+    cmd = [
+        "rsync",
+        "-ac",
+        "--delete",
+        "--exclude", "tmp",
+        feed,
+        f"rsync://{controller}/feed/rel-{to_release}/"
+    ]
+    subprocess.run(cmd)
+
+
+def main(sys_argv):
+    args = upgrade_utils.parse_arguments(sys_argv)
+    try:
+        feed = args["feed"]
+        to_release = args["to_release"]
+    except KeyError as e:
+        msg = "%s is not provided" % str(e)
+        LOG.error(msg)
+        print(msg)
+        upgrade_utils.print_usage(sys_argv[0], "--feed=<feed>")
+        return 1
+
+    if feed is None or to_release is None:
+        msg = "feed or to_release are missing"
+        LOG.error(msg)
+        print(msg)
+        upgrade_utils.print_usage(sys_argv[0], "--feed=<feed>")
+        return 1
+
+    try:
+        keystone_config = upgrade_utils.get_keystone_config(args)
+        token, endpoint = upgrade_utils.get_token_endpoint(keystone_config)
+        sysinv_client = upgrade_utils.get_sysinv_client(token, endpoint)
+        _, system_mode = upgrade_utils.get_system_info(sysinv_client)
+        simplex = (system_mode == SYSTEM_MODE_SIMPLEX)
+        if simplex:
+            print("System mode is simplex. Skipping sync controllers feed.. ")
+            return 0
+
+    except ImportError:
+        msg = "Failed to import cgtsclient"
+        LOG.exception(msg)
+        return 1
+
+    except Exception as e:
+        LOG.exception("Failed to get host attributes from sysinv. Error: %s", e)
+        return 1
+
+    LOG.info("Syncing feed.")
+    try:
+        sync_controllers(to_release, feed, CONTROLLER_1_HOSTNAME)
+        LOG.info("Feed synchronized between controllers.")
+
+    except subprocess.CalledProcessError as e:
+        LOG.exception("Feed synchronization command failed. Error: %s", e)
+        return 1
+
+    except Exception as e:
+        LOG.exception("Feed synchronization failed. Error: %s", e)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    LOG.basicConfig(filename='/var/log/software.log', level=LOG.INFO)
+    sys.exit(main(sys.argv))

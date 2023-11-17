@@ -77,4 +77,6 @@ override_dh_install:
 		${ROOT}/usr/sbin/software-deploy/create_postgresql_database.sh
 	install -m 755 scripts/usm_load_import \
 		${ROOT}/usr/sbin/software-deploy/usm_load_import
+	install -m 755 scripts/sync-controllers-feed \
+		${ROOT}/usr/sbin/software-deploy/sync-controllers-feed
 	dh_install
