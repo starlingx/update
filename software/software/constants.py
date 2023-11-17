@@ -15,6 +15,8 @@ try:
 except Exception:
     pass
 
+from tsconfig.tsconfig import SW_VERSION
+
 ADDRESS_VERSION_IPV4 = 4
 ADDRESS_VERSION_IPV6 = 6
 CONTROLLER_FLOATING_HOSTNAME = "controller"
@@ -73,8 +75,11 @@ PATCH_AGENT_STATE_INSTALL_REJECTED = "install-rejected"
 
 FEED_OSTREE_BASE_DIR = "/var/www/pages/feed"
 OSTREE_BASE_DEPLOYMENT_DIR = "/ostree/deploy/debian/deploy/"
+PACKAGE_FEED_DIR = "/var/www/pages/updates/debian"
 OSTREE_REF = "starlingx"
 OSTREE_REMOTE = "debian"
+DEBIAN_RELEASE = "bullseye"
+STARLINGX_RELEASE = SW_VERSION
 PATCH_SCRIPTS_STAGING_DIR = "/var/www/pages/updates/software-scripts"
 SYSROOT_OSTREE = "/sysroot/ostree/repo"
 

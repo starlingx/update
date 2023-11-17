@@ -356,6 +356,12 @@ class ReleaseData(object):
             for req_release in req.findall("req_patch_id"):
                 self.metadata[release_id]["requires"].append(req_release.text)
 
+        self.metadata[release_id]["packages"] = []
+        for req in root.findall("packages"):
+            for deb in req.findall("deb"):
+                self.metadata[release_id]["packages"].append(
+                    deb.text.split("_")[0])
+
         self.contents[release_id] = {}
 
         for content in root.findall("contents/ostree"):

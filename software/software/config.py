@@ -24,6 +24,7 @@ api_port = 0
 alt_postgresql_port = 0
 mgmt_if = None
 nodetype = None
+package_feed = None
 platform_conf_mtime = 0
 software_conf_mtime = 0
 software_conf = constants.SOFTWARE_CONFIG_FILE_LOCAL
@@ -59,6 +60,11 @@ pecan_opts = [
         'guess_content_type_from_ext',
         default=False
     ),
+    cfg.StrOpt(
+        "package_feed",
+        default="http://controller:8080/updates/debian/rel-%s/ bullseye updates"
+                % constants.STARLINGX_RELEASE
+    ),
 ]
 
 # register the configuration for this component
@@ -80,6 +86,9 @@ def read_config():
         'controller_port': "5494",
         'agent_port': "5495",
         'alt_postgresql_port': "6666",
+        "package_feed":
+            "http://controller:8080/updates/debian/rel-%s/ bullseye updates"
+            % constants.STARLINGX_RELEASE,
     }
 
     global controller_mcast_group
@@ -88,6 +97,7 @@ def read_config():
     global controller_port
     global agent_port
     global alt_postgresql_port
+    global package_feed
 
     config = configparser.ConfigParser(defaults)
 
@@ -102,6 +112,7 @@ def read_config():
     controller_port = config.getint('runtime', 'controller_port')
     agent_port = config.getint('runtime', 'agent_port')
     alt_postgresql_port = config.getint('runtime', 'alt_postgresql_port')
+    package_feed = config.get("runtime", "package_feed")
 
     # The platform.conf file has no section headers, which causes problems
     # for ConfigParser. So we'll fake it out.

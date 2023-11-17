@@ -24,9 +24,10 @@ NAME=$(basename $0)
 
 REPO_ID=updates
 REPO_ROOT=/var/www/pages/${REPO_ID}
-REPO_DIR=${REPO_ROOT}/rel-${SW_VERSION}
+REPO_DIR=${REPO_ROOT}/debian/rel-${SW_VERSION}
 GROUPS_FILE=$REPO_DIR/comps.xml
 PATCHING_DIR=/opt/software
+RELEASE=bullseye
 
 logfile=/var/log/software.log
 
@@ -43,10 +44,17 @@ function do_setup {
     # Does the repo exist?
     if [ ! -d $REPO_DIR ]; then
         LOG "Creating repo."
-        mkdir -p $REPO_DIR
 
-        # The original Centos code would create the groups and call createrepo
-        # todo(jcasteli): determine if the ostree code needs a setup also
+        # TODO(cshort) Remove this once gpg support is added.
+        sed -i '$a gpg-verify=false' \
+            /var/www/pages/feed/rel-${SW_VERSION}/ostree_repo/config
+        sed -i '$a gpg-verify=false' \
+            /sysroot/ostree/repo/config
+
+        apt-ostree repo init \
+            --feed $REPO_DIR \
+            --release $RELEASE \
+            --origin $REPO_ID
     fi
 
     if [ ! -d $PATCHING_DIR ]; then
