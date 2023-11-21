@@ -45,7 +45,7 @@ class HealthCheck(object):
 
     def run_health_check(self):
         force = self._config.get("force", False)
-        output = self._sysinv_client.health.get_kube_upgrade(relaxed=force)
+        output = self._sysinv_client.health.get_kube_upgrade(args={}, relaxed=force)
         if HealthCheck.FAIL_MSG in output:
             return False, output
         return True, output
