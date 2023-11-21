@@ -1,7 +1,7 @@
 <?xml version="1.0" ?>
 <patch>
-  <id>starlingx-xxxPLATFORM_RELEASExxx</id>
-  <sw_version>xxxPLATFORM_RELEASExxx</sw_version>
+  <id>starlingx-xxxPLATFORM_RELEASExxx.0</id>
+  <sw_version>xxxPLATFORM_RELEASExxx.0</sw_version>
   <component>starlingx</component>
   <summary>STX xxxPLATFORM_RELEASExxx GA release</summary>
   <description>STX xxxPLATFORM_RELEASExxx major GA release</description>
