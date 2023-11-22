@@ -68,11 +68,11 @@ class TestSoftwareController(unittest.TestCase):
         self.assertEqual(error, '')
 
         # Verify that the expected methods were called on the ReleaseData object
-        release_data.parse_metadata.assert_called_once_with('/mnt/iso/upgrades/STX_2.0_GA-metadata.xml', state='available')
+        release_data.parse_metadata.assert_called_once_with('/mnt/iso/upgrades/starlingx-2.0.0-metadata.xml', state='available')
 
         # Verify that the expected files were copied to the expected directories
-        mock_copyfile.assert_called_once_with('/mnt/iso/upgrades/STX_2.0_GA-metadata.xml',
-                                              constants.AVAILABLE_DIR + '/STX_2.0_GA-metadata.xml')
+        mock_copyfile.assert_called_once_with('/mnt/iso/upgrades/starlingx-2.0.0-metadata.xml',
+                                              constants.AVAILABLE_DIR + '/starlingx-2.0.0-metadata.xml')
         expected_calls = [call(constants.AVAILABLE_DIR, exist_ok=True),
                           call(constants.FEED_OSTREE_BASE_DIR, exist_ok=True)]
         self.assertEqual(mock_makedirs.call_count, 2)
