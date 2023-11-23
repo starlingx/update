@@ -462,6 +462,7 @@ confidence=HIGH,
 # W0703 broad-except
 # W0707 raise-missing-from
 # W0719 broad-exception-raised
+# W1201 logging not lazy
 # W1505 deprecated-method
 # W1514 unspecified-encoding
 # W3101 missing-timeout
@@ -470,7 +471,7 @@ disable= C0103,C0114,C0115,C0116,C0201,C0206,C0209,C2801,
          R0205,R0402,R0801,R0902,R0903,R0904,R0911,
          R0912,R0913,R0914,R0915,R1702,R1705,R1714,
          R1715,R1722,R1724,R1725,R1732,R1735,
-         W0107,W0602,W0603,W0703,W0707,W0719,W1514,W3101
+         W0107,W0602,W0603,W0703,W0707,W0719,W1201,W1514,W3101
 
 # Enable the message, report, category or checker with the given id(s). You can
 # either give multiple identifier separated by comma (,) or put this option
