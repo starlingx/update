@@ -111,3 +111,6 @@ LICENSE_FILE = "/etc/platform/.license"
 VERIFY_LICENSE_BINARY = "/usr/bin/verify-license"
 
 SOFTWARE_JSON_FILE = "/opt/software/software.json"
+
+WORKER_SUMMARY_DIR = "%s/summary" % SOFTWARE_STORAGE_DIR
+WORKER_DATETIME_FORMAT = "%Y%m%dT%H%M%S%f"
