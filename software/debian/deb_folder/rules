@@ -6,13 +6,13 @@ PMONDIR := ${ROOT}/usr/share/starlingx/pmon.d
 
 ROOT := $(CURDIR)/debian/tmp
 export PLATFORM_RELEASE="$(shell grep SW_VERSION /usr/include/build_info.h | cut -d ' ' -f 3)"
-export METADATA_FILE="STX_${PLATFORM_RELEASE}_GA-metadata.xml"
+export METADATA_FILE="starlingx-${PLATFORM_RELEASE}.0-metadata.xml"
 
 %:
 	dh $@ --with python3 --buildsystem=pybuild
 
 override_dh_auto_build:
-	cp service-files/STX_GA-metadata.xml ${METADATA_FILE}
+	cp service-files/starlingx-GA-metadata.xml ${METADATA_FILE}
 	sed -i "s/xxxPLATFORM_RELEASExxx/${PLATFORM_RELEASE}/g" ${METADATA_FILE}
 
 override_dh_install:

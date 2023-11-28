@@ -1006,12 +1006,13 @@ class PatchController(PatchService):
 
             # After successful validation, copy metadata.xml to /opt/software/metadata/available
             os.makedirs(constants.AVAILABLE_DIR, exist_ok=True)
-            stx_release_metadata_file = "STX_%s_GA-metadata.xml" % to_release
-            abs_stx_release_metadata_file = os.path.join(iso_mount_dir,
-                                                         'upgrades',
+            to_release_name = constants.RELEASE_GA_NAME % to_release
+            stx_release_metadata_file = "%s-metadata.xml" % to_release_name
+            abs_stx_release_metadata_file = os.path.join(iso_mount_dir, 'upgrades',
                                                          stx_release_metadata_file)
 
             # Copy stx release metadata.xml to available metadata dir
+            # TODO(heitormatsui): treat the prepatched iso scenario
             shutil.copyfile(abs_stx_release_metadata_file,
                             os.path.join(constants.AVAILABLE_DIR, stx_release_metadata_file))
             LOG.info("Copied %s to %s", abs_stx_release_metadata_file, constants.AVAILABLE_DIR)
