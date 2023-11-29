@@ -975,19 +975,26 @@ class PatchController(PatchService):
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     def _process_upload_upgrade_files(self, upgrade_files, release_data):
-        '''
+        """
         Process the uploaded upgrade files
         :param upgrade_files: dict of upgrade files
         :param release_data: ReleaseData object
         :return: info, warning, error messages
-        '''
+        """
         local_info = ""
         local_warning = ""
         local_error = ""
+
+        iso_mount_dir = None
         try:
             if not verify_files([upgrade_files[constants.ISO_EXTENSION]],
                                 upgrade_files[constants.SIG_EXTENSION]):
                 raise ReleaseValidationFailure("Invalid signature file")
+
+            msg = ("iso and signature files uploaded completed\n"
+                   "Importing iso is in progress\n")
+            LOG.info(msg)
+            local_info += msg
 
             iso_file = upgrade_files.get(constants.ISO_EXTENSION)
 
@@ -1004,49 +1011,46 @@ class PatchController(PatchService):
                 raise UpgradeNotSupported("Current release %s not supported to upgrade to %s"
                                           % (SW_VERSION, to_release))
 
-            # After successful validation, copy metadata.xml to /opt/software/metadata/available
-            os.makedirs(constants.AVAILABLE_DIR, exist_ok=True)
-            to_release_name = constants.RELEASE_GA_NAME % to_release
-            stx_release_metadata_file = "%s-metadata.xml" % to_release_name
-            abs_stx_release_metadata_file = os.path.join(iso_mount_dir, 'upgrades',
-                                                         stx_release_metadata_file)
-
-            # Copy stx release metadata.xml to available metadata dir
-            # TODO(heitormatsui): treat the prepatched iso scenario
-            shutil.copyfile(abs_stx_release_metadata_file,
-                            os.path.join(constants.AVAILABLE_DIR, stx_release_metadata_file))
-            LOG.info("Copied %s to %s", abs_stx_release_metadata_file, constants.AVAILABLE_DIR)
-
-            # Copy the iso file to /var/www/pages/feed/rel-<release>
-            os.makedirs(constants.FEED_OSTREE_BASE_DIR, exist_ok=True)
-            to_release_iso_dir = os.path.join(constants.FEED_OSTREE_BASE_DIR, ("rel-%s" % to_release))
-            shutil.copytree(iso_mount_dir, to_release_iso_dir)
-            LOG.info("Copied iso file %s to %s", iso_file, to_release_iso_dir)
+            # Run /etc/software/usm-load-import script
+            LOG.info("Start load importing from %s", iso_file)
+            shutil.copyfile(os.path.join(iso_mount_dir, 'upgrades', 'usm_load_import'),
+                            constants.LOCAL_LOAD_IMPORT_FILE)
+            os.chmod(constants.LOCAL_LOAD_IMPORT_FILE, 0o755)
+            load_import_cmd = [constants.LOCAL_LOAD_IMPORT_FILE,
+                               "--from-release=%s" % SW_VERSION,
+                               "--to-release=%s" % to_release,
+                               "--iso-dir=%s" % iso_mount_dir]
+            LOG.info("Running load import command: %s", " ".join(load_import_cmd))
+            load_import_return = subprocess.run(load_import_cmd,
+                                                stdout=subprocess.PIPE,
+                                                stderr=subprocess.STDOUT,
+                                                check=False,
+                                                text=True)
+            if load_import_return.returncode != 0:
+                local_error += load_import_return.stdout
+            else:
+                local_info += load_import_return.stdout
 
             # Update the release metadata
+            abs_stx_release_metadata_file = os.path.join(iso_mount_dir,
+                                                         'upgrades',
+                                                         f"{constants.RELEASE_GA_NAME % to_release}-metadata.xml")
             release_data.parse_metadata(abs_stx_release_metadata_file, state=constants.AVAILABLE)
             LOG.info("Updated release metadata for %s", to_release)
-
-            # Unmount the iso file.
-            unmount_iso_load(iso_mount_dir)
 
         except ReleaseValidationFailure:
             msg = "Upgrade file signature verification failed"
             LOG.exception(msg)
             local_error += msg + "\n"
-        except UpgradeNotSupported:
-            msg = "Upgrade is not supported for current release %s" % SW_VERSION
-            LOG.exception(msg)
-            local_error += msg + "\n"
-        except shutil.Error:
-            msg = "Failed to copy the release %s metadata file to %s" % (to_release, constants.AVAILABLE_DIR)
-            LOG.exception(msg)
-            local_error += msg + "\n"
-            raise SoftwareError(msg)
         except Exception as e:
             msg = "Failed to process upgrade files. Error: %s" % str(e)
             LOG.exception(msg)
             local_error += msg + "\n"
+        finally:
+            # Unmount the iso file
+            if iso_mount_dir:
+                unmount_iso_load(iso_mount_dir)
+                LOG.info("Unmounted iso file %s", iso_file)
 
         return local_info, local_warning, local_error
 

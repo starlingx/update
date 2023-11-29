@@ -159,7 +159,9 @@ def save_temp_file(file_item, temp_dir=constants.SCRATCH_DIR):
     try:
         if not os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
-            os.makedirs(temp_dir)
+            os.makedirs(temp_dir, mode=0o755)
+            LOG.info("Created directory %s with free space %s bytes",
+                     temp_dir, shutil.disk_usage(temp_dir).free)
     except Exception:
         raise Exception("Failed to create directory {}".format(temp_dir))
 
@@ -172,14 +174,18 @@ def save_temp_file(file_item, temp_dir=constants.SCRATCH_DIR):
             LOG.error("Not enough space to save file %s in %s \n \
                 Available %s bytes. File size %s", file_name, temp_dir, avail_space, file_size)
     except Exception:
-        LOG.exception("Failed to get file size in bytes for %s or disk space for %s", file_item, temp_dir)
+        msg = "Failed to get file size in bytes for {} or disk space for {}".format(file_item, temp_dir)
+        LOG.exception(msg)
+        raise Exception(msg)
 
     saved_file = os.path.join(temp_dir, os.path.basename(file_name))
     try:
         with open(saved_file, 'wb') as destination_file:
             destination_file.write(file_item.value)
     except Exception:
-        LOG.exception("Failed to save file %s", file_name)
+        msg = "Failed to save file {} in {}".format(file_name, temp_dir)
+        LOG.exception(msg)
+        raise Exception(msg)
 
 
 def delete_temp_file(file_name, temp_dir=constants.SCRATCH_DIR):

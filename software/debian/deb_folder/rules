@@ -74,4 +74,6 @@ override_dh_install:
         ${ROOT}/etc/software/ostree_mounts.yaml
 	install -m 755 scripts/create_postgresql_database.sh \
 		${ROOT}/usr/sbin/create_postgresql_database.sh
+	install -m 755 scripts/usm_load_import \
+		${ROOT}/usr/sbin/usm_load_import
 	dh_install

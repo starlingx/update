@@ -1,0 +1,177 @@
+#!/usr/bin/python3
+# -*- encoding: utf-8 -*-
+#
+# vim: tabstop=4 shiftwidth=4 softtabstop=4
+#
+# Copyright (c) 2023 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+"""
+This script is run during 'software upload' command.
+It is used to copy the required files from uploaded iso image
+to the controller.
+"""
+
+import argparse
+import glob
+import logging as LOG
+import os
+import shutil
+import sys
+
+
+AVAILABLE_DIR = "/opt/software/metadata/available"
+FEED_OSTREE_BASE_DIR = "/var/www/pages/feed"
+RELEASE_GA_NAME = "starlingx-%s.0"
+SOFTWARE_STORAGE_DIR = "/opt/software"
+TMP_DIR = "/tmp"
+VAR_PXEBOOT_DIR = "/var/pxeboot"
+
+
+def load_import(from_release, to_release, iso_mount_dir):
+    """
+    Import the iso files to the feed and pxeboot directories
+    :param to_release: to release version
+    :param release_data: ReleaseData object
+    """
+
+    try:
+        # Copy the iso file to /var/www/pages/feed/rel-<release>
+        os.makedirs(FEED_OSTREE_BASE_DIR, exist_ok=True)
+        to_release_feed_dir = os.path.join(FEED_OSTREE_BASE_DIR, ("rel-%s" % to_release))
+        os.makedirs(to_release_feed_dir, exist_ok=True)
+
+        feed_contents = ["install_uuid", "efi.img", "kickstart",
+                         "ostree_repo", "pxeboot", "upgrades"]
+        for content in feed_contents:
+            src_abs_path = os.path.join(iso_mount_dir, content)
+            if os.path.isfile(src_abs_path):
+                shutil.copyfile(src_abs_path, os.path.join(to_release_feed_dir, content))
+                LOG.info("Copied %s to %s", src_abs_path, to_release_feed_dir)
+            elif os.path.isdir(src_abs_path):
+                shutil.copytree(src_abs_path, os.path.join(to_release_feed_dir, content))
+                LOG.info("Copied %s to %s", src_abs_path, to_release_feed_dir)
+
+        # Copy install_uuid to /var/www/pages/feed/rel-<release>
+        from_release_feed_dir = os.path.join(FEED_OSTREE_BASE_DIR, ("rel-%s" % from_release))
+        shutil.copyfile(os.path.join(from_release_feed_dir, "install_uuid"),
+                        os.path.join(to_release_feed_dir, "install_uuid"))
+        LOG.info("Copied install_uuid to %s", to_release_feed_dir)
+
+        # Copy pxeboot-update-${from_release}.sh to from-release feed /upgrades
+        from_release_iso_upgrades_dir = os.path.join(from_release_feed_dir, "upgrades")
+        os.makedirs(from_release_iso_upgrades_dir, exist_ok=True)
+        shutil.copyfile(os.path.join("/etc", "pxeboot-update-%s.sh" % from_release),
+                        os.path.join(from_release_iso_upgrades_dir, "pxeboot-update-%s.sh" % from_release))
+        LOG.info("Copied pxeboot-update-%s.sh to %s", from_release, from_release_iso_upgrades_dir)
+
+        # Copy pxelinux.cfg.files to from-release feed /pxeboot
+        from_release_feed_pxeboot_dir = os.path.join(from_release_feed_dir, "pxeboot")
+        os.makedirs(from_release_feed_pxeboot_dir, exist_ok=True)
+
+        # Find from-release pxelinux.cfg.files
+        pxe_dir = os.path.join(VAR_PXEBOOT_DIR, "pxelinux.cfg.files")
+        from_release_pxe_files = glob.glob(os.path.join(pxe_dir, '*' + from_release))
+        for from_release_pxe_file in from_release_pxe_files:
+            if os.path.isfile(from_release_pxe_file):
+                shutil.copyfile(from_release_pxe_file, os.path.join(from_release_feed_pxeboot_dir,
+                                                                    os.path.basename(from_release_pxe_file)))
+                LOG.info("Copied %s to %s", from_release_pxe_file, from_release_feed_pxeboot_dir)
+
+        # Converted from upgrade package extraction script
+        shutil.copyfile(os.path.join(to_release_feed_dir, "kickstart", "kickstart.cfg"),
+                        os.path.join(to_release_feed_dir, "kickstart.cfg"))
+
+        # Copy bzImage and initrd
+        bzimage_files = glob.glob(os.path.join(to_release_feed_dir, 'pxeboot', 'bzImage*'))
+        for bzimage_file in bzimage_files:
+            if os.path.isfile(bzimage_file):
+                shutil.copyfile(bzimage_file, os.path.join(VAR_PXEBOOT_DIR,
+                                                           os.path.basename(bzimage_file)))
+                LOG.info("Copied %s to %s", bzimage_file, VAR_PXEBOOT_DIR)
+
+        initrd_files = glob.glob(os.path.join(to_release_feed_dir, 'pxeboot', 'initrd*'))
+        for initrd_file in initrd_files:
+            if os.path.isfile(initrd_file):
+                shutil.copyfile(initrd_file, os.path.join(VAR_PXEBOOT_DIR,
+                                                          os.path.basename(initrd_file)))
+                LOG.info("Copied %s to %s", initrd_file, VAR_PXEBOOT_DIR)
+
+        # Copy to_release_feed/pxelinux.cfg.files to /var/pxeboot/pxelinux.cfg.files
+        pxeboot_cfg_files = glob.glob(os.path.join(to_release_feed_dir, 'pxeboot', 'pxelinux.cfg.files',
+                                                   '*' + from_release))
+        for pxeboot_cfg_file in pxeboot_cfg_files:
+            if os.path.isfile(pxeboot_cfg_file):
+                shutil.copyfile(pxeboot_cfg_file, os.path.join(VAR_PXEBOOT_DIR,
+                                                               'pxelinux.cfg.files',
+                                                               os.path.basename(pxeboot_cfg_file)))
+                LOG.info("Copied %s to %s", pxeboot_cfg_file, VAR_PXEBOOT_DIR)
+
+        # Copy pxeboot-update.sh to /etc
+        pxeboot_update_filename = "pxeboot-update-%s.sh" % to_release
+        shutil.copyfile(os.path.join(to_release_feed_dir, "upgrades", pxeboot_update_filename),
+                        os.path.join("/etc", pxeboot_update_filename))
+        LOG.info("Copied pxeboot-update-%s.sh to %s", to_release, "/etc")
+
+    except Exception as e:
+        LOG.exception("Load import failed. Error: %s" % str(e))
+        shutil.rmtree(to_release_feed_dir)
+        LOG.info("Removed %s", to_release_feed_dir)
+        raise
+
+    try:
+        # Copy metadata.xml to /opt/software/metadata/available
+        os.makedirs(AVAILABLE_DIR, exist_ok=True)
+        metadata_name = f"{RELEASE_GA_NAME % to_release}-metadata.xml"
+        LOG.info("metadata name: %s", metadata_name)
+        abs_stx_release_metadata_file = os.path.join(iso_mount_dir,
+                                                     'patches',
+                                                     metadata_name)
+
+        # Copy stx release metadata.xml to available metadata dir
+        # TODO(jli14): prepatched iso will have more than one metadata file.
+        shutil.copyfile(abs_stx_release_metadata_file,
+                        os.path.join(AVAILABLE_DIR, metadata_name))
+        LOG.info("Copied %s to %s", abs_stx_release_metadata_file, AVAILABLE_DIR)
+    except shutil.Error:
+        LOG.exception("Failed to copy the release %s metadata file to %s" % (to_release, AVAILABLE_DIR))
+        raise
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Import files from uploaded iso image to controller.",
+        epilog="Use %(prog)s -h for help.",
+    )
+    parser.add_argument(
+        "--from-release",
+        required=True,
+        help="The from-release version.",
+    )
+
+    parser.add_argument(
+        "--to-release",
+        required=True,
+        help="The to-release version.",
+    )
+
+    parser.add_argument(
+        "--iso-dir",
+        required=True,
+        help="The mounted iso image directory.",
+    )
+
+    args = parser.parse_args()
+
+    try:
+        load_import(args.from_release, args.to_release, args.iso_dir)
+    except Exception as e:
+        LOG.exception(e)
+        return 1
+
+
+if __name__ == "__main__":
+    LOG.basicConfig(filename='/var/log/usm-load-import.log', level=LOG.INFO)
+    sys.exit(main())
