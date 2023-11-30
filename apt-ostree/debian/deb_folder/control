@@ -9,6 +9,8 @@ Build-Depends:
  python3-setuptools,
  python3-all,
  python3-pbr,
+ python3-rich,
+ python3-systemd,
  python3-click,
  python3-oslotest
 Standards-Version: 4.6.2
@@ -24,6 +26,10 @@ Depends:
  python3-rich,
  bubblewrap,
  reprepro,
+ systemd-container,
+ python3-systemd,
+ python3-yaml,
+ software-properties-common
 Suggests:
  python-apt-ostree-doc,
 Description: Hybrid Image/Package management system
