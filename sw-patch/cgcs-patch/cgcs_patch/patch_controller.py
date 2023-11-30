@@ -8,6 +8,7 @@ import configparser
 import gc
 import json
 import os
+import re
 import select
 import sh
 import shutil
@@ -708,47 +709,91 @@ class PatchController(PatchService):
             LOG.error("Failed to rsync: %s", output)
             return False
 
+        LOG.info("Starting feed sync")
+        # get the folders in .../feed remote controller
+        remote_feed_dirs = {}
         try:
-            for neighbour in list(self.hosts):
-                if (self.hosts[neighbour].nodetype == "controller" and
-                        self.hosts[neighbour].ip == host):
-                    LOG.info("Starting feed sync")
-                    # The output is a string that lists the directories
-                    # Example output:
-                    # >>> dir_names = sh.ls("/var/www/pages/feed/")
-                    # >>> dir_names.stdout
-                    # b'rel-22.12  rel-22.5\n'
-                    dir_names = sh.ls(constants.FEED_OSTREE_BASE_DIR)
+            # The output is a string that lists the all folders and subfolders
+            # Example output:
+            # b'. .. rel-22.12/ rel-22.12/subfolders rel-23.09/ rel-23.09/subfoldres'
+            output = subprocess.check_output(["rsync",
+                                              "-nav",
+                                              "--exclude='*'",
+                                              "rsync://%s/feed/" % host_url,
+                                              "."], stderr=subprocess.STDOUT)
 
-                    # Convert the output above into a list that can be iterated
-                    # >>> list_of_dirs = dir_names.stdout.decode().rstrip().split()
-                    # >>> print(list_of_dirs)
-                    # ['rel-22.12', 'rel-22.5']
+            # Convert the output into a list filtered that can be iterated
+            # Example output:
+            # ['rel-22.12', 'rel-23.09']
+            mate_folders = output.decode().splitlines()
+            pattern = r'^rel-\d{2}\.\d{2}/$'
+            remote_feed_dirs = [folder[:-1] for folder in mate_folders if re.match(pattern, folder)]
 
-                    list_of_dirs = dir_names.stdout.decode("utf-8").rstrip().split()
-
-                    for rel_dir in list_of_dirs:
-                        feed_ostree = "%s/%s/ostree_repo/" % (constants.FEED_OSTREE_BASE_DIR, rel_dir)
-                        if not os.path.isdir(feed_ostree):
-                            LOG.info("Skipping feed dir %s", feed_ostree)
-                            continue
-                        LOG.info("Syncing %s", feed_ostree)
-                        output = subprocess.check_output(["ostree",
-                                                          "--repo=%s" % feed_ostree,
-                                                          "pull",
-                                                          "--depth=-1",
-                                                          "--mirror",
-                                                          "starlingx"],
-                                                         stderr=subprocess.STDOUT)
-                        output = subprocess.check_output(["ostree",
-                                                          "summary",
-                                                          "--update",
-                                                          "--repo=%s" % feed_ostree],
-                                                         stderr=subprocess.STDOUT)
-            LOG.info("Synced to mate feed via ostree pull: %s", output)
+            LOG.info("Mate feed folders: %s", remote_feed_dirs)
         except subprocess.CalledProcessError:
-            LOG.error("Failed to sync feed repo between controllers: %s", output)
+            LOG.error("Failed to get mate feed repositories: %s", output)
             return False
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            LOG.error("Failed to get feed subfolders: %s", e)
+            return False
+
+        # The output is a string that lists the directories
+        # Example output:
+        # >>> dir_names = sh.ls("/var/www/pages/feed/")
+        # >>> dir_names.stdout
+        # b'rel-22.12  rel-22.5\n'
+        dir_names = sh.ls(constants.FEED_OSTREE_BASE_DIR)
+
+        # Convert the output above into a list that can be iterated
+        # >>> list_of_dirs = dir_names.stdout.decode().rstrip().split()
+        # >>> print(list_of_dirs)
+        # ['rel-22.12', 'rel-22.5']
+        local_feed_dirs = dir_names.stdout.decode("utf-8").rstrip().split()
+
+        # get only the folders from remote not present in local and create them
+        missing_folders = [folder for folder in remote_feed_dirs if folder not in local_feed_dirs]
+
+        for folder in missing_folders:
+            LOG.info("Creating folder %s in %s", folder, constants.FEED_OSTREE_BASE_DIR)
+            try:
+                rel_dir_path = f"{constants.FEED_OSTREE_BASE_DIR}/{folder}/ostree_repo/"
+                cmd = ["mkdir", "-p", rel_dir_path]
+                output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+                cmd = ["ostree", f"--repo={rel_dir_path}", "init", "--mode=archive"]
+                output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, cwd=rel_dir_path)
+                cmd = [
+                    "ostree",
+                    "remote",
+                    "add",
+                    "--no-gpg-verify",  # TODO(lvieira) Remove this once gpg support is added.
+                    "starlingx",
+                    f"http://controller:8080/feed/{folder}/ostree_repo/"
+                ]
+                output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, cwd=rel_dir_path)
+            except subprocess.CalledProcessError:
+                LOG.error("Failed create ostree directories: %s", output)
+                return False
+
+        LOG.info("Starting to sync from mate feed via ostree pull")
+        # This is syncing all folders, maybe it can be moved
+        # to above loop and sync only the new created folders
+        for rel_dir in remote_feed_dirs:
+            feed_ostree = "%s/%s/ostree_repo/" % (constants.FEED_OSTREE_BASE_DIR, rel_dir)
+            if not os.path.isdir(feed_ostree):
+                LOG.info("Skipping feed dir %s", feed_ostree)
+                continue
+            LOG.info("Syncing %s", feed_ostree)
+            output = subprocess.check_output(["ostree",
+                                              "--repo=%s" % feed_ostree,
+                                              "pull",
+                                              "--depth=-1",
+                                              "--mirror",
+                                              "starlingx"], stderr=subprocess.STDOUT)
+            output = subprocess.check_output(["ostree",
+                                              "summary",
+                                              "--update",
+                                              "--repo=%s" % feed_ostree], stderr=subprocess.STDOUT)
+        LOG.info("Synced to mate feed via ostree pull")
 
         self.read_state_file()
 
