@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023 Wind River Systems, Inc.
+Copyright (c) 2023-2024 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -12,6 +12,7 @@ from software.authapi import acl
 from software.authapi import config
 from software.authapi import hooks
 from software.authapi import policy
+from software.utils import ExceptionHook
 
 auth_opts = [
     cfg.StrOpt('auth_strategy',
@@ -34,6 +35,7 @@ def setup_app(pecan_config=None, extra_hooks=None):
 
     app_hooks = [hooks.ConfigHook(),
                  hooks.ContextHook(pecan_config.app.acl_public_routes),
+                 ExceptionHook(),
                  ]
     if extra_hooks:
         app_hooks.extend(extra_hooks)

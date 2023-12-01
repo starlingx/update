@@ -2698,52 +2698,6 @@ class PatchController(PatchService):
         return deploy_host_list
 
 
-# The wsgiref.simple_server module has an error handler that catches
-# and prints any exceptions that occur during the API handling to stderr.
-# This means the patching sys.excepthook handler that logs uncaught
-# exceptions is never called, and those exceptions are lost.
-#
-# To get around this, we're subclassing the simple_server.ServerHandler
-# in order to replace the handle_error method with a custom one that
-# logs the exception instead, and will set a global flag to shutdown
-# the server and reset.
-#
-class MyServerHandler(simple_server.ServerHandler):
-    def handle_error(self):
-        LOG.exception('An uncaught exception has occurred:')
-        if not self.headers_sent:
-            self.result = self.error_output(self.environ, self.start_response)
-            self.finish_response()
-        global keep_running
-        keep_running = False
-
-
-def get_handler_cls():
-    cls = simple_server.WSGIRequestHandler
-
-    # old-style class doesn't support super
-    class MyHandler(cls, object):
-        def address_string(self):
-            # In the future, we could provide a config option to allow reverse DNS lookup
-            return self.client_address[0]
-
-        # Overload the handle function to use our own MyServerHandler
-        def handle(self):
-            """Handle a single HTTP request"""
-
-            self.raw_requestline = self.rfile.readline()
-            if not self.parse_request():  # An error code has been sent, just exit
-                return
-
-            handler = MyServerHandler(
-                self.rfile, self.wfile, self.get_stderr(), self.get_environ()
-            )
-            handler.request_handler = self  # pylint: disable=attribute-defined-outside-init
-            handler.run(self.server.get_app())
-
-    return MyHandler
-
-
 class PatchControllerApiThread(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
@@ -2767,8 +2721,7 @@ class PatchControllerApiThread(threading.Thread):
             self.wsgi = simple_server.make_server(
                 host, port,
                 app.VersionSelectorApplication(),
-                server_class=server_class,
-                handler_class=get_handler_cls())
+                server_class=server_class)
 
             self.wsgi.socket.settimeout(api_socket_timeout)
             global keep_running
@@ -2821,8 +2774,7 @@ class PatchControllerAuthApiThread(threading.Thread):
             self.wsgi = simple_server.make_server(
                 host, port,
                 auth_app.VersionSelectorApplication(),
-                server_class=server_class,
-                handler_class=get_handler_cls())
+                server_class=server_class)
 
             # self.wsgi.serve_forever()
             self.wsgi.socket.settimeout(api_socket_timeout)

@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023 Wind River Systems, Inc.
+Copyright (c) 2023-2024 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -115,3 +115,28 @@ class DeployAlreadyExist(SoftwareError):
 class ReleaseVersionDoNotExist(SoftwareError):
     """Release Version Do Not Exist"""
     pass
+
+
+class SoftwareServiceError(Exception):
+    """
+    This is a service error, such as file system issue or configuration
+    issue, which is expected at design time for a valid reason.
+    This exception type will provide detail information to the user.
+    see ExceptionHook for detail
+    """
+    def __init__(self, info="", warn="", error=""):
+        self._info = info
+        self._warn = warn
+        self._error = error
+
+    @property
+    def info(self):
+        return self._info if self._info is not None else ""
+
+    @property
+    def warning(self):
+        return self._warn if self._warn is not None else ""
+
+    @property
+    def error(self):
+        return self._error if self._error is not None else ""
