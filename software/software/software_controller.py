@@ -59,6 +59,8 @@ from software.release_verify import verify_files
 import software.config as cfg
 import software.utils as utils
 
+from software.db.api import get_instance
+
 import software.messages as messages
 import software.constants as constants
 
@@ -602,6 +604,8 @@ class PatchController(PatchService):
 
         self.hosts = {}
         self.controller_neighbours = {}
+
+        self.db_api_instance = get_instance()
 
         # interim_state is used to track hosts that have not responded
         # with fresh queries since a patch was applied or removed, on
@@ -2257,6 +2261,10 @@ class PatchController(PatchService):
             self.release_data.metadata[release]["state"] = constants.DEPLOYING_ACTIVATE
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+    def software_deploy_show_api(self):
+        # Retrieve deploy state from db
+        return self.db_api_instance.get_deploy()
 
     def software_deploy_host_api(self, host_ip, force, async_req=False):
         msg_info = ""

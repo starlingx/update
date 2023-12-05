@@ -129,6 +129,16 @@ class SoftwareAPIController(object):
 
     @expose('json')
     @expose('query.xml', content_type='application/xml')
+    def deploy_show(self):
+        try:
+            result = sc.software_deploy_show_api()
+        except SoftwareError as e:
+            return dict(error="Error: %s" % str(e))
+
+        return result
+
+    @expose('json')
+    @expose('query.xml', content_type='application/xml')
     def install_local(self):
         try:
             result = sc.software_install_local_api()

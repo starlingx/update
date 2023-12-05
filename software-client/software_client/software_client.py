@@ -308,7 +308,7 @@ def release_is_available_req(args):
         print("An internal error has occurred. Please check /var/log/software.log for details")
     else:
         print("Error: %s has occurred. %s" % (req.status_code, req.reason))
-    
+
     return rc
 
 
@@ -930,9 +930,40 @@ def deploy_complete_req(args):
     return check_rc(req)
 
 
-def deploy_list_req(args):
-    print(args.deployment)
-    return 1
+def deploy_show_req(args):
+    url = "http://%s/software/deploy_show" % api_addr
+    headers = {}
+    append_auth_token_if_required(headers)
+    req = requests.get(url, headers=headers)
+
+    if req.status_code >= 500:
+        print("An internal error has occurred. Please check /var/log/software.log for details")
+        return 1
+    elif req.status_code >= 400:
+        print("Respond code %d. Error: %s" % (req.status_code, req.reason))
+        return 1
+
+    data = json.loads(req.text)
+    if not data:
+        print("No deploy in progress.\n")
+    else:
+        data["reboot_required"] = "Yes" if data.get("reboot_required") else "No"
+        data_list = [[k, v] for k, v in data.items()]
+        transposed_data_list = list(zip(*data_list))
+
+        transposed_data_list[0] = [s.title().replace('_', ' ') for s in transposed_data_list[0]]
+        # Find the longest header string in each column
+        header_lengths = [len(str(x)) for x in transposed_data_list[0]]
+        # Find the longest content string in each column
+        content_lengths = [len(str(x)) for x in transposed_data_list[1]]
+        # Find the max of the two for each column
+        col_lengths = [(x if x > y else y) for x, y in zip(header_lengths, content_lengths)]
+
+        print('  '.join(f"{x.center(col_lengths[i])}" for i, x in enumerate(transposed_data_list[0])))
+        print('  '.join('=' * length for length in col_lengths))
+        print('  '.join(f"{x.center(col_lengths[i])}" for i, x in enumerate(transposed_data_list[1])))
+
+    return 0
 
 
 def deploy_host_req(args):
@@ -1161,8 +1192,8 @@ def register_deploy_commands(commands):
       - activate
       - complete
     non root/sudo users can run:
-       - list
        - query-hosts
+       - show
     Deploy commands are region_restricted, which means
     that they are not permitted to be run in DC
     """
@@ -1249,13 +1280,13 @@ def register_deploy_commands(commands):
     cmd.add_argument('deployment',
                      help='Deployment ID to complete')
 
-    # --- software deploy list ---------------------------
+    # --- software deploy show ---------------------------
     cmd = sub_cmds.add_parser(
-        'list',
-        help='List the software deployments and their states'
+        'show',
+        help='Show the software deployments states'
     )
-    cmd.set_defaults(cmd='list')
-    cmd.set_defaults(func=deploy_list_req)
+    cmd.set_defaults(cmd='show')
+    cmd.set_defaults(func=deploy_show_req)
     cmd.set_defaults(restricted=False)  # can run non root
     # --deployment is an optional argument
     cmd.add_argument('--deployment',

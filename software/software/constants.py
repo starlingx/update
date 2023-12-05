@@ -4,7 +4,7 @@ Copyright (c) 2023 Wind River Systems, Inc.
 SPDX-License-Identifier: Apache-2.0
 
 """
-
+from enum import Enum
 import os
 try:
     # The tsconfig module is only available at runtime
@@ -114,3 +114,21 @@ SOFTWARE_JSON_FILE = "/opt/software/software.json"
 
 WORKER_SUMMARY_DIR = "%s/summary" % SOFTWARE_STORAGE_DIR
 WORKER_DATETIME_FORMAT = "%Y%m%dT%H%M%S%f"
+UNKNOWN_SOFTWARE_VERSION = "0.0.0"
+
+
+class DEPLOY_STATES(Enum):
+    ACTIVATING = 'activating'
+    ACTIVATED = 'activated'
+    ACTIVATION_FAILED = 'activation-failed'
+    DATA_MIGRATION_FAILED = 'data-migration-failed'
+    DATA_MIGRATION = 'data-migration'
+    DEPLOYING = 'deploying'
+    DEPLOYED = 'deployed'
+    PRESTAGING = 'prestaging'
+    PRESTAGED = 'prestaged'
+    PRESTAGING_FAILED = 'prestaging-failed'
+    UPGRADE_CONTROLLERS = 'upgrade-controllers'
+    UPGRADE_CONTROLLER_FAILED = 'upgrade-controller-failed'
+    UPGRADE_HOSTS = 'upgrade-hosts'
+    UNKNOWN = 'unknown'

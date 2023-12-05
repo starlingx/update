@@ -11,8 +11,15 @@ from enum import Enum
 from typing import List
 
 from software import constants
-from software.exceptions import DeployDoNotExist, DeployAlreadyExist
-from software.utils import check_instances, check_state, save_to_json_file, get_software_filesystem_data
+from software.exceptions import DeployDoNotExist
+from software.exceptions import DeployAlreadyExist
+from software.utils import check_instances
+from software.utils import check_state
+from software.utils import save_to_json_file
+from software.utils import get_software_filesystem_data
+from software.utils import validate_versions
+
+from software.constants import DEPLOY_STATES
 
 LOG = logging.getLogger('main_logger')
 
@@ -122,17 +129,11 @@ class CompatibleRelease(ABC):
 
 
 class Deploy(ABC):
-
     def __init__(self):
-        self.states = Enum('States', 'activate-failed activated '
-                                     'data-migration-failed data-migration '
-                                     'activating prestaged prestaging '
-                                     'prestaging-failed '
-                                     'upgrade-controller-failed upgrade-controllers '
-                                     'upgrade-hosts')
+        pass
 
     @abstractmethod
-    def create(self, from_release: str, to_release: str, reboot_required:bool, state: str):
+    def create(self, from_release: str, to_release: str, reboot_required: bool, state: DEPLOY_STATES):
         """
         Create a new deployment entry.
 
@@ -142,51 +143,32 @@ class Deploy(ABC):
         :param state: The state of the deployment.
 
         """
-        instances = [from_release, to_release]
-        if state:
-            check_state(state, self.states)
-            instances.append(state)
+        validate_versions([from_release, to_release])
         check_instances([reboot_required], bool)
-        check_instances(instances, str)
-        pass
+        check_instances([state], DEPLOY_STATES)
 
     @abstractmethod
-    def query(self, from_release: str, to_release: str):
+    def query(self):
         """
         Get deployments based on source and target release versions.
-
-        :param from_release: The source release version.
-        :param to_release: The target release version.
-
         """
-        check_instances([from_release, to_release], str)
         pass
 
     @abstractmethod
-    def update(self, from_release: str, to_release: str, reboot_required:bool, state: str):
+    def update(self, new_state: DEPLOY_STATES):
         """
         Update a deployment entry.
 
-        :param from_release: The source release version.
-        :param to_release: The target release version.
-        :param reboot_required: If is required to do host reboot.
         :param state: The state of the deployment.
 
         """
-        check_instances([from_release, to_release, state], str)
-        check_instances([reboot_required], bool)
-        check_state(state, self.states)
-        pass
+        check_instances([new_state], DEPLOY_STATES)
 
     @abstractmethod
-    def delete(self, from_release: str, to_release: str):
+    def delete(self):
         """
         Delete a deployment entry based on source and target release versions.
-
-        :param from_release: The source release version.
-        :param to_release: The target release version.
         """
-        check_instances([from_release, to_release], str)
         pass
 
 
@@ -273,67 +255,74 @@ class DeployHosts(ABC):
         check_instances([hostname, software_release, target_release], str)
         pass
 
+
 class DeployHandler(Deploy):
     def __init__(self):
         super().__init__()
         self.data = get_software_filesystem_data()
 
-    def create(self, from_release, to_release, reboot_required, state=None):
+    def create(self, from_release, to_release, reboot_required, state=DEPLOY_STATES.DEPLOYING):
+        """
+        Create a new deploy with given from and to release version
+        :param from_release: The source release version.
+        :param to_release: The target release version.
+        :param reboot_required: If is required to do host reboot.
+        :param state: The state of the deployment.
+        """
         super().create(from_release, to_release, reboot_required, state)
-        deploy = self.query(from_release, to_release)
+        deploy = self.query()
         if deploy:
-            raise DeployAlreadyExist("Error to create. Deploy already exist.")
+            raise DeployAlreadyExist("Error to create. Deploy already exists.")
         new_deploy = {
             "from_release": from_release,
             "to_release": to_release,
             "reboot_required": reboot_required,
-            "state": state
+            "state": state.value
         }
-        deploy_data = self.data.get("deploy", [])
-        if not deploy_data:
-            deploy_data = {
-                "deploy": []
-            }
-            deploy_data["deploy"].append(new_deploy)
-            self.data.update(deploy_data)
-        else:
-            deploy_data.append(new_deploy)
-        save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
 
-    def query(self, from_release, to_release):
-        super().query(from_release, to_release)
-        for deploy in self.data.get("deploy", []):
-            if deploy.get("from_release") == from_release and deploy.get("to_release") == to_release:
-                return deploy
-        return None
+        try:
+            self.data["deploy"] = new_deploy
+            save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
+        except Exception:
+            self.data["deploy"] = {}
 
-    def query_all(self):
-        return self.data.get("deploy", [])
+    def query(self):
+        """
+        Query deploy based on from and to release version
+        :return: A deploy dictionary
+        """
+        super().query()
+        return self.data.get("deploy", {})
 
-    def update(self, from_release, to_release, reboot_required, state):
-        super().update(from_release, to_release, reboot_required, state)
-        deploy = self.query(from_release, to_release)
+    def update(self, new_state: DEPLOY_STATES):
+        """
+        Update deploy state based on from and to release version
+        :param new_state: The new state
+        """
+        super().update(new_state)
+        deploy = self.query()
         if not deploy:
-            raise DeployDoNotExist("Error to update. Deploy do not exist.")
-        deploy_data = {
-            "deploy": []
-        }
-        deploy_data["deploy"].append({
-            "from_release": from_release,
-            "to_release": to_release,
-            "reboot_required": reboot_required,
-            "state": state
-        })
-        self.data.update(deploy_data)
-        save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
+            raise DeployDoNotExist("Error to update deploy state. No deploy in progress.")
 
-    def delete(self, from_release, to_release):
-        super().delete(from_release, to_release)
-        deploy = self.query(from_release, to_release)
+        try:
+            self.data["deploy"]["state"] = new_state.value
+            save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
+        except Exception:
+            self.data["deploy"] = deploy
+
+    def delete(self):
+        """
+        Delete a deploy based on given from and to release version
+        """
+        super().delete()
+        deploy = self.query()
         if not deploy:
-            raise DeployDoNotExist("Error to delete. Deploy do not exist.")
-        self.data.get("deploy").remove(deploy)
-        save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
+            raise DeployDoNotExist("Error to delete deploy state. No deploy in progress.")
+        try:
+            self.data["deploy"] = {}
+            save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
+        except Exception:
+            self.data["deploy"] = deploy
 
 
 class DeployHostHandler(DeployHosts):
@@ -349,11 +338,11 @@ class DeployHostHandler(DeployHosts):
             raise DeployAlreadyExist("Error to create. Deploy host already exist.")
 
         new_deploy_host = {
-                "hostname": hostname,
-                "software_release": software_release,
-                "target_release": target_release,
-                "state": state
-                }
+            "hostname": hostname,
+            "software_release": software_release,
+            "target_release": target_release,
+            "state": state
+        }
 
         deploy_data = self.data.get("deploy_host", [])
         if not deploy_data:
