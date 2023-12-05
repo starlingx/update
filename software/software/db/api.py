@@ -1,9 +1,12 @@
 from software.software_entities import DeployHandler
 from software.software_entities import DeployHostHandler
+from software.constants import DEPLOY_STATES
+
 
 def get_instance():
     """Return a Software API instance."""
     return SoftwareAPI()
+
 
 class SoftwareAPI:
     _instance = None
@@ -17,20 +20,17 @@ class SoftwareAPI:
         self.deploy_handler = DeployHandler()
         self.deploy_host_handler = DeployHostHandler()
 
-    def create_deploy(self, from_release, to_release, reboot_required):
+    def create_deploy(self, from_release, to_release, reboot_required: bool):
         self.deploy_handler.create(from_release, to_release, reboot_required)
 
-    def get_deploy(self, from_release, to_release):
-        return self.deploy_handler.query(from_release, to_release)
+    def get_deploy(self):
+        return self.deploy_handler.query()
 
-    def get_deploy_all(self):
-        return self.deploy_handler.query_all()
+    def update_deploy(self, state: DEPLOY_STATES):
+        self.deploy_handler.update(state)
 
-    def update_deploy(self, from_release, to_release, reboot_required, state):
-        self.deploy_handler.update(from_release, to_release, reboot_required, state)
-
-    def delete_deploy(self, from_release, to_release):
-        self.deploy_handler.delete(from_release, to_release)
+    def delete_deploy(self):
+        self.deploy_handler.delete()
 
     def create_deploy_host(self, hostname, software_release, target_release):
         self.deploy_host_handler.create(hostname, software_release, target_release)

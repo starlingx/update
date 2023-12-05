@@ -6,6 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 """
 import json
 import logging
+import re
 import shutil
 from netaddr import IPAddress
 import os
@@ -260,6 +261,7 @@ def save_to_json_file(file, data):
             json.dump(data, f)
     except Exception as e:
         LOG.error("Problem saving file %s: %s", file, e)
+        raise
 
 
 def load_from_json_file(file):
@@ -297,9 +299,22 @@ def check_instances(params: list, instance):
             LOG.exception(msg)
             raise ValueError(msg)
 
+
 def get_software_filesystem_data():
     if os.path.exists(constants.SOFTWARE_JSON_FILE):
-        data = load_from_json_file(constants.SOFTWARE_JSON_FILE)
+        return load_from_json_file(constants.SOFTWARE_JSON_FILE)
     else:
-        data = {}
-    return data
+        return {}
+
+
+def validate_versions(versions):
+    """
+    Validate a list of versions
+    :param versions: list of versions
+    :raise: ValueError if version is invalid
+    """
+    for version in versions:
+        if not re.match(r'[0-9]+\.[0-9]+(\.[0-9]+)?$', version):
+            msg = "Invalid version: %s" % version
+            LOG.exception(msg)
+            raise ValueError(msg)
