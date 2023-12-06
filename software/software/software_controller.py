@@ -30,8 +30,10 @@ import software.apt_utils as apt_utils
 import software.ostree_utils as ostree_utils
 from software.api import app
 from software.authapi import app as auth_app
+from software.constants import DEPLOY_STATES
 from software.base import PatchService
 from software.exceptions import APTOSTreeCommandFail
+from software.db import api as db_api
 from software.exceptions import MetadataFail
 from software.exceptions import UpgradeNotSupported
 from software.exceptions import OSTreeCommandFail
@@ -2025,6 +2027,10 @@ class PatchController(PatchService):
 
             collect_current_load_for_hosts()
             if self._deploy_upgrade_start(to_release):
+                collect_current_load_for_hosts()
+                dbapi = db_api.get_instance()
+                dbapi.create_deploy(SW_VERSION, to_release, True)
+                dbapi.update_deploy(DEPLOY_STATES.DATA_MIGRATION)
                 msg_info = "Deployment for %s started" % deployment
             else:
                 msg_error = "Deployment for %s failed to start" % deployment
