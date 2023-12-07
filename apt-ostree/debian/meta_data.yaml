@@ -4,9 +4,9 @@ debver: 0.1
 dl_path:
     name: apt-ostree-0.1.tar.gz
     url: "https://opendev.org/starlingx/apt-ostree/archive/\
-          c307ed40b66492c7b8a90a14b49be2f4bfa70aa3.tar.gz"
-    sha256sum: 51730b1f7e8a0f8471d858cb43023f1fe7cf6a2edd54571a76eccd70b16fb387
-    md5sum: d92f498b563d58c27f68b4c6a5551d49
+          7923a8750d66674c19b3bc2ceac3c1a2b9c6bf87.tar.gz"
+    sha256sum: db16fd32a419262efe84d86b26eae544f8dbd7ad34133be95dc192c172ecc6dc
+    md5sum: b8200d7db336779b2753c6f0da8b05cc
 revision:
     dist: $STX_DIST
     PKG_GITREVCOUNT: true
