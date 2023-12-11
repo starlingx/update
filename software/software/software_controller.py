@@ -1270,11 +1270,11 @@ class PatchController(PatchService):
         return local_info, local_warning, local_error, release_meta_info
 
     def _process_upload_patch_files(self, patch_files):
-        '''
+        """
         Process the uploaded patch files
         :param patch_files: list of patch files
         :return: info, warning, error messages
-        '''
+        """
 
         local_info = ""
         local_warning = ""
@@ -1342,7 +1342,6 @@ class PatchController(PatchService):
                                                            metadata_dir=constants.AVAILABLE_DIR,
                                                            base_pkgdata=self.base_pkgdata)
                     PatchFile.unpack_patch(patch_file)
-
                     local_info += "%s is now uploaded\n" % release_id
                     self.release_data.add_release(this_release)
 
@@ -1371,6 +1370,32 @@ class PatchController(PatchService):
                     "sw_version": self.release_data.metadata[release_id].get("sw_version", None),
                 }
             })
+
+        # create versioned precheck for uploaded patches
+        for patch in upload_patch_info:
+            filename, values = list(patch.items())[0]
+            LOG.info("Creating precheck for release %s..." % values.get("id"))
+            for pf in patch_files:
+                if filename in pf:
+                    patch_file = pf
+
+            sw_version = values.get("sw_version")
+            required_patches = self.release_data.metadata[values.get("id")].get("requires")
+
+            # sort the required patches list and get the latest, if available
+            req_patch_id = None
+            req_patch_metadata = None
+            req_patch_version = None
+            if required_patches:
+                req_patch_id = sorted(required_patches)[-1]
+            if req_patch_id:
+                req_patch_metadata = self.release_data.metadata.get(req_patch_id)
+            if req_patch_metadata:
+                req_patch_version = req_patch_metadata.get("sw_version")
+            if req_patch_id and not req_patch_metadata:
+                LOG.warning("Required patch '%s' is not uploaded." % req_patch_id)
+
+            PatchFile.create_versioned_precheck(patch_file, sw_version, req_patch_version=req_patch_version)
 
         return local_info, local_warning, local_error, upload_patch_info
 
@@ -1546,6 +1571,9 @@ class PatchController(PatchService):
                     msg = "Deleted feed directory %s" % to_release_iso_dir
                     LOG.info(msg)
                     msg_info += msg + "\n"
+
+            # TODO(lbonatti): treat the upcoming versioning changes
+            PatchFile.delete_versioned_directory(self.release_data.metadata[release_id]["sw_version"])
 
             try:
                 # Delete the metadata
@@ -2112,10 +2140,15 @@ class PatchController(PatchService):
 
         return release, success, msg_info, msg_warning, msg_error
 
-    def _deploy_precheck(self, release_version: str, force: bool, region_name: str = "RegionOne") -> dict:
+    def _deploy_precheck(self, release_version: str, force: bool = False,
+                         region_name: str = "RegionOne", patch: bool = False) -> dict:
         """
-        Verify if system is capable to upgrade to a specified deployment
-        return: dict of info, warning and error messages
+        Verify if system satisfy the requisites to upgrade to a specified deployment.
+        :param release_version: full release name, e.g. starlingx-MM.mm.pp
+        :param force: if True will ignore minor alarms during precheck
+        :param region_name: region_name
+        :param patch: if True then indicate precheck is for patch release
+        :return: dict of info, warning and error messages
         """
 
         msg_info = ""
@@ -2123,8 +2156,9 @@ class PatchController(PatchService):
         msg_error = ""
 
         precheck_script = utils.get_precheck_script(release_version)
+
         if not os.path.isfile(precheck_script):
-            msg = "Upgrade files for deployment %s are not present on the system, " \
+            msg = "Release files for deployment %s are not present on the system, " \
                   "cannot proceed with the precheck." % release_version
             LOG.error(msg)
             msg_error = "Fail to perform deploy precheck. " \
@@ -2165,6 +2199,8 @@ class PatchController(PatchService):
                "--region_name=%s" % region_name]
         if force:
             cmd.append("--force")
+        if patch:
+            cmd.append("--patch")
 
         # Call precheck from the deployment files
         precheck_return = subprocess.run(
@@ -2181,17 +2217,20 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-    def software_deploy_precheck_api(self, deployment: str, force: bool, **kwargs) -> dict:
+    def software_deploy_precheck_api(self, deployment: str, force: bool = False, **kwargs) -> dict:
         """
-        Verify if system is capable to upgrade to a specified deployment
-        return: dict of info, warning and error messages
+        Verify if system satisfy the requisites to upgrade to a specified deployment.
+        :param deployment: full release name, e.g. starlingx-MM.mm.pp
+        :param force: if True will ignore minor alarms during precheck
+        :return: dict of info, warning and error messages
         """
         release, success, msg_info, msg_warning, msg_error = self._release_basic_checks(deployment)
         if not success:
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
         region_name = kwargs["region_name"]
         release_version = release["sw_version"]
-        return self._deploy_precheck(release_version, force, region_name)
+        patch = not utils.is_upgrade_deploy(SW_VERSION, release_version)
+        return self._deploy_precheck(release_version, force, region_name, patch)
 
     def _deploy_upgrade_start(self, to_release):
         LOG.info("start deploy upgrade to %s from %s" % (to_release, SW_VERSION))
@@ -2255,9 +2294,12 @@ class PatchController(PatchService):
         if not success:
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
+        # TODO(heitormatsui) Enforce deploy-precheck for patch release
+        patch_release = True
         if utils.is_upgrade_deploy(SW_VERSION, release["sw_version"]):
+            patch_release = False
             to_release = release["sw_version"]
-            ret = self._deploy_precheck(to_release, force)
+            ret = self._deploy_precheck(to_release, force, patch=patch_release)
             if ret["error"]:
                 ret["error"] = "The following issues have been detected which prevent " \
                                "deploying %s\n" % deployment + \
@@ -2309,13 +2351,12 @@ class PatchController(PatchService):
         else:
             operation = "remove"
 
-        # If releases are such that R2 requires R1
-        # R3 requires R2
-        # R4 requires R3
-        # And current running release is R2
-        # And command issued is "software deploy start R4"
-        # Order for apply operation: [R3, R4]
-        # Order for remove operation: [R3]
+        # If releases are such that:
+        # R2 requires R1, R3 requires R2, R4 requires R3
+        # If current running release is R2 and command issued is "software deploy start R4"
+        # operation is "apply" with order [R3, R4]
+        # If current running release is R4 and command issued is "software deploy start R2"
+        # operation is "remove" with order [R4, R3]
         if operation == "apply":
 
             collect_current_load_for_hosts()

@@ -33,6 +33,7 @@ from software.exceptions import ReleaseValidationFailure
 from software.exceptions import ReleaseMismatchFailure
 from software.exceptions import SoftwareFail
 from software.exceptions import SoftwareServiceError
+from software.exceptions import VersionedDeployPrecheckFailure
 
 import software.constants as constants
 import software.utils as utils
@@ -980,6 +981,69 @@ class PatchFile(object):
             os.chdir(orig_wd)
             shutil.rmtree(patch_tmpdir)
 
+    @staticmethod
+    def create_versioned_precheck(patch, sw_version, req_patch_version=None):
+        """
+        Extract the deploy-precheck script from the patch into
+        a versioned directory under SOFTWARE_STORAGE_DIR and,
+        if script is not available in the patch, then create a
+        symlink to the versioned directory of the required patch.
+        :param patch: path to patch file
+        :param sw_version: patch version in MM.mm.pp format
+        :param req_patch_version: required patch version in MM.mm.pp format
+        """
+        # open patch and create versioned scripts directory
+        tar = tarfile.open(patch, "r:gz")
+        versioned_dir = constants.VERSIONED_SCRIPTS_DIR % sw_version
+        versioned_script = os.path.join(versioned_dir, constants.DEPLOY_PRECHECK_SCRIPT)
+        if os.path.exists(versioned_dir):
+            shutil.rmtree(versioned_dir)
+        os.makedirs(versioned_dir)
+
+        error_msg = "Versioned precheck script cannot be created, "
+        try:
+            # if patch contains precheck script, copy it to versioned directory
+            if constants.DEPLOY_PRECHECK_SCRIPT in tar.getnames():
+                tar.extract(constants.DEPLOY_PRECHECK_SCRIPT, path=versioned_dir)
+                os.chmod(versioned_script, mode=0o755)
+                LOG.info("Versioned precheck script copied to %s." % versioned_script)
+            # in case patch does not contain a precheck script
+            # then symlink to required patch versioned directory
+            else:
+                LOG.info("'%s' script is not included in the patch, will attempt to "
+                         "symlink to the 'required patch' precheck script." %
+                         constants.DEPLOY_PRECHECK_SCRIPT)
+                if not req_patch_version:
+                    error_msg += "'required patch' version could not be determined."
+                    raise VersionedDeployPrecheckFailure
+
+                req_versioned_dir = constants.VERSIONED_SCRIPTS_DIR % req_patch_version
+                req_versioned_script = os.path.join(req_versioned_dir, constants.DEPLOY_PRECHECK_SCRIPT)
+                # if required patch directory does not exist create the link anyway
+                if not os.path.exists(req_versioned_dir):
+                    LOG.warning("'required patch' versioned directory %s does not exist."
+                                % req_versioned_dir)
+                os.symlink(req_versioned_script, versioned_script)
+                LOG.info("Versioned precheck script %s symlinked to %s." % (
+                    versioned_script, req_versioned_script))
+        except Exception as e:
+            LOG.warning("%s: %s" % (error_msg, e))
+
+    @staticmethod
+    def delete_versioned_directory(sw_version):
+        """
+        Delete the versioned deploy-precheck script.
+        :param sw_version: precheck script version to be deleted
+        """
+        try:
+            opt_release_folder = "%s/rel-%s" % (constants.SOFTWARE_STORAGE_DIR,
+                                                sw_version)
+            if os.path.isdir(opt_release_folder):
+                shutil.rmtree(opt_release_folder, ignore_errors=True)
+            LOG.info("Versioned directory %s deleted." % opt_release_folder)
+        except Exception as e:
+            LOG.exception("Failed to delete versioned precheck: %s", e)
+
 
 def patch_build():
     configure_logging(logtofile=False)
@@ -1198,5 +1262,12 @@ def parse_release_metadata(filename):
     root = tree.getroot()
     data = {}
     for child in root:
+        # get requires under <req_patch_id> key
+        if child.tag == "requires":
+            requires = []
+            for item in child:
+                requires.append(item.text)
+            data[child.tag] = requires
+            continue
         data[child.tag] = child.text
     return data

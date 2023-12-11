@@ -159,6 +159,7 @@ RELEASE_GA_NAME = "starlingx-%s"
 # Precheck constants
 LICENSE_FILE = "/etc/platform/.license"
 VERIFY_LICENSE_BINARY = "/usr/bin/verify-license"
+VERSIONED_SCRIPTS_DIR = "%s/rel-%%s/bin/" % SOFTWARE_STORAGE_DIR
 
 SOFTWARE_JSON_FILE = "%s/software.json" % SOFTWARE_STORAGE_DIR
 SYNCED_SOFTWARE_JSON_FILE = "%s/synced/software.json" % SOFTWARE_STORAGE_DIR
