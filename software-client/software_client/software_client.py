@@ -400,6 +400,25 @@ def release_upload_req(args):
         print_result_debug(req)
     else:
         print_software_op_result(req)
+        data = json.loads(req.text)
+        data_list = [(k, v["id"], v["sw_version"])
+                     for d in data["upload_info"] for k, v in d.items()]
+
+        header_data_list = ["Uploaded File", "Id", "SW Version"]
+
+        # Find the longest header string in each column
+        header_lengths = [len(str(x)) for x in header_data_list]
+        # Find the longest content string in each column
+        content_lengths = [max(len(str(x[i])) for x in data_list)
+                           for i in range(len(header_data_list))]
+        # Find the max of the two for each column
+        col_lengths = [(x if x > y else y) for x, y in zip(header_lengths, content_lengths)]
+
+        print('  '.join(f"{x.center(col_lengths[i])}" for i, x in enumerate(header_data_list)))
+        print('  '.join('=' * length for length in col_lengths))
+        for item in data_list:
+            print('  '.join(f"{str(x).center(col_lengths[i])}" for i, x in enumerate(item)))
+        print("\n")
 
     if check_rc(req) != 0:
         # We hit a failure.  Update rc but keep looping

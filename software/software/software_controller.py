@@ -41,10 +41,11 @@ from software.exceptions import ReleaseValidationFailure
 from software.exceptions import ReleaseMismatchFailure
 from software.exceptions import ReleaseIsoDeleteFailure
 from software.software_functions import collect_current_load_for_hosts
+from software.software_functions import parse_release_metadata
 from software.software_functions import configure_logging
 from software.software_functions import mount_iso_load
 from software.software_functions import unmount_iso_load
-from software.software_functions import read_upgrade_metadata
+from software.software_functions import read_upgrade_support_versions
 from software.software_functions import BasePackageData
 from software.software_functions import PatchFile
 from software.software_functions import package_dir
@@ -988,6 +989,7 @@ class PatchController(PatchService):
         local_info = ""
         local_warning = ""
         local_error = ""
+        release_meta_info = {}
 
         iso_mount_dir = None
         try:
@@ -1007,7 +1009,7 @@ class PatchController(PatchService):
             LOG.info("Mounted iso file %s to %s", iso_file, iso_mount_dir)
 
             # Read the metadata from the iso file
-            to_release, supported_from_releases = read_upgrade_metadata(iso_mount_dir)
+            to_release, supported_from_releases = read_upgrade_support_versions(iso_mount_dir)
             LOG.info("Reading metadata from iso file %s completed", iso_file)
             # Validate that the current release is supported to upgrade to the new release
             supported_versions = [v.get("version") for v in supported_from_releases]
@@ -1049,6 +1051,19 @@ class PatchController(PatchService):
             release_data.parse_metadata(abs_stx_release_metadata_file, state=constants.AVAILABLE)
             LOG.info("Updated release metadata for %s", to_release)
 
+            # Get release metadata
+            all_release_meta_info = parse_release_metadata(abs_stx_release_metadata_file)
+            release_meta_info = {
+                os.path.basename(upgrade_files[constants.ISO_EXTENSION]): {
+                    "id": all_release_meta_info.get("id"),
+                    "sw_version": all_release_meta_info.get("sw_version"),
+                },
+                os.path.basename(upgrade_files[constants.SIG_EXTENSION]): {
+                    "id": None,
+                    "sw_version": None,
+                }
+            }
+
         except ReleaseValidationFailure:
             msg = "Upgrade file signature verification failed"
             LOG.exception(msg)
@@ -1063,7 +1078,7 @@ class PatchController(PatchService):
                 unmount_iso_load(iso_mount_dir)
                 LOG.info("Unmounted iso file %s", iso_file)
 
-        return local_info, local_warning, local_error
+        return local_info, local_warning, local_error, release_meta_info
 
     def _process_upload_patch_files(self, patch_files):
         '''
@@ -1075,6 +1090,7 @@ class PatchController(PatchService):
         local_info = ""
         local_warning = ""
         local_error = ""
+        upload_patch_info = []
         try:
             # Create the directories
             for state_dir in constants.DEPLOY_STATE_METADATA_DIR:
@@ -1086,10 +1102,13 @@ class PatchController(PatchService):
 
         for patch_file in patch_files:
 
+            base_patch_filename = os.path.basename(patch_file)
+
             # Get the release_id from the filename
             # and check to see if it's already uploaded
             # todo(abailey) We should not require the ID as part of the file
-            (release_id, _) = os.path.splitext(os.path.basename(patch_file))
+            (release_id, _) = os.path.splitext(base_patch_filename)
+
             patch_metadata = self.release_data.metadata.get(release_id, None)
 
             if patch_metadata:
@@ -1155,7 +1174,14 @@ class PatchController(PatchService):
                     local_error += msg + "\n"
                     continue
 
-        return local_info, local_warning, local_error
+            upload_patch_info.append({
+                base_patch_filename: {
+                    "id": release_id,
+                    "sw_version": self.release_data.metadata[release_id].get("sw_version", None),
+                }
+            })
+
+        return local_info, local_warning, local_error, upload_patch_info
 
     def software_release_upload(self, release_files):
         """
@@ -1165,6 +1191,8 @@ class PatchController(PatchService):
         msg_info = ""
         msg_warning = ""
         msg_error = ""
+
+        upload_info = []
 
         # Refresh data, if needed
         self.base_pkgdata.loaddirs()
@@ -1185,26 +1213,30 @@ class PatchController(PatchService):
             elif ext == constants.SIG_EXTENSION:
                 upgrade_files[constants.SIG_EXTENSION] = uploaded_file
             else:
-                LOG.exception("The file extension is not supported. Supported extensions include .patch, .iso and .sig")
+                LOG.exception(
+                    "The file extension is not supported. Supported extensions include .patch, .iso and .sig")
 
         if len(upgrade_files) == 1:  # Only one upgrade file uploaded
             msg = "Missing upgrade file or signature file"
             LOG.error(msg)
             msg_error += msg + "\n"
         elif len(upgrade_files) == 2:  # Two upgrade files uploaded
-            tmp_info, tmp_warning, tmp_error = self._process_upload_upgrade_files(upgrade_files,
-                                                                                  self.release_data)
+            tmp_info, tmp_warning, tmp_error, tmp_release_meta_info = self._process_upload_upgrade_files(
+                upgrade_files, self.release_data)
             msg_info += tmp_info
             msg_warning += tmp_warning
             msg_error += tmp_error
+            upload_info.append(tmp_release_meta_info)
 
         if len(patch_files) > 0:
-            tmp_info, tmp_warning, tmp_error = self._process_upload_patch_files(patch_files)
+            tmp_info, tmp_warning, tmp_error, tmp_patch_meta_info = self._process_upload_patch_files(
+                patch_files)
             msg_info += tmp_info
             msg_warning += tmp_warning
             msg_error += tmp_error
+            upload_info += tmp_patch_meta_info
 
-        return dict(info=msg_info, warning=msg_warning, error=msg_error)
+        return dict(info=msg_info, warning=msg_warning, error=msg_error, upload_info=upload_info)
 
     def release_apply_remove_order(self, release, running_sw_version, reverse=False):
 

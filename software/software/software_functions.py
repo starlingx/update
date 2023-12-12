@@ -1023,9 +1023,12 @@ def unmount_iso_load(iso_path):
             pass
 
 
-def read_upgrade_metadata(mounted_dir):
+def read_upgrade_support_versions(mounted_dir):
     """
-    Read upgrade metadata file
+    Read upgrade metadata file to get supported upgrades
+    versions
+    :param mounted_dir: Mounted iso directory
+    :return: to_release, supported_from_releases
     """
     try:
         root = ElementTree.parse(mounted_dir + "/upgrades/metadata.xml").getroot()
@@ -1107,3 +1110,17 @@ def collect_current_load_for_hosts():
         LOG.info("Collect current load for hosts successfully.")
     except Exception as err:
         LOG.error("Error in collect current load for hosts: %s", err)
+
+
+def parse_release_metadata(filename):
+    """
+    Parse release metadata from xml file
+    :param filename: XML file
+    :return: dict of release metadata
+    """
+    tree = ElementTree.parse(filename)
+    root = tree.getroot()
+    data = {}
+    for child in root:
+        data[child.tag] = child.text
+    return data
