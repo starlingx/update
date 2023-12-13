@@ -2538,6 +2538,43 @@ class PatchController(PatchService):
 
         return dict(data)
 
+    def deploy_host_list(self):
+        query_hosts = self.query_host_cache()
+        deploy_hosts = self.db_api_instance.get_deploy_host()
+        deploy = self.db_api_instance.get_deploy()
+
+        # If there's a hostname missing, add it to query hosts.
+        hostnames = []
+        for host in query_hosts:
+            hostnames.append(host["hostname"])
+        for host in deploy_hosts:
+            if host["hostname"] not in hostnames:
+                query_hosts.append(host)
+
+        deploy_host_list = []
+        # Merge dicts if hostname matches
+        for query_host in query_hosts:
+            query_host["reboot_required"] = query_host.pop("requires_reboot", None)
+            for host in deploy_hosts:
+                if query_host["hostname"] == host["hostname"]:
+                    # New set of keys for the host list, some of previously dict keys
+                    # is kept such as state, interim_state that is used for patch.
+                    deploy_host = {
+                        "hostname": host.get("hostname"),
+                        "sw_version": deploy.get("from_release"),
+                        "to_release": deploy.get("to_release"),
+                        "reboot_required": deploy.get("reboot_required"),
+                        "deploy_host_state": host.get("state"),
+                        "state": query_host.get("state"),
+                        "interim_state": query_host.get("interim_state"),
+                        "ip": query_host.get("ip")
+                    }
+                    deploy_host_list.append(deploy_host)
+                    break
+        if not deploy_host_list:
+            return query_hosts
+        return deploy_host_list
+
 
 # The wsgiref.simple_server module has an error handler that catches
 # and prints any exceptions that occur during the API handling to stderr.

@@ -175,20 +175,18 @@ class Deploy(ABC):
 class DeployHosts(ABC):
 
     def __init__(self):
-        self.states = Enum('States', 'completed failed pending ready')
+        self.states = Enum('States', 'aborted deployed deploying failed pending-deploy')
 
     @abstractmethod
-    def create(self, hostname: str, software_release: str, target_release: str, state: str):
+    def create(self, hostname: str, state: str):
         """
         Create a new deploy-host entry
 
         :param hostname: The name of the host.
-        :param software_release: The software release version.
-        :param target_release: The target release version.
         :param state: The state of the deploy-host entry.
 
         """
-        instances = [hostname, software_release, target_release]
+        instances = [hostname]
         if state:
             check_state(state, self.states)
             instances.append(state)
@@ -196,7 +194,7 @@ class DeployHosts(ABC):
         pass
 
     @abstractmethod
-    def query_by_hostname(self, hostname: str):
+    def query(self, hostname: str):
         """
         Get deploy-host entries for a given host.
 
@@ -207,34 +205,19 @@ class DeployHosts(ABC):
         pass
 
     @abstractmethod
-    def query(self, hostname: str, software_release: str, target_release: str):
-        """
-        Get deploy-host entries for a given host.
-
-        :param hostname: The name of the host.
-        :param software_release: The software release version.
-        :param target_release: The target release version.
-
-        """
-        check_instances([hostname, software_release, target_release], str)
-        pass
-
-    @abstractmethod
-    def update(self, hostname: str, software_release: str, target_release: str, state: str):
+    def update(self, hostname: str, state: str):
         """
         Update a deploy-host entry
 
         :param hostname: The name of the host.
-        :param software_release: The software release version.
-        :param target_release: The target release version.
         :param state: The state of the deploy-host entry.
         """
-        check_instances([hostname, software_release, target_release, state], str)
+        check_instances([hostname, state], str)
         check_state(state, self.states)
         pass
 
     @abstractmethod
-    def delete_by_hostname(self, hostname: str):
+    def delete(self, hostname):
         """
         Delete deploy-host entries for a given host.
 
@@ -243,17 +226,6 @@ class DeployHosts(ABC):
         check_instances([hostname], str)
         pass
 
-    @abstractmethod
-    def delete(self, hostname, software_release, target_release):
-        """
-        Delete deploy-host entries for a given host.
-
-        :param hostname: The name of the host.
-        :param software_release: The software release version.
-        :param target_release: The target release version.
-        """
-        check_instances([hostname, software_release, target_release], str)
-        pass
 
 
 class DeployHandler(Deploy):
@@ -331,16 +303,14 @@ class DeployHostHandler(DeployHosts):
         super().__init__()
         self.data = get_software_filesystem_data()
 
-    def create(self, hostname, software_release, target_release, state=None):
-        super().create(hostname, software_release, target_release, state)
-        deploy = self.query(hostname, software_release, target_release)
+    def create(self, hostname, state=None):
+        super().create(hostname, state)
+        deploy = self.query(hostname)
         if deploy:
             raise DeployAlreadyExist("Error to create. Deploy host already exist.")
 
         new_deploy_host = {
             "hostname": hostname,
-            "software_release": software_release,
-            "target_release": target_release,
             "state": state
         }
 
@@ -355,16 +325,8 @@ class DeployHostHandler(DeployHosts):
             deploy_data.append(new_deploy_host)
         save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
 
-    def query(self, hostname, software_release, target_release):
-        super().query(hostname, software_release, target_release)
-        for deploy in self.data.get("deploy_host", []):
-            if (deploy.get("hostname") == hostname and deploy.get("software_release") == software_release
-                    and deploy.get("target_release") == target_release):
-                return deploy
-        return None
-
-    def query_by_hostname(self, hostname):
-        super().query_by_hostname(hostname)
+    def query(self, hostname):
+        super().query(hostname)
         for deploy in self.data.get("deploy_host", []):
             if deploy.get("hostname") == hostname:
                 return deploy
@@ -373,36 +335,28 @@ class DeployHostHandler(DeployHosts):
     def query_all(self):
         return self.data.get("deploy_host", [])
 
-    def update(self, hostname, software_release, target_release, state):
-        super().update(hostname, software_release, target_release, state)
-        deploy = self.query(hostname, software_release, target_release)
+    def update(self, hostname, state):
+        super().update(hostname, state)
+        deploy = self.query(hostname)
         if not deploy:
             raise Exception("Error to update. Deploy host do not exist.")
 
         index = self.data.get("deploy_host", []).index(deploy)
-        self.data["deploy_host"][index].update({
+        updated_entity = {
             "hostname": hostname,
-            "software_release": software_release,
-            "target_release": target_release,
             "state": state
-        })
+        }
+        self.data["deploy_host"][index].update(updated_entity)
         save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
+        return updated_entity
 
     def delete_all(self):
         self.data.get("deploy_host").clear()
         save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
 
-    def delete_by_hostname(self, hostname):
-        super().delete_by_hostname(hostname)
-        deploy = self.query_by_hostname(hostname)
-        if not deploy:
-            raise DeployDoNotExist("Error to delete. Deploy host do not exist.")
-        self.data.get("deploy_host").remove(deploy)
-        save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
-
-    def delete(self, hostname, software_release, target_release):
-        super().delete(hostname, software_release, target_release)
-        deploy = self.query(hostname, software_release, target_release)
+    def delete(self, hostname):
+        super().delete(hostname)
+        deploy = self.query(hostname)
         if not deploy:
             raise DeployDoNotExist("Error to delete. Deploy host do not exist.")
         self.data.get("deploy_host").remove(deploy)

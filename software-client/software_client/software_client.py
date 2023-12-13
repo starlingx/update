@@ -549,7 +549,7 @@ def release_list_req(args):
     return check_rc(req)
 
 
-def print_software_deploy_query_result(req):
+def print_software_deploy_host_list_result(req):
     if req.status_code == 200:
         data = json.loads(req.text)
         if 'data' not in data:
@@ -561,64 +561,58 @@ def print_software_deploy_query_result(req):
 
         # Calculate column widths
         hdr_hn = "Hostname"
-        hdr_ip = "IP Address"
-        hdr_dep = "Deployed"
+        hdr_rel = "Software Release"
+        hdr_tg_rel = "Target Release"
         hdr_rr = "Reboot Required"
-        hdr_rel = "Release"
         hdr_state = "Host State"
 
         width_hn = len(hdr_hn)
-        width_ip = len(hdr_ip)
-        width_pc = len(hdr_dep)
-        width_rr = len(hdr_rr)
         width_rel = len(hdr_rel)
+        width_tg_rel = len(hdr_tg_rel)
+        width_rr = len(hdr_rr)
         width_state = len(hdr_state)
 
         for agent in sorted(agents, key=lambda a: a["hostname"]):
+            if agent.get("deploy_host_state") is None:
+                agent["deploy_host_state"] = "No active deployment"
+            if agent.get("to_release") is None:
+                agent["to_release"] = "N/A"
             if len(agent["hostname"]) > width_hn:
                 width_hn = len(agent["hostname"])
-            if len(agent["ip"]) > width_ip:
-                width_ip = len(agent["ip"])
             if len(agent["sw_version"]) > width_rel:
                 width_rel = len(agent["sw_version"])
-            if len(agent["state"]) > width_state:
-                width_state = len(agent["state"])
+            if len(agent["to_release"]) > width_tg_rel:
+                width_tg_rel = len(agent["to_release"])
+            if len(agent["deploy_host_state"]) > width_state:
+                width_state = len(agent["deploy_host_state"])
 
-        print("{0:^{width_hn}}  {1:^{width_ip}}  {2:^{width_pc}}  {3:^{width_rr}}  {4:^{width_rel}}  {5:^{width_state}}".format(
-            hdr_hn, hdr_ip, hdr_dep, hdr_rr, hdr_rel, hdr_state,
-            width_hn=width_hn, width_ip=width_ip, width_pc=width_pc, width_rr=width_rr, width_rel=width_rel, width_state=width_state))
+        print("{0:^{width_hn}}  {1:^{width_rel}}  {2:^{width_tg_rel}}  {3:^{width_rr}}  {4:^{width_state}}".format(
+            hdr_hn, hdr_rel, hdr_tg_rel, hdr_rr, hdr_state,
+            width_hn=width_hn, width_rel=width_rel, width_tg_rel=width_tg_rel, width_rr=width_rr, width_state=width_state))
 
-        print("{0}  {1}  {2}  {3}  {4}  {5}".format(
-            '=' * width_hn, '=' * width_ip, '=' * width_pc, '=' * width_rr, '=' * width_rel, '=' * width_state))
+        print("{0}  {1}  {2}  {3}  {4}".format(
+            '=' * width_hn, '=' * width_rel, '=' * width_tg_rel, '=' * width_rr, '=' * width_state))
 
         for agent in sorted(agents, key=lambda a: a["hostname"]):
-            deployed_field = "Yes" if agent["deployed"] else "No"
-            if agent.get("interim_state") is True:
-                deployed_field = "Pending"
-
-            if agent["patch_failed"]:
-                deployed_field = "Failed"
-
-            print("{0:<{width_hn}}  {1:<{width_ip}}  {2:^{width_pc}}  {3:^{width_rr}}  {4:^{width_rel}}  {5:^{width_state}}".format(
+            print("{0:<{width_hn}}  {1:^{width_rel}}  {2:^{width_tg_rel}}  {3:^{width_rr}}  {4:^{width_state}}".format(
                 agent["hostname"],
-                agent["ip"],
-                deployed_field,
-                "Yes" if agent["requires_reboot"] else "No",
                 agent["sw_version"],
-                agent["state"],
-                width_hn=width_hn, width_ip=width_ip, width_pc=width_pc, width_rr=width_rr, width_rel=width_rel, width_state=width_state))
+                agent["to_release"],
+                "Yes" if agent.get("reboot_required", None) else "No",
+                agent["deploy_host_state"],
+                width_hn=width_hn, width_rel=width_rel, width_tg_rel=width_tg_rel, width_rr=width_rr, width_state=width_state))
 
     elif req.status_code == 500:
         print("An internal error has occurred. Please check /var/log/software.log for details")
 
 
-def deploy_query_hosts_req(args):
-    url = "http://%s/software/query_hosts" % api_addr
+def deploy_host_list_req(args):
+    url = "http://%s/software/host_list" % api_addr
     req = requests.get(url)
     if args.debug:
         print_result_debug(req)
     else:
-        print_software_deploy_query_result(req)
+        print_software_deploy_host_list_result(req)
 
     return check_rc(req)
 
@@ -643,7 +637,7 @@ def release_show_req(args):
 
 
 def wait_for_install_complete(agent_ip):
-    url = "http://%s/software/query_hosts" % api_addr
+    url = "http://%s/software/host_list" % api_addr
     rc = 0
 
     max_retries = 4
@@ -669,7 +663,7 @@ def wait_for_install_complete(agent_ip):
         if req.status_code == 200:
             data = json.loads(req.text)
             if 'data' not in data:
-                print("Invalid query-hosts data returned:")
+                print("Invalid host-list data returned:")
                 print_result_debug(req)
                 rc = 1
                 break
@@ -1192,7 +1186,7 @@ def register_deploy_commands(commands):
       - activate
       - complete
     non root/sudo users can run:
-       - query-hosts
+       - host-list
        - show
     Deploy commands are region_restricted, which means
     that they are not permitted to be run in DC
@@ -1300,13 +1294,13 @@ def register_deploy_commands(commands):
                      required=False,
                      help='List all deployments that have this state')
 
-    # --- software deploy query-hosts -------------
+    # --- software deploy host-list -------------
     cmd = sub_cmds.add_parser(
-        'query-hosts',
-        help='Query hosts for software deployment'
+        'host-list',
+        help='List of hosts for software deployment'
     )
-    cmd.set_defaults(cmd='query-hosts')
-    cmd.set_defaults(func=deploy_query_hosts_req)
+    cmd.set_defaults(cmd='host-list')
+    cmd.set_defaults(func=deploy_host_list_req)
     cmd.set_defaults(restricted=False)  # can run non root
 
 

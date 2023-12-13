@@ -1,3 +1,10 @@
+"""
+Copyright (c) 2023 Wind River Systems, Inc.
+
+SPDX-License-Identifier: Apache-2.0
+
+"""
+
 from software.software_entities import DeployHandler
 from software.software_entities import DeployHostHandler
 from software.constants import DEPLOY_STATES
@@ -32,23 +39,17 @@ class SoftwareAPI:
     def delete_deploy(self):
         self.deploy_handler.delete()
 
-    def create_deploy_host(self, hostname, software_release, target_release):
-        self.deploy_host_handler.create(hostname, software_release, target_release)
-
-    def get_deploy_host_by_hostname(self, hostname):
-        return self.deploy_host_handler.query_by_hostname(hostname)
+    def create_deploy_host(self, hostname):
+        self.deploy_host_handler.create(hostname)
 
     def get_deploy_host(self):
         return self.deploy_host_handler.query_all()
 
-    def update_deploy_host(self, hostname, software_release, target_release, state):
-        self.deploy_host_handler.update(hostname, software_release, target_release, state)
+    def update_deploy_host(self, hostname, state):
+        return self.deploy_host_handler.update(hostname, state)
 
-    def delete_deploy_host_by_hostname(self, hostname):
-        self.deploy_host_handler.delete_by_hostname(hostname)
-
-    def delete_deploy_host(self, hostname, software_release, target_release):
-        self.deploy_host_handler.delete(hostname, software_release, target_release)
+    def delete_deploy_host(self, hostname):
+        self.deploy_host_handler.delete(hostname)
 
     def delete_deploy_host_all(self):
         self.deploy_host_handler.delete_all()
