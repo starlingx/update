@@ -1035,10 +1035,17 @@ class PatchController(PatchService):
             else:
                 local_info += load_import_return.stdout
 
+            # Copy iso /upgrades/software-deploy/ to /opt/software/rel-<rel>/bin/
+            to_release_bin_dir = os.path.join(
+                constants.SOFTWARE_STORAGE_DIR, ("rel-%s" % to_release), "bin")
+            if os.path.exists(to_release_bin_dir):
+                shutil.rmtree(to_release_bin_dir)
+            shutil.copytree(os.path.join(iso_mount_dir, "upgrades",
+                            constants.SOFTWARE_DEPLOY_FOLDER), to_release_bin_dir)
+
             # Update the release metadata
-            abs_stx_release_metadata_file = os.path.join(iso_mount_dir,
-                                                         'upgrades',
-                                                         f"{constants.RELEASE_GA_NAME % to_release}-metadata.xml")
+            abs_stx_release_metadata_file = os.path.join(
+                iso_mount_dir, 'upgrades', f"{constants.RELEASE_GA_NAME % to_release}-metadata.xml")
             release_data.parse_metadata(abs_stx_release_metadata_file, state=constants.AVAILABLE)
             LOG.info("Updated release metadata for %s", to_release)
 

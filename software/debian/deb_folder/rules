@@ -20,6 +20,7 @@ override_dh_install:
 	python3 setup.py bdist_wheel  --universal  -d $(CURDIR)/debian/$(PYBUILD_NAME)-wheels/usr/share/python-wheels
 	install -d -m 755 $(ROOT)/usr/bin
 	install -d -m 755 $(ROOT)/usr/sbin
+	install -d -m 755 $(ROOT)/usr/sbin/software-deploy
 	install -d -m 755 $(ROOT)/run
 	install -m 755 -d ${ROOT}/etc/goenabled.d
 	install -m 755 -d ${ROOT}/etc/init.d
@@ -61,19 +62,19 @@ override_dh_install:
 	install -m 444 service-files/software.logrotate \
 		${ROOT}/etc/logrotate.d/software
 	install -m 755 scripts/deploy-precheck \
-		${ROOT}/usr/sbin/deploy-precheck
+		${ROOT}/usr/sbin/software-deploy/deploy-precheck
 	install -m 444 scripts/upgrade_utils.py \
-		${ROOT}/usr/sbin/upgrade_utils.py
+		${ROOT}/usr/sbin/software-deploy/upgrade_utils.py
 	install -m 755 scripts/prep-data-migration \
-		${ROOT}/usr/sbin/prep-data-migration
+		${ROOT}/usr/sbin/software-deploy/prep-data-migration
 	install -m 444 ${METADATA_FILE} \
         ${ROOT}/etc/software/${METADATA_FILE}
 	install -m 755 scripts/chroot_mounts.sh \
-		${ROOT}/usr/sbin/chroot_mounts.sh
+		${ROOT}/usr/sbin/software-deploy/chroot_mounts.sh
 	install -m 444 scripts/ostree_mounts.yaml \
         ${ROOT}/etc/software/ostree_mounts.yaml
 	install -m 755 scripts/create_postgresql_database.sh \
-		${ROOT}/usr/sbin/create_postgresql_database.sh
+		${ROOT}/usr/sbin/software-deploy/create_postgresql_database.sh
 	install -m 755 scripts/usm_load_import \
-		${ROOT}/usr/sbin/usm_load_import
+		${ROOT}/usr/sbin/software-deploy/usm_load_import
 	dh_install

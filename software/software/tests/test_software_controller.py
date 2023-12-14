@@ -29,9 +29,11 @@ class TestSoftwareController(unittest.TestCase):
     @patch('software.software_controller.os.chmod')
     @patch('software.software_controller.read_upgrade_metadata')
     @patch('software.software_controller.subprocess.run')
+    @patch('software.software_controller.shutil.copytree')
     @patch('software.software_controller.unmount_iso_load')
     def test_process_upload_upgrade_files(self,
                                           mock_unmount_iso_load,
+                                          mock_copytree,  # pylint: disable=unused-argument
                                           mock_run,
                                           mock_read_upgrade_metadata,
                                           mock_chmod,  # pylint: disable=unused-argument

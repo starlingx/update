@@ -109,6 +109,9 @@ VERIFY_LICENSE_BINARY = "/usr/bin/verify-license"
 
 SOFTWARE_JSON_FILE = "/opt/software/software.json"
 
+# The value "software-deploy" is also used in rule file
+SOFTWARE_DEPLOY_FOLDER = "software-deploy"
+
 WORKER_SUMMARY_DIR = "%s/summary" % SOFTWARE_STORAGE_DIR
 WORKER_DATETIME_FORMAT = "%Y%m%dT%H%M%S%f"
 UNKNOWN_SOFTWARE_VERSION = "0.0.0"
