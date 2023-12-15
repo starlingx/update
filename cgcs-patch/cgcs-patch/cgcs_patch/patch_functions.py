@@ -202,8 +202,7 @@ def parse_pkgver(pkgver):
 def get_release_from_patch(patchfile):
     rel = ""
     try:
-        cmd = "tar xf %s -O metadata.tar | tar x -O" % patchfile
-        metadata_str = subprocess.check_output(cmd, shell=True)
+        metadata_str = subprocess.check_output(['tar', '--to-command=tar -xO', '-xf', patchfile, 'metadata.tar'])
         root = ElementTree.fromstring(metadata_str)
         # Extract release version
         rel = root.findtext('sw_version')

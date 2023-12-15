@@ -106,6 +106,14 @@ class FakeTar(object):
         return True
 
 
+class NoSignatureTar(FakeTar):
+    def extract(self, filename):
+        if filename == "signature.v2":  # pylint: disable=no-else-raise
+            raise KeyError("Signature doesn't exist")
+        else:
+            return filename
+
+
 class CgcsPatchFunctionsTestCase(testtools.TestCase):
 
     def create_element_tree_from_dict(self, tree_root, dict_obj):
@@ -208,9 +216,9 @@ class CgcsPatchFunctionsTestCase(testtools.TestCase):
                                            _mock_log_warning,
                                            _mock_open):
         test_obj = PatchFile()
-        _mock_open.return_value = FakeTar(["file1"])
+        _mock_open.return_value = NoSignatureTar(["file1"])
         self.assertRaises(PatchValidationFailure, test_obj.read_patch, "fake_path")
-        _mock_log_warning.assert_any_call('Patch not signed')
+        _mock_log_warning.assert_any_call('Patch has not been signed')
         _mock_log_error.assert_any_call('Patch failed verification')
 
     @mock.patch.object(tarfile, "open")

@@ -157,8 +157,7 @@ def write_xml_file(top,
 def get_release_from_patch(patchfile):
     rel = ""
     try:
-        cmd = "tar xf %s -O metadata.tar | tar x -O" % patchfile
-        metadata_str = subprocess.check_output(cmd, shell=True)
+        metadata_str = subprocess.check_output(['tar', '--to-command=tar -xO', '-xf', patchfile, 'metadata.tar'])
         root = ElementTree.fromstring(metadata_str)
         # Extract release version
         rel = root.findtext('sw_version')
@@ -625,21 +624,20 @@ class PatchFile(object):
         # Open the patch file and extract the contents to the current dir
         tar = tarfile.open(path, "r:gz")
 
-        filelist = []
-        for f in tar.getmembers():
-            filelist.append(f.name)
-
-        if detached_signature_file not in filelist:
-            msg = "Patch not signed"
+        tar.extract("signature")
+        try:
+            tar.extract(detached_signature_file)
+        except KeyError:
+            msg = "Patch has not been signed"
             LOG.warning(msg)
-
-        for f in filelist:
-            tar.extract(f)
 
         # Filelist used for signature validation and verification
         sig_filelist = ["metadata.tar", "software.tar"]
-        if "semantics.tar" in filelist:
+        if "semantics.tar" in [f.name for f in tar.getmembers()]:
             sig_filelist.append("semantics.tar")
+
+        for f in sig_filelist:
+            tar.extract(f)
 
         # Verify the data integrity signature first
         sigfile = open("signature", "r")
@@ -675,6 +673,11 @@ class PatchFile(object):
             if cert_type is None:
                 LOG.error(msg)
             raise ReleaseValidationFailure(msg)
+
+        # Restart script
+        for f in tar.getmembers():
+            if f.name not in sig_filelist:
+                tar.extract(f)
 
         tar = tarfile.open("metadata.tar")
         tar.extractall()
