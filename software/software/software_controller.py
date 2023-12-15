@@ -1019,8 +1019,9 @@ class PatchController(PatchService):
 
             # Run /etc/software/usm-load-import script
             LOG.info("Start load importing from %s", iso_file)
-            shutil.copyfile(os.path.join(iso_mount_dir, 'upgrades', 'usm_load_import'),
-                            constants.LOCAL_LOAD_IMPORT_FILE)
+            import_script = os.path.join(iso_mount_dir, 'upgrades',
+                                         constants.SOFTWARE_DEPLOY_FOLDER, 'usm_load_import')
+            shutil.copyfile(import_script, constants.LOCAL_LOAD_IMPORT_FILE)
             os.chmod(constants.LOCAL_LOAD_IMPORT_FILE, 0o755)
             load_import_cmd = [constants.LOCAL_LOAD_IMPORT_FILE,
                                "--from-release=%s" % SW_VERSION,
