@@ -64,7 +64,7 @@ class UpgradeHealthCheck(HealthCheck):
         supported_releases = dict()
 
         # Parse upgrade metadata file for supported upgrade paths
-        root = ElementTree.parse("%s/metadata.xml" % os.path.dirname(__file__))
+        root = ElementTree.parse("%s/../metadata.xml" % os.path.dirname(__file__))
         upgrade_root = root.find("supported_upgrades").findall("upgrade")
         for upgrade in upgrade_root:
             version = upgrade.find("version")
