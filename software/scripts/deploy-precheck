@@ -12,6 +12,7 @@
 Run platform upgrade deploy precheck as a standalone executable
 """
 
+import argparse
 import os
 import re
 import requests
@@ -44,6 +45,7 @@ class HealthCheck(object):
             upgrade_utils.get_token_endpoint(config, service_type="usm")
 
     def run_health_check(self):
+        """Run general health check using sysinv client"""
         force = self._config.get("force", False)
         output = self._sysinv_client.health.get_kube_upgrade(args={}, relaxed=force)
         if HealthCheck.FAIL_MSG in output:
@@ -136,6 +138,7 @@ class UpgradeHealthCheck(HealthCheck):
         return success, active_version, latest_version
 
     def run_health_check(self):
+        """Run specific upgrade health checks"""
         health_ok = True
         output = ""
 
@@ -201,42 +204,43 @@ class UpgradeHealthCheck(HealthCheck):
         return health_ok, output
 
 
-def parse_config(args):
-    if not args:
-        return None
+def parse_config(args=None):
+    """Parse the parameters passed to the script"""
+    parser = argparse.ArgumentParser(description="Run health checks to verify if the system "
+                                                 "meets the requirements to deploy a specific "
+                                                 "release.")
+    parser.add_argument("--auth_url",
+                        help="Authentication URL",
+                        required=True)
+    parser.add_argument("--username",
+                        help="Username",
+                        required=True)
+    parser.add_argument("--password",
+                        help="Password",
+                        required=True)
+    parser.add_argument("--project_name",
+                        help="Project Name",
+                        required=True)
+    parser.add_argument("--user_domain_name",
+                        help="User Domain Name",
+                        required=True)
+    parser.add_argument("--project_domain_name",
+                        help="Project Domain Name",
+                        required=True)
+    parser.add_argument("--region_name",
+                        help="Region Name",
+                        default="RegionOne")
+    parser.add_argument("--force",
+                        help="Ignore non-critical health checks",
+                        action="store_true")
 
-    required_keystone_config = ["auth_url", "username", "password", "project_name",
-                                "user_domain_name", "project_domain_name", "region_name"]
-    config = dict()
-    for i in range(1, len(args)):
-        try:
-            sep = args[i].find("=")
-            # for params in --key=value format
-            if sep > 0:
-                key = args[i][:sep].lstrip("-")
-                value = args[i][sep+1:]
-            # for params in --key format
-            else:
-                key = args[i].lstrip("-")
-                value = True
-            config[key] = value
-        except ValueError:
-            print("Invalid parameter format: %s" % args[i])
-            return None
-
-    if not all(cf in config for cf in required_keystone_config):
-        return None
-    return config
+    # if args was not passed will use sys.argv by default
+    parsed_args = parser.parse_args(args)
+    return vars(parsed_args)
 
 
 def main(argv=None):
     config = parse_config(argv)
-    if not config:
-        print("Please provide keystone_authtoken configuration.\n"
-              "usage: deploy-precheck --auth_url=<auth_url> --username=<username> "
-              "--password=<password> --project_name=<project_name> --user_domain_name=<user_domain_name> "
-              "--project_domain_name=<project_domain_name> --region_name=<region_name> [--force]")
-        return 1
 
     general_health_check = HealthCheck(config)
     upgrade_health_check = UpgradeHealthCheck(config)
@@ -259,4 +263,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(main())
