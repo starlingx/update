@@ -292,7 +292,7 @@ def check_state(state, states):
     :param state: String value.
     :param states: An Enum object.
     """
-    if not state in states.__members__:
+    if state not in states.__members__:
         msg = "State %s not in valid states: %s" % (state, list(states.__members__.keys()))
         LOG.exception(msg)
         raise StateValidationFailure(msg)

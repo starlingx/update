@@ -6,7 +6,8 @@ SPDX-License-Identifier: Apache-2.0
 """
 
 import logging
-from abc import ABC, abstractmethod
+from abc import ABC
+from abc import abstractmethod
 from enum import Enum
 from typing import List
 
@@ -225,7 +226,6 @@ class DeployHosts(ABC):
         """
         check_instances([hostname], str)
         pass
-
 
 
 class DeployHandler(Deploy):
