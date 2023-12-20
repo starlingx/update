@@ -1868,8 +1868,9 @@ class PatchController(PatchService):
 
         # Check if software release directory location exists
         release_version = utils.get_major_release_version(release["sw_version"])
-        deployment_dir = "%s/rel-%s" % (constants.FEED_OSTREE_BASE_DIR, release_version)
-        precheck_script = "%s/upgrades/deploy-precheck" % deployment_dir
+        deployment_dir = os.path.join(constants.FEED_OSTREE_BASE_DIR, "rel-%s" % release_version)
+        precheck_script = os.path.join(deployment_dir, "upgrades",
+                                       constants.SOFTWARE_DEPLOY_FOLDER, "deploy-precheck")
         if not os.path.isdir(deployment_dir) or not os.path.isfile(precheck_script):
             msg = "Upgrade files for deployment %s are not present on the system, " \
                   "cannot proceed with the precheck." % deployment
