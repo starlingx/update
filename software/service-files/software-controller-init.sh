@@ -28,6 +28,7 @@ REPO_DIR=${REPO_ROOT}/debian/rel-${SW_VERSION}
 GROUPS_FILE=$REPO_DIR/comps.xml
 PATCHING_DIR=/opt/software
 RELEASE=bullseye
+SYNCED_SOFTWARE_FILESYSTEM_DIR=${PATCHING_DIR}/synced
 
 logfile=/var/log/software.log
 
@@ -60,6 +61,11 @@ function do_setup {
     if [ ! -d $PATCHING_DIR ]; then
         LOG "Creating $PATCHING_DIR"
         mkdir -p $PATCHING_DIR
+    fi
+
+    if [ ! -d $SYNCED_SOFTWARE_FILESYSTEM_DIR ]; then
+        LOG "Creating $SYNCED_SOFTWARE_FILESYSTEM_DIR"
+        mkdir -p $SYNCED_SOFTWARE_FILESYSTEM_DIR
     fi
 
     # If we can ping the active controller, sync the repos

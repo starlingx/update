@@ -384,6 +384,13 @@ def get_software_filesystem_data():
         return {}
 
 
+def get_synced_software_filesystem_data():
+    if os.path.exists(constants.SYNCED_SOFTWARE_JSON_FILE):
+        return load_from_json_file(constants.SYNCED_SOFTWARE_JSON_FILE)
+    else:
+        return {}
+
+
 def validate_versions(versions):
     """
     Validate a list of versions

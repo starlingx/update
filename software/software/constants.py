@@ -144,7 +144,8 @@ LOCAL_LOAD_IMPORT_FILE = "/etc/software/usm_load_import"
 LICENSE_FILE = "/etc/platform/.license"
 VERIFY_LICENSE_BINARY = "/usr/bin/verify-license"
 
-SOFTWARE_JSON_FILE = "/opt/software/software.json"
+SOFTWARE_JSON_FILE = "%s/software.json" % SOFTWARE_STORAGE_DIR
+SYNCED_SOFTWARE_JSON_FILE = "%s/synced/software.json" % SOFTWARE_STORAGE_DIR
 
 # The value "software-deploy" is also used in rule file
 SOFTWARE_DEPLOY_FOLDER = "software-deploy"

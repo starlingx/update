@@ -41,6 +41,8 @@ PATCHMSG_STR = {
     PATCHMSG_DEPLOY_STATE_UPDATE_ACK: "deploy-state-update-ack"
 }
 
+MSG_ACK_SUCCESS = 'success'
+
 
 class PatchMessage(object):
     def __init__(self, msgtype=PATCHMSG_UNKNOWN):

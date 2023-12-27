@@ -599,6 +599,50 @@ class PatchMessageDropHostReq(messages.PatchMessage):
         sock.sendto(str.encode(message), (sc.controller_address, cfg.controller_port))
 
 
+class SoftwareMessageDeployStateUpdate(messages.PatchMessage):
+    def __init__(self):
+        messages.PatchMessage.__init__(self, messages.PATCHMSG_DEPLOY_STATE_UPDATE)
+
+    def encode(self):
+        global sc
+        messages.PatchMessage.encode(self)
+        filesystem_data = utils.get_software_filesystem_data()
+        deploys_state = {"deploy_host": filesystem_data.get("deploy_host", {}),
+                         "deploy": filesystem_data.get("deploy", {})}
+        self.message["deploy_state"] = deploys_state
+
+    def handle(self, sock, addr):  # pylint: disable=unused-argument
+        LOG.error("Should not get here")
+
+    def send(self, sock):
+        global sc
+        self.encode()
+        message = json.dumps(self.message)
+        sock.sendto(str.encode(message), (sc.agent_address, cfg.agent_port))
+
+
+class SoftwareMessageDeployStateUpdateAck(messages.PatchMessage):
+    def __init__(self):
+        messages.PatchMessage.__init__(self, messages.PATCHMSG_DEPLOY_STATE_UPDATE_ACK)
+        self.peer_state_data = {}
+
+    def decode(self, data):
+        messages.PatchMessage.decode(self, data)
+        self.peer_state_data = data
+
+    def encode(self):
+        # Nothing to add, so just call the super class
+        messages.PatchMessage.encode(self)
+
+    def handle(self, sock, addr):
+        global sc
+        if self.peer_state_data["result"] == messages.MSG_ACK_SUCCESS:
+            LOG.debug("Peer controller is synced with value: %s",
+                      self.peer_state_data["deploy_state"])
+        else:
+            LOG.error("Peer controller deploy state has diverged.")
+
+
 class PatchController(PatchService):
     def __init__(self):
         PatchService.__init__(self)
@@ -1869,6 +1913,14 @@ class PatchController(PatchService):
                         msg = "Failed to delete the restart script for %s" % patch_id
                         LOG.exception(msg)
 
+    def _update_state_to_peer(self):
+        state_update_msg = SoftwareMessageDeployStateUpdate()
+        self.socket_lock.acquire()
+        try:
+            state_update_msg.send(self.sock_out)
+        finally:
+            self.socket_lock.release()
+
     def _release_basic_checks(self, deployment):
         """
         Does basic sanity checks on the release data
@@ -2053,6 +2105,7 @@ class PatchController(PatchService):
                 if sw_rel is None:
                     raise InternalError("%s cannot be found" % to_release)
                 sw_rel.update_state(constants.DEPLOYING)
+                self._update_state_to_peer()
                 msg_info = "Deployment for %s started" % deployment
             else:
                 msg_error = "Deployment for %s failed to start" % deployment
@@ -2942,6 +2995,8 @@ class PatchControllerMainThread(threading.Thread):
                             msg = PatchMessageAgentInstallResp()
                         elif msgdata['msgtype'] == messages.PATCHMSG_DROP_HOST_REQ:
                             msg = PatchMessageDropHostReq()
+                        elif msgdata['msgtype'] == messages.PATCHMSG_DEPLOY_STATE_UPDATE_ACK:
+                            msg = SoftwareMessageDeployStateUpdateAck()
 
                     if msg is None:
                         msg = messages.PatchMessage()

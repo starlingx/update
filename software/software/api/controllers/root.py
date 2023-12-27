@@ -54,10 +54,10 @@ class Root(base.APIBase):
     def convert(self):
         root = Root()
         root.name = "StarlingX USM API"
-        root.description = ("Unified Software Management API allows for a "
-             "single REST API / CLI and single procedure for updating "
-             "the StarlingX software on a Standalone Cloud or Distributed Cloud."
-                            )
+        root.description = (
+            "Unified Software Management API allows for a "
+            "single REST API / CLI and single procedure for updating "
+            "the StarlingX software on a Standalone Cloud or Distributed Cloud.")
         root.versions = [Version.convert('v1')]
         root.default_version = Version.convert('v1')
         return root

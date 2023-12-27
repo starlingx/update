@@ -195,6 +195,72 @@ class PatchMessageHelloAgentAck(messages.PatchMessage):
         sock.sendto(str.encode(message), (pa.controller_address, cfg.controller_port))
 
 
+class SoftwareMessageDeployStateUpdate(messages.PatchMessage):
+    def __init__(self):
+        messages.PatchMessage.__init__(self, messages.PATCHMSG_DEPLOY_STATE_UPDATE)
+        self.data = {}
+
+    def decode(self, data):
+        messages.PatchMessage.decode(self, data)
+        self.data = data
+
+    def encode(self):
+        # Nothing to add, so just call the super class
+        messages.PatchMessage.encode(self)
+
+    def handle(self, sock, addr):
+        global pa
+        filesystem_data = utils.get_software_filesystem_data()
+        synced_filesystem_data = utils.get_synced_software_filesystem_data()
+
+        actual_state = {"deploy_host": filesystem_data.get("deploy_host", {}),
+                        "deploy": filesystem_data.get("deploy", {})}
+
+        synced_state = {"deploy_host": synced_filesystem_data.get("deploy_host", {}),
+                        "deploy": synced_filesystem_data.get("deploy", {})}
+
+        peer_state = {"deploy_host": self.data.get("deploy_state").get("deploy_host", {}),
+                      "deploy": self.data.get("deploy_state").get("deploy", {})}
+
+        result = "diverged"
+        if actual_state == peer_state:
+            result = messages.MSG_ACK_SUCCESS
+        elif actual_state == synced_state:
+            result = messages.MSG_ACK_SUCCESS
+
+        if result == messages.MSG_ACK_SUCCESS:
+            utils.save_to_json_file(constants.SOFTWARE_JSON_FILE, peer_state)
+            utils.save_to_json_file(constants.SYNCED_SOFTWARE_JSON_FILE, peer_state)
+
+        resp = SoftwareMessageDeployStateUpdateAck()
+        resp.send(sock, result)
+
+    def send(self, sock):  # pylint: disable=unused-argument
+        LOG.info("Should not get here")
+
+
+class SoftwareMessageDeployStateUpdateAck(messages.PatchMessage):
+    def __init__(self, peer_state_data=None):
+        self.peer_state_data = peer_state_data
+        messages.PatchMessage.__init__(self, messages.PATCHMSG_DEPLOY_STATE_UPDATE_ACK)
+
+    def encode(self, result):  # pylint: disable=arguments-differ
+        global pa
+        messages.PatchMessage.encode(self)
+        synced_data = utils.get_synced_software_filesystem_data()
+        self.message["result"] = result
+        self.message["deploy_state"] = synced_data
+
+    def handle(self, sock, addr):  # pylint: disable=unused-argument
+        LOG.error("Should not get here")
+
+    def send(self, sock, result):
+        global pa
+        self.encode(result)
+        message = json.dumps(self.message)
+        sock.sendto(str.encode(message), (pa.controller_address, cfg.controller_port))
+
+
 class PatchMessageQueryDetailed(messages.PatchMessage):
     def __init__(self):
         messages.PatchMessage.__init__(self, messages.PATCHMSG_QUERY_DETAILED)
@@ -681,6 +747,8 @@ class PatchAgent(PatchService):
                         msg = PatchMessageSendLatestFeedCommit()
                     elif msgdata['msgtype'] == messages.PATCHMSG_AGENT_INSTALL_REQ:
                         msg = PatchMessageAgentInstallReq()
+                    elif msgdata['msgtype'] == messages.PATCHMSG_DEPLOY_STATE_UPDATE:
+                        msg = SoftwareMessageDeployStateUpdate()
 
                 if msg is None:
                     msg = messages.PatchMessage()
