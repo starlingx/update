@@ -32,7 +32,6 @@ from software.authapi import app as auth_app
 from software.constants import DEPLOY_STATES
 from software.base import PatchService
 from software.exceptions import APTOSTreeCommandFail
-from software.db import api as db_api
 from software.exceptions import InternalError
 from software.exceptions import MetadataFail
 from software.exceptions import UpgradeNotSupported
@@ -2241,13 +2240,11 @@ class PatchController(PatchService):
 
     def deploy_state_changed(self, deploy_state):
         '''Handle 'deploy state change' event, invoked when operations complete. '''
-        dbapi = db_api.get_instance()
-        dbapi.update_deploy(deploy_state)
+        self.db_api_instance.update_deploy(deploy_state)
 
     def host_deploy_state_changed(self, hostname, host_deploy_state):
         '''Handle 'host deploy state change' event. '''
-        dbapi = db_api.get_instance()
-        dbapi.update_deploy_host(hostname, host_deploy_state)
+        self.db_api_instance.update_deploy_host(hostname, host_deploy_state)
 
     def software_deploy_start_api(self, deployment: str, force: bool, **kwargs) -> dict:
         """
@@ -2271,14 +2268,14 @@ class PatchController(PatchService):
 
             if self._deploy_upgrade_start(to_release):
                 collect_current_load_for_hosts()
-                dbapi = db_api.get_instance()
-                dbapi.create_deploy(SW_VERSION, to_release, True)
-                dbapi.update_deploy(DEPLOY_STATES.START)
+                self.update_and_sync_deploy_state(self.db_api_instance.create_deploy,
+                                                  SW_VERSION, to_release, True)
+                self.update_and_sync_deploy_state(self.db_api_instance.update_deploy,
+                                                  DEPLOY_STATES.START)
                 sw_rel = self.release_collection.get_release_by_id(deployment)
                 if sw_rel is None:
                     raise InternalError("%s cannot be found" % to_release)
                 sw_rel.update_state(constants.DEPLOYING)
-                self._update_state_to_peer()
                 msg_info = "Deployment for %s started" % deployment
             else:
                 msg_error = "Deployment for %s failed to start" % deployment
@@ -2934,6 +2931,27 @@ class PatchController(PatchService):
         if not deploy_host_list:
             return query_hosts
         return deploy_host_list
+
+
+    def update_and_sync_deploy_state(self, func, *args, **kwargs):
+        """
+        :param func: SoftwareApi method
+        :param args: arguments passed related to func
+        :param kwargs: keyword arguments passed related to func
+
+        Example:
+        -------
+
+        Usage of *args:
+        update_and_sync_deploy_state(self.db_api_instance.create_deploy,
+                                     release_version, to_release, bool)
+        Usage of **kwargs:
+        update_and_sync_deploy_state(self.db_api_instance.update_deploy_host,
+                                     hostname=hostname, state=state)
+        """
+
+        func(*args, **kwargs)
+        self._update_state_to_peer()
 
 
 class PatchControllerApiThread(threading.Thread):
