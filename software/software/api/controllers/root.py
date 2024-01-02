@@ -5,6 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 """
 import cgi
+import json
 import os
 from oslo_log import log
 from pecan import expose
@@ -172,21 +173,39 @@ class SoftwareAPIController(object):
     @expose('json')
     @expose('query.xml', content_type='application/xml')
     def upload(self):
-        request_data = list(request.POST.items())
-        temp_dir = os.path.join(constants.SCRATCH_DIR, 'upload_files')
+        is_local = False
+        temp_dir = None
+        uploaded_files = []
+        request_data = []
+        local_files = []
+
+        # --local option only sends a list of file names
+        if (request.content_type == "text/plain"):
+            local_files = list(json.loads(request.body))
+            is_local = True
+        else:
+            request_data = list(request.POST.items())
+            temp_dir = os.path.join(constants.SCRATCH_DIR, 'upload_files')
 
         try:
-            if len(request_data) == 0:
+            if len(request_data) == 0 and len(local_files) == 0:
                 raise SoftwareError("No files uploaded")
-            # Protect against duplications
-            uploaded_files = sorted(set(request_data))
-            # Save all uploaded files to /scratch dir
-            for file_item in uploaded_files:
-                assert isinstance(file_item[1], cgi.FieldStorage)
-                utils.save_temp_file(file_item[1], temp_dir)
 
-            # Get all uploaded files from /scratch dir
-            uploaded_files = utils.get_all_files(temp_dir)
+            if is_local:
+                uploaded_files = local_files
+                LOG.info("Uploaded local files: %s", uploaded_files)
+            else:
+                # Protect against duplications
+                uploaded_files = sorted(set(request_data))
+                # Save all uploaded files to /scratch/upload_files dir
+                for file_item in uploaded_files:
+                    assert isinstance(file_item[1], cgi.FieldStorage)
+                    utils.save_temp_file(file_item[1], temp_dir)
+
+                # Get all uploaded files from /scratch dir
+                uploaded_files = utils.get_all_files(temp_dir)
+                LOG.info("Uploaded files: %s", uploaded_files)
+
             # Process uploaded files
             return sc.software_release_upload(uploaded_files)
 
@@ -195,7 +214,8 @@ class SoftwareAPIController(object):
         finally:
             # Remove all uploaded files from /scratch dir
             sc.software_sync()
-            shutil.rmtree(temp_dir, ignore_errors=True)
+            if temp_dir:
+                shutil.rmtree(temp_dir, ignore_errors=True)
 
     @expose('json')
     @expose('query.xml', content_type='application/xml')

@@ -365,35 +365,49 @@ def release_upload_req(args):
 
     # arg.release is a list
     releases = args.release
+    is_local = args.local  # defaults to False
 
     # Ignore interrupts during this function
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     to_upload_files = {}
+    valid_files = []
+    invalid_files = []
 
-    for software_file in sorted(list(set(releases))):
+    # Validate all the files
+    valid_files = [os.path.abspath(software_file) for software_file in releases if os.path.isfile(
+        software_file) and os.path.splitext(software_file)[1] in constants.SUPPORTED_UPLOAD_FILE_EXT]
+    invalid_files = [software_file for software_file in releases
+                     if software_file not in valid_files]
 
+    for software_file in invalid_files:
         if os.path.isdir(software_file):
             print("Error: %s is a directory. Please use upload-dir" % software_file)
-            continue
-
-        if not os.path.isfile(software_file):
+        elif os.path.isfile(software_file):
+            print("Error: %s has the unsupported file extension." % software_file)
+        else:
             print("Error: File does not exist: %s" % software_file)
-            continue
 
-        file_name, ext = os.path.splitext(software_file)
-        if ext not in constants.SUPPORTED_UPLOAD_FILE_EXT:
-            print("Error: File type not supported: %s" % file_name)
-            continue
+    if len(valid_files) == 0:
+        print("No file to be uploaded.")
+        return rc
 
-        to_upload_files[software_file] = (software_file, open(software_file, 'rb'))
+    if is_local:
+        to_upload_filenames = json.dumps(valid_files)
+        headers = {'Content-Type': 'text/plain'}
+    else:
+        for software_file in valid_files:
+            with open(software_file, 'rb') as file:
+                data_content = file.read()
+            to_upload_files[software_file] = (software_file, data_content)
 
-    encoder = MultipartEncoder(fields=to_upload_files)
+        encoder = MultipartEncoder(fields=to_upload_files)
+        headers = {'Content-Type': encoder.content_type}
+
     url = "http://%s/software/upload" % api_addr
-    headers = {'Content-Type': encoder.content_type}
     append_auth_token_if_required(headers)
     req = requests.post(url,
-                        data=encoder,
+                        data=to_upload_filenames if is_local else encoder,
                         headers=headers)
 
     if args.debug:
@@ -1468,6 +1482,11 @@ def setup_argparse():
     cmd.add_argument('release',
                      nargs="+",  # accepts a list
                      help='software releases to upload')
+    cmd.add_argument('--local',
+                     required=False,
+                     default=False,
+                     action='store_true',
+                     help='Upload files from active controller')
 
     # --- software upload-dir <release dir> ------
     cmd = commands.add_parser(
