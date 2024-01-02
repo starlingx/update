@@ -1123,16 +1123,13 @@ def patch_query_app_dependencies_req():
         return 1
 
 
-def check_env(env, var):
-    if env not in os.environ:
-        print("You must provide a %s via env[%s]" % (var, env))
-        exit(-1)
-
-
-def get_auth_token_and_endpoint(region_name):
+def get_auth_token_and_endpoint(region_name, interface):
     from keystoneauth1 import exceptions
     from keystoneauth1 import identity
     from keystoneauth1 import session
+
+    if not region_name:
+        return None, None 
 
     user_env_map = {'OS_USERNAME': 'username',
                     'OS_PASSWORD': 'password',
@@ -1142,7 +1139,8 @@ def get_auth_token_and_endpoint(region_name):
                     'OS_PROJECT_DOMAIN_NAME': 'project_domain_name'}
 
     for k, v in user_env_map.items():
-        check_env(k, v)
+        if k not in os.environ:
+            return None, None
 
     user = dict()
     for k, v in user_env_map.items():
@@ -1153,11 +1151,11 @@ def get_auth_token_and_endpoint(region_name):
     try:
         token = auth.get_token(sess)
         endpoint = auth.get_endpoint(sess, service_type='usm',
-                                     interface='internal',
+                                     interface=interface,
                                      region_name=region_name)
     except (exceptions.http.Unauthorized, exceptions.EndpointNotFound) as e:
         print(str(e))
-        exit(-1)
+        return None, None
 
     return token, endpoint
 
@@ -1188,20 +1186,18 @@ def check_for_os_region_name(args):
 
     global VIRTUAL_REGION
     if region != VIRTUAL_REGION:
-        print("Unsupported region name: %s" % region)
-        exit(1)
+        return False
 
     # check it is running on the active controller
     # not able to use sm-query due to it requires sudo
     try:
         subprocess.check_output("pgrep -f dcorch-api-proxy", shell=True)
     except subprocess.CalledProcessError:
-        print("Command must be run from the active controller.")
-        exit(1)
+        return False
 
     # get a token and fetch the internal endpoint in SystemController
     global auth_token
-    auth_token, endpoint = get_auth_token_and_endpoint(region)
+    auth_token, endpoint = get_auth_token_and_endpoint(region, 'internal')
     if endpoint is not None:
         global api_addr
         url = urlparse(endpoint)
@@ -1520,6 +1516,16 @@ def main():
                                                                VIRTUAL_REGION))
         rc = 1
         exit(rc)
+
+    global auth_token
+    if not auth_token:
+        region = os.environ.get("OS_REGION_NAME", None)
+        auth_token, endpoint = get_auth_token_and_endpoint(region, 'public')
+        if endpoint is not None:
+            global api_addr
+            url = urlparse(endpoint)
+            address = format_url_address(url.hostname)
+            api_addr = '{}:{}'.format(address, url.port)
 
     if auth_token is None and os.geteuid() != 0:
         if args.restricted:
