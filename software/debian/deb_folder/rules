@@ -64,6 +64,8 @@ override_dh_install:
 		${ROOT}/etc/logrotate.d/software
 	install -m 755 scripts/deploy-precheck \
 		${ROOT}/usr/sbin/software-deploy/deploy-precheck
+	install -m 755 scripts/software-deploy-start \
+		${ROOT}/usr/sbin/software-deploy/software-deploy-start
 	install -m 444 scripts/upgrade_utils.py \
 		${ROOT}/usr/sbin/software-deploy/upgrade_utils.py
 	install -m 755 scripts/prep-data-migration \
