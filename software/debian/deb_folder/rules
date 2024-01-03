@@ -14,6 +14,7 @@ export METADATA_FILE="starlingx-${PLATFORM_RELEASE}.0-metadata.xml"
 override_dh_auto_build:
 	cp service-files/starlingx-GA-metadata.xml ${METADATA_FILE}
 	sed -i "s/xxxPLATFORM_RELEASExxx/${PLATFORM_RELEASE}/g" ${METADATA_FILE}
+	sed -i "s/xxxPLATFORM_RELEASExxx/${PLATFORM_RELEASE}/g" software/utilities/constants.py
 
 override_dh_install:
 	python3 setup.py install -f --install-layout=deb --root=$(ROOT)
