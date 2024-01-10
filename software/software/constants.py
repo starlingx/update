@@ -91,7 +91,8 @@ DEPLOYMENT_STATE_INACTIVE = "Inactive"
 DEPLOYMENT_STATE_PRESTAGING = "Prestaging"
 DEPLOYMENT_STATE_PRESTAGED = "Prestaged"
 
-UPGRADE_FEED_DIR = "/var/www/pages/feed/"
+FEED_DIR = "/var/www/pages/feed/"
+UPGRADE_FEED_DIR = FEED_DIR
 TMP_DIR = "/tmp"
 OSTREE_REPO = 'ostree_repo'
 

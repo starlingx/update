@@ -29,10 +29,10 @@ from software.exceptions import ReleaseUploadFailure
 from software.exceptions import ReleaseValidationFailure
 from software.exceptions import ReleaseMismatchFailure
 from software.exceptions import SoftwareFail
-from software.exceptions import SysinvClientNotInitialized
 
 import software.constants as constants
 import software.utils as utils
+from software.sysinv_utils import get_sysinv_client
 
 
 try:
@@ -1049,52 +1049,12 @@ def read_upgrade_support_versions(mounted_dir):
     return to_release, supported_from_releases
 
 
-def get_endpoints_token(config=None, service_type="platform"):
-    try:
-        if not config:
-            keystone_conf = CONF.get('keystone_authtoken')
-        else:
-            keystone_conf = config
-        user = {
-            'auth_url': keystone_conf["auth_url"] + '/v3',
-            'username': keystone_conf["username"],
-            'password': keystone_conf["password"],
-            'project_name': keystone_conf["project_name"],
-            'user_domain_name': keystone_conf["user_domain_name"],
-            'project_domain_name': keystone_conf["project_domain_name"],
-        }
-        region_name = keystone_conf["region_name"]
-        token, endpoint = utils.get_auth_token_and_endpoint(user=user,
-                                                            service_type=service_type,
-                                                            region_name=region_name,
-                                                            interface='public')
-        return token, endpoint
-    except Exception as e:
-        LOG.error("Failed to get '%s' endpoint. Error: %s", service_type, str(e))
-        return None, None
-
-
-def get_sysinv_client(token, endpoint):
-    try:
-        from cgtsclient import client
-        sysinv_client = client.Client(version='1', endpoint=endpoint, token=token, timeout=600)
-        return sysinv_client
-    except ImportError:
-        msg = "Failed to import cgtsclient"
-        LOG.exception(msg)
-        raise ImportError(msg)
-    except Exception as e:
-        msg = "Failed to get sysinv client. Error: %s" % str(e)
-        LOG.exception(msg)
-        raise SysinvClientNotInitialized(msg)
-
-
 def collect_current_load_for_hosts():
     load_data = {
         "current_loads": []
     }
     try:
-        token, endpoint = get_endpoints_token()
+        token, endpoint = utils.get_endpoints_token()
         sysinv_client = get_sysinv_client(token=token, endpoint=endpoint)
         host_list = sysinv_client.ihost.list()
         for ihost in host_list:
