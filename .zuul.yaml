@@ -33,14 +33,14 @@
 - job:
     name: py3-bandit
     parent: tox
-    nodeset: ubuntu-focal
+    nodeset: debian-bullseye
     vars:
       tox_envlist: bandit
 
 - job:
     name: py3-flake8
     parent: tox
-    nodeset: ubuntu-bionic
+    nodeset: debian-bullseye
     required-projects:
       - starlingx/config
       - starlingx/fault
