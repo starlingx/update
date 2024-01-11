@@ -1338,6 +1338,11 @@ class PatchController(PatchService):
                     LOG.exception(msg)
                     raise OSTreeTarFail(msg)
 
+            package_repo_dir = "%s/rel-%s" % (constants.PACKAGE_FEED_DIR, release_sw_version)
+            packages = self.release_data.metadata[release_id].get("packages")
+            if packages:
+                apt_utils.package_remove(package_repo_dir, packages)
+
             # Delete upgrade iso file in folder
             # TODO(heitormatsui): treat the prepatched iso scenario
             metadata_file = "%s-metadata.xml" % release_id

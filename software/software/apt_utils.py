@@ -40,6 +40,34 @@ def package_upload(feed_dir, package):
         raise APTOSTreeCommandFail(msg)
 
 
+def package_remove(feed_dir, packages):
+    """
+    Remove a list of Debian packages from the
+    apt repository.
+
+    :param feed_dir: apt package feed directory
+    :param package: Debian package
+    """
+    try:
+        for package in packages:
+            msg  = "Removing package: %s" % package
+            LOG.info(msg)
+
+            subprocess.run(
+                ["apt-ostree", "repo", "remove",
+                "--feed", str(feed_dir),
+                "--release", constants.DEBIAN_RELEASE,
+                package],
+                check=True,
+                capture_outptu=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to remove package."
+        info_msg = "\"apt-ostree repo remove\" error: return code %s , Output: %s" \
+                % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.error(info_msg)
+        raise APTOSTreeCommandFail(msg)
+
+
 def run_install(repo_dir, packages):
     """
     Run Debian package upgrade.
