@@ -17,6 +17,11 @@ class SoftwareError(Exception):
         return self.message or ""
 
 
+class APTOSTreeCommandFail(SoftwareError):
+    """Apt-ostree errror."""
+    pass
+
+
 class MetadataFail(SoftwareError):
     """Metadata error."""
     pass

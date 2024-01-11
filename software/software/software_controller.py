@@ -26,10 +26,12 @@ from wsgiref import simple_server
 
 from oslo_config import cfg as oslo_cfg
 
+import software.apt_utils as apt_utils
 import software.ostree_utils as ostree_utils
 from software.api import app
 from software.authapi import app as auth_app
 from software.base import PatchService
+from software.exceptions import APTOSTreeCommandFail
 from software.exceptions import MetadataFail
 from software.exceptions import UpgradeNotSupported
 from software.exceptions import OSTreeCommandFail
@@ -2032,11 +2034,14 @@ class PatchController(PatchService):
         # todo(jcasteli) Remove once the logic to include major release version
         # in release list is implemented
         running_sw_version = "23.09.0"
-        # Commit1 in release metadata.xml file represents the latest commit
-        for release_id in sorted(list(self.release_data.metadata)):
-            if self.latest_feed_commit == self.release_data.contents[release_id]["commit1"]["commit"]:
-                running_sw_version = self.release_data.metadata[release_id]["sw_version"]
-                LOG.info("Running software version: %s", running_sw_version)
+
+        # todo(chuck) Remove once to determine how we are associating a patch
+        # with a release.
+        # release in release metadata.xml file represents the latest commit
+        # for release_id in sorted(list(self.release_data.metadata)):
+        #    if SW_VERSION == self.release_data.contents[release_id]["release"]:
+        #        running_sw_version = self.release_data.metadata[release_id]["sw_version"]
+        #        LOG.info("Running software version: %s", running_sw_version)
 
         higher = utils.compare_release_version(self.release_data.metadata[deployment]["sw_version"],
                                                running_sw_version)
@@ -2090,6 +2095,12 @@ class PatchController(PatchService):
                 LOG.info(msg)
                 audit_log_info(msg)
 
+                packages = self.release_data.metadata[release].get("packages")
+                if packages is None:
+                    msg = "Unable to determine pckages to install"
+                    LOG.error(msg)
+                    raise MetadataFail(msg)
+
                 if self.release_data.metadata[release]["state"] != constants.AVAILABLE \
                    or self.release_data.metadata[release]["state"] == constants.COMMITTED:
                     msg = "%s is already being deployed" % release
@@ -2103,49 +2114,48 @@ class PatchController(PatchService):
                 latest_commit = ""
                 try:
                     latest_commit = ostree_utils.get_feed_latest_commit(release_sw_version)
+                    LOG.info("Latest commit: %s" % latest_commit)
                 except OSTreeCommandFail:
                     LOG.exception("Failure during commit consistency check for %s.", release)
 
-                if self.release_data.contents[release]["base"]["commit"] != latest_commit:
-                    msg = "The base commit %s for %s does not match the latest commit %s " \
-                          "on this system." \
-                          % (self.release_data.contents[release]["base"]["commit"],
-                             release,
-                             latest_commit)
-                    LOG.info(msg)
-                    msg_info += msg + "\n"
-                    continue
-
                 ostree_tar_filename = self.get_ostree_tar_filename(release_sw_version, release)
+                package_repo_dir = "%s/rel-%s" % (constants.PACKAGE_FEED_DIR, release_sw_version)
+                feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, release_sw_version)
 
                 # Create a temporary working directory
                 tmpdir = tempfile.mkdtemp(prefix="deployment_")
 
-                # Save the current directory, so we can chdir back after
-                orig_wd = os.getcwd()
-
-                # Change to the tmpdir
-                os.chdir(tmpdir)
-
                 try:
                     # Extract the software.tar
                     tar = tarfile.open(ostree_tar_filename)
-                    tar.extractall()
-                    feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, release_sw_version)
-                    # Copy extracted folders of software.tar to the feed ostree repo
-                    shutil.copytree(tmpdir, feed_ostree, dirs_exist_ok=True)
+                    tar.extractall(path=tmpdir)
                 except tarfile.TarError:
                     msg = "Failed to extract the ostree tarball for %s" % release
                     LOG.exception(msg)
                     raise OSTreeTarFail(msg)
-                except shutil.Error:
-                    msg = "Failed to copy the ostree tarball for %s" % release
+
+                # Upload the package to the package feed.
+                try:
+                    deb_dir = os.scandir(tmpdir)
+                    for deb in deb_dir:
+                        apt_utils.package_upload(package_repo_dir,
+                                                 os.path.join(tmpdir, deb.name))
+                except OSError as e:
+                    msg = "Failed to scan %s for Debian packages. Error: %s" \
+                        % (package_repo_dir, e.errno)
                     LOG.exception(msg)
                     raise OSTreeTarFail(msg)
                 finally:
-                    # Change back to original working dir
-                    os.chdir(orig_wd)
                     shutil.rmtree(tmpdir, ignore_errors=True)
+
+                try:
+                    apt_utils.run_install(feed_ostree, packages)
+                except APTOSTreeCommandFail:
+                    LOG.exception("Failed to intall Debian package.")
+                    raise APTOSTreeCommandFail(msg)
+
+                # Update the feed ostree summary
+                ostree_utils.update_repo_summary_file(feed_ostree)
 
                 try:
                     # Move the release metadata to deploying dir
@@ -2167,9 +2177,8 @@ class PatchController(PatchService):
                 else:
                     self.release_data.metadata[release]["state"] = constants.UNKNOWN
 
-                # Commit1 in release metadata.xml file represents the latest commit
-                # after this release has been applied to the feed repo
-                self.latest_feed_commit = self.release_data.contents[release]["commit1"]["commit"]
+                # Get the latest commit after performing "apt-ostree install".
+                self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
 
                 with self.hosts_lock:
                     self.interim_state[release] = list(self.hosts)
