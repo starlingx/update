@@ -18,7 +18,6 @@ import sh
 import shutil
 import socket
 import subprocess
-import tarfile
 import tempfile
 import threading
 import time
@@ -1134,6 +1133,7 @@ class PatchController(PatchService):
                                                                metadata_only=True,
                                                                existing_content=self.release_data.contents[release_id],
                                                                base_pkgdata=self.base_pkgdata)
+                        PatchFile.unpack_patch(patch_file)
                         self.release_data.update_release(this_release)
                         msg = "%s is already uploaded. Updated metadata only" % release_id
                         LOG.info(msg)
@@ -1157,6 +1157,7 @@ class PatchController(PatchService):
                     this_release = PatchFile.extract_patch(patch_file,
                                                            metadata_dir=constants.AVAILABLE_DIR,
                                                            base_pkgdata=self.base_pkgdata)
+                    PatchFile.unpack_patch(patch_file)
 
                     local_info += "%s is now uploaded\n" % release_id
                     self.release_data.add_release(this_release)
@@ -2124,35 +2125,7 @@ class PatchController(PatchService):
                 except OSTreeCommandFail:
                     LOG.exception("Failure during commit consistency check for %s.", release)
 
-                ostree_tar_filename = self.get_ostree_tar_filename(release_sw_version, release)
-                package_repo_dir = "%s/rel-%s" % (constants.PACKAGE_FEED_DIR, release_sw_version)
                 feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, release_sw_version)
-
-                # Create a temporary working directory
-                tmpdir = tempfile.mkdtemp(prefix="deployment_")
-
-                try:
-                    # Extract the software.tar
-                    tar = tarfile.open(ostree_tar_filename)
-                    tar.extractall(path=tmpdir)
-                except tarfile.TarError:
-                    msg = "Failed to extract the ostree tarball for %s" % release
-                    LOG.exception(msg)
-                    raise OSTreeTarFail(msg)
-
-                # Upload the package to the package feed.
-                try:
-                    deb_dir = os.scandir(tmpdir)
-                    for deb in deb_dir:
-                        apt_utils.package_upload(package_repo_dir,
-                                                 os.path.join(tmpdir, deb.name))
-                except OSError as e:
-                    msg = "Failed to scan %s for Debian packages. Error: %s" \
-                        % (package_repo_dir, e.errno)
-                    LOG.exception(msg)
-                    raise OSTreeTarFail(msg)
-                finally:
-                    shutil.rmtree(tmpdir, ignore_errors=True)
 
                 try:
                     apt_utils.run_install(feed_ostree, packages)

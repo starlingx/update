@@ -21,10 +21,12 @@ from oslo_config import cfg as oslo_cfg
 from lxml import etree as ElementTree
 from xml.dom import minidom
 
+import software.apt_utils as apt_utils
 from software.release_verify import verify_files
 from software.release_verify import cert_type_all
 from software.release_signing import sign_files
 from software.exceptions import MetadataFail
+from software.exceptions import OSTreeTarFail
 from software.exceptions import ReleaseUploadFailure
 from software.exceptions import ReleaseValidationFailure
 from software.exceptions import ReleaseMismatchFailure
@@ -908,6 +910,51 @@ class PatchFile(object):
 
         return thispatch
 
+    @staticmethod
+    def unpack_patch(patch):
+        """Extract patch and upload Debian package to the repository.
+        :param patch: Patch file
+        :param metadata_dir: Directory to store the metadata XML file
+        """
+        thispatch = None
+
+        # Load the patch
+        abs_patch = os.path.abspath(patch)
+        PatchFile.read_patch(abs_patch)
+        thispatch = ReleaseData()
+        patch_id = thispatch.parse_metadata("metadata.xml")
+
+        patch_sw_version = utils.get_major_release_version(
+                thispatch.metadata[patch_id]["sw_version"])
+        abs_ostree_tar_dir = package_dir[patch_sw_version]
+        ostree_tar_filename = "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id)
+        package_repo_dir = "%s/rel-%s" % (constants.PACKAGE_FEED_DIR, patch_sw_version)
+
+        # Create a temporary working directory
+        tmpdir = tempfile.mkdtemp(prefix="deployment_")
+
+        try:
+            # Extract the software.tar
+            tar = tarfile.open(ostree_tar_filename)
+            tar.extractall(path=tmpdir)
+
+            # Upload the package to the apt repository
+            deb_dir = os.scandir(tmpdir)
+            for deb in deb_dir:
+                apt_utils.package_upload(package_repo_dir,
+                        os.path.join(tmpdir, deb.name))
+        except tarfile.TarError:
+            msg = "Failed to extract the ostree tarball for %s" \
+                    % patch_sw_version
+            LOG.exception(msg)
+            raise OSTreeTarFail(msg)
+        except OSError as e:
+            msg = "Failed to scan %s for Debian packages. Error: %s" \
+                     % (package_repo_dir, e.errno)
+            LOG.exception(msg)
+            raise OSTreeTarFail(msg)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 def patch_build():
     configure_logging(logtofile=False)
