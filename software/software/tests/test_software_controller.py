@@ -32,7 +32,9 @@ class TestSoftwareController(unittest.TestCase):
     @patch('software.software_controller.shutil.copytree')
     @patch('software.software_controller.parse_release_metadata')
     @patch('software.software_controller.unmount_iso_load')
+    @patch('software.software_controller.PatchController.major_release_upload_check')
     def test_process_upload_upgrade_files(self,
+                                          mock_major_release_upload_check,
                                           mock_unmount_iso_load,
                                           mock_parse_release_metadata,
                                           mock_copytree,  # pylint: disable=unused-argument
@@ -47,6 +49,7 @@ class TestSoftwareController(unittest.TestCase):
         controller.release_data = MagicMock()
 
         # Mock the return values of the mocked functions
+        mock_major_release_upload_check.return_value = True
         mock_verify_files.return_value = True
         mock_mount_iso_load.return_value = '/test/iso'
         mock_read_upgrade_support_versions.return_value = (
@@ -86,7 +89,9 @@ class TestSoftwareController(unittest.TestCase):
     @patch('software.software_controller.verify_files')
     @patch('software.software_controller.mount_iso_load')
     @patch('software.software_controller.unmount_iso_load')
+    @patch('software.software_controller.PatchController.major_release_upload_check')
     def test_process_upload_upgrade_files_invalid_signature(self,
+                                                            mock_major_release_upload_check,
                                                             mock_unmount_iso_load,  # pylint: disable=unused-argument
                                                             mock_mount_iso_load,
                                                             mock_verify_files,
@@ -97,6 +102,7 @@ class TestSoftwareController(unittest.TestCase):
         # Mock the return values of the mocked functions
         mock_verify_files.return_value = False
         mock_mount_iso_load.return_value = '/test/iso'
+        mock_major_release_upload_check.return_value = True
 
         # Call the function being tested
         with patch('software.software_controller.SW_VERSION', '1.0'):
@@ -111,13 +117,16 @@ class TestSoftwareController(unittest.TestCase):
     @patch('software.software_controller.PatchController.__init__', return_value=None)
     @patch('software.software_controller.verify_files',
            side_effect=ReleaseValidationFailure('Invalid signature file'))
+    @patch('software.software_controller.PatchController.major_release_upload_check')
     def test_process_upload_upgrade_files_validation_error(self,
+                                                           mock_major_release_upload_check,
                                                            mock_verify_files,
                                                            mock_init):  # pylint: disable=unused-argument
         controller = PatchController()
         controller.release_data = MagicMock()
 
         mock_verify_files.return_value = False
+        mock_major_release_upload_check.return_value = True
 
         # Call the function being tested
         info, warning, error, _ = controller._process_upload_upgrade_files(self.upgrade_files,  # pylint: disable=protected-access
