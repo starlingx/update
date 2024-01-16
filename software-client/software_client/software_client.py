@@ -377,8 +377,8 @@ def release_upload_req(args):
     # Validate all the files
     valid_files = [os.path.abspath(software_file) for software_file in releases if os.path.isfile(
         software_file) and os.path.splitext(software_file)[1] in constants.SUPPORTED_UPLOAD_FILE_EXT]
-    invalid_files = [software_file for software_file in releases
-                     if software_file not in valid_files]
+    invalid_files = [os.path.abspath(software_file) for software_file in releases
+                     if os.path.abspath(software_file) not in valid_files]
 
     for software_file in invalid_files:
         if os.path.isdir(software_file):
