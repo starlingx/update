@@ -96,13 +96,17 @@ sudo cp /etc/kubernetes/admin.conf ${rootdir}/etc/kubernetes/
 DATA_PREP_SCRIPT="/usr/sbin/software-deploy/prep-data-migration"
 # OS_AUTH_URL, OS_USERNAME, OS_PASSWORD, OS_PROJECT_NAME, OS_USER_DOMAIN_NAME,
 # OS_PROJECT_DOMAIN_NAME, OS_REGION_NAME are in env variables.
-cmd_line=${DATA_PREP_SCRIPT}
-cmd_line+=" --rootdir=${rootdir} --from_release=${from_ver} --to_release=${to_ver}"
+cmd_line=" --rootdir=${rootdir} --from_release=${from_ver} --to_release=${to_ver}"
 cmd_line+=" --auth_url=${OS_AUTH_URL} --username=${OS_USERNAME} --password=${OS_PASSWORD}"
 cmd_line+=" --project_name=${OS_PROJECT_NAME} --user_domain_name=${OS_USER_DOMAIN_NAME}"
 cmd_line+=" --project_domain_name=${OS_PROJECT_DOMAIN_NAME} --region_name=${OS_REGION_NAME}"
+prep_cmd="${DATA_PREP_SCRIPT} ${cmd_line}"
 
-${cmd_line} || handle_error $? "Failed to extract data for migration"
+${prep_cmd} || handle_error $? "Failed to extract data for migration"
 
 sudo chroot ${rootdir} /usr/sbin/software-deploy/create_postgresql_database.sh ${port} || handle_error $? "Failed to start 2nd instance of postgresql"
 sudo chroot ${rootdir} /usr/bin/software-migrate ${from_ver} ${to_ver} ${port} || handle_error $? "Failed to migrate data"
+
+SYNC_CONTROLLERS_SCRIPT="/usr/sbin/software-deploy/sync-controllers-feed"
+sync_controllers_cmd="${SYNC_CONTROLLERS_SCRIPT} ${cmd_line} --feed=${feed}"
+${sync_controllers_cmd} || handle_error $? "Failed to sync feeds"
