@@ -33,6 +33,7 @@ from software.constants import DEPLOY_STATES
 from software.base import PatchService
 from software.exceptions import APTOSTreeCommandFail
 from software.db import api as db_api
+from software.exceptions import InternalError
 from software.exceptions import MetadataFail
 from software.exceptions import UpgradeNotSupported
 from software.exceptions import OSTreeCommandFail
@@ -43,6 +44,7 @@ from software.exceptions import ReleaseInvalidRequest
 from software.exceptions import ReleaseValidationFailure
 from software.exceptions import ReleaseMismatchFailure
 from software.exceptions import ReleaseIsoDeleteFailure
+from software.release_data import SWReleaseCollection
 from software.software_functions import collect_current_load_for_hosts
 from software.software_functions import parse_release_metadata
 from software.software_functions import configure_logging
@@ -652,6 +654,13 @@ class PatchController(PatchService):
             self.read_state_file()
         else:
             self.write_state_file()
+
+    @property
+    def release_collection(self):
+        # for this stage, the SWReleaseCollection behaves as a broker which
+        # does not hold any release data. it only last one request
+        swrc = SWReleaseCollection(self.release_data)
+        return swrc
 
     def update_config(self):
         cfg.read_config()
@@ -2035,12 +2044,15 @@ class PatchController(PatchService):
                 ret["error"] += "Please fix above issues then retry the deploy.\n"
                 return ret
 
-            collect_current_load_for_hosts()
             if self._deploy_upgrade_start(to_release):
                 collect_current_load_for_hosts()
                 dbapi = db_api.get_instance()
                 dbapi.create_deploy(SW_VERSION, to_release, True)
                 dbapi.update_deploy(DEPLOY_STATES.DATA_MIGRATION)
+                sw_rel = self.release_collection.get_release_by_id(deployment)
+                if sw_rel is None:
+                    raise InternalError("%s cannot be found" % to_release)
+                sw_rel.update_state(constants.DEPLOYING)
                 msg_info = "Deployment for %s started" % deployment
             else:
                 msg_error = "Deployment for %s failed to start" % deployment

@@ -117,6 +117,19 @@ class ReleaseVersionDoNotExist(SoftwareError):
     pass
 
 
+class FileSystemError(SoftwareError):
+    """
+    A failure during a linux file operation.
+    Likely fixable by a root user.
+    """
+    pass
+
+
+class InternalError(Exception):
+    """This is an internal error aka bug"""
+    pass
+
+
 class SoftwareServiceError(Exception):
     """
     This is a service error, such as file system issue or configuration
