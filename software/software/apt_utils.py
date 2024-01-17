@@ -59,7 +59,7 @@ def package_remove(feed_dir, packages):
                 "--release", constants.DEBIAN_RELEASE,
                 package],
                 check=True,
-                capture_outptu=True)
+                capture_output=True)
     except subprocess.CalledProcessError as e:
         msg = "Failed to remove package."
         info_msg = "\"apt-ostree repo remove\" error: return code %s , Output: %s" \
