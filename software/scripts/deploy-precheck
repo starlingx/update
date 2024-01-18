@@ -3,7 +3,7 @@
 #
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 #
-# Copyright (c) 2023 Wind River Systems, Inc.
+# Copyright (c) 2023-2024 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -78,9 +78,9 @@ class UpgradeHealthCheck(HealthCheck):
 
     # TODO(heitormatsui): implement patch precheck targeted against USM
     #  and implement patch precheck for subcloud
-    def _check_required_patch(self, release, required_patch):
+    def _check_required_patch(self, required_patch):
         """Checks if required patch for the supported release is installed"""
-        url = self._software_endpoint + '/query?show=applied&release=%s' % release
+        url = self._software_endpoint + '/query?show=deployed'
         headers = {"X-Auth-Token": self._software_token}
         response = requests.get(url, headers=headers, timeout=10)
 
@@ -161,7 +161,7 @@ class UpgradeHealthCheck(HealthCheck):
 
         # check if required patches are applied/committed if is a valid upgrade path
         if success:
-            success, missing_patches = self._check_required_patch(active_release, required_patch)
+            success, missing_patches = self._check_required_patch(required_patch)
             output += 'Required patches are applied: [%s]\n' \
                       % (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
             if not success:
@@ -174,19 +174,17 @@ class UpgradeHealthCheck(HealthCheck):
 
         # check k8s version is the latest available
         success, active_version, latest_version = self._check_kube_version()
-        if success:
-            output += 'Active kubernetes version is the latest supported version: [%s]\n' \
-                      % (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
-        else:
-            if active_version:
-                output += 'Upgrade kubernetes to the latest version: [%s]. ' \
-                          'See "system kube-version-list"\n' % latest_version
-            else:
-                output += 'Failed to get version info. Upgrade kubernetes to' \
-                          ' the latest version (%s) and ensure that the ' \
-                          'kubernetes  version information is available in ' \
-                          ' the kubeadm configmap.\n' \
-                          'Also see "system kube-version-list"\n' % latest_version
+        output += 'Active kubernetes version is the latest supported version: [%s]\n' \
+                  % (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
+        if not active_version:
+            output += '-> Failed to get version info. Upgrade kubernetes to ' \
+                      'the latest version (%s) and ensure that the ' \
+                      'kubernetes version information is available in ' \
+                      'the kubeadm configmap.\n' \
+                      'See "system kube-version-list"\n' % latest_version
+        elif active_version != latest_version:
+            output += '-> Upgrade active kubernetes version [%s] to the latest version: [%s]. ' \
+                      'See "system kube-version-list"\n' % (active_version, latest_version)
 
         health_ok = health_ok and success
 
