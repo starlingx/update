@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023 Wind River Systems, Inc.
+Copyright (c) 2023-2024 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -2023,7 +2023,7 @@ class PatchController(PatchService):
 
         if utils.is_upgrade_deploy(SW_VERSION, release["sw_version"]):
             to_release = release["sw_version"]
-            ret = self._do_deploy_precheck(to_release, force)
+            ret = self._deploy_precheck(to_release, force)
             if ret["error"]:
                 ret["error"] = "The following issues have been detected which prevent " \
                                "deploying %s\n" % deployment + \
