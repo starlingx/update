@@ -1860,6 +1860,37 @@ class PatchController(PatchService):
                         msg = "Failed to delete the restart script for %s" % patch_id
                         LOG.exception(msg)
 
+    def _release_basic_checks(self, deployment):
+        """
+        Does basic sanity checks on the release data
+        :param deployment: release to be checked
+        :return: release dict (if exists),
+                 bool with success output,
+                 strings with info, warning and error messages
+        """
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
+        success = True
+
+        # We need to verify that the software release exists
+        release = self.release_data.metadata.get(deployment, None)
+        if not release:
+            msg = "Software release version corresponding to the specified release " \
+                  "%s does not exist." % deployment
+            LOG.error(msg)
+            msg_error += msg + " Try deleting and re-uploading the software for recovery."
+            success = False
+
+        # Check if release state is valid
+        elif release["state"] not in [constants.AVAILABLE]:
+            msg = "Software release state is invalid: %s" % release["state"]
+            LOG.error(msg)
+            msg_error += msg
+            success = False
+
+        return release, success, msg_info, msg_warning, msg_error
+
     def _deploy_precheck(self, release_version: str, force: bool, region_name: str = "RegionOne") -> dict:
         """
         Verify if system is capable to upgrade to a specified deployment
@@ -1940,23 +1971,9 @@ class PatchController(PatchService):
         Verify if system is capable to upgrade to a specified deployment
         return: dict of info, warning and error messages
         """
-        msg_info = ""
-        msg_warning = ""
-        msg_error = ""
-
-        # We need to verify that the software release exists
-        release = self.release_data.metadata.get(deployment, None)
-        if not release:
-            msg = "Software release version corresponding to the specified release " \
-                  "%s does not exist. " % deployment
-            LOG.error(msg)
-            msg_error += "Software release version corresponding to the specified " \
-                         "release %s does not exist. " \
-                         "Try deleting and re-uploading the software for " \
-                         "recovery." % deployment
+        release, success, msg_info, msg_warning, msg_error = self._release_basic_checks(deployment)
+        if not success:
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
-        # Check if software release directory location exists
         region_name = kwargs["region_name"]
         release_version = release["sw_version"]
         return self._deploy_precheck(release_version, force, region_name)
@@ -2003,22 +2020,9 @@ class PatchController(PatchService):
         Start deployment by applying the changes to the feed ostree
         return: dict of info, warning and error messages
         """
-        msg_info = ""
-        msg_warning = ""
-        msg_error = ""
+        release, success, msg_info, msg_warning, msg_error = self._release_basic_checks(deployment)
 
-        # TODO(bqian) to create a separate function to check a release is uploaded and
-        # all materials exist. raise proper exception if not.
-        # We need to verify that the software release exists
-        release = self.release_data.metadata.get(deployment, None)
-        if not release:
-            msg = "Software release version corresponding to the specified release " \
-                  "%s does not exist. " % deployment
-            LOG.error(msg)
-            msg_error += "Software release version corresponding to the specified " \
-                         "release %s does not exist. " \
-                         "Try delete and re-upload the software for " \
-                         "recovery." % deployment
+        if not success:
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         if utils.is_upgrade_deploy(SW_VERSION, release["sw_version"]):
