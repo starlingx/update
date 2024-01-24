@@ -918,6 +918,15 @@ class PatchFile(object):
         """
         thispatch = None
 
+        # Create a temporary working directory
+        patch_tmpdir = tempfile.mkdtemp(prefix="patch_")
+
+        # Save the current directory, so we can chdir back after
+        orig_wd = os.getcwd()
+
+        # Change to the tmpdir
+        os.chdir(patch_tmpdir)
+
         # Load the patch
         abs_patch = os.path.abspath(patch)
         PatchFile.read_patch(abs_patch)
@@ -955,6 +964,8 @@ class PatchFile(object):
             raise OSTreeTarFail(msg)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
+            os.chdir(orig_wd)
+            shutil.rmtree(patch_tmpdir)
 
 def patch_build():
     configure_logging(logtofile=False)
