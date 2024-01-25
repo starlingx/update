@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023 Wind River Systems, Inc.
+Copyright (c) 2023-2024 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -934,7 +934,7 @@ class PatchFile(object):
         patch_id = thispatch.parse_metadata("metadata.xml")
 
         patch_sw_version = utils.get_major_release_version(
-                thispatch.metadata[patch_id]["sw_version"])
+            thispatch.metadata[patch_id]["sw_version"])
         abs_ostree_tar_dir = package_dir[patch_sw_version]
         ostree_tar_filename = "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id)
         package_repo_dir = "%s/rel-%s" % (constants.PACKAGE_FEED_DIR, patch_sw_version)
@@ -951,21 +951,22 @@ class PatchFile(object):
             deb_dir = os.scandir(tmpdir)
             for deb in deb_dir:
                 apt_utils.package_upload(package_repo_dir,
-                        os.path.join(tmpdir, deb.name))
+                                         os.path.join(tmpdir, deb.name))
         except tarfile.TarError:
             msg = "Failed to extract the ostree tarball for %s" \
-                    % patch_sw_version
+                  % patch_sw_version
             LOG.exception(msg)
             raise OSTreeTarFail(msg)
         except OSError as e:
             msg = "Failed to scan %s for Debian packages. Error: %s" \
-                     % (package_repo_dir, e.errno)
+                  % (package_repo_dir, e.errno)
             LOG.exception(msg)
             raise OSTreeTarFail(msg)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
             os.chdir(orig_wd)
             shutil.rmtree(patch_tmpdir)
+
 
 def patch_build():
     configure_logging(logtofile=False)

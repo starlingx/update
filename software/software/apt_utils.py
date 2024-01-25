@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023 Wind River Systems, Inc.
+Copyright (c) 2023-2024 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -50,20 +50,20 @@ def package_remove(feed_dir, packages):
     """
     try:
         for package in packages:
-            msg  = "Removing package: %s" % package
+            msg = "Removing package: %s" % package
             LOG.info(msg)
 
             subprocess.run(
                 ["apt-ostree", "repo", "remove",
-                "--feed", str(feed_dir),
-                "--release", constants.DEBIAN_RELEASE,
-                package],
+                 "--feed", str(feed_dir),
+                 "--release", constants.DEBIAN_RELEASE,
+                 package],
                 check=True,
                 capture_output=True)
     except subprocess.CalledProcessError as e:
         msg = "Failed to remove package."
         info_msg = "\"apt-ostree repo remove\" error: return code %s , Output: %s" \
-                % (e.returncode, e.stderr.decode("utf-8"))
+                   % (e.returncode, e.stderr.decode("utf-8"))
         LOG.error(info_msg)
         raise APTOSTreeCommandFail(msg)
 
