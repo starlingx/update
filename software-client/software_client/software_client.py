@@ -283,6 +283,28 @@ def print_release_show_result(req):
         print("An internal error has occurred. Please check /var/log/software.log for details")
 
 
+def _print_result_list(header_data_list, data_list):
+    """
+    Print a list of data in a simple table format
+    :param header_data_list: Array of header data
+    :param data_list: Array of data
+    """
+
+    # Find the longest header string in each column
+    header_lengths = [len(str(x)) for x in header_data_list]
+    # Find the longest content string in each column
+    content_lengths = [max(len(str(x[i])) for x in data_list)
+                       for i in range(len(header_data_list))]
+    # Find the max of the two for each column
+    col_lengths = [(x if x > y else y) for x, y in zip(header_lengths, content_lengths)]
+
+    print('  '.join(f"{x.center(col_lengths[i])}" for i, x in enumerate(header_data_list)))
+    print('  '.join('=' * length for length in col_lengths))
+    for item in data_list:
+        print('  '.join(f"{str(x).center(col_lengths[i])}" for i, x in enumerate(item)))
+    print("\n")
+
+
 def software_command_not_implemented_yet(args):
     print("NOT IMPLEMENTED %s" % args)
     return 1
@@ -415,25 +437,13 @@ def release_upload_req(args):
     else:
         print_software_op_result(req)
         data = json.loads(req.text)
-        data_list = [(k, v["id"], v["sw_version"])
-                     for d in data["upload_info"] for k, v in d.items()]
+        data_list = [(k, v["id"])
+                     for d in data["upload_info"] for k, v in d.items()
+                     if not k.endswith(".sig")]
 
-        header_data_list = ["Uploaded File", "Id", "SW Version"]
+        header_data_list = ["Uploaded File", "Id"]
 
-        # Find the longest header string in each column
-        header_lengths = [len(str(x)) for x in header_data_list]
-        # Find the longest content string in each column
-        content_lengths = [max(len(str(x[i])) for x in data_list)
-                           for i in range(len(header_data_list))]
-        # Find the max of the two for each column
-        col_lengths = [(x if x > y else y) for x, y in zip(header_lengths, content_lengths)]
-
-        print('  '.join(f"{x.center(col_lengths[i])}" for i, x in enumerate(header_data_list)))
-        print('  '.join('=' * length for length in col_lengths))
-        for item in data_list:
-            print('  '.join(f"{str(x).center(col_lengths[i])}" for i, x in enumerate(item)))
-        print("\n")
-
+        _print_result_list(header_data_list, data_list)
     if check_rc(req) != 0:
         # We hit a failure.  Update rc but keep looping
         rc = 1
@@ -577,7 +587,10 @@ def release_list_req(args):
     if args.debug:
         print_result_debug(req)
     else:
-        print_software_op_result(req)
+        header_data_list = ["Release", "RR", "State"]
+        data = json.loads(req.text)
+        data_list = [(k, v["reboot_required"], v["state"]) for k, v in data["sd"].items()]
+        _print_result_list(header_data_list, data_list)
 
     return check_rc(req)
 
@@ -989,9 +1002,11 @@ def deploy_show_req(args):
         # Find the max of the two for each column
         col_lengths = [(x if x > y else y) for x, y in zip(header_lengths, content_lengths)]
 
-        print('  '.join(f"{x.center(col_lengths[i])}" for i, x in enumerate(transposed_data_list[0])))
+        print('  '.join(f"{x.center(col_lengths[i])}" for i,
+              x in enumerate(transposed_data_list[0])))
         print('  '.join('=' * length for length in col_lengths))
-        print('  '.join(f"{x.center(col_lengths[i])}" for i, x in enumerate(transposed_data_list[1])))
+        print('  '.join(f"{x.center(col_lengths[i])}" for i,
+              x in enumerate(transposed_data_list[1])))
 
     return 0
 
