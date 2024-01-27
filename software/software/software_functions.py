@@ -348,7 +348,8 @@ class ReleaseData(object):
                     "summary",
                     "description",
                     "install_instructions",
-                    "restart_script",
+                    "pre_install",
+                    "post_install",
                     "warnings",
                     "apply_active_release_only",
                     "commit"]:
@@ -881,13 +882,16 @@ class PatchFile(object):
             v = "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id)
             LOG.info("software.tar %s" % v)
 
-            # restart_script may not exist in metadata.
-            if thispatch.metadata[patch_id].get("restart_script"):
-                if not os.path.exists(root_scripts_dir):
-                    os.makedirs(root_scripts_dir)
-                restart_script_name = os.path.join(tmpdir, thispatch.metadata[patch_id]["restart_script"])
-                if os.path.isfile(restart_script_name):
-                    shutil.move(restart_script_name, os.path.join(root_scripts_dir, restart_script_name))
+            if not os.path.exists(root_scripts_dir):
+                os.makedirs(root_scripts_dir)
+            if thispatch.metadata[patch_id].get("pre_install"):
+                pre_install_script_name = thispatch.metadata[patch_id]["pre_install"]
+                shutil.move(os.path.join(tmpdir, pre_install_script_name),
+                            "%s/%s" % (root_scripts_dir, pre_install_script_name))
+            if thispatch.metadata[patch_id].get("post_install"):
+                post_install_script_name = thispatch.metadata[patch_id]["post_install"]
+                shutil.move(os.path.join(tmpdir, post_install_script_name),
+                            "%s/%s" % (root_scripts_dir, post_install_script_name))
 
         except tarfile.TarError as te:
             msg = "Extract software failed %s" % str(te)

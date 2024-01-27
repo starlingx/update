@@ -167,8 +167,12 @@ class SWRelease(object):
         return self._get_by_key('packages')
 
     @property
-    def restart_script(self):
-        return self._get_by_key('restart_script')
+    def pre_install(self):
+        return self._get_by_key('pre_install')
+
+    @property
+    def post_install(self):
+        return self._get_by_key('post_install')
 
     @property
     def apply_active_release_only(self):
