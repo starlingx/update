@@ -82,4 +82,6 @@ override_dh_install:
 		${ROOT}/usr/sbin/software-deploy/usm_load_import
 	install -m 755 scripts/sync-controllers-feed \
 		${ROOT}/usr/sbin/software-deploy/sync-controllers-feed
+	install -m 755 scripts/deploy-cleanup \
+		${ROOT}/usr/sbin/software-deploy/deploy-cleanup
 	dh_install
