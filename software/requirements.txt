@@ -14,3 +14,4 @@ PyGObject
 requests_toolbelt
 sh
 WebOb
+WSME>=0.5b2
