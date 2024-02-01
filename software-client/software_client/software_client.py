@@ -283,7 +283,7 @@ def print_release_show_result(req):
         print("An internal error has occurred. Please check /var/log/software.log for details")
 
 
-def _print_result_list(header_data_list, data_list):
+def _print_result_list(header_data_list, data_list, sort_key=0):
     """
     Print a list of data in a simple table format
     :param header_data_list: Array of header data
@@ -300,7 +300,7 @@ def _print_result_list(header_data_list, data_list):
 
     print('  '.join(f"{x.center(col_lengths[i])}" for i, x in enumerate(header_data_list)))
     print('  '.join('=' * length for length in col_lengths))
-    for item in data_list:
+    for item in sorted(data_list, key=lambda d: d[sort_key]):
         print('  '.join(f"{str(x).center(col_lengths[i])}" for i, x in enumerate(item)))
     print("\n")
 
