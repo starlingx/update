@@ -283,12 +283,17 @@ def print_release_show_result(req):
         print("An internal error has occurred. Please check /var/log/software.log for details")
 
 
-def _print_result_list(header_data_list, data_list, sort_key=0):
+def _print_result_list(header_data_list, data_list, has_error, sort_key=0):
     """
     Print a list of data in a simple table format
     :param header_data_list: Array of header data
     :param data_list: Array of data
+    :param has_error: Boolean indicating if the request has error message
+    :param sort_key: Sorting key for the list
     """
+
+    if has_error:
+        return
 
     # Find the longest header string in each column
     header_lengths = [len(str(x)) for x in header_data_list]
@@ -442,8 +447,8 @@ def release_upload_req(args):
                      if not k.endswith(".sig")]
 
         header_data_list = ["Uploaded File", "Id"]
-
-        _print_result_list(header_data_list, data_list)
+        has_error = 'error' in data and data["error"]
+        _print_result_list(header_data_list, data_list, has_error)
     if check_rc(req) != 0:
         # We hit a failure.  Update rc but keep looping
         rc = 1
@@ -590,7 +595,8 @@ def release_list_req(args):
         header_data_list = ["Release", "RR", "State"]
         data = json.loads(req.text)
         data_list = [(k, v["reboot_required"], v["state"]) for k, v in data["sd"].items()]
-        _print_result_list(header_data_list, data_list)
+        has_error = 'error' in data and data["error"]
+        _print_result_list(header_data_list, data_list, has_error)
 
     return check_rc(req)
 
@@ -1147,7 +1153,7 @@ def get_auth_token_and_endpoint(region_name, interface):
     from keystoneauth1 import session
 
     if not region_name:
-        return None, None 
+        return None, None
 
     user_env_map = {'OS_USERNAME': 'username',
                     'OS_PASSWORD': 'password',
