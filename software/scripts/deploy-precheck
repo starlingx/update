@@ -25,6 +25,16 @@ from lxml import etree as ElementTree
 import upgrade_utils
 
 
+# TODO(heitormatsui) keep updated for every release
+SUPPORTED_K8S_VERSIONS = [
+    "v1.24.4",
+    "v1.25.3",
+    "v1.26.1",
+    "v1.27.5",
+    "v1.28.4",
+]
+
+
 class HealthCheck(object):
     """This class represents a general health check object
     that uses sysinv-client to run system health checks"""
@@ -56,6 +66,7 @@ class HealthCheck(object):
 class UpgradeHealthCheck(HealthCheck):
     """This class represents a upgrade-specific health check object
     that verifies if system is in a valid state for upgrade"""
+
     def _check_valid_upgrade_path(self):
         """Checks if active release to specified release is a valid upgrade path"""
         # Get active release
@@ -124,18 +135,18 @@ class UpgradeHealthCheck(HealthCheck):
                 return False
         return True
 
-    def _check_kube_version(self):
-        """Check if active k8s version is the latest available"""
+    def _check_kube_version(self, supported_versions):
+        """Check if active k8s version is in a list of supported versions
+           :param supported_versions: list of supported k8s versions
+        """
         kube_versions = self._sysinv_client.kube_version.list()
-
         active_version = None
-        latest_version = kube_versions[-1].version
         for kv in kube_versions:
             if kv.state == "active":
                 active_version = kv.version
                 break
-        success = active_version == latest_version
-        return success, active_version, latest_version
+        success = active_version in supported_versions
+        return success, active_version
 
     def run_health_check(self):
         """Run specific upgrade health checks"""
@@ -172,20 +183,20 @@ class UpgradeHealthCheck(HealthCheck):
         else:
             output += 'Invalid upgrade path, skipping required patches check...'
 
-        # check k8s version is the latest available
-        success, active_version, latest_version = self._check_kube_version()
-        output += 'Active kubernetes version is the latest supported version: [%s]\n' \
-                  % (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
-        if not active_version:
-            output += '-> Failed to get version info. Upgrade kubernetes to ' \
-                      'the latest version (%s) and ensure that the ' \
-                      'kubernetes version information is available in ' \
-                      'the kubeadm configmap.\n' \
-                      'See "system kube-version-list"\n' % latest_version
-        elif active_version != latest_version:
-            output += '-> Upgrade active kubernetes version [%s] to the latest version: [%s]. ' \
-                      'See "system kube-version-list"\n' % (active_version, latest_version)
+        # check if k8s version is valid
+        success, active_version = self._check_kube_version(SUPPORTED_K8S_VERSIONS)
+        output += 'Active kubernetes version [%s] is a valid supported version: [%s]\n' \
+                  % (active_version, HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
 
+        if not active_version:
+            output += ('-> Failed to get version info. Upgrade kubernetes to one of the '
+                       'supported versions [%s] and ensure that the kubernetes version '
+                       'information is available in the kubeadm configmap.\n'
+                       'See "system kube-version-list"\n' % ", ".join(SUPPORTED_K8S_VERSIONS))
+        elif not success:
+            output += ('-> Upgrade active kubernetes version [%s] to one of the '
+                       'supported versions [%s]. See "system kube-version-list"\n' %
+                       (active_version, ", ".join(SUPPORTED_K8S_VERSIONS)))
         health_ok = health_ok and success
 
         # TODO(heitormatsui) Do we need the following check on USM?
