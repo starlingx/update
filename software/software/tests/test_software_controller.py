@@ -1,12 +1,13 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# Copyright (c) 2023 Wind River Systems, Inc.
+# Copyright (c) 2023-2024 Wind River Systems, Inc.
 #
 from software.software_controller import PatchController
 from software.software_controller import ReleaseValidationFailure
 import unittest
 from unittest.mock import MagicMock
+from unittest.mock import mock_open
 from unittest.mock import patch
 from software import constants
 
@@ -127,3 +128,64 @@ class TestSoftwareController(unittest.TestCase):
         self.assertEqual(info, '')
         self.assertEqual(warning, '')
         self.assertEqual(error, 'Upgrade file signature verification failed\n')
+
+    @patch('software.software_controller.os.path.isfile')
+    @patch('software.software_controller.json.load')
+    @patch('software.software_controller.open', new_callable=mock_open)
+    def test_in_sync_controller_api_files_identical(self,
+                                                    mock_dummy,  # pylint: disable=unused-argument
+                                                    mock_json_load,
+                                                    mock_isfile):
+        controller = PatchController()
+
+        # Test when both files exist and are identical
+        mock_isfile.side_effect = [True, True]
+        mock_json_load.side_effect = [{'key': 'value'}, {'key': 'value'}]
+        result = controller.in_sync_controller_api()
+        self.assertEqual(result, {"in_sync": True})
+
+    @patch('software.software_controller.os.path.isfile')
+    @patch('software.software_controller.json.load')
+    @patch('software.software_controller.open', new_callable=mock_open)
+    def test_in_sync_controller_api_files_not_identical(self,
+                                                        mock_dummy,  # pylint: disable=unused-argument
+                                                        mock_json_load,
+                                                        mock_isfile):
+        controller = PatchController()
+
+        # Test when both files exist and are not identical
+        mock_isfile.side_effect = [True, True]
+        mock_json_load.side_effect = [{'key': 'value1'}, {'key': 'value2'}]
+        result = controller.in_sync_controller_api()
+        self.assertEqual(result, {"in_sync": False})
+
+    @patch('software.software_controller.os.path.isfile')
+    @patch('software.software_controller.json.load')
+    @patch('software.software_controller.open', new_callable=mock_open)
+    def test_in_sync_controller_api_files_not_exist(self,
+                                                    mock_dummy,  # pylint: disable=unused-argument
+                                                    mock_json_load,  # pylint: disable=unused-argument
+                                                    mock_isfile):
+        controller = PatchController()
+
+        # Test when neither file exists
+        mock_isfile.side_effect = [False, False]
+        result = controller.in_sync_controller_api()
+        self.assertEqual(result, {"in_sync": True})
+
+    @patch('software.software_controller.os.path.isfile')
+    @patch('software.software_controller.json.load')
+    @patch('software.software_controller.open', new_callable=mock_open)
+    def test_in_sync_controller_api_one_file_exist(self,
+                                                   mock_dummy,  # pylint: disable=unused-argument
+                                                   mock_json_load,  # pylint: disable=unused-argument
+                                                   mock_isfile):
+        controller = PatchController()
+
+        # Test when only one file exists
+        mock_isfile.side_effect = [True, False]
+        result = controller.in_sync_controller_api()
+        self.assertEqual(result, {"in_sync": False})
+        mock_isfile.side_effect = [False, True]
+        result = controller.in_sync_controller_api()
+        self.assertEqual(result, {"in_sync": False})
