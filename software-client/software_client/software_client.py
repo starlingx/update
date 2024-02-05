@@ -295,6 +295,9 @@ def _print_result_list(header_data_list, data_list, has_error, sort_key=0):
     if has_error:
         return
 
+    if data_list is None or len(data_list) == 0:
+        return
+
     # Find the longest header string in each column
     header_lengths = [len(str(x)) for x in header_data_list]
     # Find the longest content string in each column
