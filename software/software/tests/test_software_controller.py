@@ -74,7 +74,7 @@ class TestSoftwareController(unittest.TestCase):
         # Verify that the expected messages were returned
         self.assertEqual(
             info,
-            'iso and signature files uploaded completed\nImporting iso is in progress\nLoad import successful')
+            'iso and signature files upload completed\nImporting iso is in progress\nLoad import successful')
         self.assertEqual(warning, '')
         self.assertEqual(error, '')
         self.assertEqual(

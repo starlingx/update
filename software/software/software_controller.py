@@ -1001,7 +1001,7 @@ class PatchController(PatchService):
                                 upgrade_files[constants.SIG_EXTENSION]):
                 raise ReleaseValidationFailure("Invalid signature file")
 
-            msg = ("iso and signature files uploaded completed\n"
+            msg = ("iso and signature files upload completed\n"
                    "Importing iso is in progress\n")
             LOG.info(msg)
             local_info += msg

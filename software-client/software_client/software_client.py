@@ -868,16 +868,25 @@ def release_upload_dir_req(args):
 
     # Find all files that need to be uploaded in given directories
     for release_dir in release_dirs:
-        raw_files = [f for f in os.listdir(release_dir)
-                     if os.path.isfile(os.path.join(release_dir, f))]
+        if os.path.isdir(release_dir):
+            raw_files = [f for f in os.listdir(release_dir)
+                         if os.path.isfile(os.path.join(release_dir, f))]
 
-        # Get absolute path of files
-        raw_files = [os.path.abspath(os.path.join(release_dir, f)) for f in raw_files]
+            # Get absolute path of files
+            raw_files = [os.path.abspath(os.path.join(release_dir, f)) for f in raw_files]
+        else:
+            print("Skipping invalid directory: %s" % release_dir, file=sys.stderr)
+
+    if len(raw_files) == 0:
+        print("No file to upload")
+        return 0
 
     for software_file in sorted(set(raw_files)):
         _, ext = os.path.splitext(software_file)
         if ext in constants.SUPPORTED_UPLOAD_FILE_EXT:
             to_upload_files[software_file] = (software_file, open(software_file, 'rb'))
+        else:
+            print("Skipping unsupported file: %s" % software_file, file=sys.stderr)
 
     encoder = MultipartEncoder(fields=to_upload_files)
     url = "http://%s/v1/software/upload" % api_addr
