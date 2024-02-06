@@ -41,6 +41,9 @@ def load_import(from_release, to_release, iso_mount_dir):
         # Copy the iso file to /var/www/pages/feed/rel-<release>
         os.makedirs(FEED_OSTREE_BASE_DIR, exist_ok=True)
         to_release_feed_dir = os.path.join(FEED_OSTREE_BASE_DIR, ("rel-%s" % to_release))
+        if os.path.exists(to_release_feed_dir):
+            shutil.rmtree(to_release_feed_dir)
+            LOG.info("Removed existing %s", to_release_feed_dir)
         os.makedirs(to_release_feed_dir, exist_ok=True)
 
         feed_contents = ["install_uuid", "efi.img", "kickstart",
@@ -166,6 +169,7 @@ def main():
     args = parser.parse_args()
 
     try:
+        LOG.info("Load import from %s to %s started", args.from_release, args.to_release)
         load_import(args.from_release, args.to_release, args.iso_dir)
     except Exception as e:
         LOG.exception(e)
