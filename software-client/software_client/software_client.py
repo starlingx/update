@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023 Wind River Systems, Inc.
+Copyright (c) 2023-2024 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -321,7 +321,7 @@ def software_command_not_implemented_yet(args):
 def release_is_available_req(args):
 
     releases = "/".join(args.release)
-    url = "http://%s/software/is_available/%s" % (api_addr, releases)
+    url = "http://%s/v1/software/is_available/%s" % (api_addr, releases)
 
     headers = {}
     append_auth_token_if_required(headers)
@@ -345,7 +345,7 @@ def release_is_available_req(args):
 def release_is_deployed_req(args):
 
     releases = "/".join(args.release)
-    url = "http://%s/software/is_deployed/%s" % (api_addr, releases)
+    url = "http://%s/v1/software/is_deployed/%s" % (api_addr, releases)
 
     headers = {}
     append_auth_token_if_required(headers)
@@ -369,7 +369,7 @@ def release_is_deployed_req(args):
 def release_is_committed_req(args):
 
     releases = "/".join(args.release)
-    url = "http://%s/software/is_committed/%s" % (api_addr, releases)
+    url = "http://%s/v1/software/is_committed/%s" % (api_addr, releases)
 
     headers = {}
     append_auth_token_if_required(headers)
@@ -434,7 +434,7 @@ def release_upload_req(args):
         encoder = MultipartEncoder(fields=to_upload_files)
         headers = {'Content-Type': encoder.content_type}
 
-    url = "http://%s/software/upload" % api_addr
+    url = "http://%s/v1/software/upload" % api_addr
     append_auth_token_if_required(headers)
     req = requests.post(url,
                         data=to_upload_filenames if is_local else encoder,
@@ -466,7 +466,7 @@ def release_delete_req(args):
     # Ignore interrupts during this function
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
-    url = "http://%s/software/delete/%s" % (api_addr, releases)
+    url = "http://%s/v1/software/delete/%s" % (api_addr, releases)
 
     headers = {}
     append_auth_token_if_required(headers)
@@ -498,7 +498,7 @@ def commit_patch_req(args):
     elif args.all:
         # Get a list of all patches
         extra_opts = "&release=%s" % relopt
-        url = "http://%s/software/query?show=patch%s" % (api_addr, extra_opts)
+        url = "http://%s/v1/software/query?show=patch%s" % (api_addr, extra_opts)
 
         req = requests.get(url, headers=headers)
 
@@ -527,7 +527,7 @@ def commit_patch_req(args):
         patches = "/".join(args.patch)
 
         # First, get a list of dependencies and ask for confirmation
-        url = "http://%s/software/query_dependencies/%s?recursive=yes" % (api_addr, patches)
+        url = "http://%s/v1/software/query_dependencies/%s?recursive=yes" % (api_addr, patches)
 
         req = requests.get(url, headers=headers)
 
@@ -548,7 +548,7 @@ def commit_patch_req(args):
             return 1
 
     # Run dry-run
-    url = "http://%s/software/commit_dry_run/%s" % (api_addr, patches)
+    url = "http://%s/v1/software/commit_dry_run/%s" % (api_addr, patches)
 
     req = requests.post(url, headers=headers)
     print_software_op_result(req)
@@ -571,7 +571,7 @@ def commit_patch_req(args):
         print("Aborting...")
         return 1
 
-    url = "http://%s/software/commit_patch/%s" % (api_addr, patches)
+    url = "http://%s/v1/software/commit_patch/%s" % (api_addr, patches)
     req = requests.post(url, headers=headers)
 
     if args.debug:
@@ -587,7 +587,7 @@ def release_list_req(args):
     extra_opts = ""
     if args.release:
         extra_opts = "&release=%s" % args.release
-    url = "http://%s/software/query?show=%s%s" % (api_addr, state, extra_opts)
+    url = "http://%s/v1/software/query?show=%s%s" % (api_addr, state, extra_opts)
     headers = {}
     append_auth_token_if_required(headers)
     req = requests.get(url, headers=headers)
@@ -662,7 +662,7 @@ def print_software_deploy_host_list_result(req):
 
 
 def deploy_host_list_req(args):
-    url = "http://%s/software/host_list" % api_addr
+    url = "http://%s/v1/software/host_list" % api_addr
     req = requests.get(url)
     if args.debug:
         print_result_debug(req)
@@ -676,7 +676,7 @@ def release_show_req(args):
     # arg.release is a list
     releases = "/".join(args.release)
 
-    url = "http://%s/software/show/%s" % (api_addr, releases)
+    url = "http://%s/v1/software/show/%s" % (api_addr, releases)
 
     headers = {}
     append_auth_token_if_required(headers)
@@ -692,7 +692,7 @@ def release_show_req(args):
 
 
 def wait_for_install_complete(agent_ip):
-    url = "http://%s/software/host_list" % api_addr
+    url = "http://%s/v1/software/host_list" % api_addr
     rc = 0
 
     max_retries = 4
@@ -788,7 +788,7 @@ def host_install(args):
     agent_ip = args.agent
 
     # Issue deploy_host request and poll for results
-    url = "http://%s/software/deploy_host/%s" % (api_addr, agent_ip)
+    url = "http://%s/v1/software/deploy_host/%s" % (api_addr, agent_ip)
 
     if args.force:
         url += "/force"
@@ -821,7 +821,7 @@ def host_install(args):
 def drop_host(args):
     host_ip = args.host
 
-    url = "http://%s/software/drop_host/%s" % (api_addr, host_ip)
+    url = "http://%s/v1/software/drop_host/%s" % (api_addr, host_ip)
 
     req = requests.post(url)
 
@@ -837,7 +837,7 @@ def install_local(args):  # pylint: disable=unused-argument
     # Ignore interrupts during this function
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
-    url = "http://%s/software/install_local" % (api_addr)
+    url = "http://%s/v1/software/install_local" % (api_addr)
 
     headers = {}
     append_auth_token_if_required(headers)
@@ -875,7 +875,7 @@ def release_upload_dir_req(args):
             to_upload_files[software_file] = (software_file, open(software_file, 'rb'))
 
     encoder = MultipartEncoder(fields=to_upload_files)
-    url = "http://%s/software/upload" % api_addr
+    url = "http://%s/v1/software/upload" % api_addr
     headers = {'Content-Type': encoder.content_type}
     append_auth_token_if_required(headers)
     req = requests.post(url,
@@ -896,7 +896,7 @@ def deploy_precheck_req(args):
     region_name = args.region_name
 
     # Issue deploy_precheck request
-    url = "http://%s/software/deploy_precheck/%s" % (api_addr, deployment)
+    url = "http://%s/v1/software/deploy_precheck/%s" % (api_addr, deployment)
     if args.force:
         url += "/force"
     url += "?region_name=%s" % region_name
@@ -922,9 +922,9 @@ def deploy_start_req(args):
 
     # Issue deploy_start request
     if args.force:
-        url = "http://%s/software/deploy_start/%s/force" % (api_addr, deployment)
+        url = "http://%s/v1/software/deploy_start/%s/force" % (api_addr, deployment)
     else:
-        url = "http://%s/software/deploy_start/%s" % (api_addr, deployment)
+        url = "http://%s/v1/software/deploy_start/%s" % (api_addr, deployment)
 
     headers = {}
     append_auth_token_if_required(headers)
@@ -946,7 +946,7 @@ def deploy_activate_req(args):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     # Issue deploy_start request
-    url = "http://%s/software/deploy_activate/%s" % (api_addr, deployment)
+    url = "http://%s/v1/software/deploy_activate/%s" % (api_addr, deployment)
 
     headers = {}
     append_auth_token_if_required(headers)
@@ -968,7 +968,7 @@ def deploy_complete_req(args):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     # Issue deploy_complete request
-    url = "http://%s/software/deploy_complete/%s" % (api_addr, deployment)
+    url = "http://%s/v1/software/deploy_complete/%s" % (api_addr, deployment)
 
     headers = {}
     append_auth_token_if_required(headers)
@@ -983,7 +983,7 @@ def deploy_complete_req(args):
 
 
 def deploy_show_req(args):
-    url = "http://%s/software/deploy_show" % api_addr
+    url = "http://%s/v1/software/deploy_show" % api_addr
     headers = {}
     append_auth_token_if_required(headers)
     req = requests.get(url, headers=headers)
@@ -1025,7 +1025,7 @@ def deploy_host_req(args):
     agent_ip = args.agent
 
     # Issue deploy_host request and poll for results
-    url = "http://%s/software/deploy_host/%s" % (api_addr, agent_ip)
+    url = "http://%s/v1/software/deploy_host/%s" % (api_addr, agent_ip)
 
     if args.force:
         url += "/force"
@@ -1060,7 +1060,7 @@ def patch_init_release(args):
 
     release = args.release
 
-    url = "http://%s/software/init_release/%s" % (api_addr, release)
+    url = "http://%s/v1/software/init_release/%s" % (api_addr, release)
 
     req = requests.post(url)
 
@@ -1078,7 +1078,7 @@ def patch_del_release(args):
 
     release = args.release
 
-    url = "http://%s/software/del_release/%s" % (api_addr, release)
+    url = "http://%s/v1/software/del_release/%s" % (api_addr, release)
 
     req = requests.post(url)
 
@@ -1095,7 +1095,7 @@ def patch_report_app_dependencies_req(args):  # pylint: disable=unused-argument
     extra_opts_str = '?%s' % '&'.join(extra_opts)
 
     patches = "/".join(args)
-    url = "http://%s/software/report_app_dependencies/%s%s" \
+    url = "http://%s/v1/software/report_app_dependencies/%s%s" \
           % (api_addr, patches, extra_opts_str)
 
     headers = {}
@@ -1111,7 +1111,7 @@ def patch_report_app_dependencies_req(args):  # pylint: disable=unused-argument
 
 
 def patch_query_app_dependencies_req():
-    url = "http://%s/software/query_app_dependencies" % api_addr
+    url = "http://%s/v1/software/query_app_dependencies" % api_addr
 
     headers = {}
     append_auth_token_if_required(headers)
