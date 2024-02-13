@@ -1,27 +1,59 @@
 """
-Copyright (c) 2023 Wind River Systems, Inc.
+Copyright (c) 2023-2024 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
+import hashlib
+from pecan import hooks
 import json
 import logging
-import re
-import shutil
 from netaddr import IPAddress
 import os
 from oslo_config import cfg as oslo_cfg
 from packaging import version
+import re
+import shutil
 import socket
 from socket import if_nametoindex as if_nametoindex_func
+import traceback
+import webob
 
 import software.constants as constants
-
 from software.exceptions import StateValidationFailure
+from software.exceptions import SoftwareServiceError
 
 
 LOG = logging.getLogger('main_logger')
 CONF = oslo_cfg.CONF
+
+
+class ExceptionHook(hooks.PecanHook):
+    def _get_stacktrace_signature(self, trace):
+        trace = re.sub(', line \\d+', '', trace)
+        # only taking 4 bytes from the hash to identify different error paths
+        signature = hashlib.shake_128(trace.encode('utf-8')).hexdigest(4)
+        return signature
+
+    def on_error(self, state, e):
+        trace = traceback.format_exc()
+        signature = self._get_stacktrace_signature(trace)
+        status = 500
+
+        if isinstance(e, SoftwareServiceError):
+            LOG.warning("An issue is detected. Signature [%s]" % signature)
+            LOG.exception(e)
+
+            data = dict(info=e.info, warning=e.warning, error=e.error)
+            data['error'] = data['error'] + " Error signature [%s]" % signature
+        else:
+            err_msg = "Internal error occurred. Error signature [%s]" % signature
+            LOG.error(err_msg)
+            LOG.exception(e)
+            # Unexpected exceptions, exception message is not sent to the user.
+            # Instead state as internal error
+            data = dict(info="", warning="", error=err_msg)
+        return webob.Response(json.dumps(data), status=status)
 
 
 def if_nametoindex(name):

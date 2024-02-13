@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023 Wind River Systems, Inc.
+Copyright (c) 2023-2024 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -8,6 +8,7 @@ SPDX-License-Identifier: Apache-2.0
 import pecan
 
 from software.config import CONF
+from software.utils import ExceptionHook
 
 
 def get_pecan_config():
@@ -39,15 +40,14 @@ def setup_app(pecan_config=None):
         pecan_config = get_pecan_config()
     pecan.configuration.set_config(dict(pecan_config), overwrite=True)
 
-    # todo(abailey): Add in the hooks
-    hooks = []
+    hook_list = [ExceptionHook()]
 
     # todo(abailey): It seems like the call to pecan.configuration above
     # mean that the following lines are redundnant?
     app = pecan.make_app(
         pecan_config.app.root,
         debug=pecan_config.app.debug,
-        hooks=hooks,
+        hooks=hook_list,
         force_canonical=pecan_config.app.force_canonical,
         guess_content_type_from_ext=pecan_config.app.guess_content_type_from_ext
     )
