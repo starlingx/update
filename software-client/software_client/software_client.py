@@ -266,6 +266,11 @@ def print_release_show_result(req):
                                                 contents[release_id]["commit%s" % (i + 1)]["commit"],
                                                 width=TERM_WIDTH, subsequent_indent=' ' * 20))
 
+                if "packages" in sd[release_id] and len(sd[release_id]["packages"]):
+                    print("    Packages:")
+                    for package in sorted(sd[release_id]["packages"]):
+                        print(" " * 20 + package)
+
                 print("\n")
 
         if 'info' in data and data["info"] != "":

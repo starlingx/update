@@ -361,8 +361,7 @@ class ReleaseData(object):
         self.metadata[release_id]["packages"] = []
         for req in root.findall("packages"):
             for deb in req.findall("deb"):
-                self.metadata[release_id]["packages"].append(
-                    deb.text.split("_")[0])
+                self.metadata[release_id]["packages"].append(deb.text)
 
         self.contents[release_id] = {}
 
