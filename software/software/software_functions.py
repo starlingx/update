@@ -641,8 +641,15 @@ class PatchFile(object):
 
         # Filelist used for signature validation and verification
         sig_filelist = ["metadata.tar", "software.tar"]
+
+        # Check if conditional scripts are inside the patch
+        # If yes then add them to signature checklist
         if "semantics.tar" in [f.name for f in tar.getmembers()]:
             sig_filelist.append("semantics.tar")
+        if "pre-install.sh" in [f.name for f in tar.getmembers()]:
+            sig_filelist.append("pre-install.sh")
+        if "post-install.sh" in [f.name for f in tar.getmembers()]:
+            sig_filelist.append("post-install.sh")
 
         for f in sig_filelist:
             tar.extract(f)
