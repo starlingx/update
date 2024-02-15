@@ -1,6 +1,6 @@
 # !/bin/bash
 #
-# Copyright (c) 2023 Wind River Systems, Inc.
+# Copyright (c) 2023-2024 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -40,9 +40,14 @@ else
 fi
 
 k8s_ver=$(echo ${k8s_ver} | sed 's/^v//')
-rootdir="/sysroot/upgrade/sysroot"
-repo="/sysroot/upgrade/ostree_repo"
+staging_dir="/sysroot/upgrade"
+rootdir=${staging_dir}"/sysroot"
+repo=${staging_dir}"/ostree_repo"
 instbr="starlingx"
+
+deploy_cleanup() {
+    sudo ${rootdir}/usr/sbin/software-deploy/deploy-cleanup ${repo} ${rootdir} all
+}
 
 handle_error() {
     local exit_code="$1"
@@ -51,18 +56,18 @@ handle_error() {
     echo "Error: ${error_message}" >&2
     echo "Please check the error details and take appropriate action for recovery." >&2
 
+    # cleanup before exiting
+    deploy_cleanup
+
     exit ${exit_code}
 }
 
-if [ -e ${rootdir} ]; then
-        echo "${rootdir} already exists. Please ensure to clean up environment to continue." >&2
+for dir in $rootdir $repo; do
+    if [ -e ${dir} ]; then
+        echo "${dir} already exists. Please ensure to clean up environment to continue." >&2
         exit 1
-fi
-
-if [ -e ${repo} ]; then
-        echo "${repo} already exists. Please ensure to clean up environment to continue." >&2
-        exit 1
-fi
+    fi
+done
 
 # TODO(bqian) below ostree operations will be replaced by apt-ostree
 sudo mkdir ${repo} -p
@@ -110,3 +115,6 @@ sudo chroot ${rootdir} /usr/bin/software-migrate ${from_ver} ${to_ver} ${port} |
 SYNC_CONTROLLERS_SCRIPT="/usr/sbin/software-deploy/sync-controllers-feed"
 sync_controllers_cmd="${SYNC_CONTROLLERS_SCRIPT} ${cmd_line} --feed=${feed}"
 ${sync_controllers_cmd} || handle_error $? "Failed to sync feeds"
+
+# cleanup after successful data migration
+deploy_cleanup

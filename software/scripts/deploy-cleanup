@@ -1,0 +1,155 @@
+#!/bin/bash
+#
+# Copyright (c) 2024 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# This script removes artifacts created by the deploy start script:
+# 1. Stop temporary database created for data migrations
+# 2. Unmount the bind mounts used by the data migration process
+# 3. Remove the staging deployment directory created by checking out TO release ostree branch
+#
+# It can be used either by another script (e.g. software-deploy-start) to automatically
+# cleanup the environment after both success/failure paths of the data migration process,
+# or can be used by a system administrator to manually cleanup the environment if the
+# automatic cleanup process fails.
+#
+
+log() {
+  type=$1
+  echo "[$(date --iso-8601=seconds)] $type: $2"
+}
+
+stop_database() {
+    local rootdir=$1
+    local to_ver=$2
+    local rc=0
+
+    # attempt to stop temporary database if still up
+    tmp_db_dir=${rootdir}/var/lib/postgresql/${to_ver}
+    log "INFO" "Attempting to stop the temporary database in ${tmp_db_dir}..."
+    if [ -d $tmp_db_dir ]; then
+        lsof $tmp_db_dir
+        if [ $? -eq 0 ]; then
+            tmp_db_bin_dir=$(${rootdir}/usr/bin/pg_config --bindir)
+            sudo -u postgres ${tmp_db_bin_dir}/pg_ctl -D ${tmp_db_dir} stop
+            if [ $? -ne 0 ]; then
+                rc=1
+                log "ERROR" "Error stopping database."
+            else
+                log "INFO" "Success stopping database."
+            fi
+        else
+            log "INFO" "Database is not running."
+        fi
+    else
+        log "WARN" "No database found in the specified directory."
+    fi
+    return $rc
+}
+
+unmount_filesystems() {
+    local rootdir=$1
+    local rc=0
+
+    log "INFO" "Attempting to unmount filesystems under ${rootdir}..."
+    k8s_umount_output=$(sudo umount ${rootdir}/usr/local/kubernetes/current 2>&1)
+    if [ $? -ne 0 ]; then
+        if [[ ! $k8s_umount_output =~ "not mounted" ]]; then
+            rc=1
+            log "ERROR" $k8s_umount_output
+        fi
+    fi
+    sudo ${rootdir}/usr/sbin/software-deploy/chroot_mounts.sh ${rootdir} -u
+    if [ $? -ne 0 ]; then
+        rc=1
+        log "ERROR" "Error unmounting filesystems."
+    else
+        log "INFO" "Success unmounting filesystems."
+    fi
+    return $rc
+}
+
+remove_temp_directories() {
+    local repo=$1
+    local rootdir=$2
+    local rc=0
+
+    log "INFO" "Attempting to remove temporary deployment directories [${repo}, ${rootdir}]..."
+    sudo ${rootdir}/usr/sbin/software-deploy/chroot_mounts.sh ${rootdir} -c
+    if [ $? -ne 0 ]; then
+       rc=1
+       log "ERROR" "Some mount points are still mounted, cannot proceed with the cleanup."
+    else
+        rm -rf $repo $rootdir
+        log "INFO" "Temporary deployment directories removed successfully."
+    fi
+    return $rc
+}
+
+# script usage
+if [ $# -ne 3 ]; then
+    echo
+    echo "usage: deploy-start-cleanup <tmp_ostree_repo_dir> <tmp_root_dir> <action>"
+    echo -e "\nParameters"
+    echo "=========="
+    echo "tmp_ostree_repo_dir: temporary ostree repo directory (example: /sysroot/upgrade/ostree_repo)"
+    echo "tmp_root_dir: temporary ostree checkout root directory (example: /sysroot/upgrade/sysroot)"
+    echo "action: action executed by the script (db|umount|remove|all)"
+    echo "- db: stop temporary database created for target release"
+    echo "- umount: unmount the bind mounts"
+    echo "- remove: delete the target release temporary directory"
+    echo "- all: all of the above, in top-down order"
+    echo
+    exit 1
+fi
+
+repo=$1
+rootdir=$2
+action=$3
+
+# basic checks
+for dir in $repo $rootdir; do
+    if [ ! -d $dir ]; then
+        log "ERROR" "Specified directory $dir does not exist, cannot proceed with cleanup."
+        exit 1
+    fi
+done
+
+target_build_info=${rootdir}/usr/etc/build.info
+if [ ! -f $target_build_info ]; then
+    log "ERROR" "Cannot get target release build-info information, cannot proceed with cleanup."
+    exit 1
+fi
+
+# set to_ver based on build-info inside rootdir
+to_ver=$(cat $target_build_info | grep SW_VERSION | cut -d'"' -f2)
+
+# main
+log "INFO" "Starting cleanup for staging directories [${repo}, ${rootdir}]..."
+case $action in
+    "db")
+        stop_database $rootdir $to_ver
+    ;;
+    "umount")
+        unmount_filesystems $rootdir
+    ;;
+    "remove")
+        remove_temp_directories $repo $rootdir
+    ;;
+    "all")
+        stop_database $rootdir $to_ver && \
+        unmount_filesystems $rootdir && \
+        remove_temp_directories $repo $rootdir
+    ;;
+    *)
+        log "ERROR" "Invalid action specified: ${action}"
+    ;;
+esac
+rc=$?
+if [ $rc -ne 0 ]; then
+    log "ERROR" "Error cleaning up [${repo}, ${rootdir}], please check the logs, take manual actions and retry the script."
+fi
+log "INFO" "Cleanup script ended."
+
+exit $rc
