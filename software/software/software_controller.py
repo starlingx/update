@@ -1883,7 +1883,7 @@ class PatchController(PatchService):
             success = False
 
         # Check if release state is valid
-        elif release["state"] not in [constants.AVAILABLE]:
+        elif release["state"] not in constants.VALID_DEPLOY_START_STATES:
             msg = "Software release state is invalid: %s" % release["state"]
             LOG.error(msg)
             msg_error += msg
