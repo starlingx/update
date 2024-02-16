@@ -1339,7 +1339,7 @@ class PatchController(PatchService):
                     raise OSTreeTarFail(msg)
 
             package_repo_dir = "%s/rel-%s" % (constants.PACKAGE_FEED_DIR, release_sw_version)
-            packages = self.release_data.metadata[release_id].get("packages")
+            packages = [pkg.split("_")[0] for pkg in self.release_data.metadata[release_id].get("packages")]
             if packages:
                 apt_utils.package_remove(package_repo_dir, packages)
 
@@ -2111,9 +2111,9 @@ class PatchController(PatchService):
                 LOG.info(msg)
                 audit_log_info(msg)
 
-                packages = self.release_data.metadata[release].get("packages")
+                packages = [pkg.split("_")[0] for pkg in self.release_data.metadata[release].get("packages")]
                 if packages is None:
-                    msg = "Unable to determine pckages to install"
+                    msg = "Unable to determine packages to install"
                     LOG.error(msg)
                     raise MetadataFail(msg)
 
