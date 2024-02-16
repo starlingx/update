@@ -40,3 +40,12 @@ def get_k8s_ver():
         if k8s_ver.state == "active":
             return k8s_ver.version
     raise Exception("Failed to get current k8s version")
+
+def get_ihost_list():
+    try:
+        token, endpoint = utils.get_endpoints_token()
+        sysinv_client = get_sysinv_client(token=token, endpoint=endpoint)
+        return sysinv_client.ihost.list()
+    except Exception as err:
+        LOG.error("Error getting ihost list: %s", err)
+        raise

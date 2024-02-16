@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023 Wind River Systems, Inc.
+Copyright (c) 2023-2024 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -20,6 +20,7 @@ from software.utils import save_to_json_file
 from software.utils import get_software_filesystem_data
 from software.utils import validate_versions
 
+from software.constants import DEPLOY_HOST_STATES
 from software.constants import DEPLOY_STATES
 
 LOG = logging.getLogger('main_logger')
@@ -176,10 +177,10 @@ class Deploy(ABC):
 class DeployHosts(ABC):
 
     def __init__(self):
-        self.states = Enum('States', 'aborted deployed deploying failed pending-deploy')
+        pass
 
     @abstractmethod
-    def create(self, hostname: str, state: str):
+    def create(self, hostname: str, state: DEPLOY_HOST_STATES):
         """
         Create a new deploy-host entry
 
@@ -189,8 +190,7 @@ class DeployHosts(ABC):
         """
         instances = [hostname]
         if state:
-            check_state(state, self.states)
-            instances.append(state)
+            check_instances([state], DEPLOY_HOST_STATES)
         check_instances(instances, str)
         pass
 
@@ -213,8 +213,8 @@ class DeployHosts(ABC):
         :param hostname: The name of the host.
         :param state: The state of the deploy-host entry.
         """
-        check_instances([hostname, state], str)
-        check_state(state, self.states)
+        check_instances([hostname], str)
+        check_instances([state], DEPLOY_HOST_STATES)
         pass
 
     @abstractmethod
@@ -303,7 +303,7 @@ class DeployHostHandler(DeployHosts):
         super().__init__()
         self.data = get_software_filesystem_data()
 
-    def create(self, hostname, state=None):
+    def create(self, hostname, state:DEPLOY_HOST_STATES=None):
         super().create(hostname, state)
         deploy = self.query(hostname)
         if deploy:
@@ -311,7 +311,7 @@ class DeployHostHandler(DeployHosts):
 
         new_deploy_host = {
             "hostname": hostname,
-            "state": state
+            "state": state.value if state else None
         }
 
         deploy_data = self.data.get("deploy_host", [])
@@ -335,7 +335,7 @@ class DeployHostHandler(DeployHosts):
     def query_all(self):
         return self.data.get("deploy_host", [])
 
-    def update(self, hostname, state):
+    def update(self, hostname, state: DEPLOY_HOST_STATES):
         super().update(hostname, state)
         deploy = self.query(hostname)
         if not deploy:
@@ -344,7 +344,7 @@ class DeployHostHandler(DeployHosts):
         index = self.data.get("deploy_host", []).index(deploy)
         updated_entity = {
             "hostname": hostname,
-            "state": state
+            "state": state.value
         }
         self.data["deploy_host"][index].update(updated_entity)
         save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)

@@ -612,13 +612,10 @@ def release_list_req(args):
 
 def print_software_deploy_host_list_result(req):
     if req.status_code == 200:
-        data = json.loads(req.text)
-        if 'data' not in data:
-            print("Invalid data returned:")
-            print_result_debug(req)
+        data = req.json().get("data", None)
+        if not data:
+            print("No deploy in progress.\n")
             return
-
-        agents = data['data']
 
         # Calculate column widths
         hdr_hn = "Hostname"
@@ -633,19 +630,19 @@ def print_software_deploy_host_list_result(req):
         width_rr = len(hdr_rr)
         width_state = len(hdr_state)
 
-        for agent in sorted(agents, key=lambda a: a["hostname"]):
-            if agent.get("deploy_host_state") is None:
-                agent["deploy_host_state"] = "No active deployment"
-            if agent.get("to_release") is None:
-                agent["to_release"] = "N/A"
+        for agent in sorted(data, key=lambda a: a["hostname"]):
+            if agent.get("host_state") is None:
+                agent["host_state"] = "No active deployment"
+            if agent.get("target_release") is None:
+                agent["target_release"] = "N/A"
             if len(agent["hostname"]) > width_hn:
                 width_hn = len(agent["hostname"])
-            if len(agent["sw_version"]) > width_rel:
-                width_rel = len(agent["sw_version"])
-            if len(agent["to_release"]) > width_tg_rel:
-                width_tg_rel = len(agent["to_release"])
-            if len(agent["deploy_host_state"]) > width_state:
-                width_state = len(agent["deploy_host_state"])
+            if len(agent["software_release"]) > width_rel:
+                width_rel = len(agent["software_release"])
+            if len(agent["target_release"]) > width_tg_rel:
+                width_tg_rel = len(agent["target_release"])
+            if len(agent["host_state"]) > width_state:
+                width_state = len(agent["host_state"])
 
         print("{0:^{width_hn}}  {1:^{width_rel}}  {2:^{width_tg_rel}}  {3:^{width_rr}}  {4:^{width_state}}".format(
             hdr_hn, hdr_rel, hdr_tg_rel, hdr_rr, hdr_state,
@@ -654,13 +651,13 @@ def print_software_deploy_host_list_result(req):
         print("{0}  {1}  {2}  {3}  {4}".format(
             '=' * width_hn, '=' * width_rel, '=' * width_tg_rel, '=' * width_rr, '=' * width_state))
 
-        for agent in sorted(agents, key=lambda a: a["hostname"]):
+        for agent in sorted(data, key=lambda a: a["hostname"]):
             print("{0:<{width_hn}}  {1:^{width_rel}}  {2:^{width_tg_rel}}  {3:^{width_rr}}  {4:^{width_state}}".format(
                 agent["hostname"],
-                agent["sw_version"],
-                agent["to_release"],
+                agent["software_release"],
+                agent["target_release"],
                 "Yes" if agent.get("reboot_required", None) else "No",
-                agent["deploy_host_state"],
+                agent["host_state"],
                 width_hn=width_hn, width_rel=width_rel, width_tg_rel=width_tg_rel, width_rr=width_rr, width_state=width_state))
 
     elif req.status_code == 500:
@@ -723,54 +720,33 @@ def wait_for_install_complete(agent_ip):
                 break
 
         if req.status_code == 200:
-            data = json.loads(req.text)
-            if 'data' not in data:
+            data = req.json().get("data", None)
+            if not data:
                 print("Invalid host-list data returned:")
                 print_result_debug(req)
                 rc = 1
                 break
 
-            state = None
-            agents = data['data']
-            interim_state = None
+            host_state = None
 
-            for agent in agents:
-                if agent['hostname'] == agent_ip \
-                   or agent['ip'] == agent_ip:
-                    state = agent.get('state')
-                    interim_state = agent.get('interim_state')
+            for d in data:
+                if d['hostname'] == agent_ip:
+                    host_state = d.get('host_state')
 
-            if state is None:
-                # If the software daemons have restarted, there's a
-                # window after the software-controller restart that the
-                # hosts table will be empty.
-                retriable_count += 1
-                if retriable_count <= max_retries:
-                    continue
-                else:
-                    print("%s agent has timed out." % agent_ip)
-                    rc = 1
-                    break
-
-            if state == constants.PATCH_AGENT_STATE_INSTALLING or \
-                    interim_state is True:
-                # Still installing
+            if host_state == constants.DEPLOYING:
+                # Still deploying
                 sys.stdout.write(".")
                 sys.stdout.flush()
-            elif state == constants.PATCH_AGENT_STATE_INSTALL_REJECTED:
-                print("\nInstallation rejected. Node must be locked")
+            elif host_state == constants.FAILED:
+                print("\nDeployment failed. Please check logs for details.")
                 rc = 1
                 break
-            elif state == constants.PATCH_AGENT_STATE_INSTALL_FAILED:
-                print("\nInstallation failed. Please check logs for details.")
-                rc = 1
-                break
-            elif state == constants.PATCH_AGENT_STATE_IDLE:
-                print("\nInstallation was successful.")
+            elif host_state == constants.DEPLOYED:
+                print("\nDeployment was successful.")
                 rc = 0
                 break
             else:
-                print("\nPatch agent is reporting unknown state: %s" % state)
+                print("\nReported unknown state: %s" % host_state)
                 rc = 1
                 break
 

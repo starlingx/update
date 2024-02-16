@@ -10,6 +10,7 @@ import os
 from oslo_log import log
 from pecan import expose
 from pecan import request
+from pecan import Response
 import shutil
 
 from software.exceptions import SoftwareError
@@ -231,14 +232,11 @@ class SoftwareAPIController(object):
 
         return dict(sd=sd)
 
-    @expose('json')
-    @expose('query_hosts.xml', content_type='application/xml')
-    def host_list(self, *args):  # pylint: disable=unused-argument
-        try:
-            query_hosts = sc.deploy_host_list()
-        except Exception as e:
-            return dict(error=str(e))
-        return dict(data=query_hosts)
+    @expose('json', method="GET")
+    def host_list(self):
+        query_hosts = dict(data=sc.deploy_host_list())
+        response_data = json.dumps(query_hosts)
+        return Response(body=response_data, status_code=200)
 
     @expose(method='GET', template='json')
     def in_sync_controller(self):

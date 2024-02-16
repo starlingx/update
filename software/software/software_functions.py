@@ -23,6 +23,7 @@ from lxml import etree as ElementTree
 from xml.dom import minidom
 
 import software.apt_utils as apt_utils
+from software.db.api import get_instance
 from software.release_verify import verify_files
 from software.release_verify import cert_type_all
 from software.release_signing import sign_files
@@ -36,7 +37,7 @@ from software.exceptions import SoftwareServiceError
 
 import software.constants as constants
 import software.utils as utils
-from software.sysinv_utils import get_sysinv_client
+from software.sysinv_utils import get_ihost_list
 
 
 try:
@@ -1162,15 +1163,28 @@ def read_upgrade_support_versions(mounted_dir):
     return to_release, supported_from_releases
 
 
+def create_deploy_hosts():
+    """
+    Create deploy-hosts entities based on hostnames
+    from sysinv.
+    """
+    try:
+        db_api_instance = get_instance()
+        for ihost in get_ihost_list():
+            db_api_instance.create_deploy_host(ihost.hostname)
+        LOG.info("Deploy-hosts entities created successfully.")
+    except Exception as err:
+        LOG.exception("Error in deploy-hosts entities creation")
+        raise err
+
+
+
 def collect_current_load_for_hosts():
     load_data = {
         "current_loads": []
     }
     try:
-        token, endpoint = utils.get_endpoints_token()
-        sysinv_client = get_sysinv_client(token=token, endpoint=endpoint)
-        host_list = sysinv_client.ihost.list()
-        for ihost in host_list:
+        for ihost in get_ihost_list():
             software_load = ihost.software_load
             hostname = ihost.hostname
             load_data["current_loads"].append({
