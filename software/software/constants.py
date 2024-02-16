@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023 Wind River Systems, Inc.
+Copyright (c) 2023-2024 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -26,12 +26,15 @@ SOFTWARE_CONFIG_FILE_LOCAL = "/etc/software/software.conf"
 
 AVAILABLE_DIR = "%s/metadata/available" % SOFTWARE_STORAGE_DIR
 UNAVAILABLE_DIR = "%s/metadata/unavailable" % SOFTWARE_STORAGE_DIR
+DEPLOYING_DIR = "%s/metadata/deploying" % SOFTWARE_STORAGE_DIR
+DEPLOYED_DIR = "%s/metadata/deployed" % SOFTWARE_STORAGE_DIR
+REMOVING_DIR = "%s/metadata/removing" % SOFTWARE_STORAGE_DIR
+
+# TODO(bqian) states to be removed once current references are removed
 DEPLOYING_START_DIR = "%s/metadata/deploying_start" % SOFTWARE_STORAGE_DIR
 DEPLOYING_HOST_DIR = "%s/metadata/deploying_host" % SOFTWARE_STORAGE_DIR
 DEPLOYING_ACTIVATE_DIR = "%s/metadata/deploying_activate" % SOFTWARE_STORAGE_DIR
 DEPLOYING_COMPLETE_DIR = "%s/metadata/deploying_complete" % SOFTWARE_STORAGE_DIR
-DEPLOYED_DIR = "%s/metadata/deployed" % SOFTWARE_STORAGE_DIR
-REMOVING_DIR = "%s/metadata/removing" % SOFTWARE_STORAGE_DIR
 ABORTING_DIR = "%s/metadata/aborting" % SOFTWARE_STORAGE_DIR
 COMMITTED_DIR = "%s/metadata/committed" % SOFTWARE_STORAGE_DIR
 SEMANTICS_DIR = "%s/semantics" % SOFTWARE_STORAGE_DIR
@@ -40,32 +43,56 @@ DEPLOY_STATE_METADATA_DIR = \
     [
         AVAILABLE_DIR,
         UNAVAILABLE_DIR,
+        DEPLOYING_DIR,
+        DEPLOYED_DIR,
+        REMOVING_DIR,
+        # TODO(bqian) states to be removed once current references are removed
         DEPLOYING_START_DIR,
         DEPLOYING_HOST_DIR,
         DEPLOYING_ACTIVATE_DIR,
         DEPLOYING_COMPLETE_DIR,
-        DEPLOYED_DIR,
-        REMOVING_DIR,
         ABORTING_DIR,
         COMMITTED_DIR,
     ]
 
-ABORTING = 'aborting'
+# new release state needs to be added to VALID_RELEASE_STATES list
 AVAILABLE = 'available'
-COMMITTED = 'committed'
+UNAVAILABLE = 'unavailable'
+DEPLOYING = 'deploying'
 DEPLOYED = 'deployed'
+REMOVING = 'removing'
+UNKNOWN = 'n/a'
+
+# TODO(bqian) states to be removed once current references are removed
+ABORTING = 'aborting'
+COMMITTED = 'committed'
 DEPLOYING_ACTIVATE = 'deploying-activate'
 DEPLOYING_COMPLETE = 'deploying-complete'
 DEPLOYING_HOST = 'deploying-host'
 DEPLOYING_START = 'deploying-start'
-REMOVING = 'removing'
 UNAVAILABLE = 'unavailable'
-UNKNOWN = 'n/a'
 
 VALID_DEPLOY_START_STATES = [
     AVAILABLE,
     DEPLOYED,
 ]
+
+VALID_RELEASE_STATES = [AVAILABLE, UNAVAILABLE, DEPLOYING, DEPLOYED,
+                        REMOVING]
+
+RELEASE_STATE_TO_DIR_MAP = {AVAILABLE: AVAILABLE_DIR,
+                            UNAVAILABLE: UNAVAILABLE_DIR,
+                            DEPLOYING: DEPLOYING_DIR,
+                            DEPLOYED: DEPLOYED_DIR,
+                            REMOVING: REMOVING_DIR}
+
+# valid release state transition below could still be changed as
+# development continue
+RELEASE_STATE_VALID_TRANSITION = {
+    AVAILABLE: [DEPLOYING],
+    DEPLOYING: [DEPLOYED],
+    DEPLOYED: [REMOVING, UNAVAILABLE]
+}
 
 STATUS_DEVELOPEMENT = 'DEV'
 STATUS_OBSOLETE = 'OBS'

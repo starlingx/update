@@ -299,9 +299,14 @@ class ReleaseData(object):
         :param state: Indicates Applied, Available, or Committed
         :return: Release ID
         """
-        tree = ElementTree.parse(filename)
-        root = tree.getroot()
 
+        with open(filename, "r") as f:
+            text = f.read()
+
+        return self.parse_metadata_string(text, state)
+
+    def parse_metadata_string(self, text, state):
+        root = ElementTree.fromstring(text)
         #
         #    <patch>
         #        <id>PATCH_0001</id>
