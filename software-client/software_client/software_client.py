@@ -173,7 +173,7 @@ def print_software_op_result(req):
         print("Error: %s has occurred. %s" % (req.status_code, req.reason))
 
 
-def print_release_show_result(req):
+def print_release_show_result(req, list_packages=False):
     if req.status_code == 200:
         data = json.loads(req.text)
 
@@ -266,10 +266,11 @@ def print_release_show_result(req):
                                                 contents[release_id]["commit%s" % (i + 1)]["commit"],
                                                 width=TERM_WIDTH, subsequent_indent=' ' * 20))
 
-                if "packages" in sd[release_id] and len(sd[release_id]["packages"]):
-                    print("    Packages:")
-                    for package in sorted(sd[release_id]["packages"]):
-                        print(" " * 20 + package)
+                if list_packages:
+                    if "packages" in sd[release_id] and len(sd[release_id]["packages"]):
+                        print("    Packages:")
+                        for package in sorted(sd[release_id]["packages"]):
+                            print(" " * 20 + package)
 
                 print("\n")
 
@@ -680,6 +681,7 @@ def deploy_host_list_req(args):
 def release_show_req(args):
     # arg.release is a list
     releases = "/".join(args.release)
+    list_packages = args.packages
 
     url = "http://%s/v1/software/show/%s" % (api_addr, releases)
 
@@ -691,7 +693,7 @@ def release_show_req(args):
     if args.debug:
         print_result_debug(req)
     else:
-        print_release_show_result(req)
+        print_release_show_result(req, list_packages=list_packages)
 
     return check_rc(req)
 
@@ -1512,7 +1514,12 @@ def setup_argparse():
     cmd.set_defaults(restricted=False)  # can run non root
     cmd.add_argument('release',
                      nargs="+",  # accepts a list
-                     help='Release ID to show')
+                     help='release ID to print detailed information')
+    cmd.add_argument('--packages',
+                     required=False,
+                     default=False,
+                     action='store_true',
+                     help='list packages contained in the release')
 
     # --- software upload <release> ---------------
     cmd = commands.add_parser(
