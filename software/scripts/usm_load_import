@@ -3,7 +3,7 @@
 #
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 #
-# Copyright (c) 2023 Wind River Systems, Inc.
+# Copyright (c) 2023-2024 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -21,6 +21,7 @@ import os
 import shutil
 import sys
 
+import upgrade_utils
 
 AVAILABLE_DIR = "/opt/software/metadata/available"
 FEED_OSTREE_BASE_DIR = "/var/www/pages/feed"
@@ -199,5 +200,5 @@ def main():
 
 
 if __name__ == "__main__":
-    LOG.basicConfig(filename='/var/log/usm-load-import.log', level=LOG.INFO)
+    upgrade_utils.configure_logging('/var/log/software.log', log_level=LOG.INFO)
     sys.exit(main())
