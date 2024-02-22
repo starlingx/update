@@ -138,7 +138,7 @@ class Deploy(ABC):
         """
         Create a new deployment entry.
 
-        :param from_release: The source release version.
+        :param from_release: The current release version.
         :param to_release: The target release version.
         :param reboot_required: If is required to do host reboot.
         :param state: The state of the deployment.
@@ -149,10 +149,11 @@ class Deploy(ABC):
         check_instances([state], DEPLOY_STATES)
 
     @abstractmethod
-    def query(self):
+    def query(self, from_release, to_release):
         """
-        Get deployments based on source and target release versions.
+        Get deployments based on current and target release versions.
         """
+        validate_versions([from_release, to_release])
         pass
 
     @abstractmethod
@@ -160,7 +161,7 @@ class Deploy(ABC):
         """
         Update a deployment entry.
 
-        :param state: The state of the deployment.
+        :param new_state: The state of the deployment.
 
         """
         check_instances([new_state], DEPLOY_STATES)
@@ -168,7 +169,7 @@ class Deploy(ABC):
     @abstractmethod
     def delete(self):
         """
-        Delete a deployment entry based on source and target release versions.
+        Delete a deployment entry based on current and target release versions.
         """
         pass
 
@@ -236,13 +237,13 @@ class DeployHandler(Deploy):
     def create(self, from_release, to_release, reboot_required, state=DEPLOY_STATES.START):
         """
         Create a new deploy with given from and to release version
-        :param from_release: The source release version.
+        :param from_release: The current release version.
         :param to_release: The target release version.
         :param reboot_required: If is required to do host reboot.
         :param state: The state of the deployment.
         """
         super().create(from_release, to_release, reboot_required, state)
-        deploy = self.query()
+        deploy = self.query(from_release, to_release)
         if deploy:
             raise DeployAlreadyExist("Error to create. Deploy already exists.")
         new_deploy = {
@@ -253,18 +254,39 @@ class DeployHandler(Deploy):
         }
 
         try:
-            self.data["deploy"] = new_deploy
+            deploy_data = self.data.get("deploy", [])
+            if not deploy_data:
+                deploy_data = {
+                    "deploy": []
+                }
+                deploy_data["deploy"].append(new_deploy)
+                self.data.update(deploy_data)
+            else:
+                deploy_data.append(new_deploy)
             save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
         except Exception:
-            self.data["deploy"] = {}
+            self.data["deploy"][0] = {}
 
-    def query(self):
+    def query(self, from_release, to_release):
         """
         Query deploy based on from and to release version
-        :return: A deploy dictionary
+        :param from_release: The current release version.
+        :param to_release: The target release version.
+        :return: A list of deploy dictionary
         """
-        super().query()
-        return self.data.get("deploy", {})
+        super().query(from_release, to_release)
+        for deploy in self.data.get("deploy", []):
+            if (deploy.get("from_release") == from_release
+                    and deploy.get("to_release") == to_release):
+                return deploy
+        return []
+
+    def query_all(self):
+        """
+        Query all deployments inside software.json file.
+        :return: A list of deploy dictionary
+        """
+        return self.data.get("deploy", [])
 
     def update(self, new_state: DEPLOY_STATES):
         """
@@ -272,29 +294,29 @@ class DeployHandler(Deploy):
         :param new_state: The new state
         """
         super().update(new_state)
-        deploy = self.query()
+        deploy = self.query_all()
         if not deploy:
             raise DeployDoNotExist("Error to update deploy state. No deploy in progress.")
 
         try:
-            self.data["deploy"]["state"] = new_state.value
+            self.data["deploy"][0]["state"] = new_state.value
             save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
         except Exception:
-            self.data["deploy"] = deploy
+            self.data["deploy"][0] = deploy
 
     def delete(self):
         """
         Delete a deploy based on given from and to release version
         """
         super().delete()
-        deploy = self.query()
+        deploy = self.query_all()
         if not deploy:
             raise DeployDoNotExist("Error to delete deploy state. No deploy in progress.")
         try:
-            self.data["deploy"] = {}
+            self.data["deploy"].clear()
             save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
         except Exception:
-            self.data["deploy"] = deploy
+            self.data["deploy"][0] = deploy
 
 
 class DeployHostHandler(DeployHosts):
@@ -326,6 +348,11 @@ class DeployHostHandler(DeployHosts):
         save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
 
     def query(self, hostname):
+        """
+        Query deploy based on hostname
+        :param hostname: The name of the host.
+        :return: A list of deploy dictionary
+        """
         super().query(hostname)
         for deploy in self.data.get("deploy_host", []):
             if deploy.get("hostname") == hostname:

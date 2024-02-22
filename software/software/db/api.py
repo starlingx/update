@@ -37,10 +37,17 @@ class SoftwareAPI:
         self.deploy_handler.create(from_release, to_release, reboot_required)
         self.end_update()
 
-    def get_deploy(self):
+    def get_deploy(self, from_release, to_release):
         self.begin_update()
         try:
-            return self.deploy_handler.query()
+            return self.deploy_handler.query(from_release, to_release)
+        finally:
+            self.end_update()
+
+    def get_deploy_all(self):
+        self.begin_update()
+        try:
+            return self.deploy_handler.query_all()
         finally:
             self.end_update()
 

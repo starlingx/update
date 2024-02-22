@@ -1011,7 +1011,7 @@ def deploy_complete_req(args):
 
 
 def deploy_show_req(args):
-    url = "http://%s/v1/software/deploy_show" % api_addr
+    url = "http://%s/v1/software/deploy" % api_addr
     headers = {}
     append_auth_token_if_required(headers)
     req = requests.get(url, headers=headers)
@@ -1023,10 +1023,11 @@ def deploy_show_req(args):
         print("Respond code %d. Error: %s" % (req.status_code, req.reason))
         return 1
 
-    data = json.loads(req.text)
+    data = req.json().get("data")
     if not data:
-        print("No deploy in progress.\n")
+        print("No deploy in progress.")
     else:
+        data = data[0]
         data["reboot_required"] = "Yes" if data.get("reboot_required") else "No"
         data_list = [[k, v] for k, v in data.items()]
         transposed_data_list = list(zip(*data_list))

@@ -2627,9 +2627,13 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-    def software_deploy_show_api(self):
+    def software_deploy_show_api(self, from_release=None, to_release=None):
         # Retrieve deploy state from db
-        return self.db_api_instance.get_deploy()
+        if from_release and to_release:
+            return self.db_api_instance.get_deploy(from_release, to_release)
+        else:
+            # Retrieve deploy state from db in list format
+            return self.db_api_instance.get_deploy_all()
 
     def software_deploy_host_api(self, host_ip, force, async_req=False):
         msg_info = ""
@@ -2902,7 +2906,11 @@ class PatchController(PatchService):
     def deploy_host_list(self):
         query_hosts = self.query_host_cache()
         deploy_hosts = self.db_api_instance.get_deploy_host()
-        deploy = self.db_api_instance.get_deploy()
+        deploy = self.db_api_instance.get_deploy_all()
+        if not deploy:
+            return None
+        deploy = deploy[0]
+
 
         # If there's a hostname missing, add it to query hosts.
         hostnames = []
