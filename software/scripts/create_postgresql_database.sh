@@ -1,13 +1,22 @@
 #!/bin/bash
 #
-# Copyright (c) 2023 Wind River Systems, Inc.
+# Copyright (c) 2023-2024 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
 #
 # This script is used create a 2nd instance of postgres on a DX upgrade.
 # It needs the port number as parameter and it should be different from the default.
+#
 
+script_dir=$(dirname $0)
+shell_utils=${script_dir}/shell-utils
+if [ -f $shell_utils ]; then
+    source $shell_utils
+else
+    echo "ERROR: ${shell_utils} module not found."
+    exit 1
+fi
 
 DEFAULT_POSTGRESQL_PORT=5432
 POSTGRESQL_PATH=/var/lib/postgresql
@@ -16,7 +25,7 @@ POSTGRESQL_RUNTIME=/var/run/postgresql
 INFO_FILE=/etc/build.info
 
 if [ -z "$1" ]; then
-    echo "Error: Port parameter is missing."
+    error "'Port' parameter is missing."
     exit 1
 fi
 
@@ -24,7 +33,7 @@ PORT="$1"
 
 # Prevent issues with the default postgres port
 if [ "$PORT" -eq "$DEFAULT_POSTGRESQL_PORT" ]; then
-    echo "Error: Port number should be different from the default."
+    error "Port number should be different from the default."
     exit 1
 fi
 
@@ -32,8 +41,8 @@ cleanup_and_exit() {
     local exit_code="$1"
     local error_message="$2"
 
-    echo "Error: $error_message" >&2
-    echo "Please check the error details and take appropriate action for recovery." >&2
+    error "$error_message" >&2
+    error "Please check the error details and take appropriate action for recovery." >&2
 
     exit "$exit_code"
 }

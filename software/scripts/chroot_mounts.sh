@@ -5,6 +5,15 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+script_dir=$(dirname $0)
+shell_utils=${script_dir}/shell-utils
+if [ -f $shell_utils ]; then
+    source $shell_utils
+else
+    echo "ERROR: ${shell_utils} module not found."
+    exit 1
+fi
+
 DEV_PATH=/dev
 PLATFORM_PATH=/opt/platform
 RABBIT_PATH=/var/lib/rabbitmq
@@ -34,8 +43,8 @@ handle_error() {
     local exit_code="$1"
     local error_message="$2"
 
-    echo "Error: $error_message" >&2
-    echo "Please check the error details and take appropriate action for recovery." >&2
+    log "$error_message" >&2
+    log "Please check the error details and take appropriate action for recovery." >&2
 
     # attempt to unmount if there were successful mounts before the error
     umount_all
@@ -50,7 +59,7 @@ mount_all() {
         src=${src_dst[0]}
         dst=${src_dst[1]}
 
-        echo "mount --bind ${src} ${dst}"
+        info "Bind mounting ${src} -> ${dst}"
         sudo mkdir -p ${dst}
         sudo mount --bind ${src} ${dst} || handle_error 1 "Failed to bind mount ${src} to ${dst}"
     done
@@ -65,12 +74,12 @@ umount_all() {
         src=${src_dst[0]}
         dst=${src_dst[1]}
 
-        echo "sudo umount $dst"
+        info "Unmounting $dst"
         umount_output=$(sudo umount $dst 2>&1)
         if [ $? -ne 0 ]; then
             # ignore messages that are not harmful
             if [[ ! $umount_output =~ ("not mounted"|"no mount point specified") ]]; then
-                echo $umount_output
+                error "$umount_output"
                 rc=1
             fi
         fi
@@ -94,16 +103,16 @@ check_all() {
         fi
     done
     if [[ ${#mounted[@]} -gt 0 ]]; then
-        echo "Mounted mount points:"
+        info "Mounted mount points:"
         for mnt in ${mounted[@]}; do
-            echo $mnt
+            info $mnt
         done
     fi
     return $rc
 }
 
 if [ -z "$1" ]; then
-    echo "Error: OSTree deployment branch parameter is missing."
+    error "OSTree deployment branch parameter is missing."
     exit 1
 fi
 

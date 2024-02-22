@@ -13,10 +13,17 @@
 # 5. perform data migration
 #
 
-# TODO: centralize USM upgrade scripts output into one single log
-exec > /var/log/deploy_start.log 2>&1
+exec 2>&1 >> /var/log/software.log
 
-exec_path=$(dirname $0)
+script_dir=$(dirname $0)
+shell_utils=${script_dir}/shell-utils
+if [ -f $shell_utils ]; then
+    source $shell_utils
+else
+    echo "ERROR: ${shell_utils} module not found."
+    exit 1
+fi
+
 usage()
 {
     echo "usage: $0 from_ver to_ver k8s_ver postgresql_port feed [commit_id|latest_commit]"
@@ -63,10 +70,10 @@ handle_error() {
     local error_message="$2"
     local state="start-failed"
 
-    echo "Error: ${error_message}" >&2
-    echo "Please check the error details and take appropriate action for recovery." >&2
+    error "${error_message}" >&2
+    error "Please check the error details and take appropriate action for recovery." >&2
 
-    echo "Update deploy state ${state}." >&2
+    error "Update deploy state ${state}." >&2
     deploy_update_state ${state}
 
     # cleanup before exiting
@@ -77,13 +84,14 @@ handle_error() {
 
 for dir in $rootdir $repo; do
     if [ -e ${dir} ]; then
-        echo "${dir} already exists. Please ensure to clean up environment to continue." >&2
+        error "${dir} already exists. Please ensure to clean up environment to continue." >&2
         exit 1
     fi
 done
 
 sudo mkdir ${repo} -p
 
+info "Initializing ostree repo..."
 sudo ostree --repo=${repo} init --mode=archive || handle_error $? "Failed to init repo"
 sudo ostree --repo=${repo} remote add ${instbr} ${feed_url} --no-gpg-verify || handle_error $? "Failed to remote add repo"
 sudo ostree --repo=${repo} pull --depth=-1 --mirror ${instbr}:${instbr} || handle_error $? "Failed to pull repo"
@@ -92,23 +100,27 @@ sudo ostree --repo=${repo} pull --depth=-1 --mirror ${instbr}:${instbr} || handl
 if [ -z ${commit_id} ]; then
     # get commit id, only latest for now
     commit_id=$(ostree rev-parse --repo=${repo} ${instbr})
-    echo "latest commit id ${commit_id}"
+    info "Latest commit id ${commit_id}"
     if [ -z "${commit_id}" ]; then
         handle_error 1 "Failed to retrieve commit id"
     fi
 fi
 
-echo "checkout commit id ${commit_id}"
+info "Checkout commit id ${commit_id}"
 
+info "Checking out ostree repo..."
 sudo ostree --repo=${repo} checkout ${commit_id} ${rootdir} || handle_error $? "Failed to checkout ${commit_id}"
 
 # create proper mounts on deploy file system
+info "Creating mount points..."
 sudo ${rootdir}/usr/sbin/software-deploy/chroot_mounts.sh ${rootdir} || handle_error $? "Failed to mount required mount points"
 
 sudo mount --bind ${rootdir}/usr/local/kubernetes/${k8s_ver} ${rootdir}/usr/local/kubernetes/current
 sudo cp /etc/kubernetes/admin.conf ${rootdir}/etc/kubernetes/
+info "Mount points created successfully"
 
-DATA_PREP_SCRIPT="${exec_path}/prep-data-migration"
+info "Preparing for data migration..."
+DATA_PREP_SCRIPT="${script_dir}/prep-data-migration"
 # OS_AUTH_URL, OS_USERNAME, OS_PASSWORD, OS_PROJECT_NAME, OS_USER_DOMAIN_NAME,
 # OS_PROJECT_DOMAIN_NAME, OS_REGION_NAME are in env variables.
 cmd_line=" --rootdir=${rootdir} --from_release=${from_ver} --to_release=${to_ver}"
@@ -118,17 +130,27 @@ cmd_line+=" --project_domain_name=${OS_PROJECT_DOMAIN_NAME} --region_name=${OS_R
 prep_cmd="${DATA_PREP_SCRIPT} ${cmd_line}"
 
 ${prep_cmd} || handle_error $? "Failed to extract data for migration"
+info "Data migration preparations complete."
 
+info "Creating temporary database..."
 sudo chroot ${rootdir} /usr/sbin/software-deploy/create_postgresql_database.sh ${port} || handle_error $? "Failed to start 2nd instance of postgresql"
-sudo chroot ${rootdir} /usr/bin/software-migrate ${from_ver} ${to_ver} ${port} || handle_error $? "Failed to migrate data"
+info "Database creation complete."
 
+info "Starting data migration..."
+sudo chroot ${rootdir} /usr/bin/software-migrate ${from_ver} ${to_ver} ${port} || handle_error $? "Failed to migrate data"
+info "Data migration completed."
+
+info "Syncing feed between controllers..."
 SYNC_CONTROLLERS_SCRIPT="/usr/sbin/software-deploy/sync-controllers-feed"
 sync_controllers_cmd="${SYNC_CONTROLLERS_SCRIPT} ${cmd_line} --feed=${feed}"
 ${sync_controllers_cmd} || handle_error $? "Failed to sync feeds"
+info "Feed sync complete."
 
 state="start-done"
 deploy_update_state $state
-echo "Update deploy state ${state}."
+info "Update deploy state ${state}."
 
 # cleanup after successful data migration
+info "Starting cleanup..."
 deploy_cleanup
+info "Cleanup complete."
