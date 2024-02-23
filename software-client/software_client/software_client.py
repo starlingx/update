@@ -883,6 +883,18 @@ def release_upload_dir_req(args):
         print("No file to upload")
         return 0
 
+    temp_iso_files = [f for f in raw_files if f.endswith(constants.ISO_EXTENSION)]
+    if len(temp_iso_files) > 1:  # Verify that only one ISO file is being uploaded
+        print("Only one ISO file can be uploaded at a time. Found: %s" %
+              temp_iso_files, file=sys.stderr)
+        return 1
+
+    temp_sig_files = [f for f in raw_files if f.endswith(constants.SIG_EXTENSION)]
+    if len(temp_sig_files) > 1:  # Verify that only one SIG file is being uploaded
+        print("Only one SIG file can be uploaded at a time. Found: %s" %
+              temp_sig_files, file=sys.stderr)
+        return 1
+
     for software_file in sorted(set(raw_files)):
         _, ext = os.path.splitext(software_file)
         if ext in constants.SUPPORTED_UPLOAD_FILE_EXT:
