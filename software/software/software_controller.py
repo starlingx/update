@@ -1437,6 +1437,35 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
+    def in_sync_controller_api(self):
+        """
+        Check if both controllers are in sync
+        by checking the database JSON file
+        """
+        is_in_sync = False
+
+        does_synced_software_exist = os.path.isfile(constants.SYNCED_SOFTWARE_JSON_FILE)
+        does_software_exist = os.path.isfile(constants.SOFTWARE_JSON_FILE)
+
+        if does_synced_software_exist and does_software_exist:
+            # both files exist, compare them
+            with open(constants.SYNCED_SOFTWARE_JSON_FILE, 'r') as f:
+                synced_software = json.load(f)
+            with open(constants.SOFTWARE_JSON_FILE, 'r') as f:
+                software = json.load(f)
+            LOG.debug("Synced software: %s", synced_software)
+            LOG.debug("Software: %s", software)
+
+            is_in_sync = synced_software == software
+        elif not does_synced_software_exist and not does_software_exist:
+            # neither file exists, it is not in deploying state
+            is_in_sync = True
+        else:
+            # either file does not exist, it is in deploying state
+            is_in_sync = False
+
+        return {"in_sync": is_in_sync}
+
     def patch_init_release_api(self, release):
         """
         Create an empty repo for a new release
