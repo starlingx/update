@@ -24,6 +24,9 @@ CONTROLLER_FLOATING_HOSTNAME = "controller"
 SOFTWARE_STORAGE_DIR = "/opt/software"
 SOFTWARE_CONFIG_FILE_LOCAL = "/etc/software/software.conf"
 
+DEPLOY_PRECHECK_SCRIPT = "deploy-precheck"
+DEPLOY_START_SCRIPT = "software-deploy-start"
+
 AVAILABLE_DIR = "%s/metadata/available" % SOFTWARE_STORAGE_DIR
 UNAVAILABLE_DIR = "%s/metadata/unavailable" % SOFTWARE_STORAGE_DIR
 DEPLOYING_DIR = "%s/metadata/deploying" % SOFTWARE_STORAGE_DIR
@@ -71,10 +74,24 @@ DEPLOYING_COMPLETE = 'deploying-complete'
 DEPLOYING_HOST = 'deploying-host'
 DEPLOYING_START = 'deploying-start'
 UNAVAILABLE = 'unavailable'
+UNKNOWN = 'n/a'
 
 VALID_DEPLOY_START_STATES = [
     AVAILABLE,
     DEPLOYED,
+]
+
+# host deploy substate
+HOST_DEPLOY_PENDING = 'pending'
+HOST_DEPLOY_STARTED = 'deploy-started'
+HOST_DEPLOY_DONE = 'deploy-done'
+HOST_DEPLOY_FAILED = 'deploy-failed'
+
+VALID_HOST_DEPLOY_STATE = [
+    HOST_DEPLOY_PENDING,
+    HOST_DEPLOY_STARTED,
+    HOST_DEPLOY_DONE,
+    HOST_DEPLOY_FAILED
 ]
 
 VALID_RELEASE_STATES = [AVAILABLE, UNAVAILABLE, DEPLOYING, DEPLOYED,
@@ -137,7 +154,7 @@ SIG_EXTENSION = ".sig"
 PATCH_EXTENSION = ".patch"
 SUPPORTED_UPLOAD_FILE_EXT = [ISO_EXTENSION, SIG_EXTENSION, PATCH_EXTENSION]
 SCRATCH_DIR = "/scratch"
-RELEASE_GA_NAME = "starlingx-%s.0"
+RELEASE_GA_NAME = "starlingx-%s"
 LOCAL_LOAD_IMPORT_FILE = "/etc/software/usm_load_import"
 
 # Precheck constants
@@ -156,17 +173,12 @@ UNKNOWN_SOFTWARE_VERSION = "0.0.0"
 
 
 class DEPLOY_STATES(Enum):
-    ACTIVATING = 'activating'
-    ACTIVATED = 'activated'
-    ACTIVATION_FAILED = 'activation-failed'
-    DATA_MIGRATION_FAILED = 'data-migration-failed'
-    DATA_MIGRATION = 'data-migration'
-    DEPLOYING = 'deploying'
-    DEPLOYED = 'deployed'
-    PRESTAGING = 'prestaging'
-    PRESTAGED = 'prestaged'
-    PRESTAGING_FAILED = 'prestaging-failed'
-    UPGRADE_CONTROLLERS = 'upgrade-controllers'
-    UPGRADE_CONTROLLER_FAILED = 'upgrade-controller-failed'
-    UPGRADE_HOSTS = 'upgrade-hosts'
-    UNKNOWN = 'unknown'
+    ACTIVATE = 'activate'
+    ACTIVATE_DONE = 'activate-done'
+    ACTIVATE_FAILED = 'activate-failed'
+    START = 'start'
+    START_DONE = 'start-done'
+    START_FAILED = 'start-failed'
+    HOST = 'host'
+    HOST_DONE = 'host-done'
+    HOST_FAILED = 'host-failed'

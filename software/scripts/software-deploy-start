@@ -16,7 +16,7 @@
 # TODO: centralize USM upgrade scripts output into one single log
 exec > /var/log/deploy_start.log 2>&1
 
-
+exec_path=$(dirname $0)
 usage()
 {
     echo "usage: $0 from_ver to_ver k8s_ver postgresql_port feed [commit_id|latest_commit]"
@@ -45,16 +45,29 @@ rootdir=${staging_dir}"/sysroot"
 repo=${staging_dir}"/ostree_repo"
 instbr="starlingx"
 
+report_agent="deploy-start"
+
 deploy_cleanup() {
     sudo ${rootdir}/usr/sbin/software-deploy/deploy-cleanup ${repo} ${rootdir} all
+}
+
+deploy_update_state() {
+    local state="$1"
+
+    # update deploy state to start-done
+    /usr/bin/software-deploy-update -s ${state} ${report_agent}
 }
 
 handle_error() {
     local exit_code="$1"
     local error_message="$2"
+    local state="start-failed"
 
     echo "Error: ${error_message}" >&2
     echo "Please check the error details and take appropriate action for recovery." >&2
+
+    echo "Update deploy state ${state}." >&2
+    deploy_update_state ${state}
 
     # cleanup before exiting
     deploy_cleanup
@@ -69,13 +82,13 @@ for dir in $rootdir $repo; do
     fi
 done
 
-# TODO(bqian) below ostree operations will be replaced by apt-ostree
 sudo mkdir ${repo} -p
 
 sudo ostree --repo=${repo} init --mode=archive || handle_error $? "Failed to init repo"
 sudo ostree --repo=${repo} remote add ${instbr} ${feed_url} --no-gpg-verify || handle_error $? "Failed to remote add repo"
 sudo ostree --repo=${repo} pull --depth=-1 --mirror ${instbr}:${instbr} || handle_error $? "Failed to pull repo"
 
+# TODO(bqian) make commit_id mandatory once the commit-id is built to metadata.xml for major releases
 if [ -z ${commit_id} ]; then
     # get commit id, only latest for now
     commit_id=$(ostree rev-parse --repo=${repo} ${instbr})
@@ -95,10 +108,7 @@ sudo ${rootdir}/usr/sbin/software-deploy/chroot_mounts.sh ${rootdir} || handle_e
 sudo mount --bind ${rootdir}/usr/local/kubernetes/${k8s_ver} ${rootdir}/usr/local/kubernetes/current
 sudo cp /etc/kubernetes/admin.conf ${rootdir}/etc/kubernetes/
 
-# TODO: need to switch back to /opt/software/${to_ver}/bin/prep-data-migration
-#  for running with apt-ostree in the future, when the script is copied to versioned directory
-#  at software upload, such as: DATA_PREP_SCRIPT="/opt/software/${to_ver}/bin/prep-data-migration"
-DATA_PREP_SCRIPT="/usr/sbin/software-deploy/prep-data-migration"
+DATA_PREP_SCRIPT="${exec_path}/prep-data-migration"
 # OS_AUTH_URL, OS_USERNAME, OS_PASSWORD, OS_PROJECT_NAME, OS_USER_DOMAIN_NAME,
 # OS_PROJECT_DOMAIN_NAME, OS_REGION_NAME are in env variables.
 cmd_line=" --rootdir=${rootdir} --from_release=${from_ver} --to_release=${to_ver}"
@@ -115,6 +125,10 @@ sudo chroot ${rootdir} /usr/bin/software-migrate ${from_ver} ${to_ver} ${port} |
 SYNC_CONTROLLERS_SCRIPT="/usr/sbin/software-deploy/sync-controllers-feed"
 sync_controllers_cmd="${SYNC_CONTROLLERS_SCRIPT} ${cmd_line} --feed=${feed}"
 ${sync_controllers_cmd} || handle_error $? "Failed to sync feeds"
+
+state="start-done"
+deploy_update_state $state
+echo "Update deploy state ${state}."
 
 # cleanup after successful data migration
 deploy_cleanup

@@ -154,7 +154,7 @@ class UpgradeHealthCheck(HealthCheck):
         output = ""
 
         # get target release from script directory location
-        upgrade_release = re.match("^.*/rel-(\d\d.\d\d)/", __file__).group(1)
+        upgrade_release = re.match("^.*/rel-(\d\d.\d\d.\d*)/", __file__).group(1)
 
         # check installed license
         success = self._check_license(upgrade_release)

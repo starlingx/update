@@ -77,6 +77,28 @@ def get_major_release_version(sw_release_version):
             return None
 
 
+def get_feed_path(sw_version):
+    sw_ver = get_major_release_version(sw_version)
+    path = os.path.join(constants.UPGRADE_FEED_DIR, f"rel-{sw_ver}")
+    return path
+
+
+def get_software_deploy_script(sw_version, script):
+    if script == constants.DEPLOY_PRECHECK_SCRIPT:
+        return get_precheck_script(sw_version)
+
+    feed_dir = get_feed_path(sw_version)
+    script_path = os.path.join(feed_dir, "upgrades/software-deploy", script)
+    return script_path
+
+
+def get_precheck_script(sw_version):
+    deploy_precheck = os.path.join("/opt/software/",
+                                   f"rel-{sw_version}",
+                                   "bin", constants.DEPLOY_PRECHECK_SCRIPT)
+    return deploy_precheck
+
+
 def compare_release_version(sw_release_version_1, sw_release_version_2):
     """Compares release versions and returns True if first is higher than second """
     if not sw_release_version_1 or not sw_release_version_2:

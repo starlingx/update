@@ -18,6 +18,7 @@ import sys
 import tarfile
 import tempfile
 from oslo_config import cfg as oslo_cfg
+from packaging import version
 from lxml import etree as ElementTree
 from xml.dom import minidom
 
@@ -31,6 +32,7 @@ from software.exceptions import ReleaseUploadFailure
 from software.exceptions import ReleaseValidationFailure
 from software.exceptions import ReleaseMismatchFailure
 from software.exceptions import SoftwareFail
+from software.exceptions import SoftwareServiceError
 
 import software.constants as constants
 import software.utils as utils
@@ -1102,6 +1104,39 @@ def unmount_iso_load(iso_path):
             pass
 
 
+def get_metadata_files(root_dir):
+    files = []
+    for filename in os.listdir(root_dir):
+        fn, ext = os.path.splitext(filename)
+        if ext == '.xml' and fn.endswith('-metadata'):
+            fullname = os.path.join(root_dir, filename)
+            files.append(fullname)
+    return files
+
+
+def get_sw_version(metadata_files):
+    # from a list of metadata files, find the latest sw_version (e.g 24.0.1)
+    unset_ver = "0.0.0"
+    rel_ver = unset_ver
+    for f in metadata_files:
+        try:
+            root = ElementTree.parse(f).getroot()
+        except Exception:
+            msg = f"Cannot parse {f}"
+            LOG.exception(msg)
+            continue
+
+        sw_ver = root.findtext("sw_version")
+        if sw_ver and version.parse(sw_ver) > version.parse(rel_ver):
+            rel_ver = sw_ver
+
+    if rel_ver == unset_ver:
+        err_msg = "Invalid metadata. Cannot identify the sw_version."
+        raise SoftwareServiceError(err_msg)
+
+    return rel_ver
+
+
 def read_upgrade_support_versions(mounted_dir):
     """
     Read upgrade metadata file to get supported upgrades
@@ -1112,9 +1147,11 @@ def read_upgrade_support_versions(mounted_dir):
     try:
         root = ElementTree.parse(mounted_dir + "/upgrades/metadata.xml").getroot()
     except IOError:
-        raise MetadataFail("Failed to read /upgrades/metadata.xml file")
+        raise SoftwareServiceError("Failed to read /upgrades/metadata.xml file")
 
-    to_release = root.findtext("version")
+    rel_metadata_files = get_metadata_files(os.path.join(mounted_dir, "upgrades"))
+    to_release = get_sw_version(rel_metadata_files)
+
     supported_from_releases = []
     supported_upgrades = root.find("supported_upgrades").findall("upgrade")
     for upgrade in supported_upgrades:

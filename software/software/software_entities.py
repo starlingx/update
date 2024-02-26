@@ -233,7 +233,7 @@ class DeployHandler(Deploy):
         super().__init__()
         self.data = get_software_filesystem_data()
 
-    def create(self, from_release, to_release, reboot_required, state=DEPLOY_STATES.DEPLOYING):
+    def create(self, from_release, to_release, reboot_required, state=DEPLOY_STATES.START):
         """
         Create a new deploy with given from and to release version
         :param from_release: The source release version.

@@ -44,6 +44,7 @@ from software.exceptions import ReleaseInvalidRequest
 from software.exceptions import ReleaseValidationFailure
 from software.exceptions import ReleaseMismatchFailure
 from software.exceptions import ReleaseIsoDeleteFailure
+from software.exceptions import SoftwareServiceError
 from software.release_data import SWReleaseCollection
 from software.software_functions import collect_current_load_for_hosts
 from software.software_functions import parse_release_metadata
@@ -643,6 +644,104 @@ class SoftwareMessageDeployStateUpdateAck(messages.PatchMessage):
             LOG.error("Peer controller deploy state has diverged.")
 
 
+class SWMessageDeployStateChanged(messages.PatchMessage):
+    def __init__(self):
+        messages.PatchMessage.__init__(self, messages.PATCHMSG_DEPLOY_STATE_CHANGED)
+        self.valid = False
+        self.agent = None
+        self.deploy_state = None
+        self.hostname = None
+        self.host_state = None
+
+    def decode(self, data):
+        """
+        The message is a serialized json object:
+        {
+             "msgtype": "deploy-state-changed",
+             "msgversion": 1,
+             "agent": "<a valid agent>",
+             "deploy-state": "<deploy-state>",
+             "hostname": "<hostname>",
+             "host-state": "<host-deploy-substate>"
+        }
+        """
+
+        messages.PatchMessage.decode(self, data)
+
+        self.valid = True
+        self.agent = None
+
+        valid_agents = ['deploy-start']
+        if 'agent' in data:
+            agent = data['agent']
+        else:
+            agent = 'unknown'
+
+        if agent not in valid_agents:
+            # ignore msg from unknown senders
+            LOG.info("%s received from unknown agent %s" %
+                     (messages.PATCHMSG_DEPLOY_STATE_CHANGED, agent))
+            self.valid = False
+
+        valid_state = {
+            DEPLOY_STATES.START_DONE.value: DEPLOY_STATES.START_DONE,
+            DEPLOY_STATES.START_FAILED.value: DEPLOY_STATES.START_FAILED
+        }
+        if 'deploy-state' in data and data['deploy-state']:
+            deploy_state = data['deploy-state']
+            if deploy_state in valid_state:
+                self.deploy_state = valid_state[deploy_state]
+                LOG.info("%s received from %s with deploy-state %s" %
+                         (messages.PATCHMSG_DEPLOY_STATE_CHANGED, agent, deploy_state))
+            else:
+                self.valid = False
+                LOG.error("%s received from %s with invalid deploy-state %s" %
+                          (messages.PATCHMSG_DEPLOY_STATE_CHANGED, agent, deploy_state))
+
+        if 'hostname' in data and data['hostname']:
+            self.hostname = data['hostname']
+
+        if 'host-state' in data and data['host-state']:
+            host_state = data['host-state']
+            if host_state not in constants.VALID_HOST_DEPLOY_STATE:
+                LOG.error("%s received from %s with invalid host-state %s" %
+                          (messages.PATCHMSG_DEPLOY_STATE_CHANGED, agent, host_state))
+                self.valid = False
+            else:
+                self.host_state = host_state
+
+        if self.valid:
+            self.valid = (bool(self.host_state and self.hostname) != bool(self.deploy_state))
+
+        if not self.valid:
+            LOG.error("%s received from %s as invalid %s" %
+                      (messages.PATCHMSG_DEPLOY_STATE_CHANGED, agent, data))
+
+    def handle(self, sock, addr):
+        global sc
+        if not self.valid:
+            # nothing to do
+            return
+
+        if self.deploy_state:
+            LOG.info("Received deploy state changed to %s, agent %s" %
+                     (self.deploy_state, self.agent))
+            sc.deploy_state_changed(self.deploy_state)
+        else:
+            LOG.info("Received %s deploy state changed to %s, agent %s" %
+                     (self.hostname, self.host_state, self.agent))
+            sc.host_deploy_state_changed(self.hostname, self.host_state)
+
+        sock.sendto(str.encode("OK"), addr)
+
+    def send(self, sock):
+        global sc
+        LOG.info("sending sync req")
+        self.encode()
+        message = json.dumps(self.message)
+        sock.sendto(str.encode(message), (sc.controller_address, cfg.controller_port))
+
+
 class PatchController(PatchService):
     def __init__(self):
         PatchService.__init__(self)
@@ -1036,6 +1135,29 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
+    def major_release_upload_check(self):
+        """
+        major release upload semantic check
+        """
+        valid_controllers = ['controller-0']
+        if socket.gethostname() not in valid_controllers:
+            msg = f"Upload rejected, major release must be uploaded to {valid_controllers}"
+            LOG.info(msg)
+            raise SoftwareServiceError(error=msg)
+
+        max_major_releases = 2
+        major_releases = []
+        for rel in self.release_collection.iterate_releases():
+            major_rel = utils.get_major_release_version(rel.sw_version)
+            if major_rel not in major_releases:
+                major_releases.append(major_rel)
+
+        if len(major_releases) >= max_major_releases:
+            msg = f"Major releases {major_releases} have already been uploaded." + \
+                  f"Max major releases is {max_major_releases}"
+            LOG.info(msg)
+            raise SoftwareServiceError(error=msg)
+
     def _process_upload_upgrade_files(self, upgrade_files, release_data):
         """
         Process the uploaded upgrade files
@@ -1047,6 +1169,9 @@ class PatchController(PatchService):
         local_warning = ""
         local_error = ""
         release_meta_info = {}
+
+        # validate this major release upload
+        self.major_release_upload_check()
 
         iso_mount_dir = None
         try:
@@ -1102,6 +1227,10 @@ class PatchController(PatchService):
                 shutil.rmtree(to_release_bin_dir)
             shutil.copytree(os.path.join(iso_mount_dir, "upgrades",
                             constants.SOFTWARE_DEPLOY_FOLDER), to_release_bin_dir)
+            # Copy metadata.xml to /opt/software/rel-<rel>/
+            to_file = os.path.join(constants.SOFTWARE_STORAGE_DIR, ("rel-%s" % to_release), "metadata.xml")
+            metadata_file = os.path.join(iso_mount_dir, "upgrades", "metadata.xml")
+            shutil.copyfile(metadata_file, to_file)
 
             # Update the release metadata
             abs_stx_release_metadata_file = os.path.join(
@@ -1363,7 +1492,7 @@ class PatchController(PatchService):
                              constants.DEPLOYED]
 
             if deploystate not in ignore_states:
-                msg = "Release %s is active and cannot be deleted." % release_id
+                msg = f"Release {release_id} is {deploystate} and cannot be deleted."
                 LOG.error(msg)
                 msg_error += msg + "\n"
                 id_verification = False
@@ -1991,13 +2120,11 @@ class PatchController(PatchService):
         msg_warning = ""
         msg_error = ""
 
-        # TODO(bqian) when the deploy-precheck script is moved to /opt/software/rel-<ver>/,
-        # change the code below to call the right script with patch number in <ver>
         rel_ver = utils.get_major_release_version(release_version)
-        rel_path = "rel-%s" % rel_ver
+        rel_path = "rel-%s" % release_version
         deployment_dir = os.path.join(constants.FEED_OSTREE_BASE_DIR, rel_path)
-        precheck_script = os.path.join(deployment_dir, "upgrades",
-                                       constants.SOFTWARE_DEPLOY_FOLDER, "deploy-precheck")
+        precheck_script = utils.get_precheck_script(release_version)
+
         if not os.path.isdir(deployment_dir) or not os.path.isfile(precheck_script):
             msg = "Upgrade files for deployment %s are not present on the system, " \
                   "cannot proceed with the precheck." % rel_ver
@@ -2070,7 +2197,14 @@ class PatchController(PatchService):
 
     def _deploy_upgrade_start(self, to_release):
         LOG.info("start deploy upgrade to %s from %s" % (to_release, SW_VERSION))
-        cmd_path = "/usr/sbin/software-deploy/software-deploy-start"
+        deploy_script_name = constants.DEPLOY_START_SCRIPT
+        cmd_path = utils.get_software_deploy_script(to_release, deploy_script_name)
+        if not os.path.isfile(cmd_path):
+            msg = f"{deploy_script_name} was not found"
+            LOG.error(msg)
+            raise SoftwareServiceError(f"{deploy_script_name} was not found. "
+                                       "The uploaded software could have been damaged. "
+                                       "Please delete the software and re-upload it")
         major_to_release = utils.get_major_release_version(to_release)
         k8s_ver = get_k8s_ver()
         postgresql_port = str(cfg.alt_postgresql_port)
@@ -2105,6 +2239,16 @@ class PatchController(PatchService):
             LOG.error("Failed to start command: %s. Error %s" % (' '.join(upgrade_start_cmd), e))
             return False
 
+    def deploy_state_changed(self, deploy_state):
+        '''Handle 'deploy state change' event, invoked when operations complete. '''
+        dbapi = db_api.get_instance()
+        dbapi.update_deploy(deploy_state)
+
+    def host_deploy_state_changed(self, hostname, host_deploy_state):
+        '''Handle 'host deploy state change' event. '''
+        dbapi = db_api.get_instance()
+        dbapi.update_deploy_host(hostname, host_deploy_state)
+
     def software_deploy_start_api(self, deployment: str, force: bool, **kwargs) -> dict:
         """
         Start deployment by applying the changes to the feed ostree
@@ -2129,7 +2273,7 @@ class PatchController(PatchService):
                 collect_current_load_for_hosts()
                 dbapi = db_api.get_instance()
                 dbapi.create_deploy(SW_VERSION, to_release, True)
-                dbapi.update_deploy(DEPLOY_STATES.DATA_MIGRATION)
+                dbapi.update_deploy(DEPLOY_STATES.START)
                 sw_rel = self.release_collection.get_release_by_id(deployment)
                 if sw_rel is None:
                     raise InternalError("%s cannot be found" % to_release)
@@ -3026,6 +3170,8 @@ class PatchControllerMainThread(threading.Thread):
                             msg = PatchMessageDropHostReq()
                         elif msgdata['msgtype'] == messages.PATCHMSG_DEPLOY_STATE_UPDATE_ACK:
                             msg = SoftwareMessageDeployStateUpdateAck()
+                        elif msgdata['msgtype'] == messages.PATCHMSG_DEPLOY_STATE_CHANGED:
+                            msg = SWMessageDeployStateChanged()
 
                     if msg is None:
                         msg = messages.PatchMessage()
