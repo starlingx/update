@@ -155,7 +155,6 @@ PATCH_EXTENSION = ".patch"
 SUPPORTED_UPLOAD_FILE_EXT = [ISO_EXTENSION, SIG_EXTENSION, PATCH_EXTENSION]
 SCRATCH_DIR = "/scratch"
 RELEASE_GA_NAME = "starlingx-%s"
-LOCAL_LOAD_IMPORT_FILE = "/etc/software/usm_load_import"
 
 # Precheck constants
 LICENSE_FILE = "/etc/platform/.license"

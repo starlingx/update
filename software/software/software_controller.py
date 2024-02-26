@@ -1153,7 +1153,7 @@ class PatchController(PatchService):
                 major_releases.append(major_rel)
 
         if len(major_releases) >= max_major_releases:
-            msg = f"Major releases {major_releases} have already been uploaded." + \
+            msg = f"Major releases {major_releases} have already been uploaded. " + \
                   f"Max major releases is {max_major_releases}"
             LOG.info(msg)
             raise SoftwareServiceError(error=msg)
@@ -1173,6 +1173,7 @@ class PatchController(PatchService):
         # validate this major release upload
         self.major_release_upload_check()
 
+        to_release = None
         iso_mount_dir = None
         try:
             if not verify_files([upgrade_files[constants.ISO_EXTENSION]],
@@ -1199,13 +1200,18 @@ class PatchController(PatchService):
                 raise UpgradeNotSupported("Current release %s not supported to upgrade to %s"
                                           % (SW_VERSION, to_release))
 
-            # Run /etc/software/usm-load-import script
-            LOG.info("Start load importing from %s", iso_file)
-            import_script = os.path.join(iso_mount_dir, 'upgrades',
-                                         constants.SOFTWARE_DEPLOY_FOLDER, 'usm_load_import')
-            shutil.copyfile(import_script, constants.LOCAL_LOAD_IMPORT_FILE)
-            os.chmod(constants.LOCAL_LOAD_IMPORT_FILE, 0o755)
-            load_import_cmd = [constants.LOCAL_LOAD_IMPORT_FILE,
+            # Copy iso /upgrades/software-deploy/ to /opt/software/rel-<rel>/bin/
+            to_release_bin_dir = os.path.join(
+                constants.SOFTWARE_STORAGE_DIR, ("rel-%s" % to_release), "bin")
+            if os.path.exists(to_release_bin_dir):
+                shutil.rmtree(to_release_bin_dir)
+            shutil.copytree(os.path.join(iso_mount_dir, "upgrades",
+                            constants.SOFTWARE_DEPLOY_FOLDER), to_release_bin_dir)
+
+            # Run usm_load_import script
+            LOG.info("Starting load import from %s", iso_file)
+            import_script = os.path.join(to_release_bin_dir, 'usm_load_import')
+            load_import_cmd = [import_script,
                                "--from-release=%s" % SW_VERSION,
                                "--to-release=%s" % to_release,
                                "--iso-dir=%s" % iso_mount_dir]
@@ -1220,13 +1226,6 @@ class PatchController(PatchService):
             else:
                 local_info += load_import_return.stdout
 
-            # Copy iso /upgrades/software-deploy/ to /opt/software/rel-<rel>/bin/
-            to_release_bin_dir = os.path.join(
-                constants.SOFTWARE_STORAGE_DIR, ("rel-%s" % to_release), "bin")
-            if os.path.exists(to_release_bin_dir):
-                shutil.rmtree(to_release_bin_dir)
-            shutil.copytree(os.path.join(iso_mount_dir, "upgrades",
-                            constants.SOFTWARE_DEPLOY_FOLDER), to_release_bin_dir)
             # Copy metadata.xml to /opt/software/rel-<rel>/
             to_file = os.path.join(constants.SOFTWARE_STORAGE_DIR, ("rel-%s" % to_release), "metadata.xml")
             metadata_file = os.path.join(iso_mount_dir, "upgrades", "metadata.xml")
@@ -1259,6 +1258,10 @@ class PatchController(PatchService):
             msg = "Failed to process upgrade files. Error: %s" % str(e)
             LOG.exception(msg)
             local_error += msg + "\n"
+            # delete versioned directory
+            if to_release:
+                to_release_dir = os.path.join(constants.SOFTWARE_STORAGE_DIR, "rel-%s" % to_release)
+                shutil.rmtree(to_release_dir, ignore_errors=True)
         finally:
             # Unmount the iso file
             if iso_mount_dir:

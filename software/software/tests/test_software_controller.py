@@ -54,13 +54,13 @@ class TestSoftwareController(unittest.TestCase):
         mock_verify_files.return_value = True
         mock_mount_iso_load.return_value = '/test/iso'
         mock_read_upgrade_support_versions.return_value = (
-            '2.0', [{'version': '1.0'}, {'version': '2.0'}])
+            '2.0.0', [{'version': '1.0.0'}, ])
         mock_run.return_value.returncode = 0
         mock_run.return_value.stdout = 'Load import successful'
-        mock_parse_release_metadata.return_value = {"id": 1, "sw_version": "2.0"}
+        mock_parse_release_metadata.return_value = {"id": 1, "sw_version": "2.0.0"}
 
         # Call the function being tested
-        with patch('software.software_controller.SW_VERSION', '1.0'):
+        with patch('software.software_controller.SW_VERSION', '1.0.0'):
             info, warning, error, release_meta_info = controller._process_upload_upgrade_files(self.upgrade_files,   # pylint: disable=protected-access
                                                                                                controller.release_data)
 
@@ -71,8 +71,11 @@ class TestSoftwareController(unittest.TestCase):
             self.upgrade_files[constants.ISO_EXTENSION], constants.TMP_DIR)
         mock_read_upgrade_support_versions.assert_called_once_with('/test/iso')
 
-        self.assertEqual(mock_run.call_args[0][0], [constants.LOCAL_LOAD_IMPORT_FILE,
-                         "--from-release=1.0", "--to-release=2.0", "--iso-dir=/test/iso"])
+        self.assertEqual(mock_run.call_args[0][0], ["%s/rel-%s/bin/%s" % (
+            constants.SOFTWARE_STORAGE_DIR,
+            release_meta_info["test.iso"]["sw_version"],
+            "usm_load_import"),
+            "--from-release=1.0.0", "--to-release=2.0.0", "--iso-dir=/test/iso"])
         mock_unmount_iso_load.assert_called_once_with('/test/iso')
 
         # Verify that the expected messages were returned
@@ -83,7 +86,7 @@ class TestSoftwareController(unittest.TestCase):
         self.assertEqual(error, '')
         self.assertEqual(
             release_meta_info,
-            {"test.iso": {"id": 1, "sw_version": "2.0"},
+            {"test.iso": {"id": 1, "sw_version": "2.0.0"},
              "test.sig": {"id": None, "sw_version": None}})
 
     @patch('software.software_controller.PatchController.__init__', return_value=None)
