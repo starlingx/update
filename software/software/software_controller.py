@@ -2120,17 +2120,13 @@ class PatchController(PatchService):
         msg_warning = ""
         msg_error = ""
 
-        rel_ver = utils.get_major_release_version(release_version)
-        rel_path = "rel-%s" % release_version
-        deployment_dir = os.path.join(constants.FEED_OSTREE_BASE_DIR, rel_path)
         precheck_script = utils.get_precheck_script(release_version)
-
-        if not os.path.isdir(deployment_dir) or not os.path.isfile(precheck_script):
+        if not os.path.isfile(precheck_script):
             msg = "Upgrade files for deployment %s are not present on the system, " \
-                  "cannot proceed with the precheck." % rel_ver
+                  "cannot proceed with the precheck." % release_version
             LOG.error(msg)
             msg_error = "Fail to perform deploy precheck. " \
-                        "Uploaded release may have been damaged." \
+                        "Uploaded release may have been damaged. " \
                         "Try delete and re-upload the release.\n"
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
