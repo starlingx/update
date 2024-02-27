@@ -74,6 +74,8 @@ import software.constants as constants
 
 from tsconfig.tsconfig import INITIAL_CONFIG_COMPLETE_FLAG
 from tsconfig.tsconfig import INITIAL_CONTROLLER_CONFIG_COMPLETE
+import xml.etree.ElementTree as ET
+
 
 CONF = oslo_cfg.CONF
 
@@ -2246,6 +2248,11 @@ class PatchController(PatchService):
         '''Handle 'host deploy state change' event. '''
         self.db_api_instance.update_deploy_host(hostname, host_deploy_state)
 
+    def add_text_tag_to_xml(self, parent, name, text):
+        tag = ET.SubElement(parent, name)
+        tag.text = text
+        return tag
+
     def software_deploy_start_api(self, deployment: str, force: bool, **kwargs) -> dict:
         """
         Start deployment by applying the changes to the feed ostree
@@ -2387,11 +2394,31 @@ class PatchController(PatchService):
                 # Update the feed ostree summary
                 ostree_utils.update_repo_summary_file(feed_ostree)
 
+                # Get the latest commit after performing "apt-ostree install".
+                self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
+
                 try:
                     # Move the release metadata to deploying dir
                     deploystate = self.release_data.metadata[release]["state"]
                     metadata_dir = DEPLOY_STATE_METADATA_DIR_DICT[deploystate]
-                    shutil.move("%s/%s-metadata.xml" % (metadata_dir, release),
+
+                    metadata_file = "%s/%s-metadata.xml" % (metadata_dir, release)
+                    tree = ET.parse(metadata_file)
+                    root = tree.getroot()
+
+                    # ostree = ET.SubElement(root, "ostree")
+                    self.add_text_tag_to_xml(root, "number_of_commits", "1")
+                    self.add_text_tag_to_xml(root, "previous_commit", latest_commit)
+                    self.add_text_tag_to_xml(root, "commit", self.latest_feed_commit)
+
+                    ET.indent(tree, '  ')
+                    with open(metadata_file, "wb") as outfile:
+                        tree = ET.tostring(root)
+                        outfile.write(tree)
+
+                    LOG.info("Latest feed commit: %s added to metadata file" % self.latest_feed_commit)
+
+                    shutil.move(metadata_file,
                                 "%s/%s-metadata.xml" % (constants.DEPLOYING_START_DIR, release))
 
                     msg_info += "%s is now in the repo\n" % release
@@ -2406,9 +2433,6 @@ class PatchController(PatchService):
                     self.release_data.metadata[release]["state"] = constants.DEPLOYING_START
                 else:
                     self.release_data.metadata[release]["state"] = constants.UNKNOWN
-
-                # Get the latest commit after performing "apt-ostree install".
-                self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
 
                 with self.hosts_lock:
                     self.interim_state[release] = list(self.hosts)
@@ -2914,7 +2938,6 @@ class PatchController(PatchService):
         if not deploy:
             return None
         deploy = deploy[0]
-
 
         deploy_host_list = []
         for host in deploy_hosts:
