@@ -1536,13 +1536,16 @@ def setup_argparse():
     # --- software upload <release> ---------------
     cmd = commands.add_parser(
         'upload',
-        help='Upload a software release'
+        help='Upload software major or patch releases'
     )
     cmd.set_defaults(cmd='upload')
     cmd.set_defaults(func=release_upload_req)
     cmd.add_argument('release',
+                     metavar='(iso + sig) | patch',
                      nargs="+",  # accepts a list
-                     help='software releases to upload')
+                     help=('pair of install iso and sig files for major release '
+                           '(GA or patched) and/or one or more files containing a '
+                           'patch release. NOTE: specify at most ONE pair of (iso + sig)'))
     cmd.add_argument('--local',
                      required=False,
                      default=False,
