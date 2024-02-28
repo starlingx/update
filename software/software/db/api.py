@@ -1,13 +1,17 @@
 """
-Copyright (c) 2023 Wind River Systems, Inc.
+Copyright (c) 2023-2024 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
 
+import logging
+import threading
 from software.software_entities import DeployHandler
 from software.software_entities import DeployHostHandler
 from software.constants import DEPLOY_STATES
+
+LOG = logging.getLogger('main_logger')
 
 
 def get_instance():
@@ -17,6 +21,7 @@ def get_instance():
 
 class SoftwareAPI:
     _instance = None
+    _lock = threading.RLock()
 
     def __new__(cls):
         if cls._instance is None:
@@ -28,28 +33,74 @@ class SoftwareAPI:
         self.deploy_host_handler = DeployHostHandler()
 
     def create_deploy(self, from_release, to_release, reboot_required: bool):
+        self.begin_update()
         self.deploy_handler.create(from_release, to_release, reboot_required)
+        self.end_update()
 
     def get_deploy(self):
-        return self.deploy_handler.query()
+        self.begin_update()
+        try:
+            return self.deploy_handler.query()
+        finally:
+            self.end_update()
 
     def update_deploy(self, state: DEPLOY_STATES):
-        self.deploy_handler.update(state)
+        self.begin_update()
+        try:
+            self.deploy_handler.update(state)
+        finally:
+            self.end_update()
 
     def delete_deploy(self):
-        self.deploy_handler.delete()
+        self.begin_update()
+        try:
+            self.deploy_handler.delete()
+        finally:
+            self.end_update()
 
     def create_deploy_host(self, hostname):
-        self.deploy_host_handler.create(hostname)
+        self.begin_update()
+        try:
+            self.deploy_host_handler.create(hostname)
+        finally:
+            self.end_update()
 
     def get_deploy_host(self):
-        return self.deploy_host_handler.query_all()
+        self.begin_update()
+        try:
+            return self.deploy_host_handler.query_all()
+        finally:
+            self.end_update()
 
     def update_deploy_host(self, hostname, state):
-        return self.deploy_host_handler.update(hostname, state)
+        self.begin_update()
+        try:
+            return self.deploy_host_handler.update(hostname, state)
+        finally:
+            self.end_update()
 
     def delete_deploy_host(self, hostname):
-        self.deploy_host_handler.delete(hostname)
+        self.begin_update()
+        try:
+            self.deploy_host_handler.delete(hostname)
+        finally:
+            self.end_update()
 
     def delete_deploy_host_all(self):
-        self.deploy_host_handler.delete_all()
+        self.begin_update()
+        try:
+            self.deploy_host_handler.delete_all()
+        finally:
+            self.end_update()
+
+    def begin_update(self):
+        tid = threading.get_native_id()
+        msg = f"{tid} is to acquire lock."
+        LOG.info(msg)
+        SoftwareAPI._lock.acquire()
+
+    def end_update(self):
+        SoftwareAPI._lock.release()
+        tid = threading.get_native_id()
+        msg = f"{tid} released lock."
+        LOG.info(msg)
