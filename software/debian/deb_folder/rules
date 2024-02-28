@@ -74,8 +74,6 @@ override_dh_install:
         ${ROOT}/etc/software/${METADATA_FILE}
 	install -m 755 scripts/chroot_mounts.sh \
 		${ROOT}/usr/sbin/software-deploy/chroot_mounts.sh
-	install -m 444 scripts/ostree_mounts.yaml \
-        ${ROOT}/etc/software/ostree_mounts.yaml
 	install -m 755 scripts/create_postgresql_database.sh \
 		${ROOT}/usr/sbin/software-deploy/create_postgresql_database.sh
 	install -m 755 scripts/usm_load_import \
@@ -84,4 +82,6 @@ override_dh_install:
 		${ROOT}/usr/sbin/software-deploy/sync-controllers-feed
 	install -m 755 scripts/deploy-cleanup \
 		${ROOT}/usr/sbin/software-deploy/deploy-cleanup
+	install -m 755 scripts/shell-utils \
+		${ROOT}/usr/sbin/software-deploy/shell-utils
 	dh_install

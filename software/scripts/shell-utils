@@ -1,0 +1,29 @@
+# !/bin/bash
+#
+# Copyright (c) 2024 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# File containing common shell functions that
+# can be sourced and used by other shell scripts.
+#
+
+log()
+{
+    script_name=$(basename $0)
+    log_type=$1
+    shift
+    echo "$(date -Iseconds | cut -d'+' -f1): ${script_name}[${$}]: ${log_type}: ${@}"
+}
+
+info() {
+    log "INFO" $@
+}
+
+warning() {
+    log "WARNING" $@
+}
+
+error() {
+    log "ERROR" $@ >&2
+}
