@@ -1,12 +1,15 @@
 #
-# Copyright (c) 2023 Wind River Systems, Inc.
+# Copyright (c) 2023-2024 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
 # This is an utility module used by standalone USM upgrade scripts
 # that runs on the FROM-side context but using TO-side code base
 #
+import logging
+import os
 import re
+import sys
 
 from keystoneauth1 import exceptions
 from keystoneauth1 import identity
@@ -128,3 +131,13 @@ def get_system_info(sysinv_client):
     """
     system_info = sysinv_client.isystem.list()[0]
     return system_info.system_type, system_info.system_mode
+
+
+def configure_logging(filename, log_level=logging.INFO):
+    my_exec = os.path.basename(sys.argv[0])
+
+    log_format = ('%(asctime)s: ' + my_exec + '[%(process)s]: '
+                  '%(filename)s(%(lineno)s): %(levelname)s: %(message)s')
+    log_datefmt = "%FT%T"
+
+    logging.basicConfig(filename=filename, format=log_format, level=log_level, datefmt=log_datefmt)

@@ -3,7 +3,7 @@
 #
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 #
-# Copyright (c) 2023 Wind River Systems, Inc.
+# Copyright (c) 2023-2024 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -60,7 +60,7 @@ def main(sys_argv):
         _, system_mode = upgrade_utils.get_system_info(sysinv_client)
         simplex = (system_mode == SYSTEM_MODE_SIMPLEX)
         if simplex:
-            print("System mode is simplex. Skipping sync controllers feed.. ")
+            LOG.info("System mode is simplex. Skipping sync controllers feed.. ")
             return 0
 
     except ImportError:
@@ -88,5 +88,5 @@ def main(sys_argv):
 
 
 if __name__ == "__main__":
-    LOG.basicConfig(filename='/var/log/software.log', level=LOG.INFO)
+    upgrade_utils.configure_logging('/var/log/software.log', log_level=LOG.INFO)
     sys.exit(main(sys.argv))

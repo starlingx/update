@@ -3,7 +3,7 @@
 #
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 #
-# Copyright (c) 2023 Wind River Systems, Inc.
+# Copyright (c) 2023-2024 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -260,7 +260,7 @@ def main(sys_argv):
 
     data_migration = DataMigration(rootdir, from_release, to_release, keystone_config)
 
-    LOG.info("Running data migration from %s to %s" % (from_release, to_release))
+    LOG.info("Running data migration preparation from %s to %s" % (from_release, to_release))
 
     try:
         # export postgres databases
@@ -285,14 +285,14 @@ def main(sys_argv):
         # Export /etc directory to $rootdir/etc
         data_migration.export_etc()
 
-        LOG.info("Data migration completed successfully.")
+        LOG.info("Data migration preparation completed successfully.")
 
     except Exception as e:
-        LOG.exception("Data migration failed.")
+        LOG.exception("Data migration preparation failed.")
         return 1
     return 0
 
 
 if __name__ == "__main__":
-    LOG.basicConfig(filename='/var/log/prep-data-migration.log', level=LOG.INFO)
+    upgrade_utils.configure_logging("/var/log/software.log", log_level=LOG.INFO)
     sys.exit(main(sys.argv))

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2023 Wind River Systems, Inc.
+# Copyright (c) 2023-2024 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -7,6 +7,7 @@
 import argparse
 import glob
 import json
+import logging
 import os
 from pathlib import Path
 import psycopg2
@@ -16,14 +17,12 @@ import sys
 import subprocess
 import yaml
 
-
-from oslo_log import log
-
 from software.utilities import constants
 import software.utilities.utils as utils
 
 
 sout = sys.stdout
+devnull = subprocess.DEVNULL
 
 
 def get_postgres_bin():
@@ -38,11 +37,17 @@ def get_postgres_bin():
 
 
 POSTGRES_BIN = get_postgres_bin()
-LOG = log.getLogger(__name__)
 POSTGRES_PATH = '/var/lib/postgresql'
 POSTGRES_DATA_DIR = os.path.join(POSTGRES_PATH, constants.SW_VERSION)
 DB_CONNECTION_FORMAT = "connection=postgresql://%s:%s@127.0.0.1:%s/%s\n"
 DB_BARBICAN_CONNECTION_FORMAT = "postgresql://%s:%s@127.0.0.1:%s/%s"
+
+# Configure logging
+LOG = logging.getLogger(__name__)
+log_format = ('%(asctime)s: ' + __name__ + '[%(process)s]: '
+              '%(filename)s(%(lineno)s): %(levelname)s: %(message)s')
+log_datefmt = "%FT%T"
+logging.basicConfig(filename="/var/log/software.log", format=log_format, level=logging.INFO, datefmt=log_datefmt)
 
 
 def migrate_keyring_data(from_release, to_release):
@@ -252,11 +257,11 @@ def import_databases(target_port, from_path=None):
     try:
         postgres_config_path = os.path.join(
             from_dir, 'postgres.postgreSql.config')
-        # Do postgres schema import (suppress stderr due to noise)
+        # Do postgres schema import
         subprocess.check_call(['sudo -u postgres psql --port=%s -f ' % target_port +
                                postgres_config_path + ' postgres'],
                               shell=True,
-                              stdout=sout,
+                              stdout=devnull,
                               stderr=sout)
     except subprocess.CalledProcessError:
         LOG.exception("Failed to import schemas.")
@@ -267,7 +272,7 @@ def import_databases(target_port, from_path=None):
     # Do postgres data import
     for data in glob.glob(from_dir + '/*.*Sql.data'):
         db_elem = data.split('/')[-1].split('.')[0]
-        LOG.info("importing {}".format(db_elem))
+        LOG.info("Importing %s" % db_elem)
         import_commands.append((db_elem,
                                 "sudo -u postgres psql --port=%s -f " % target_port + data +
                                 " " + db_elem))
@@ -301,8 +306,7 @@ def import_databases(target_port, from_path=None):
         try:
             print("Importing %s" % cmd[0])
             LOG.info("Executing import command: %s" % cmd[1])
-            subprocess.check_call([cmd[1]],
-                                  shell=True, stdout=sout)
+            subprocess.check_call([cmd[1]], shell=True, stdout=devnull, stderr=sout)
 
         except subprocess.CalledProcessError as ex:
             LOG.exception("Failed to execute command: '%s' during upgrade "
