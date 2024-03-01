@@ -21,6 +21,9 @@ ADDRESS_VERSION_IPV4 = 4
 ADDRESS_VERSION_IPV6 = 6
 CONTROLLER_FLOATING_HOSTNAME = "controller"
 
+DISTRIBUTED_CLOUD_ROLE_SYSTEMCONTROLLER = 'systemcontroller'
+SYSTEM_CONTROLLER_REGION = 'SystemController'
+
 SOFTWARE_STORAGE_DIR = "/opt/software"
 SOFTWARE_CONFIG_FILE_LOCAL = "/etc/software/software.conf"
 
@@ -64,7 +67,8 @@ UNAVAILABLE = 'unavailable'
 DEPLOYING = 'deploying'
 DEPLOYED = 'deployed'
 REMOVING = 'removing'
-UNKNOWN = 'n/a'
+
+DELETABLE_STATE = [AVAILABLE, UNAVAILABLE]
 
 # TODO(bqian) states to be removed once current references are removed
 ABORTING = 'aborting'
@@ -181,6 +185,7 @@ class DEPLOY_STATES(Enum):
     HOST = 'host'
     HOST_DONE = 'host-done'
     HOST_FAILED = 'host-failed'
+
 
 class DEPLOY_HOST_STATES(Enum):
     DEPLOYED = 'deployed'

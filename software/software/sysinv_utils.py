@@ -5,8 +5,10 @@ SPDX-License-Identifier: Apache-2.0
 
 """
 import logging
-import software.utils as utils
+
 from software.exceptions import SysinvClientNotInitialized
+from software import constants
+from software import utils
 
 
 LOG = logging.getLogger('main_logger')
@@ -41,6 +43,7 @@ def get_k8s_ver():
             return k8s_ver.version
     raise Exception("Failed to get current k8s version")
 
+
 def get_ihost_list():
     try:
         token, endpoint = utils.get_endpoints_token()
@@ -49,3 +52,18 @@ def get_ihost_list():
     except Exception as err:
         LOG.error("Error getting ihost list: %s", err)
         raise
+
+
+def get_dc_role():
+    try:
+        token, endpoint = utils.get_endpoints_token()
+        sysinv_client = get_sysinv_client(token=token, endpoint=endpoint)
+        system = sysinv_client.isystem.list()[0]
+        return system.distributed_cloud_role
+    except Exception as err:
+        LOG.error("Error getting DC role: %s", err)
+        raise
+
+
+def is_system_controller():
+    return get_dc_role() == constants.DISTRIBUTED_CLOUD_ROLE_SYSTEMCONTROLLER

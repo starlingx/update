@@ -5,11 +5,13 @@
 #
 
 import os
+from packaging import version
 import shutil
 from software import constants
 from software.exceptions import FileSystemError
 from software.exceptions import InternalError
 from software.software_functions import LOG
+from software import utils
 
 
 class SWRelease(object):
@@ -19,6 +21,7 @@ class SWRelease(object):
         self._id = rel_id
         self._metadata = metadata
         self._contents = contents
+        self._sw_version = None
 
     @property
     def metadata(self):
@@ -83,8 +86,16 @@ class SWRelease(object):
             raise InternalError(error)
 
     @property
-    def sw_version(self):
+    def sw_release(self):
+        '''3 sections MM.mm.pp release version'''
         return self.metadata['sw_version']
+
+    @property
+    def sw_version(self):
+        '''2 sections MM.mm software version'''
+        if self._sw_version is None:
+            self._sw_version = utils.get_major_release_version(self.sw_release)
+        return self._sw_version
 
     def _get_latest_commit(self):
         num_commits = self.contents['number_of_commits']
@@ -155,6 +166,16 @@ class SWRelease(object):
             # may consider raise InvalidRelease exception when iso comes with
             # latest commit
             return None
+
+    @property
+    def is_ga_release(self):
+        ver = version.parse(self.sw_release)
+        _, _, pp = ver.release
+        return pp == 0
+
+    @property
+    def is_deletable(self):
+        return self.state in constants.DELETABLE_STATE
 
 
 class SWReleaseCollection(object):

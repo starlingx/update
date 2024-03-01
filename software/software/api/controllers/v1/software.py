@@ -14,6 +14,7 @@ from pecan import Response
 import shutil
 
 from software.exceptions import SoftwareError
+from software.exceptions import SoftwareServiceError
 from software.software_controller import sc
 import software.utils as utils
 import software.constants as constants
@@ -26,32 +27,20 @@ class SoftwareAPIController(object):
 
     @expose('json')
     def commit_patch(self, *args):
-        try:
-            result = sc.patch_commit(list(args))
-        except SoftwareError as e:
-            return dict(error=str(e))
-
+        result = sc.patch_commit(list(args))
         sc.software_sync()
 
         return result
 
     @expose('json')
     def commit_dry_run(self, *args):
-        try:
-            result = sc.patch_commit(list(args), dry_run=True)
-        except SoftwareError as e:
-            return dict(error=str(e))
-
+        result = sc.patch_commit(list(args), dry_run=True)
         return result
 
     @expose('json')
     @expose('query.xml', content_type='application/xml')
     def delete(self, *args):
-        try:
-            result = sc.software_release_delete_api(list(args))
-        except SoftwareError as e:
-            return dict(error="Error: %s" % str(e))
-
+        result = sc.software_release_delete_api(list(args))
         sc.software_sync()
 
         return result
@@ -60,13 +49,9 @@ class SoftwareAPIController(object):
     @expose('query.xml', content_type='application/xml')
     def deploy_activate(self, *args):
         if sc.any_patch_host_installing():
-            return dict(error="Rejected: One or more nodes are installing a release.")
+            raise SoftwareServiceError(error="Rejected: One or more nodes are installing a release.")
 
-        try:
-            result = sc.software_deploy_activate_api(list(args)[0])
-        except SoftwareError as e:
-            return dict(error="Error: %s" % str(e))
-
+        result = sc.software_deploy_activate_api(list(args)[0])
         sc.software_sync()
         return result
 
@@ -74,12 +59,9 @@ class SoftwareAPIController(object):
     @expose('query.xml', content_type='application/xml')
     def deploy_complete(self, *args):
         if sc.any_patch_host_installing():
-            return dict(error="Rejected: One or more nodes are installing a release.")
+            raise SoftwareServiceError(error="Rejected: One or more nodes are installing a release.")
 
-        try:
-            result = sc.software_deploy_complete_api(list(args)[0])
-        except SoftwareError as e:
-            return dict(error="Error: %s" % str(e))
+        result = sc.software_deploy_complete_api(list(args)[0])
 
         sc.software_sync()
         return result
@@ -93,10 +75,7 @@ class SoftwareAPIController(object):
         if len(list(args)) > 1 and 'force' in list(args)[1:]:
             force = True
 
-        try:
-            result = sc.software_deploy_host_api(list(args)[0], force, async_req=True)
-        except SoftwareError as e:
-            return dict(error="Error: %s" % str(e))
+        result = sc.software_deploy_host_api(list(args)[0], force, async_req=True)
 
         return result
 
@@ -107,10 +86,7 @@ class SoftwareAPIController(object):
         if 'force' in list(args):
             force = True
 
-        try:
-            result = sc.software_deploy_precheck_api(list(args)[0], force, **kwargs)
-        except SoftwareError as e:
-            return dict(error="Error: %s" % str(e))
+        result = sc.software_deploy_precheck_api(list(args)[0], force, **kwargs)
 
         return result
 
@@ -121,12 +97,9 @@ class SoftwareAPIController(object):
         force = 'force' in list(args)
 
         if sc.any_patch_host_installing():
-            return dict(error="Rejected: One or more nodes are installing releases.")
+            raise SoftwareServiceError(error="Rejected: One or more nodes are installing a release.")
 
-        try:
-            result = sc.software_deploy_start_api(list(args)[0], force, **kwargs)
-        except SoftwareError as e:
-            return dict(error="Error: %s" % str(e))
+        result = sc.software_deploy_start_api(list(args)[0], force, **kwargs)
 
         sc.send_latest_feed_commit_to_agent()
         sc.software_sync()
@@ -144,10 +117,7 @@ class SoftwareAPIController(object):
     @expose('json')
     @expose('query.xml', content_type='application/xml')
     def install_local(self):
-        try:
-            result = sc.software_install_local_api()
-        except SoftwareError as e:
-            return dict(error="Error: %s" % str(e))
+        result = sc.software_install_local_api()
 
         return result
 
@@ -166,10 +136,7 @@ class SoftwareAPIController(object):
     @expose('json')
     @expose('show.xml', content_type='application/xml')
     def show(self, *args):
-        try:
-            result = sc.software_release_query_specific_cached(list(args))
-        except SoftwareError as e:
-            return dict(error="Error: %s" % str(e))
+        result = sc.software_release_query_specific_cached(list(args))
 
         return result
 
@@ -212,8 +179,6 @@ class SoftwareAPIController(object):
             # Process uploaded files
             return sc.software_release_upload(uploaded_files)
 
-        except Exception as e:
-            return dict(error=str(e))
         finally:
             # Remove all uploaded files from /scratch dir
             sc.software_sync()
@@ -223,10 +188,7 @@ class SoftwareAPIController(object):
     @expose('json')
     @expose('query.xml', content_type='application/xml')
     def query(self, **kwargs):
-        try:
-            sd = sc.software_release_query_cached(**kwargs)
-        except SoftwareError as e:
-            return dict(error="Error: %s" % str(e))
+        sd = sc.software_release_query_cached(**kwargs)
 
         return dict(sd=sd)
 

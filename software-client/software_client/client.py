@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-from keystoneauth1 import loading
 from oslo_utils import importutils
 
 from software_client import exc
@@ -18,6 +17,7 @@ API_ENDPOINT = "http://127.0.0.1:" + API_PORT
 
 
 def _make_session(**kwargs):
+    from keystoneauth1 import loading
     """Construct a session based on authentication information
 
     :param kwargs: keyword args containing credentials, either:

@@ -31,6 +31,7 @@ from software.api import app
 from software.authapi import app as auth_app
 from software.constants import DEPLOY_STATES
 from software.base import PatchService
+from software.dc_utils import get_subcloud_groupby_version
 from software.exceptions import APTOSTreeCommandFail
 from software.exceptions import InternalError
 from software.exceptions import MetadataFail
@@ -66,6 +67,7 @@ from software.release_verify import verify_files
 import software.config as cfg
 import software.utils as utils
 from software.sysinv_utils import get_k8s_ver
+from software.sysinv_utils import is_system_controller
 
 from software.db.api import get_instance
 
@@ -1148,7 +1150,7 @@ class PatchController(PatchService):
         max_major_releases = 2
         major_releases = []
         for rel in self.release_collection.iterate_releases():
-            major_rel = utils.get_major_release_version(rel.sw_version)
+            major_rel = rel.sw_version
             if major_rel not in major_releases:
                 major_releases.append(major_rel)
 
@@ -1470,7 +1472,43 @@ class PatchController(PatchService):
         msg_error = ""
 
         # Protect against duplications
-        release_list = sorted(list(set(release_ids)))
+        full_list = sorted(list(set(release_ids)))
+
+        not_founds = []
+        cannot_del = []
+        used_by_subcloud = []
+        release_list = []
+        for rel_id in full_list:
+            rel = self.release_collection.get_release_by_id(rel_id)
+            if rel is None:
+                not_founds.append(rel_id)
+            else:
+                if not rel.is_deletable:
+                    cannot_del.append(rel_id)
+                elif rel.is_ga_release and is_system_controller():
+                    subcloud_by_sw_version = get_subcloud_groupby_version()
+                    if rel.sw_version in subcloud_by_sw_version:
+                        used_by_subcloud.append(rel_id)
+                    else:
+                        release_list.append(rel_id)
+                else:
+                    release_list.append(rel_id)
+
+        err_msg = ""
+        if len(not_founds) > 0:
+            list_str = ','.join(not_founds)
+            err_msg = f"Releases {list_str} can not be found\n"
+
+        if len(cannot_del) > 0:
+            list_str = ','.join(cannot_del)
+            err_msg = err_msg + f"Releases {list_str} are not ready to delete\n"
+
+        if len(used_by_subcloud) > 0:
+            list_str = ','.join(used_by_subcloud)
+            err_msg = err_msg + f"Releases {list_str} are still used by subcloud(s)"
+
+        if len(err_msg) > 0:
+            raise SoftwareServiceError(error=err_msg)
 
         msg = "Deleting releases: %s" % ",".join(release_list)
         LOG.info(msg)
@@ -2914,7 +2952,6 @@ class PatchController(PatchService):
         if not deploy:
             return None
         deploy = deploy[0]
-
 
         deploy_host_list = []
         for host in deploy_hosts:

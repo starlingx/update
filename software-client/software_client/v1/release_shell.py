@@ -192,9 +192,5 @@ def do_upload_dir(cc, args):
 def do_delete(cc, args):
     """Delete the software release"""
     resp, body = cc.release.release_delete(args.release)
-    if args.debug:
-        utils.print_result_debug(resp, body)
-    else:
-        utils.print_software_op_result(resp, body)
-
+    utils.display_info(resp)
     return utils.check_rc(resp, body)
