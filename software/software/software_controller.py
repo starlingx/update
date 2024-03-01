@@ -1219,7 +1219,7 @@ class PatchController(PatchService):
             load_import_return = subprocess.run(load_import_cmd,
                                                 stdout=subprocess.PIPE,
                                                 stderr=subprocess.STDOUT,
-                                                check=False,
+                                                check=True,
                                                 text=True)
             if load_import_return.returncode != 0:
                 local_error += load_import_return.stdout
@@ -3058,7 +3058,9 @@ class PatchControllerMainThread(threading.Thread):
         global sc
         global thread_death
 
-        # LOG.info ("In Main thread")
+        # Send periodic messages to the agents
+        # We only can use one inverval
+        SEND_MSG_INTERVAL_IN_SECONDS = 30.0
 
         try:
             sock_in = sc.setup_socket()
@@ -3083,8 +3085,10 @@ class PatchControllerMainThread(threading.Thread):
             sc.socket_lock.release()
 
             # Send hello every thirty seconds
-            hello_timeout = time.time() + 30.0
-            remaining = 30
+            hello_timeout = time.time() + SEND_MSG_INTERVAL_IN_SECONDS
+            # Send deploy state update every thirty seconds
+            deploy_state_update_timeout = time.time() + SEND_MSG_INTERVAL_IN_SECONDS
+            remaining = int(SEND_MSG_INTERVAL_IN_SECONDS)
 
             agent_query_conns = []
 
@@ -3105,8 +3109,8 @@ class PatchControllerMainThread(threading.Thread):
                 inputs = [sc.sock_in] + agent_query_conns
                 outputs = []
 
-                # LOG.info("Running select, remaining=%d", remaining)
-                rlist, wlist, xlist = select.select(inputs, outputs, inputs, remaining)
+                rlist, wlist, xlist = select.select(
+                    inputs, outputs, inputs, SEND_MSG_INTERVAL_IN_SECONDS)
 
                 if (len(rlist) == 0 and
                         len(wlist) == 0 and
@@ -3114,7 +3118,6 @@ class PatchControllerMainThread(threading.Thread):
                     # Timeout hit
                     sc.audit_socket()
 
-                # LOG.info("Checking sockets")
                 for s in rlist:
                     data = ''
                     addr = None
@@ -3214,9 +3217,9 @@ class PatchControllerMainThread(threading.Thread):
                         stale_hosts.append(ip)
 
                 remaining = int(hello_timeout - time.time())
-                if remaining <= 0 or remaining > 30:
-                    hello_timeout = time.time() + 30.0
-                    remaining = 30
+                if remaining <= 0 or remaining > int(SEND_MSG_INTERVAL_IN_SECONDS):
+                    hello_timeout = time.time() + SEND_MSG_INTERVAL_IN_SECONDS
+                    remaining = int(SEND_MSG_INTERVAL_IN_SECONDS)
 
                     sc.socket_lock.acquire()
 
@@ -3250,6 +3253,25 @@ class PatchControllerMainThread(threading.Thread):
                                     sc.interim_state[patch_id].remove(n)
 
                     sc.hosts_lock.release()
+
+                deploy_state_update_remaining = int(deploy_state_update_timeout - time.time())
+                # Only send the deploy state update from the active controller
+                if deploy_state_update_remaining <= 0 or deploy_state_update_remaining > int(
+                        SEND_MSG_INTERVAL_IN_SECONDS):
+                    deploy_state_update_timeout = time.time() + SEND_MSG_INTERVAL_IN_SECONDS
+                    deploy_state_update_remaining = int(
+                        SEND_MSG_INTERVAL_IN_SECONDS)
+
+                    # Only send the deploy state update from the active controller
+                    if utils.is_active_controller():
+                        try:
+                            sc.socket_lock.acquire()
+                            deploy_state_update = SoftwareMessageDeployStateUpdate()
+                            deploy_state_update.send(sc.sock_out)
+                        except Exception as e:
+                            LOG.exception("Failed to send deploy state update. Error: %s", str(e))
+                        finally:
+                            sc.socket_lock.release()
         except Exception:
             # Log all exceptions
             LOG.exception("Error occurred during request processing")

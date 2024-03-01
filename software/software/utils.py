@@ -424,3 +424,14 @@ def validate_versions(versions):
             msg = "Invalid version: %s" % ver
             LOG.exception(msg)
             raise ValueError(msg)
+
+
+def is_active_controller():
+    """
+    Check if a controller is active
+
+    :return: True if the controller is active, False otherwise
+    """
+
+    keyring_file = f"/opt/platform/.keyring/{constants.SW_VERSION}/.CREDENTIAL"
+    return os.path.exists(keyring_file)
