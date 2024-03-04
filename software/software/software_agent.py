@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023 Wind River Systems, Inc.
+Copyright (c) 2024 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -71,15 +71,24 @@ def clearflag(fname):
 def pull_restart_scripts_from_controller():
     # If the rsync fails, it raises an exception to
     # the caller "handle_install()" and fails the
-    # host-install request for this host
-    output = subprocess.check_output(["rsync",
-                                      "-acv",
-                                      "--delete",
-                                      "--exclude", "tmp",
-                                      "rsync://controller/repo/software-scripts/",
-                                      "%s/" % insvc_software_scripts],
-                                     stderr=subprocess.STDOUT)
-    LOG.info("Synced restart scripts from controller: %s", output)
+    # host-install request for this host.
+    # The restart_scripts are optional, so if the files
+    # are not present, it should not raise any exception
+    try:
+        output = subprocess.check_output(["rsync",
+                                        "-acv",
+                                        "--delete",
+                                        "--exclude", "tmp",
+                                        "rsync://controller/repo/software-scripts/",
+                                        "%s/" % insvc_software_scripts],
+                                        stderr=subprocess.STDOUT)
+        LOG.info("Synced restart scripts from controller: %s", output)
+    except subprocess.CalledProcessError as e:
+        if "No such file or directory" in e.output.decode("utf-8"):
+            LOG.info("No restart scripts contained in the release")
+        else:
+            LOG.exception("Failed to sync restart scripts from controller")
+            raise
 
 
 def check_install_uuid():
