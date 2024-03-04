@@ -23,10 +23,6 @@ LOG = log.getLogger(__name__)
 
 class SoftwareAPIController(object):
 
-    @expose(generic=True, template='json')
-    def index(self):
-        pass
-
     @expose('json')
     def commit_patch(self, *args):
         try:
@@ -244,6 +240,6 @@ class SoftwareAPIController(object):
             return dict(error=str(e))
         return dict(data=query_hosts)
 
-    @index.when(method='GET', template='json')
+    @expose(method='GET', template='json')
     def in_sync_controller(self):
         return sc.in_sync_controller_api()
