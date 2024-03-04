@@ -1,15 +1,9 @@
 """
-Copyright (c) 2023 Wind River Systems, Inc.
+Copyright (c) 2023-2024 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
-
-# Server Specific Configurations
-server = {
-    'port': '5497',
-    'host': '0.0.0.0'
-}
 
 # Pecan Application Configurations
 app = {

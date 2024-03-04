@@ -2267,10 +2267,15 @@ class PatchController(PatchService):
 
             if self._deploy_upgrade_start(to_release):
                 collect_current_load_for_hosts()
-                self.update_and_sync_deploy_state(self.db_api_instance.create_deploy,
-                                                  SW_VERSION, to_release, True)
-                self.update_and_sync_deploy_state(self.db_api_instance.update_deploy,
-                                                  DEPLOY_STATES.START)
+                self.db_api_instance.begin_update()
+                try:
+                    self.update_and_sync_deploy_state(self.db_api_instance.create_deploy,
+                                                      SW_VERSION, to_release, True)
+                    self.update_and_sync_deploy_state(self.db_api_instance.update_deploy,
+                                                      DEPLOY_STATES.START)
+                finally:
+                    self.db_api_instance.end_update()
+
                 sw_rel = self.release_collection.get_release_by_id(deployment)
                 if sw_rel is None:
                     raise InternalError("%s cannot be found" % to_release)
@@ -2931,7 +2936,6 @@ class PatchController(PatchService):
             return query_hosts
         return deploy_host_list
 
-
     def update_and_sync_deploy_state(self, func, *args, **kwargs):
         """
         :param func: SoftwareApi method
@@ -3001,14 +3005,14 @@ class PatchControllerApiThread(threading.Thread):
 
 
 class PatchControllerAuthApiThread(threading.Thread):
-    def __init__(self):
+    def __init__(self, port):
         threading.Thread.__init__(self)
         # LOG.info ("Initializing Authenticated API thread")
         self.wsgi = None
+        self.port = port
 
     def run(self):
         host = CONF.auth_api_bind_ip
-        port = CONF.auth_api_port
         if host is None:
             host = utils.get_versioned_address_all()
         try:
@@ -3027,7 +3031,7 @@ class PatchControllerAuthApiThread(threading.Thread):
 
             server_class.address_family = utils.get_management_family()
             self.wsgi = simple_server.make_server(
-                host, port,
+                host, self.port,
                 auth_app.VersionSelectorApplication(),
                 server_class=server_class)
 
@@ -3286,11 +3290,13 @@ def main():
 
     LOG.info("launching")
     api_thread = PatchControllerApiThread()
-    auth_api_thread = PatchControllerAuthApiThread()
+    auth_api_thread = PatchControllerAuthApiThread(CONF.auth_api_port)
+    auth_api_alt_thread = PatchControllerAuthApiThread(CONF.auth_api_alt_port)
     main_thread = PatchControllerMainThread()
 
     api_thread.start()
     auth_api_thread.start()
+    auth_api_alt_thread.start()
     main_thread.start()
 
     thread_death.wait()
@@ -3299,4 +3305,5 @@ def main():
 
     api_thread.join()
     auth_api_thread.join()
+    auth_api_alt_thread.join()
     main_thread.join()
