@@ -27,6 +27,10 @@ SYSTEM_CONTROLLER_REGION = 'SystemController'
 SOFTWARE_STORAGE_DIR = "/opt/software"
 SOFTWARE_CONFIG_FILE_LOCAL = "/etc/software/software.conf"
 
+# Deploy precheck return codes
+RC_SUCCESS = 0
+RC_UNHEALTHY = 3
+
 DEPLOY_PRECHECK_SCRIPT = "deploy-precheck"
 DEPLOY_START_SCRIPT = "software-deploy-start"
 

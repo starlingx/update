@@ -2249,12 +2249,14 @@ class PatchController(PatchService):
             check=False,
             text=True,
         )
-        if precheck_return.returncode != 0:
-            msg_error += precheck_return.stdout
-        else:
+        system_healthy = None
+        if precheck_return.returncode in [constants.RC_SUCCESS, constants.RC_UNHEALTHY]:
+            system_healthy = precheck_return.returncode == constants.RC_SUCCESS
             msg_info += precheck_return.stdout
+        else:
+            msg_error += precheck_return.stdout
 
-        return dict(info=msg_info, warning=msg_warning, error=msg_error)
+        return dict(info=msg_info, warning=msg_warning, error=msg_error, system_healthy=system_healthy)
 
     def software_deploy_precheck_api(self, deployment: str, force: bool = False, **kwargs) -> dict:
         """
@@ -2339,11 +2341,14 @@ class PatchController(PatchService):
             patch_release = False
             to_release = release["sw_version"]
             ret = self._deploy_precheck(to_release, force, patch=patch_release)
-            if ret["error"]:
-                ret["error"] = "The following issues have been detected which prevent " \
-                               "deploying %s\n" % deployment + \
+            if ret["system_healthy"] is None:
+                ret["error"] = "Fail to perform deploy precheck. Internal error has occurred.\n" + \
                                ret["error"]
-                ret["error"] += "Please fix above issues then retry the deploy.\n"
+                return ret
+            elif not ret["system_healthy"]:
+                ret["info"] = "The following issues have been detected, which prevent " \
+                               "deploying %s\n" % deployment + ret["info"] + \
+                               "Please fix above issues then retry the deploy.\n"
                 return ret
 
             if self._deploy_upgrade_start(to_release):

@@ -34,6 +34,9 @@ SUPPORTED_K8S_VERSIONS = [
     "v1.28.4",
 ]
 
+RC_SUCCESS = 0
+RC_UNHEALTHY = 3
+
 
 class HealthCheck(object):
     """This class represents a general health check object
@@ -327,8 +330,9 @@ def main(argv=None):
     # print health check output and exit
     print(output)
     if health_ok:
-        return 0
-    return 1
+        return RC_SUCCESS
+    else:
+        return RC_UNHEALTHY
 
 
 if __name__ == "__main__":
