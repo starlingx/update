@@ -1,7 +1,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# Copyright (c) 2023 Wind River Systems, Inc.
+# Copyright (c) 2023-2024 Wind River Systems, Inc.
 #
 
 import json
@@ -138,8 +138,7 @@ class SoftwareClientHelpTestCase(SoftwareClientTestCase, SoftwareClientNonRootMi
         """When no arguments are called, it should call print_usage"""
         shell_args = [self.PROG, ]
         self._test_method(shell_args=shell_args)
-        mock_usage.assert_called()
-        mock_help.assert_not_called()
+        mock_help.assert_called()
         mock_check.assert_not_called()
 
     @mock.patch('software_client.software_client.check_for_os_region_name')
@@ -149,7 +148,6 @@ class SoftwareClientHelpTestCase(SoftwareClientTestCase, SoftwareClientNonRootMi
         """When -h is passed in, this should invoke print_help"""
         shell_args = [self.PROG, "-h"]
         self._test_method(shell_args=shell_args)
-        mock_usage.assert_not_called()
         mock_help.assert_called()
         mock_check.assert_not_called()
 
@@ -160,6 +158,5 @@ class SoftwareClientHelpTestCase(SoftwareClientTestCase, SoftwareClientNonRootMi
         """invalid args should invoke print_usage"""
         shell_args = [self.PROG, "invalid_arg"]
         self._test_method(shell_args=shell_args)
-        mock_usage.assert_called()
         mock_help.assert_not_called()
         mock_check.assert_not_called()

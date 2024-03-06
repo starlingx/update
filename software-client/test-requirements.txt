@@ -3,5 +3,6 @@ hacking
 
 bandit
 coverage
+httplib2
 pylint
 stestr

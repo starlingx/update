@@ -1,1213 +1,36 @@
-"""
-Copyright (c) 2023-2024 Wind River Systems, Inc.
+#
+# Copyright (c) 2013-2024 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
 
-SPDX-License-Identifier: Apache-2.0
 
 """
-# PYTHON_ARGCOMPLETE_OK
-import argcomplete
+Command-line interface for Software
+"""
+
+from __future__ import print_function
 import argparse
-import json
+import httplib2
+import logging
 import os
-import re
-import requests
-import signal
-import software_client.constants as constants
 import subprocess
 import sys
-import textwrap
-import time
 
-from requests_toolbelt import MultipartEncoder
-from urllib.parse import urlparse
+import software_client
 
-from tsconfig.tsconfig import SW_VERSION as RUNNING_SW_VERSION
+from software_client import client as sclient
+from software_client import exc
+from software_client.common import utils
+from software_client.constants import TOKEN, KEYSTONE, LOCAL_ROOT
 
-api_addr = "127.0.0.1:5493"
-auth_token = None
 
-TERM_WIDTH = 72
 VIRTUAL_REGION = 'SystemController'
-IPV6_FAMILY = 6
-
-
-def set_term_width():
-    global TERM_WIDTH
-
-    try:
-        with open(os.devnull, 'w') as NULL:
-            output = subprocess.check_output(["tput", "cols"], stderr=NULL)
-            width = int(output)
-            if width > 60:
-                TERM_WIDTH = width - 4
-    except Exception:
-        pass
-
-
-def check_rc(req):
-    rc = 0
-    if req.status_code == 200:
-        data = json.loads(req.text)
-        if 'error' in data and data["error"] != "":
-            rc = 1
-    else:
-        rc = 1
-
-    return rc
-
-
-def print_result_debug(req):
-    if req.status_code == 200:
-        data = json.loads(req.text)
-        if 'sd' in data:
-            print(json.dumps(data['sd'],
-                             sort_keys=True,
-                             indent=4,
-                             separators=(',', ': ')))
-        elif 'data' in data:
-            print(json.dumps(data['data'],
-                             sort_keys=True,
-                             indent=4,
-                             separators=(',', ': ')))
-        else:
-            print(json.dumps(data,
-                             sort_keys=True,
-                             indent=4,
-                             separators=(',', ': ')))
-    elif req.status_code == 500:
-        print("An internal error has occurred. Please check /var/log/software.log for details")
-    else:
-        m = re.search("(Error message:.*)", req.text, re.MULTILINE)
-        if m:
-            print(m.group(0))
-        else:
-            print("%s %s" % (req.status_code, req.reason))
-
-
-def print_software_op_result(req):
-    if req.status_code == 200:
-        data = json.loads(req.text)
-
-        if 'sd' in data:
-            sd = data['sd']
-
-            # Calculate column widths
-            hdr_release = "Release"
-            hdr_version = "Version"
-            hdr_rr = "RR"
-            hdr_state = "State"
-
-            width_release = len(hdr_release)
-            width_version = len(hdr_version)
-            width_rr = len(hdr_rr)
-            width_state = len(hdr_state)
-
-            show_all = False
-
-            for release_id in list(sd):
-                width_release = max(len(release_id), width_release)
-                width_state = max(len(sd[release_id]["state"]), width_state)
-                if "sw_version" in sd[release_id]:
-                    show_all = True
-                    width_version = max(len(sd[release_id]["sw_version"]), width_version)
-
-            if show_all:
-                print("{0:^{width_release}}  {1:^{width_rr}}  {2:^{width_version}}  {3:^{width_state}}".format(
-                    hdr_release, hdr_rr, hdr_version, hdr_state,
-                    width_release=width_release, width_rr=width_rr,
-                    width_version=width_version, width_state=width_state))
-
-                print("{0}  {1}  {2}  {3}".format(
-                    '=' * width_release, '=' * width_rr, '=' * width_version, '=' * width_state))
-
-                for release_id in sorted(list(sd)):
-                    if "reboot_required" in sd[release_id]:
-                        rr = sd[release_id]["reboot_required"]
-                    else:
-                        rr = "Y"
-
-                    print("{0:<{width_release}}  {1:^{width_rr}}  {2:^{width_version}}  {3:^{width_state}}".format(
-                        release_id,
-                        rr,
-                        sd[release_id]["sw_version"],
-                        sd[release_id]["state"],
-                        width_release=width_release, width_rr=width_rr,
-                        width_version=width_version, width_state=width_state))
-            else:
-                print("{0:^{width_release}}  {1:^{width_state}}".format(
-                    hdr_release, hdr_state,
-                    width_release=width_release, width_state=width_state))
-
-                print("{0}  {1}".format(
-                    '=' * width_release, '=' * width_state))
-
-                for release_id in sorted(list(sd)):
-                    if "reboot_required" in sd[release_id]:
-                        rr = sd[release_id]["reboot_required"]
-                    else:
-                        rr = "Y"
-
-                    print("{0:<{width_release}}  {1:^{width_rr}}  {2:^{width_state}}".format(
-                        release_id,
-                        rr,
-                        sd[release_id]["state"],
-                        width_release=width_release, width_rr=width_rr,
-                        width_state=width_state))
-
-            print("")
-
-        if 'info' in data and data["info"] != "":
-            print(data["info"])
-
-        if 'warning' in data and data["warning"] != "":
-            print("Warning:")
-            print(data["warning"])
-
-        if 'error' in data and data["error"] != "":
-            print("Error:")
-            print(data["error"])
-
-    elif req.status_code == 500:
-        print("An internal error has occurred. Please check /var/log/software.log for details")
-    else:
-        print("Error: %s has occurred. %s" % (req.status_code, req.reason))
-
-
-def print_release_show_result(req, list_packages=False):
-    if req.status_code == 200:
-        data = json.loads(req.text)
-
-        if 'metadata' in data:
-            sd = data['metadata']
-            contents = data['contents']
-            for release_id in sorted(list(sd)):
-                print("%s:" % release_id)
-
-                if "sw_version" in sd[release_id] and sd[release_id]["sw_version"] != "":
-                    print(textwrap.fill("    {0:<15} ".format("Version:") + sd[release_id]["sw_version"],
-                                        width=TERM_WIDTH, subsequent_indent=' ' * 20))
-
-                if "state" in sd[release_id] and sd[release_id]["state"] != "":
-                    print(textwrap.fill("    {0:<15} ".format("State:") + sd[release_id]["state"],
-                                        width=TERM_WIDTH, subsequent_indent=' ' * 20))
-
-                if "status" in sd[release_id] and sd[release_id]["status"] != "":
-                    print(textwrap.fill("    {0:<15} ".format("Status:") + sd[release_id]["status"],
-                                        width=TERM_WIDTH, subsequent_indent=' ' * 20))
-
-                if "unremovable" in sd[release_id] and sd[release_id]["unremovable"] != "":
-                    print(textwrap.fill("    {0:<15} ".format("Unremovable:") + sd[release_id]["unremovable"],
-                                        width=TERM_WIDTH, subsequent_indent=' ' * 20))
-
-                if "reboot_required" in sd[release_id] and sd[release_id]["reboot_required"] != "":
-                    print(textwrap.fill("    {0:<15} ".format("RR:") + sd[release_id]["reboot_required"],
-                                        width=TERM_WIDTH, subsequent_indent=' ' * 20))
-
-                if "apply_active_release_only" in sd[release_id] and sd[release_id]["apply_active_release_only"] != "":
-                    print(textwrap.fill("    {0:<15} ".format("Apply Active Release Only:") + sd[release_id]["apply_active_release_only"],
-                                        width=TERM_WIDTH, subsequent_indent=' ' * 20))
-
-                if "summary" in sd[release_id] and sd[release_id]["summary"] != "":
-                    print(textwrap.fill("    {0:<15} ".format("Summary:") + sd[release_id]["summary"],
-                                        width=TERM_WIDTH, subsequent_indent=' ' * 20))
-
-                if "description" in sd[release_id] and sd[release_id]["description"] != "":
-                    first_line = True
-                    for line in sd[release_id]["description"].split('\n'):
-                        if first_line:
-                            print(textwrap.fill("    {0:<15} ".format("Description:") + line,
-                                                width=TERM_WIDTH, subsequent_indent=' ' * 20))
-                            first_line = False
-                        else:
-                            print(textwrap.fill(line,
-                                                width=TERM_WIDTH, subsequent_indent=' ' * 20,
-                                                initial_indent=' ' * 20))
-
-                if "install_instructions" in sd[release_id] and sd[release_id]["install_instructions"] != "":
-                    print("    Install Instructions:")
-                    for line in sd[release_id]["install_instructions"].split('\n'):
-                        print(textwrap.fill(line,
-                                            width=TERM_WIDTH, subsequent_indent=' ' * 20,
-                                            initial_indent=' ' * 20))
-
-                if "warnings" in sd[release_id] and sd[release_id]["warnings"] != "":
-                    first_line = True
-                    for line in sd[release_id]["warnings"].split('\n'):
-                        if first_line:
-                            print(textwrap.fill("    {0:<15} ".format("Warnings:") + line,
-                                                width=TERM_WIDTH, subsequent_indent=' ' * 20))
-                            first_line = False
-                        else:
-                            print(textwrap.fill(line,
-                                                width=TERM_WIDTH, subsequent_indent=' ' * 20,
-                                                initial_indent=' ' * 20))
-
-                if "requires" in sd[release_id] and len(sd[release_id]["requires"]) > 0:
-                    print("    Requires:")
-                    for req_patch in sorted(sd[release_id]["requires"]):
-                        print(' ' * 20 + req_patch)
-
-                if "contents" in data and release_id in data["contents"]:
-                    print("    Contents:\n")
-                    if "number_of_commits" in contents[release_id] and \
-                            contents[release_id]["number_of_commits"] != "":
-                        print(textwrap.fill("    {0:<15} ".format("No. of commits:") +
-                                            contents[release_id]["number_of_commits"],
-                                            width=TERM_WIDTH, subsequent_indent=' ' * 20))
-                    if "base" in contents[release_id] and \
-                            contents[release_id]["base"]["commit"] != "":
-                        print(textwrap.fill("    {0:<15} ".format("Base commit:") +
-                                            contents[release_id]["base"]["commit"],
-                                            width=TERM_WIDTH, subsequent_indent=' ' * 20))
-                    if "number_of_commits" in contents[release_id] and \
-                            contents[release_id]["number_of_commits"] != "":
-                        for i in range(int(contents[release_id]["number_of_commits"])):
-                            print(textwrap.fill("    {0:<15} ".format("Commit%s:" % (i + 1)) +
-                                                contents[release_id]["commit%s" % (i + 1)]["commit"],
-                                                width=TERM_WIDTH, subsequent_indent=' ' * 20))
-
-                if list_packages:
-                    if "packages" in sd[release_id] and len(sd[release_id]["packages"]):
-                        print("    Packages:")
-                        for package in sorted(sd[release_id]["packages"]):
-                            print(" " * 20 + package)
-
-                print("\n")
-
-        if 'info' in data and data["info"] != "":
-            print(data["info"])
-
-        if 'warning' in data and data["warning"] != "":
-            print("Warning:")
-            print(data["warning"])
-
-        if 'error' in data and data["error"] != "":
-            print("Error:")
-            print(data["error"])
-
-    elif req.status_code == 500:
-        print("An internal error has occurred. Please check /var/log/software.log for details")
-
-
-def _print_result_list(header_data_list, data_list, has_error, sort_key=0):
-    """
-    Print a list of data in a simple table format
-    :param header_data_list: Array of header data
-    :param data_list: Array of data
-    :param has_error: Boolean indicating if the request has error message
-    :param sort_key: Sorting key for the list
-    """
-
-    if has_error:
-        return
-
-    if data_list is None or len(data_list) == 0:
-        return
-
-    # Find the longest header string in each column
-    header_lengths = [len(str(x)) for x in header_data_list]
-    # Find the longest content string in each column
-    content_lengths = [max(len(str(x[i])) for x in data_list)
-                       for i in range(len(header_data_list))]
-    # Find the max of the two for each column
-    col_lengths = [(x if x > y else y) for x, y in zip(header_lengths, content_lengths)]
-
-    print('  '.join(f"{x.center(col_lengths[i])}" for i, x in enumerate(header_data_list)))
-    print('  '.join('=' * length for length in col_lengths))
-    for item in sorted(data_list, key=lambda d: d[sort_key]):
-        print('  '.join(f"{str(x).center(col_lengths[i])}" for i, x in enumerate(item)))
-    print("\n")
 
 
 def software_command_not_implemented_yet(args):
     print("NOT IMPLEMENTED %s" % args)
     return 1
-
-
-def release_is_available_req(args):
-
-    releases = "/".join(args.release)
-    url = "http://%s/v1/software/is_available/%s" % (api_addr, releases)
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.post(url, headers=headers)
-
-    rc = 1
-
-    if req.status_code == 200:
-        result = json.loads(req.text)
-        print(result)
-        if result is True:
-            rc = 0
-    elif req.status_code == 500:
-        print("An internal error has occurred. Please check /var/log/software.log for details")
-    else:
-        print("Error: %s has occurred. %s" % (req.status_code, req.reason))
-
-    return rc
-
-
-def release_is_deployed_req(args):
-
-    releases = "/".join(args.release)
-    url = "http://%s/v1/software/is_deployed/%s" % (api_addr, releases)
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.post(url, headers=headers)
-
-    rc = 1
-
-    if req.status_code == 200:
-        result = json.loads(req.text)
-        print(result)
-        if result is True:
-            rc = 0
-    elif req.status_code == 500:
-        print("An internal error has occurred. Please check /var/log/software.log for details")
-    else:
-        print("Error: %s has occurred. %s" % (req.status_code, req.reason))
-
-    return rc
-
-
-def release_is_committed_req(args):
-
-    releases = "/".join(args.release)
-    url = "http://%s/v1/software/is_committed/%s" % (api_addr, releases)
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.post(url, headers=headers)
-
-    rc = 1
-
-    if req.status_code == 200:
-        result = json.loads(req.text)
-        print(result)
-        if result is True:
-            rc = 0
-    elif req.status_code == 500:
-        print("An internal error has occurred. Please check /var/log/software.log for details")
-    else:
-        print("Error: %s has occurred. %s" % (req.status_code, req.reason))
-
-    return rc
-
-
-def release_upload_req(args):
-    rc = 0
-
-    # arg.release is a list
-    releases = args.release
-    is_local = args.local  # defaults to False
-
-    # Ignore interrupts during this function
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    to_upload_files = {}
-    valid_files = []
-    invalid_files = []
-
-    # Validate all the files
-    valid_files = [os.path.abspath(software_file) for software_file in releases if os.path.isfile(
-        software_file) and os.path.splitext(software_file)[1] in constants.SUPPORTED_UPLOAD_FILE_EXT]
-    invalid_files = [os.path.abspath(software_file) for software_file in releases
-                     if os.path.abspath(software_file) not in valid_files]
-
-    for software_file in invalid_files:
-        if os.path.isdir(software_file):
-            print("Error: %s is a directory. Please use upload-dir" % software_file)
-        elif os.path.isfile(software_file):
-            print("Error: %s has the unsupported file extension." % software_file)
-        else:
-            print("Error: File does not exist: %s" % software_file)
-
-    if len(valid_files) == 0:
-        print("No file to be uploaded.")
-        return rc
-
-    if is_local:
-        to_upload_filenames = json.dumps(valid_files)
-        headers = {'Content-Type': 'text/plain'}
-    else:
-        for software_file in valid_files:
-            with open(software_file, 'rb') as file:
-                data_content = file.read()
-            to_upload_files[software_file] = (software_file, data_content)
-
-        encoder = MultipartEncoder(fields=to_upload_files)
-        headers = {'Content-Type': encoder.content_type}
-
-    url = "http://%s/v1/software/upload" % api_addr
-    append_auth_token_if_required(headers)
-    req = requests.post(url,
-                        data=to_upload_filenames if is_local else encoder,
-                        headers=headers)
-
-    if args.debug:
-        print_result_debug(req)
-    else:
-        print_software_op_result(req)
-        data = json.loads(req.text)
-        data_list = [(k, v["id"])
-                     for d in data["upload_info"] for k, v in d.items()
-                     if not k.endswith(".sig")]
-
-        header_data_list = ["Uploaded File", "Id"]
-        has_error = 'error' in data and data["error"]
-        _print_result_list(header_data_list, data_list, has_error)
-    if check_rc(req) != 0:
-        # We hit a failure.  Update rc but keep looping
-        rc = 1
-
-    return rc
-
-
-def release_delete_req(args):
-    # arg.release is a list
-    releases = "/".join(args.release)
-
-    # Ignore interrupts during this function
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    url = "http://%s/v1/software/delete/%s" % (api_addr, releases)
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.post(url, headers=headers)
-
-    if args.debug:
-        print_result_debug(req)
-    else:
-        print_software_op_result(req)
-
-    return check_rc(req)
-
-
-def commit_patch_req(args):
-
-    # Ignore interrupts during this function
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    # Default to running release
-    # this all needs to be changed
-    relopt = RUNNING_SW_VERSION
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    if args.sw_version and not args.all:
-        # Disallow
-        print("Use of --sw-version option requires --all")
-        return 1
-    elif args.all:
-        # Get a list of all patches
-        extra_opts = "&release=%s" % relopt
-        url = "http://%s/v1/software/query?show=patch%s" % (api_addr, extra_opts)
-
-        req = requests.get(url, headers=headers)
-
-        patch_list = []
-        if req.status_code == 200:
-            data = json.loads(req.text)
-
-            if 'sd' in data:
-                patch_list = sorted(list(data['sd']))
-        elif req.status_code == 500:
-            print("Failed to get patch list. Aborting...")
-            return 1
-
-        if len(patch_list) == 0:
-            print("There are no %s patches to commit." % relopt)
-            return 0
-
-        print("The following patches will be committed:")
-        for patch_id in patch_list:
-            print("    %s" % patch_id)
-        print()
-
-        patches = "/".join(patch_list)
-    else:
-        # args.patch is a list
-        patches = "/".join(args.patch)
-
-        # First, get a list of dependencies and ask for confirmation
-        url = "http://%s/v1/software/query_dependencies/%s?recursive=yes" % (api_addr, patches)
-
-        req = requests.get(url, headers=headers)
-
-        if req.status_code == 200:
-            data = json.loads(req.text)
-
-            if 'patches' in data:
-                print("The following patches will be committed:")
-                for release_id in sorted(data['patches']):
-                    print("    %s" % release_id)
-                print()
-            else:
-                print("No patches found to commit")
-                return 1
-
-        elif req.status_code == 500:
-            print("An internal error has occurred. Please check /var/log/software.log for details")
-            return 1
-
-    # Run dry-run
-    url = "http://%s/v1/software/commit_dry_run/%s" % (api_addr, patches)
-
-    req = requests.post(url, headers=headers)
-    print_software_op_result(req)
-
-    if check_rc(req) != 0:
-        print("Aborting...")
-        return 1
-
-    if args.dry_run:
-        return 0
-
-    print()
-    commit_warning = "WARNING: Committing a patch is an irreversible operation. " + \
-                     "Committed patches cannot be removed."
-    print(textwrap.fill(commit_warning, width=TERM_WIDTH, subsequent_indent=' ' * 9))
-    print()
-
-    user_input = input("Would you like to continue? [y/N]: ")
-    if user_input.lower() != 'y':
-        print("Aborting...")
-        return 1
-
-    url = "http://%s/v1/software/commit_patch/%s" % (api_addr, patches)
-    req = requests.post(url, headers=headers)
-
-    if args.debug:
-        print_result_debug(req)
-    else:
-        print_software_op_result(req)
-
-    return check_rc(req)
-
-
-def release_list_req(args):
-    state = args.state  # defaults to "all"
-    extra_opts = ""
-    if args.release:
-        extra_opts = "&release=%s" % args.release
-    url = "http://%s/v1/software/query?show=%s%s" % (api_addr, state, extra_opts)
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.get(url, headers=headers)
-
-    if args.debug:
-        print_result_debug(req)
-    else:
-        header_data_list = ["Release", "RR", "State"]
-        data = json.loads(req.text)
-        data_list = [(k, v["reboot_required"], v["state"]) for k, v in data["sd"].items()]
-        has_error = 'error' in data and data["error"]
-        _print_result_list(header_data_list, data_list, has_error)
-
-    return check_rc(req)
-
-
-def print_software_deploy_host_list_result(req):
-    if req.status_code == 200:
-        data = req.json().get("data", None)
-        if not data:
-            print("No deploy in progress.\n")
-            return
-
-        # Calculate column widths
-        hdr_hn = "Hostname"
-        hdr_rel = "Software Release"
-        hdr_tg_rel = "Target Release"
-        hdr_rr = "Reboot Required"
-        hdr_state = "Host State"
-
-        width_hn = len(hdr_hn)
-        width_rel = len(hdr_rel)
-        width_tg_rel = len(hdr_tg_rel)
-        width_rr = len(hdr_rr)
-        width_state = len(hdr_state)
-
-        for agent in sorted(data, key=lambda a: a["hostname"]):
-            if agent.get("host_state") is None:
-                agent["host_state"] = "No active deployment"
-            if agent.get("target_release") is None:
-                agent["target_release"] = "N/A"
-            if len(agent["hostname"]) > width_hn:
-                width_hn = len(agent["hostname"])
-            if len(agent["software_release"]) > width_rel:
-                width_rel = len(agent["software_release"])
-            if len(agent["target_release"]) > width_tg_rel:
-                width_tg_rel = len(agent["target_release"])
-            if len(agent["host_state"]) > width_state:
-                width_state = len(agent["host_state"])
-
-        print("{0:^{width_hn}}  {1:^{width_rel}}  {2:^{width_tg_rel}}  {3:^{width_rr}}  {4:^{width_state}}".format(
-            hdr_hn, hdr_rel, hdr_tg_rel, hdr_rr, hdr_state,
-            width_hn=width_hn, width_rel=width_rel, width_tg_rel=width_tg_rel, width_rr=width_rr, width_state=width_state))
-
-        print("{0}  {1}  {2}  {3}  {4}".format(
-            '=' * width_hn, '=' * width_rel, '=' * width_tg_rel, '=' * width_rr, '=' * width_state))
-
-        for agent in sorted(data, key=lambda a: a["hostname"]):
-            print("{0:<{width_hn}}  {1:^{width_rel}}  {2:^{width_tg_rel}}  {3:^{width_rr}}  {4:^{width_state}}".format(
-                agent["hostname"],
-                agent["software_release"],
-                agent["target_release"],
-                "Yes" if agent.get("reboot_required", None) else "No",
-                agent["host_state"],
-                width_hn=width_hn, width_rel=width_rel, width_tg_rel=width_tg_rel, width_rr=width_rr, width_state=width_state))
-
-    elif req.status_code == 500:
-        print("An internal error has occurred. Please check /var/log/software.log for details")
-
-
-def deploy_host_list_req(args):
-    url = "http://%s/v1/software/host_list" % api_addr
-    req = requests.get(url)
-    if args.debug:
-        print_result_debug(req)
-    else:
-        print_software_deploy_host_list_result(req)
-
-    return check_rc(req)
-
-
-def release_show_req(args):
-    # arg.release is a list
-    releases = "/".join(args.release)
-    list_packages = args.packages
-
-    url = "http://%s/v1/software/show/%s" % (api_addr, releases)
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    # todo(abailey): convert this to a GET
-    req = requests.post(url, headers=headers)
-
-    if args.debug:
-        print_result_debug(req)
-    else:
-        print_release_show_result(req, list_packages=list_packages)
-
-    return check_rc(req)
-
-
-def wait_for_install_complete(agent_ip):
-    url = "http://%s/v1/software/host_list" % api_addr
-    rc = 0
-
-    max_retries = 4
-    retriable_count = 0
-
-    while True:
-        # Sleep on the first pass as well, to allow time for the
-        # agent to respond
-        time.sleep(5)
-
-        try:
-            req = requests.get(url)
-        except requests.exceptions.ConnectionError:
-            # The local software-controller may have restarted.
-            retriable_count += 1
-            if retriable_count <= max_retries:
-                continue
-            else:
-                print("Lost communications with the software controller")
-                rc = 1
-                break
-
-        if req.status_code == 200:
-            data = req.json().get("data", None)
-            if not data:
-                print("Invalid host-list data returned:")
-                print_result_debug(req)
-                rc = 1
-                break
-
-            host_state = None
-
-            for d in data:
-                if d['hostname'] == agent_ip:
-                    host_state = d.get('host_state')
-
-            if host_state == constants.DEPLOYING:
-                # Still deploying
-                sys.stdout.write(".")
-                sys.stdout.flush()
-            elif host_state == constants.FAILED:
-                print("\nDeployment failed. Please check logs for details.")
-                rc = 1
-                break
-            elif host_state == constants.DEPLOYED:
-                print("\nDeployment was successful.")
-                rc = 0
-                break
-            else:
-                print("\nReported unknown state: %s" % host_state)
-                rc = 1
-                break
-
-        elif req.status_code == 500:
-            print("An internal error has occurred. Please check /var/log/software.log for details")
-            rc = 1
-            break
-        else:
-            m = re.search("(Error message:.*)", req.text, re.MULTILINE)
-            if m:
-                print(m.group(0))
-            else:
-                print(vars(req))
-            rc = 1
-            break
-
-    return rc
-
-
-def host_install(args):
-    rc = 0
-    agent_ip = args.agent
-
-    # Issue deploy_host request and poll for results
-    url = "http://%s/v1/software/deploy_host/%s" % (api_addr, agent_ip)
-
-    if args.force:
-        url += "/force"
-
-    req = requests.post(url)
-
-    if req.status_code == 200:
-        data = json.loads(req.text)
-        if 'error' in data and data["error"] != "":
-            print("Error:")
-            print(data["error"])
-            rc = 1
-        else:
-            rc = wait_for_install_complete(agent_ip)
-    elif req.status_code == 500:
-        print("An internal error has occurred. "
-              "Please check /var/log/software.log for details")
-        rc = 1
-    else:
-        m = re.search("(Error message:.*)", req.text, re.MULTILINE)
-        if m:
-            print(m.group(0))
-        else:
-            print("%s %s" % (req.status_code, req.reason))
-        rc = 1
-
-    return rc
-
-
-def drop_host(args):
-    host_ip = args.host
-
-    url = "http://%s/v1/software/drop_host/%s" % (api_addr, host_ip)
-
-    req = requests.post(url)
-
-    if args.debug:
-        print_result_debug(req)
-    else:
-        print_software_op_result(req)
-
-    return check_rc(req)
-
-
-def install_local(args):  # pylint: disable=unused-argument
-    # Ignore interrupts during this function
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    url = "http://%s/v1/software/install_local" % (api_addr)
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.get(url, headers=headers)
-
-    if args.debug:
-        print_result_debug(req)
-    else:
-        print_software_op_result(req)
-
-    return check_rc(req)
-
-
-def release_upload_dir_req(args):
-    # arg.release is a list
-    release_dirs = args.release
-
-    # Ignore interrupts during this function
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    to_upload_files = {}
-    raw_files = []
-
-    # Find all files that need to be uploaded in given directories
-    for release_dir in release_dirs:
-        if os.path.isdir(release_dir):
-            raw_files = [f for f in os.listdir(release_dir)
-                         if os.path.isfile(os.path.join(release_dir, f))]
-
-            # Get absolute path of files
-            raw_files = [os.path.abspath(os.path.join(release_dir, f)) for f in raw_files]
-        else:
-            print("Skipping invalid directory: %s" % release_dir, file=sys.stderr)
-
-    if len(raw_files) == 0:
-        print("No file to upload")
-        return 0
-
-    temp_iso_files = [f for f in raw_files if f.endswith(constants.ISO_EXTENSION)]
-    if len(temp_iso_files) > 1:  # Verify that only one ISO file is being uploaded
-        print("Only one ISO file can be uploaded at a time. Found: %s" %
-              temp_iso_files, file=sys.stderr)
-        return 1
-
-    temp_sig_files = [f for f in raw_files if f.endswith(constants.SIG_EXTENSION)]
-    if len(temp_sig_files) > 1:  # Verify that only one SIG file is being uploaded
-        print("Only one SIG file can be uploaded at a time. Found: %s" %
-              temp_sig_files, file=sys.stderr)
-        return 1
-
-    for software_file in sorted(set(raw_files)):
-        _, ext = os.path.splitext(software_file)
-        if ext in constants.SUPPORTED_UPLOAD_FILE_EXT:
-            to_upload_files[software_file] = (software_file, open(software_file, 'rb'))
-        else:
-            print("Skipping unsupported file: %s" % software_file, file=sys.stderr)
-
-    encoder = MultipartEncoder(fields=to_upload_files)
-    url = "http://%s/v1/software/upload" % api_addr
-    headers = {'Content-Type': encoder.content_type}
-    append_auth_token_if_required(headers)
-    req = requests.post(url,
-                        data=encoder,
-                        headers=headers)
-    if args.debug:
-        print_result_debug(req)
-    else:
-        print_software_op_result(req)
-    return check_rc(req)
-
-
-def deploy_precheck_req(args):
-    # args.deployment is a string
-    deployment = args.deployment
-
-    # args.region is a string
-    region_name = args.region_name
-
-    # Issue deploy_precheck request
-    url = "http://%s/v1/software/deploy_precheck/%s" % (api_addr, deployment)
-    if args.force:
-        url += "/force"
-    url += "?region_name=%s" % region_name
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.post(url, headers=headers)
-
-    if args.debug:
-        print_result_debug(req)
-    else:
-        print_software_op_result(req)
-
-    return check_rc(req)
-
-
-def deploy_start_req(args):
-    # args.deployment is a string
-    deployment = args.deployment
-
-    # Ignore interrupts during this function
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    # Issue deploy_start request
-    if args.force:
-        url = "http://%s/v1/software/deploy_start/%s/force" % (api_addr, deployment)
-    else:
-        url = "http://%s/v1/software/deploy_start/%s" % (api_addr, deployment)
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.post(url, headers=headers)
-
-    if args.debug:
-        print_result_debug(req)
-    else:
-        print_software_op_result(req)
-
-    return check_rc(req)
-
-
-def deploy_activate_req(args):
-    # args.deployment is a string
-    deployment = args.deployment
-
-    # Ignore interrupts during this function
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    # Issue deploy_start request
-    url = "http://%s/v1/software/deploy_activate/%s" % (api_addr, deployment)
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.post(url, headers=headers)
-
-    if args.debug:
-        print_result_debug(req)
-    else:
-        print_software_op_result(req)
-
-    return check_rc(req)
-
-
-def deploy_complete_req(args):
-    # args.deployment is a string
-    deployment = args.deployment
-
-    # Ignore interrupts during this function
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    # Issue deploy_complete request
-    url = "http://%s/v1/software/deploy_complete/%s" % (api_addr, deployment)
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.post(url, headers=headers)
-
-    if args.debug:
-        print_result_debug(req)
-    else:
-        print_software_op_result(req)
-
-    return check_rc(req)
-
-
-def deploy_show_req(args):
-    url = "http://%s/v1/software/deploy" % api_addr
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.get(url, headers=headers)
-
-    if req.status_code >= 500:
-        print("An internal error has occurred. Please check /var/log/software.log for details")
-        return 1
-    elif req.status_code >= 400:
-        print("Respond code %d. Error: %s" % (req.status_code, req.reason))
-        return 1
-
-    data = req.json().get("data")
-    if not data:
-        print("No deploy in progress.")
-    else:
-        data = data[0]
-        data["reboot_required"] = "Yes" if data.get("reboot_required") else "No"
-        data_list = [[k, v] for k, v in data.items()]
-        transposed_data_list = list(zip(*data_list))
-
-        transposed_data_list[0] = [s.title().replace('_', ' ') for s in transposed_data_list[0]]
-        # Find the longest header string in each column
-        header_lengths = [len(str(x)) for x in transposed_data_list[0]]
-        # Find the longest content string in each column
-        content_lengths = [len(str(x)) for x in transposed_data_list[1]]
-        # Find the max of the two for each column
-        col_lengths = [(x if x > y else y) for x, y in zip(header_lengths, content_lengths)]
-
-        print('  '.join(f"{x.center(col_lengths[i])}" for i,
-              x in enumerate(transposed_data_list[0])))
-        print('  '.join('=' * length for length in col_lengths))
-        print('  '.join(f"{x.center(col_lengths[i])}" for i,
-              x in enumerate(transposed_data_list[1])))
-
-    return 0
-
-
-def deploy_host_req(args):
-    rc = 0
-    agent_ip = args.agent
-
-    # Issue deploy_host request and poll for results
-    url = "http://%s/v1/software/deploy_host/%s" % (api_addr, agent_ip)
-
-    if args.force:
-        url += "/force"
-
-    req = requests.post(url)
-
-    if req.status_code == 200:
-        data = json.loads(req.text)
-        if 'error' in data and data["error"] != "":
-            print("Error:")
-            print(data["error"])
-            rc = 1
-        else:
-            rc = wait_for_install_complete(agent_ip)
-    elif req.status_code == 500:
-        print("An internal error has occurred. "
-              "Please check /var/log/software.log for details")
-        rc = 1
-    else:
-        m = re.search("(Error message:.*)", req.text, re.MULTILINE)
-        if m:
-            print(m.group(0))
-        else:
-            print("%s %s" % (req.status_code, req.reason))
-        rc = 1
-    return rc
-
-
-def patch_init_release(args):
-    # Ignore interrupts during this function
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    release = args.release
-
-    url = "http://%s/v1/software/init_release/%s" % (api_addr, release)
-
-    req = requests.post(url)
-
-    if args.debug:
-        print_result_debug(req)
-    else:
-        print_software_op_result(req)
-
-    return check_rc(req)
-
-
-def patch_del_release(args):
-    # Ignore interrupts during this function
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    release = args.release
-
-    url = "http://%s/v1/software/del_release/%s" % (api_addr, release)
-
-    req = requests.post(url)
-
-    if args.debug:
-        print_result_debug(req)
-    else:
-        print_software_op_result(req)
-
-    return check_rc(req)
-
-
-def patch_report_app_dependencies_req(args):  # pylint: disable=unused-argument
-    extra_opts = [args.app]
-    extra_opts_str = '?%s' % '&'.join(extra_opts)
-
-    patches = "/".join(args)
-    url = "http://%s/v1/software/report_app_dependencies/%s%s" \
-          % (api_addr, patches, extra_opts_str)
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.post(url, headers=headers)
-
-    if req.status_code == 200:
-        return 0
-    else:
-        print("An internal error has occurred. "
-              "Please check /var/log/software.log for details.")
-        return 1
-
-
-def patch_query_app_dependencies_req():
-    url = "http://%s/v1/software/query_app_dependencies" % api_addr
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.post(url, headers=headers)
-
-    if req.status_code == 200:
-        data = json.loads(req.text)
-        if len(data) == 0:
-            print("There are no application dependencies.")
-        else:
-            hdr_app = "Application"
-            hdr_list = "Required Patches"
-            width_app = len(hdr_app)
-            width_list = len(hdr_list)
-
-            for app, patch_list in data.items():
-                width_app = max(width_app, len(app))
-                width_list = max(width_list, len(', '.join(patch_list)))
-
-            print("{0:<{width_app}}  {1:<{width_list}}".format(
-                hdr_app, hdr_list,
-                width_app=width_app, width_list=width_list))
-
-            print("{0}  {1}".format(
-                '=' * width_app, '=' * width_list))
-
-            for app, patch_list in sorted(data.items()):
-                print("{0:<{width_app}}  {1:<{width_list}}".format(
-                    app, ', '.join(patch_list),
-                    width_app=width_app, width_list=width_list))
-
-        return 0
-    else:
-        print("An internal error has occurred. "
-              "Please check /var/log/software.log for details.")
-        return 1
-
-
-def get_auth_token_and_endpoint(region_name, interface):
-    from keystoneauth1 import exceptions
-    from keystoneauth1 import identity
-    from keystoneauth1 import session
-
-    if not region_name:
-        return None, None
-
-    user_env_map = {'OS_USERNAME': 'username',
-                    'OS_PASSWORD': 'password',
-                    'OS_PROJECT_NAME': 'project_name',
-                    'OS_AUTH_URL': 'auth_url',
-                    'OS_USER_DOMAIN_NAME': 'user_domain_name',
-                    'OS_PROJECT_DOMAIN_NAME': 'project_domain_name'}
-
-    for k, v in user_env_map.items():
-        if k not in os.environ:
-            return None, None
-
-    user = dict()
-    for k, v in user_env_map.items():
-        user[v] = os.environ.get(k)
-
-    auth = identity.V3Password(**user)
-    sess = session.Session(auth=auth)
-    try:
-        token = auth.get_token(sess)
-        endpoint = auth.get_endpoint(sess, service_type='usm',
-                                     interface=interface,
-                                     region_name=region_name)
-    except (exceptions.http.Unauthorized, exceptions.EndpointNotFound) as e:
-        print(str(e))
-        return None, None
-
-    return token, endpoint
-
-
-def append_auth_token_if_required(headers):
-    global auth_token
-    if auth_token is not None:
-        headers['X-Auth-Token'] = auth_token
-
-
-def format_url_address(address):
-    import netaddr
-    try:
-        ip_addr = netaddr.IPAddress(address)
-        if ip_addr.version == IPV6_FAMILY:
-            return "[%s]" % address
-        else:
-            return address
-    except netaddr.AddrFormatError:
-        return address
 
 
 def check_for_os_region_name(args):
@@ -1227,357 +50,405 @@ def check_for_os_region_name(args):
     except subprocess.CalledProcessError:
         return False
 
-    # get a token and fetch the internal endpoint in SystemController
-    global auth_token
-    auth_token, endpoint = get_auth_token_and_endpoint(region, 'internal')
-    if endpoint is not None:
-        global api_addr
-        url = urlparse(endpoint)
-        address = format_url_address(url.hostname)
-        api_addr = '{}:{}'.format(address, url.port)
+    return True
+
+
+def check_keystone_credentials(args):
+    if not args.os_username:
+        return False
+
+    if not args.os_password:
+        # priviledge check (only allow Keyring retrieval if we are root)
+        if os.geteuid() == 0:
+            import keyring
+            args.os_password = keyring.get_password('CGCS', args.os_username)
+        else:
+            return False
+
+    if not (args.os_project_id or args.os_project_name):
+        return False
+
+    if not args.os_auth_url:
+        return False
+
+    if not args.os_region_name:
+        return False
 
     return True
 
 
-def register_deploy_commands(commands):
-    """deploy commands
-      - precheck
-      - start
-      - host
-      - activate
-      - complete
-    non root/sudo users can run:
-       - host-list
-       - show
-    Deploy commands are region_restricted, which means
-    that they are not permitted to be run in DC
-    """
+class SoftwareClientShell(object):
 
-    cmd_area = 'deploy'
-    cmd_parser = commands.add_parser(
-        cmd_area,
-        help='Software Deploy',
-        epilog="StarlingX Unified Software Deployment"
-    )
-    cmd_parser.set_defaults(cmd_area=cmd_area)
+    def __init__(self):
+        self.subcommands = None
+        self.parser = None
 
-    # Deploy commands are region_restricted, which means
-    # that they are not permitted to be run in DC
-    cmd_parser.set_defaults(region_restricted=True)
+    def get_base_parser(self):
+        parser = argparse.ArgumentParser(
+            prog='software',
+            description=__doc__.strip(),
+            epilog='See "software help COMMAND" '
+                   'for help on a specific command.',
+            add_help=False,
+            formatter_class=HelpFormatter,
+        )
 
-    sub_cmds = cmd_parser.add_subparsers(
-        title='Software Deploy Commands',
-        metavar=''
-    )
-    sub_cmds.required = True
+        # Global arguments
+        parser.add_argument('-h', '--help',
+                            action='store_true',
+                            help=argparse.SUPPRESS,
+                            )
 
-    # --- software deploy precheck -----------------------
-    cmd = sub_cmds.add_parser(
-        'precheck',
-        help='Verify whether prerequisites for installing the software deployment are satisfied'
-    )
-    cmd.set_defaults(cmd='precheck')
-    cmd.set_defaults(func=deploy_precheck_req)
-    cmd.add_argument('deployment',
-                     help='Verify if prerequisites are met for this Deployment ID')
-    cmd.add_argument('-f',
-                     '--force',
-                     action='store_true',
-                     required=False,
-                     help='Allow bypassing non-critical checks')
-    cmd.add_argument('--region_name',
-                     default='RegionOne',
-                     required=False,
-                     help='Run precheck against a subcloud')
+        parser.add_argument('--version',
+                            action='version',
+                            version=software_client.__version__)
 
-    # --- software deploy start --------------------------
-    cmd = sub_cmds.add_parser(
-        'start',
-        help='Start the software deployment'
-    )
-    cmd.set_defaults(cmd='start')
-    cmd.set_defaults(func=deploy_start_req)
-    cmd.add_argument('deployment',
-                     help='Deployment ID to start')
-    cmd.add_argument('-f',
-                     '--force',
-                     action='store_true',
-                     required=False,
-                     help='Allow bypassing non-critical checks')
+        parser.add_argument('--debug',
+                            default=bool(utils.env('SOFTWARECLIENT_DEBUG')),
+                            action='store_true',
+                            help='Defaults to env[SOFTWARECLIENT_DEBUG]')
 
-    # --- software deploy host ---------------------------
-    cmd = sub_cmds.add_parser(
-        'host',
-        help='Deploy prestaged software deployment to the host'
-    )
-    cmd.set_defaults(cmd='host')
-    cmd.set_defaults(func=deploy_host_req)
-    cmd.add_argument('agent',
-                     help="Agent on which host deploy is triggered")
-    cmd.add_argument('-f',
-                     '--force',
-                     action='store_true',
-                     required=False,
-                     help="Force deploy host")
+        parser.add_argument('-v', '--verbose',
+                            default=False, action="store_true",
+                            help="Print more verbose output")
 
-    # --- software deploy activate -----------------------
-    cmd = sub_cmds.add_parser(
-        'activate',
-        help='Activate the software deployment'
-    )
-    cmd.set_defaults(cmd='activate')
-    cmd.set_defaults(func=deploy_activate_req)
-    cmd.add_argument('deployment',
-                     help='Deployment ID to activate')
+        parser.add_argument('-k', '--insecure',
+                            default=False,
+                            action='store_true',
+                            help="Explicitly allow system client to "
+                            "perform \"insecure\" SSL (https) requests. "
+                            "The server's certificate will "
+                            "not be verified against any certificate "
+                            "authorities. This option should be used with "
+                            "caution")
 
-    # --- software deploy complete -----------------------
-    cmd = sub_cmds.add_parser(
-        'complete',
-        help='Complete the software deployment'
-    )
-    cmd.set_defaults(cmd='complete')
-    cmd.set_defaults(func=deploy_complete_req)
-    cmd.add_argument('deployment',
-                     help='Deployment ID to complete')
+        parser.add_argument('--cert-file',
+                            help='Path of certificate file to use in SSL '
+                            'connection. This file can optionally be prepended'
+                            ' with the private key')
 
-    # --- software deploy show ---------------------------
-    cmd = sub_cmds.add_parser(
-        'show',
-        help='Show the software deployments states'
-    )
-    cmd.set_defaults(cmd='show')
-    cmd.set_defaults(func=deploy_show_req)
-    cmd.set_defaults(restricted=False)  # can run non root
-    # --deployment is an optional argument
-    cmd.add_argument('--deployment',
-                     required=False,
-                     help='List the deployment specified')
-    # --state is an optional argument.
-    # default: "all"
-    # acceptable values: inactive, active, prestaging, prestaged, all
-    cmd.add_argument('--state',
-                     default="all",
-                     required=False,
-                     help='List all deployments that have this state')
+        parser.add_argument('--key-file',
+                            help='Path of client key to use in SSL connection.'
+                            ' This option is not necessary if your key is '
+                            'prepended to your cert file')
 
-    # --- software deploy host-list -------------
-    cmd = sub_cmds.add_parser(
-        'host-list',
-        help='List of hosts for software deployment'
-    )
-    cmd.set_defaults(cmd='host-list')
-    cmd.set_defaults(func=deploy_host_list_req)
-    cmd.set_defaults(restricted=False)  # can run non root
+        parser.add_argument('--ca-file',
+                            default=utils.env('OS_CACERT'),
+                            help='Path of CA SSL certificate(s) used to verify'
+                            ' the remote server certificate. Without this '
+                            'option systemclient looks for the default system '
+                            'CA certificates')
 
+        parser.add_argument('--timeout',
+                            default=600,
+                            help='Number of seconds to wait for a response')
 
-def setup_argparse():
-    parser = argparse.ArgumentParser(prog="software",
-                                     description="Unified Software Management",
-                                     epilog="Used for patching and upgrading")
-    parser.add_argument('--debug', action='store_true', help="Enable debug output")
-    # parser.add_argument('--os-auth-url', default=None)
-    # parser.add_argument('--os-project-name', default=None)
-    # parser.add_argument('--os-project-domain-name', default=None)
-    # parser.add_argument('--os-username', default=None)
-    # parser.add_argument('--os-password', default=None)
-    # parser.add_argument('--os-user-domain-name', default=None)
-    parser.add_argument('--os-region-name', default=None)
-    # parser.add_argument('--os-interface', default=None)
+        parser.add_argument('--os-username',
+                            default=utils.env('OS_USERNAME'),
+                            help='Defaults to env[OS_USERNAME]')
 
-    # All commands are considered restricted, unless explicitly set to False
-    parser.set_defaults(restricted=True)
-    # All functions are initially defined as 'not implemented yet'
-    # The func will be overridden by the command definition as they are completed
-    parser.set_defaults(func=software_command_not_implemented_yet)
+        parser.add_argument('--os_username',
+                            help=argparse.SUPPRESS)
 
-    # No commands are region restricted, unless explicitly set to True
-    parser.set_defaults(region_restricted=False)
+        parser.add_argument('--os-password',
+                            default=utils.env('OS_PASSWORD'),
+                            help='Defaults to env[OS_PASSWORD]')
 
-    commands = parser.add_subparsers(title='Commands', metavar='')
-    commands.required = True
+        parser.add_argument('--os_password',
+                            help=argparse.SUPPRESS)
 
-    # -- software commit-patch <release> ---------------
-    cmd = commands.add_parser(
-        'commit-patch',
-        help='Commit patches to free disk space. WARNING: This action is irreversible!'
-    )
-    cmd.set_defaults(cmd='commit-patch')
-    cmd.set_defaults(func=commit_patch_req)
-    cmd.add_argument('patch',
-                     nargs="+",  # accepts a list
-                     help='Patch ID/s to commit')
-    # --dry-run is an optional argument
-    cmd.add_argument('--dry-run',
-                     action='store_true',
-                     required=False,
-                     help='Check the space savings without committing the patch')
-    # --all is an optional argument
-    cmd.add_argument('--all',
-                     action='store_true',
-                     required=False,
-                     help='Commit all the applied patches')
-    # --sw-version is an optional argument
-    cmd.add_argument('--sw-version',
-                     required=False,
-                     help='Software release version')
+        parser.add_argument('--os-tenant-id',
+                            default=utils.env('OS_TENANT_ID'),
+                            help='Defaults to env[OS_TENANT_ID]')
 
-    # -- software delete <release> ---------------
-    cmd = commands.add_parser(
-        'delete',
-        help='Delete the software release'
-    )
-    cmd.set_defaults(cmd='delete')
-    cmd.set_defaults(func=release_delete_req)
-    cmd.add_argument('release',
-                     nargs="+",  # accepts a list
-                     help='Release ID to delete')
+        parser.add_argument('--os_tenant_id',
+                            help=argparse.SUPPRESS)
 
-    # -- software install-local ---------------
-    cmd = commands.add_parser(
-        'install-local',
-        help='Trigger patch install/remove on the local host. ' +
-             'This command can only be used for patch installation ' +
-             'prior to initial configuration.'
-    )
-    cmd.set_defaults(cmd='install-local')
-    cmd.set_defaults(func=install_local)
+        parser.add_argument('--os-tenant-name',
+                            default=utils.env('OS_TENANT_NAME'),
+                            help='Defaults to env[OS_TENANT_NAME]')
 
-    # --- software is-available <release> ------
-    cmd = commands.add_parser(
-        'is-available',
-        help='Query Available state for list of releases. Returns True if all are Available, False otherwise.'
-    )
-    cmd.set_defaults(cmd='is-available')
-    cmd.set_defaults(func=release_is_available_req)
-    cmd.add_argument('release',
-                     nargs="+",  # accepts a list
-                     help='List of releases')
+        parser.add_argument('--os_tenant_name',
+                            help=argparse.SUPPRESS)
 
-    # --- software is-committed <release> ------
-    cmd = commands.add_parser(
-        'is-committed',
-        help='Query Committed state for list of releases. Returns True if all are Committed, False otherwise.'
-    )
-    cmd.set_defaults(cmd='is-committed')
-    cmd.set_defaults(func=release_is_committed_req)
-    cmd.add_argument('release',
-                     nargs="+",  # accepts a list
-                     help='List of releases')
+        parser.add_argument('--os-auth-url',
+                            default=utils.env('OS_AUTH_URL'),
+                            help='Defaults to env[OS_AUTH_URL]')
 
-    # --- software is-deployed  <release> ------
-    cmd = commands.add_parser(
-        'is-deployed',
-        help='Query Deployed state for list of releases. Returns True if all are Deployed, False otherwise.'
-    )
-    cmd.set_defaults(cmd='is-deployed')
-    cmd.set_defaults(func=release_is_deployed_req)
-    cmd.add_argument('release',
-                     nargs="+",  # accepts a list
-                     help='List of releases')
+        parser.add_argument('--os_auth_url',
+                            help=argparse.SUPPRESS)
 
-    # --- software list ---------------------------
-    cmd = commands.add_parser(
-        'list',
-        help='List the software releases'
-    )
-    cmd.set_defaults(cmd='list')
-    cmd.set_defaults(func=release_list_req)
-    cmd.set_defaults(restricted=False)  # can run non root
-    # --release is an optional argument
-    cmd.add_argument('--release',
-                     required=False,
-                     help='filter against a release ID')
-    # --state is an optional argument. default: "all"
-    cmd.add_argument('--state',
-                     default="all",
-                     required=False,
-                     help='filter against a release state')
+        parser.add_argument('--os-region-name',
+                            default=utils.env('OS_REGION_NAME'),
+                            help='Defaults to env[OS_REGION_NAME]')
 
-    # --- software show <release> -----------------
-    cmd = commands.add_parser(
-        'show',
-        help='Show the software release'
-    )
-    cmd.set_defaults(cmd='show')
-    cmd.set_defaults(func=release_show_req)
-    cmd.set_defaults(restricted=False)  # can run non root
-    cmd.add_argument('release',
-                     nargs="+",  # accepts a list
-                     help='release ID to print detailed information')
-    cmd.add_argument('--packages',
-                     required=False,
-                     default=False,
-                     action='store_true',
-                     help='list packages contained in the release')
+        parser.add_argument('--os_region_name',
+                            help=argparse.SUPPRESS)
 
-    # --- software upload <release> ---------------
-    cmd = commands.add_parser(
-        'upload',
-        help='Upload software major or patch releases'
-    )
-    cmd.set_defaults(cmd='upload')
-    cmd.set_defaults(func=release_upload_req)
-    cmd.add_argument('release',
-                     metavar='(iso + sig) | patch',
-                     nargs="+",  # accepts a list
-                     help=('pair of install iso and sig files for major release '
-                           '(GA or patched) and/or one or more files containing a '
-                           'patch release. NOTE: specify at most ONE pair of (iso + sig)'))
-    cmd.add_argument('--local',
-                     required=False,
-                     default=False,
-                     action='store_true',
-                     help='Upload files from active controller')
+        parser.add_argument('--os-auth-token',
+                            default=utils.env('OS_AUTH_TOKEN'),
+                            help='Defaults to env[OS_AUTH_TOKEN]')
 
-    # --- software upload-dir <release dir> ------
-    cmd = commands.add_parser(
-        'upload-dir',
-        help='Upload a software release dir'
-    )
-    cmd.set_defaults(cmd='upload-dir')
-    cmd.set_defaults(func=release_upload_dir_req)
-    cmd.add_argument('release',
-                     nargs="+",  # accepts a list
-                     help='directory containing software releases to upload')
+        parser.add_argument('--os_auth_token',
+                            help=argparse.SUPPRESS)
 
-    register_deploy_commands(commands)
-    return parser
+        parser.add_argument('--software-url',
+                            default=utils.env('SYSTEM_URL'),
+                            help='Defaults to env[SYSTEM_URL]')
+
+        parser.add_argument('--software_url',
+                            help=argparse.SUPPRESS)
+
+        parser.add_argument('--system-api-version',
+                            default=utils.env('SYSTEM_API_VERSION', default='1'),
+                            help='Defaults to env[SYSTEM_API_VERSION] '
+                            'or 1')
+
+        parser.add_argument('--system_api_version',
+                            help=argparse.SUPPRESS)
+
+        parser.add_argument('--os-service-type',
+                            default=utils.env('OS_SERVICE_TYPE'),
+                            help='Defaults to env[OS_SERVICE_TYPE]')
+
+        parser.add_argument('--os_service_type',
+                            help=argparse.SUPPRESS)
+
+        parser.add_argument('--os-endpoint-type',
+                            default=utils.env('OS_ENDPOINT_TYPE'),
+                            help='Defaults to env[OS_ENDPOINT_TYPE]')
+
+        parser.add_argument('--os_endpoint_type',
+                            help=argparse.SUPPRESS)
+
+        parser.add_argument('--os-user-domain-id',
+                            default=utils.env('OS_USER_DOMAIN_ID'),
+                            help='Defaults to env[OS_USER_DOMAIN_ID].')
+
+        parser.add_argument('--os-user-domain-name',
+                            default=utils.env('OS_USER_DOMAIN_NAME'),
+                            help='Defaults to env[OS_USER_DOMAIN_NAME].')
+
+        parser.add_argument('--os-project-id',
+                            default=utils.env('OS_PROJECT_ID'),
+                            help='Another way to specify tenant ID. '
+                                 'This option is mutually exclusive with '
+                                 ' --os-tenant-id. '
+                                 'Defaults to env[OS_PROJECT_ID].')
+
+        parser.add_argument('--os-project-name',
+                            default=utils.env('OS_PROJECT_NAME'),
+                            help='Another way to specify tenant name. '
+                                 'This option is mutually exclusive with '
+                                 ' --os-tenant-name. '
+                                 'Defaults to env[OS_PROJECT_NAME].')
+
+        parser.add_argument('--os-project-domain-id',
+                            default=utils.env('OS_PROJECT_DOMAIN_ID'),
+                            help='Defaults to env[OS_PROJECT_DOMAIN_ID].')
+
+        parser.add_argument('--os-project-domain-name',
+                            default=utils.env('OS_PROJECT_DOMAIN_NAME'),
+                            help='Defaults to env[OS_PROJECT_DOMAIN_NAME].')
 
 
-def main():
-    set_term_width()
+        # All commands are considered restricted, unless explicitly set to False
+        parser.set_defaults(restricted=True)
+        # All functions are initially defined as 'not implemented yet'
+        # The func will be overridden by the command definition as they are completed
+        parser.set_defaults(func=software_command_not_implemented_yet)
 
-    rc = 0
-    parser = setup_argparse()
-    argcomplete.autocomplete(parser)
-    args = parser.parse_args()
-    dc_request = check_for_os_region_name(args)
+        # No commands are region restricted, unless explicitly set to True
+        parser.set_defaults(region_restricted=False)
 
-    # Reject the commands that are not supported in the virtual region
-    if dc_request and args.region_restricted:
-        global VIRTUAL_REGION
-        print("\n%s %s command is not allowed in %s region" % (args.cmd_area,
-                                                               args.cmd,
-                                                               VIRTUAL_REGION))
-        rc = 1
-        exit(rc)
+        return parser
 
-    global auth_token
-    if not auth_token:
-        region = os.environ.get("OS_REGION_NAME", None)
-        auth_token, endpoint = get_auth_token_and_endpoint(region, 'public')
-        if endpoint is not None:
-            global api_addr
-            url = urlparse(endpoint)
-            address = format_url_address(url.hostname)
-            api_addr = '{}:{}'.format(address, url.port)
+    def get_subcommand_parser(self, version):
+        parser = self.get_base_parser()
 
-    if auth_token is None and os.geteuid() != 0:
-        if args.restricted:
-            print("Error: Command must be run as sudo or root", file=sys.stderr)
+        self.subcommands = {}
+        subparsers = parser.add_subparsers(metavar='<subcommand>')
+        submodule = utils.import_versioned_module(version, 'shell')
+        submodule.enhance_parser(parser, subparsers, self.subcommands)
+        utils.define_commands_from_module(subparsers, self, self.subcommands)
+        subparsers2 = self._add_deploy_subparser(subparsers)
+        deploy_submodule = utils.import_versioned_module(version, 'deploy_cmd')
+        deploy_submodule.enhance_parser(parser, subparsers2, self.subcommands)
+        utils.define_commands_from_module(subparsers2, self, self.subcommands)
+        self._add_bash_completion_subparser(subparsers2)
+        return parser
+
+    def _add_bash_completion_subparser(self, subparsers):
+        subparser = subparsers.add_parser(
+            'bash_completion',
+            add_help=False,
+            formatter_class=HelpFormatter
+        )
+        self.subcommands['bash_completion'] = subparser
+        subparser.set_defaults(func=self.do_bash_completion)
+
+    def _add_deploy_subparser(self, subparsers):
+        """deploy commands
+        - precheck
+        - start
+        - host
+        - activate
+        - complete
+        non root/sudo users can run:
+        - host-list
+        - show
+        Deploy commands are region_restricted, which means
+        that they are not permitted to be run in DC
+        """
+
+        cmd_area = 'deploy'
+        cmd_parser = subparsers.add_parser(
+            cmd_area,
+            help='Software Deploy',
+            epilog="StarlingX Unified Software Deployment"
+        )
+        cmd_parser.set_defaults(cmd_area=cmd_area)
+        self.subcommands['deploy'] = cmd_parser
+
+        # Deploy commands are region_restricted, which means
+        # that they are not permitted to be run in DC
+        cmd_parser.set_defaults(region_restricted=True)
+
+        sub_cmds = cmd_parser.add_subparsers(
+            title='Software Deploy Commands:',
+            metavar=''
+        )
+        sub_cmds.required = True
+
+        return sub_cmds
+
+    def _setup_debugging(self, debug):
+        if debug:
+            logging.basicConfig(
+                format="%(levelname)s (%(module)s:%(lineno)d) %(message)s",
+                level=logging.DEBUG)
+
+            httplib2.debuglevel = 1
+        else:
+            logging.basicConfig(format="%(levelname)s %(message)s", level=logging.CRITICAL)
+
+    def main(self, argv):
+        # Parse args once to find version
+        parser = self.get_base_parser()
+        (options, args) = parser.parse_known_args(argv)
+        self._setup_debugging(options.debug)
+
+        # build available subcommands based on version
+        api_version = options.system_api_version
+        subcommand_parser = self.get_subcommand_parser(api_version)
+        self.parser = subcommand_parser
+
+        # Handle top-level --help/-h before attempting to parse
+        # a command off the command line
+        if options.help or not argv:
+            self.do_help(options)
+            return 0
+
+        # Parse args again and call whatever callback was selected
+        args = subcommand_parser.parse_args(argv)
+
+        # Short-circuit and deal with help command right away.
+        if args.func == self.do_help:  # pylint: disable=comparison-with-callable
+            self.do_help(args)
+            return 0
+        elif args.func == self.do_bash_completion:  # pylint: disable=comparison-with-callable
+            self.do_bash_completion(args)
+            return 0
+
+        dc_request = check_for_os_region_name(args)
+
+        # Reject the commands that are not supported in the virtual region
+        if dc_request and args.region_restricted:
+            global VIRTUAL_REGION
+            print("\n%s command is not allowed in %s region" % (args.cmd_area,
+                                                                VIRTUAL_REGION))
             rc = 1
             exit(rc)
 
-    # Call the function registered with argparse, and pass the 'args' to it
-    rc = args.func(args)
-    exit(rc)
+        endpoint_type = 'public'
+        if dc_request:
+            endpoint_type = 'internal'
+
+        # Identify authentication mode [token, keystone, local_root]
+        if args.software_url and args.os_auth_token:
+            auth_mode = TOKEN
+        elif check_keystone_credentials(args):
+            auth_mode = KEYSTONE
+        elif os.geteuid() == 0:
+            auth_mode = LOCAL_ROOT
+        else:
+            exception_msg = ('Invalid authentication credentials. '
+                             'Acceptable authentication modes are, '
+                             'user-defined endpoint & token OR '
+                             'keystone credentials OR '
+                             'software commands as root (sudo)')
+            raise exc.CommandError(exception_msg)
+
+        args.os_endpoint_type = endpoint_type
+        client = sclient.get_client(api_version, auth_mode, **(args.__dict__))
+
+        try:
+            args.func(client, args)
+        except exc.Unauthorized:
+            raise exc.CommandError("Invalid Identity credentials.")
+        except exc.HTTPForbidden:
+            raise exc.CommandError("Error: Forbidden")
+
+    def do_bash_completion(self, args):
+        """Prints all of the commands and options to stdout.
+        """
+        commands = set()
+        options = set()
+        for sc_str, sc in self.subcommands.items():
+            commands.add(sc_str)
+            for option in list(sc._optionals._option_string_actions):
+                options.add(option)
+
+        commands.remove('bash_completion')
+        print(' '.join(commands | options))
+
+    @utils.arg('command', metavar='<subcommand>', nargs='?',
+               help='Display help for <subcommand>')
+    def do_help(self, args):
+        """Display help about this program or one of its subcommands."""
+        if getattr(args, 'command', None):
+            if args.command in self.subcommands:
+                self.subcommands[args.command].print_help()
+            else:
+                raise exc.CommandError("'%s' is not a valid subcommand" %
+                                       args.command)
+        else:
+            self.parser.print_help()
+
+
+class HelpFormatter(argparse.HelpFormatter):
+    def start_section(self, heading):
+        # Title-case the headings
+        heading = '%s%s' % (heading[0].upper(), heading[1:])
+        super(HelpFormatter, self).start_section(heading)
+
+
+def main():
+    try:
+        SoftwareClientShell().main(sys.argv[1:])
+
+    except KeyboardInterrupt as e:
+        print(('caught: %r, aborting' % (e)), file=sys.stderr)
+        sys.exit(0)
+
+    except IOError:
+        sys.exit(0)
+
+    except Exception as e:
+        print(e, file=sys.stderr)
+        sys.exit(1)
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,9 +1,9 @@
-"""
-Copyright (c) 2023-2024 Wind River Systems, Inc.
+#
+# Copyright (c) 2023-2024 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
 
-SPDX-License-Identifier: Apache-2.0
-
-"""
 ADDRESS_VERSION_IPV4 = 4
 ADDRESS_VERSION_IPV6 = 6
 CONTROLLER_FLOATING_HOSTNAME = "controller"
@@ -64,3 +64,8 @@ SCRATCH_DIR = "/scratch"
 DEPLOYING = 'deploying'
 FAILED = 'failed'
 PENDING = 'pending'
+
+# Authorization modes of software cli
+KEYSTONE = 'keystone'
+TOKEN = 'token'
+LOCAL_ROOT = 'local_root'
