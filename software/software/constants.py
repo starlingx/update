@@ -181,3 +181,9 @@ class DEPLOY_STATES(Enum):
     HOST = 'host'
     HOST_DONE = 'host-done'
     HOST_FAILED = 'host-failed'
+
+class DEPLOY_HOST_STATES(Enum):
+    DEPLOYED = 'deployed'
+    DEPLOYING = 'deploying'
+    FAILED = 'failed'
+    PENDING = 'pending'

@@ -46,6 +46,7 @@ from software.exceptions import ReleaseIsoDeleteFailure
 from software.exceptions import SoftwareServiceError
 from software.release_data import SWReleaseCollection
 from software.software_functions import collect_current_load_for_hosts
+from software.software_functions import create_deploy_hosts
 from software.software_functions import parse_release_metadata
 from software.software_functions import configure_logging
 from software.software_functions import mount_iso_load
@@ -2267,6 +2268,7 @@ class PatchController(PatchService):
 
             if self._deploy_upgrade_start(to_release):
                 collect_current_load_for_hosts()
+                create_deploy_hosts()
                 self.db_api_instance.begin_update()
                 try:
                     self.update_and_sync_deploy_state(self.db_api_instance.create_deploy,
@@ -2319,6 +2321,7 @@ class PatchController(PatchService):
         if operation == "apply":
 
             collect_current_load_for_hosts()
+            create_deploy_hosts()
 
             # reverse = True is used for apply operation
             deployment_list = self.release_apply_remove_order(deployment, running_sw_version, reverse=True)
@@ -2411,6 +2414,8 @@ class PatchController(PatchService):
                     self.interim_state[release] = list(self.hosts)
 
         elif operation == "remove":
+            collect_current_load_for_hosts()
+            create_deploy_hosts()
             removed = False
             deployment_list = self.release_apply_remove_order(deployment, running_sw_version)
             msg = "Deploy start order for remove operation: %s" % ",".join(deployment_list)
@@ -2904,7 +2909,6 @@ class PatchController(PatchService):
         return dict(data)
 
     def deploy_host_list(self):
-        query_hosts = self.query_host_cache()
         deploy_hosts = self.db_api_instance.get_deploy_host()
         deploy = self.db_api_instance.get_deploy_all()
         if not deploy:
@@ -2912,36 +2916,17 @@ class PatchController(PatchService):
         deploy = deploy[0]
 
 
-        # If there's a hostname missing, add it to query hosts.
-        hostnames = []
-        for host in query_hosts:
-            hostnames.append(host["hostname"])
-        for host in deploy_hosts:
-            if host["hostname"] not in hostnames:
-                query_hosts.append(host)
-
         deploy_host_list = []
-        # Merge dicts if hostname matches
-        for query_host in query_hosts:
-            query_host["reboot_required"] = query_host.pop("requires_reboot", None)
-            for host in deploy_hosts:
-                if query_host["hostname"] == host["hostname"]:
-                    # New set of keys for the host list, some of previously dict keys
-                    # is kept such as state, interim_state that is used for patch.
-                    deploy_host = {
-                        "hostname": host.get("hostname"),
-                        "sw_version": deploy.get("from_release"),
-                        "to_release": deploy.get("to_release"),
-                        "reboot_required": deploy.get("reboot_required"),
-                        "deploy_host_state": host.get("state"),
-                        "state": query_host.get("state"),
-                        "interim_state": query_host.get("interim_state"),
-                        "ip": query_host.get("ip")
-                    }
-                    deploy_host_list.append(deploy_host)
-                    break
-        if not deploy_host_list:
-            return query_hosts
+        for host in deploy_hosts:
+            state = host.get("state")
+            deploy_host = {
+                "hostname": host.get("hostname"),
+                "software_release": deploy.get("from_release"),
+                "target_release": deploy.get("to_release") if state else None,
+                "reboot_required": deploy.get("reboot_required") if state else None,
+                "host_state": state
+            }
+            deploy_host_list.append(deploy_host)
         return deploy_host_list
 
     def update_and_sync_deploy_state(self, func, *args, **kwargs):
