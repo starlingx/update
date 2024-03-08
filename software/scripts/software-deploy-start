@@ -13,7 +13,8 @@
 # 5. perform data migration
 #
 
-exec 2>&1 >> /var/log/software.log
+# Used by shell-utils as the log file path
+LOG_FILE="/var/log/software.log"
 
 script_dir=$(dirname $0)
 shell_utils=${script_dir}/shell-utils
@@ -55,7 +56,7 @@ instbr="starlingx"
 report_agent="deploy-start"
 
 deploy_cleanup() {
-    sudo ${rootdir}/usr/sbin/software-deploy/deploy-cleanup ${repo} ${rootdir} all
+    sudo ${script_dir}/deploy-cleanup ${repo} ${rootdir} all
 }
 
 deploy_update_state() {
@@ -70,10 +71,10 @@ handle_error() {
     local error_message="$2"
     local state="start-failed"
 
-    error "${error_message}" >&2
-    error "Please check the error details and take appropriate action for recovery." >&2
+    error "${error_message}"
+    error "Please check the error details and take appropriate action for recovery."
 
-    error "Update deploy state ${state}." >&2
+    error "Update deploy state ${state}."
     deploy_update_state ${state}
 
     # cleanup before exiting
@@ -84,7 +85,7 @@ handle_error() {
 
 for dir in $rootdir $repo; do
     if [ -e ${dir} ]; then
-        error "${dir} already exists. Please ensure to clean up environment to continue." >&2
+        error "${dir} already exists. Please ensure to clean up environment to continue."
         exit 1
     fi
 done
@@ -113,7 +114,7 @@ sudo ostree --repo=${repo} checkout ${commit_id} ${rootdir} || handle_error $? "
 
 # create proper mounts on deploy file system
 info "Creating mount points..."
-sudo ${rootdir}/usr/sbin/software-deploy/chroot_mounts.sh ${rootdir} || handle_error $? "Failed to mount required mount points"
+sudo ${script_dir}/chroot_mounts.sh ${rootdir} || handle_error $? "Failed to mount required mount points"
 
 sudo mount --bind ${rootdir}/usr/local/kubernetes/${k8s_ver} ${rootdir}/usr/local/kubernetes/current
 sudo cp /etc/kubernetes/admin.conf ${rootdir}/etc/kubernetes/
@@ -141,10 +142,15 @@ sudo chroot ${rootdir} /usr/bin/software-migrate ${from_ver} ${to_ver} ${port} |
 info "Data migration completed."
 
 info "Syncing feed between controllers..."
-SYNC_CONTROLLERS_SCRIPT="/usr/sbin/software-deploy/sync-controllers-feed"
-sync_controllers_cmd="${SYNC_CONTROLLERS_SCRIPT} ${cmd_line} --feed=${feed}"
+SYNC_CONTROLLERS_SCRIPT="${script_dir}/sync-controllers-feed"
+sync_controllers_cmd="${SYNC_CONTROLLERS_SCRIPT} ${cmd_line} --feed=$(dirname $feed)"
 ${sync_controllers_cmd} || handle_error $? "Failed to sync feeds"
 info "Feed sync complete."
+
+# TODO(heitormatsui) remove once sysinv upgrade tables are deprecated
+info "Creating ${to_ver} load entry in legacy upgrade table..."
+sudo -u postgres psql -d sysinv -c "insert into loads(id, uuid, state, software_version) values (nextval('loads_id_seq'), 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 'available', '${to_ver}');"
+info "Load created successfully."
 
 state="start-done"
 deploy_update_state $state
