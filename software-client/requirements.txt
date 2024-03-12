@@ -7,4 +7,5 @@ oslo.serialization
 netaddr
 pecan
 requests_toolbelt
+tabulate
 WebOb

@@ -21,20 +21,26 @@ from software_client.common import utils
            help="List all deployments that have this state")
 def do_show(cc, args):
     """Show the software deployments states"""
-    # TODO(bqian) modify the cli to display with generic tabulated output
-    return cc.deploy.show()
+    resp, data = cc.deploy.show()
+    if args.debug:
+        utils.print_result_debug(resp, data)
+    else:
+        header_data_list = {"From Release": "from_release", "To Release": "to_release", "RR": "reboot_required", "State": "state"}
+        utils.display_result_list(header_data_list, data)
+
+    return utils.check_rc(resp, data)
 
 
 def do_host_list(cc, args):
     """List of hosts for software deployment """
-    req, data = cc.deploy.host_list()
-    # TODO(bqian) modify display with generic tabulated output
+    resp, data = cc.deploy.host_list()
     if args.debug:
-        utils.print_result_debug(req, data)
+        utils.print_result_debug(resp, data)
     else:
-        utils.print_software_deploy_host_list_result(req, data)
+        header_data_list = {"Host": "hostname", "From Release": "software_release", "To Release": "target_release", "RR": "reboot_required", "State": "host_state"}
+        utils.display_result_list(header_data_list, data)
 
-    return utils.check_rc(req, data)
+    return utils.check_rc(resp, data)
 
 
 @utils.arg('deployment',
@@ -68,17 +74,17 @@ def do_precheck(cc, args):
            help='Allow bypassing non-critical checks')
 def do_start(cc, args):
     """Start the software deployment"""
-    req, data = cc.deploy.start(args)
+    resp, data = cc.deploy.start(args)
     if args.debug:
-        utils.print_result_debug(req, data)
+        utils.print_result_debug(resp, data)
     else:
-        utils.print_software_op_result(req, data)
+        utils.display_info(resp)
 
-    return utils.check_rc(req, data)
+    return utils.check_rc(resp, data)
 
 
-@utils.arg('agent',
-           help="Agent on which host deploy is triggered")
+@utils.arg('host',
+           help="Name of the host that the deploy is triggered")
 @utils.arg('-f',
            '--force',
            action='store_true',
@@ -89,8 +95,6 @@ def do_host(cc, args):
     return cc.deploy.host(args)
 
 
-@utils.arg('deployment',
-           help='Deployment ID to activate')
 def do_activate(cc, args):
     """Activate the software deployment"""
     req, data = cc.deploy.activate(args)
@@ -101,8 +105,6 @@ def do_activate(cc, args):
 
     return utils.check_rc(req, data)
 
-@utils.arg('deployment',
-           help='Deployment ID to complete')
 def do_complete(cc, args):
     """Complete the software deployment"""
     req, data = cc.deploy.complete(args)

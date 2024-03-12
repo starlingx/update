@@ -20,8 +20,8 @@ from software.utils import save_to_json_file
 from software.utils import get_software_filesystem_data
 from software.utils import validate_versions
 
-from software.constants import DEPLOY_HOST_STATES
-from software.constants import DEPLOY_STATES
+from software.states import DEPLOY_HOST_STATES
+from software.states import DEPLOY_STATES
 
 LOG = logging.getLogger('main_logger')
 
@@ -135,12 +135,15 @@ class Deploy(ABC):
         pass
 
     @abstractmethod
-    def create(self, from_release: str, to_release: str, reboot_required: bool, state: DEPLOY_STATES):
+    def create(self, from_release: str, to_release: str, feed_repo: str,
+               commit_id: str, reboot_required: bool, state: DEPLOY_STATES):
         """
         Create a new deployment entry.
 
         :param from_release: The current release version.
         :param to_release: The target release version.
+        :param feed_repo: ostree repo feed path
+        :param commit_id: commit-id to deploy
         :param reboot_required: If is required to do host reboot.
         :param state: The state of the deployment.
 
@@ -230,11 +233,7 @@ class DeployHosts(ABC):
 
 
 class DeployHandler(Deploy):
-    def __init__(self):
-        super().__init__()
-        self.data = get_software_filesystem_data()
-
-    def create(self, from_release, to_release, reboot_required, state=DEPLOY_STATES.START):
+    def create(self, from_release, to_release, feed_repo, commit_id, reboot_required, state=DEPLOY_STATES.START):
         """
         Create a new deploy with given from and to release version
         :param from_release: The current release version.
@@ -242,30 +241,33 @@ class DeployHandler(Deploy):
         :param reboot_required: If is required to do host reboot.
         :param state: The state of the deployment.
         """
-        super().create(from_release, to_release, reboot_required, state)
+        super().create(from_release, to_release, feed_repo, commit_id, reboot_required, state)
         deploy = self.query(from_release, to_release)
         if deploy:
             raise DeployAlreadyExist("Error to create. Deploy already exists.")
         new_deploy = {
             "from_release": from_release,
             "to_release": to_release,
+            "feed_repo": feed_repo,
+            "commit_id": commit_id,
             "reboot_required": reboot_required,
             "state": state.value
         }
 
         try:
-            deploy_data = self.data.get("deploy", [])
+            data = get_software_filesystem_data()
+            deploy_data = data.get("deploy", [])
             if not deploy_data:
                 deploy_data = {
                     "deploy": []
                 }
                 deploy_data["deploy"].append(new_deploy)
-                self.data.update(deploy_data)
+                data.update(deploy_data)
             else:
                 deploy_data.append(new_deploy)
-            save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
+            save_to_json_file(constants.SOFTWARE_JSON_FILE, data)
         except Exception:
-            self.data["deploy"][0] = {}
+            LOG.exception()
 
     def query(self, from_release, to_release):
         """
@@ -275,7 +277,8 @@ class DeployHandler(Deploy):
         :return: A list of deploy dictionary
         """
         super().query(from_release, to_release)
-        for deploy in self.data.get("deploy", []):
+        data = get_software_filesystem_data()
+        for deploy in data.get("deploy", []):
             if (deploy.get("from_release") == from_release and
                     deploy.get("to_release") == to_release):
                 return deploy
@@ -286,7 +289,8 @@ class DeployHandler(Deploy):
         Query all deployments inside software.json file.
         :return: A list of deploy dictionary
         """
-        return self.data.get("deploy", [])
+        data = get_software_filesystem_data()
+        return data.get("deploy", [])
 
     def update(self, new_state: DEPLOY_STATES):
         """
@@ -298,11 +302,12 @@ class DeployHandler(Deploy):
         if not deploy:
             raise DeployDoNotExist("Error to update deploy state. No deploy in progress.")
 
+        data = get_software_filesystem_data()
         try:
-            self.data["deploy"][0]["state"] = new_state.value
-            save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
+            data["deploy"][0]["state"] = new_state.value
+            save_to_json_file(constants.SOFTWARE_JSON_FILE, data)
         except Exception:
-            self.data["deploy"][0] = deploy
+            LOG.exception()
 
     def delete(self):
         """
@@ -312,19 +317,16 @@ class DeployHandler(Deploy):
         deploy = self.query_all()
         if not deploy:
             raise DeployDoNotExist("Error to delete deploy state. No deploy in progress.")
+
+        data = get_software_filesystem_data()
         try:
-            self.data["deploy"].clear()
-            save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
+            data["deploy"].clear()
+            save_to_json_file(constants.SOFTWARE_JSON_FILE, data)
         except Exception:
-            self.data["deploy"][0] = deploy
+            LOG.exception()
 
 
 class DeployHostHandler(DeployHosts):
-
-    def __init__(self):
-        super().__init__()
-        self.data = get_software_filesystem_data()
-
     def create(self, hostname, state: DEPLOY_HOST_STATES = DEPLOY_HOST_STATES.PENDING):
         super().create(hostname, state)
         deploy = self.query(hostname)
@@ -336,16 +338,17 @@ class DeployHostHandler(DeployHosts):
             "state": state.value if state else None
         }
 
-        deploy_data = self.data.get("deploy_host", [])
+        data = get_software_filesystem_data()
+        deploy_data = data.get("deploy_host", [])
         if not deploy_data:
             deploy_data = {
                 "deploy_host": []
             }
             deploy_data["deploy_host"].append(new_deploy_host)
-            self.data.update(deploy_data)
+            data.update(deploy_data)
         else:
             deploy_data.append(new_deploy_host)
-        save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
+        save_to_json_file(constants.SOFTWARE_JSON_FILE, data)
 
     def query(self, hostname):
         """
@@ -354,13 +357,15 @@ class DeployHostHandler(DeployHosts):
         :return: A list of deploy dictionary
         """
         super().query(hostname)
-        for deploy in self.data.get("deploy_host", []):
+        data = get_software_filesystem_data()
+        for deploy in data.get("deploy_host", []):
             if deploy.get("hostname") == hostname:
                 return deploy
         return None
 
     def query_all(self):
-        return self.data.get("deploy_host", [])
+        data = get_software_filesystem_data()
+        return data.get("deploy_host", [])
 
     def update(self, hostname, state: DEPLOY_HOST_STATES):
         super().update(hostname, state)
@@ -368,23 +373,26 @@ class DeployHostHandler(DeployHosts):
         if not deploy:
             raise Exception("Error to update. Deploy host do not exist.")
 
-        index = self.data.get("deploy_host", []).index(deploy)
+        data = get_software_filesystem_data()
+        index = data.get("deploy_host", []).index(deploy)
         updated_entity = {
             "hostname": hostname,
             "state": state.value
         }
-        self.data["deploy_host"][index].update(updated_entity)
-        save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
+        data["deploy_host"][index].update(updated_entity)
+        save_to_json_file(constants.SOFTWARE_JSON_FILE, data)
         return updated_entity
 
     def delete_all(self):
-        self.data.get("deploy_host").clear()
-        save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
+        data = get_software_filesystem_data()
+        data.get("deploy_host").clear()
+        save_to_json_file(constants.SOFTWARE_JSON_FILE, data)
 
     def delete(self, hostname):
         super().delete(hostname)
         deploy = self.query(hostname)
         if not deploy:
             raise DeployDoNotExist("Error to delete. Deploy host do not exist.")
-        self.data.get("deploy_host").remove(deploy)
-        save_to_json_file(constants.SOFTWARE_JSON_FILE, self.data)
+        data = get_software_filesystem_data()
+        data.get("deploy_host").remove(deploy)
+        save_to_json_file(constants.SOFTWARE_JSON_FILE, data)

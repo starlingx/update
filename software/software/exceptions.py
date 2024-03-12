@@ -6,6 +6,57 @@ SPDX-License-Identifier: Apache-2.0
 """
 
 
+class InternalError(Exception):
+    """This is an internal error aka bug"""
+    pass
+
+
+class SoftwareServiceError(Exception):
+    """
+    This is a service error, such as file system issue or configuration
+    issue, which is expected at design time for a valid reason.
+    This exception type will provide detail information to the user.
+    see ExceptionHook for detail
+    """
+    def __init__(self, info="", warn="", error=""):
+        self._info = info
+        self._warn = warn
+        self._error = error
+
+    @property
+    def info(self):
+        return self._info if self._info is not None else ""
+
+    @property
+    def warning(self):
+        return self._warn if self._warn is not None else ""
+
+    @property
+    def error(self):
+        return self._error if self._error is not None else ""
+
+
+class InvalidOperation(SoftwareServiceError):
+    """Invalid operation, such as deploy a host that is already deployed """
+    def __init__(self, msg):
+        super().__init__(error=msg)
+
+
+class ReleaseNotFound(SoftwareServiceError):
+    def __init__(self, release_ids):
+        if not isinstance(release_ids, list):
+            release_ids = [release_ids]
+        super().__init__(error="Release %s can not be found" % ', '.join(release_ids))
+
+
+class HostNotFound(SoftwareServiceError):
+    def __init__(self, hostname):
+        super().__init__(error="Host %s can not be found" % hostname)
+
+
+# TODO(bqian) gradually convert SoftwareError based exception to
+# either SoftwareServiceError for user visible exceptions, or
+# InternalError for internal error (bug)
 class SoftwareError(Exception):
     """Base class for software exceptions."""
 
@@ -57,7 +108,7 @@ class SoftwareFail(SoftwareError):
     pass
 
 
-class ReleaseValidationFailure(SoftwareError):
+class ReleaseValidationFailure(SoftwareServiceError):
     """Release validation error."""
     pass
 
@@ -67,7 +118,7 @@ class UpgradeNotSupported(SoftwareError):
     pass
 
 
-class ReleaseMismatchFailure(SoftwareError):
+class ReleaseMismatchFailure(SoftwareServiceError):
     """Release mismatch error."""
     pass
 
@@ -128,33 +179,3 @@ class FileSystemError(SoftwareError):
     Likely fixable by a root user.
     """
     pass
-
-
-class InternalError(Exception):
-    """This is an internal error aka bug"""
-    pass
-
-
-class SoftwareServiceError(Exception):
-    """
-    This is a service error, such as file system issue or configuration
-    issue, which is expected at design time for a valid reason.
-    This exception type will provide detail information to the user.
-    see ExceptionHook for detail
-    """
-    def __init__(self, info="", warn="", error=""):
-        self._info = info
-        self._warn = warn
-        self._error = error
-
-    @property
-    def info(self):
-        return self._info if self._info is not None else ""
-
-    @property
-    def warning(self):
-        return self._warn if self._warn is not None else ""
-
-    @property
-    def error(self):
-        return self._error if self._error is not None else ""

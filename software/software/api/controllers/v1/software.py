@@ -12,11 +12,12 @@ from pecan import expose
 from pecan import request
 import shutil
 
+from software import constants
 from software.exceptions import SoftwareError
 from software.exceptions import SoftwareServiceError
+from software.release_data import reload_release_data
 from software.software_controller import sc
-import software.utils as utils
-import software.constants as constants
+from software import utils
 
 
 LOG = logging.getLogger('main_logger')
@@ -26,6 +27,7 @@ class SoftwareAPIController(object):
 
     @expose('json')
     def commit_patch(self, *args):
+        reload_release_data()
         result = sc.patch_commit(list(args))
         sc.software_sync()
 
@@ -33,12 +35,14 @@ class SoftwareAPIController(object):
 
     @expose('json')
     def commit_dry_run(self, *args):
+        reload_release_data()
         result = sc.patch_commit(list(args), dry_run=True)
         return result
 
     @expose('json')
     @expose('query.xml', content_type='application/xml')
     def delete(self, *args):
+        reload_release_data()
         result = sc.software_release_delete_api(list(args))
         sc.software_sync()
 
@@ -46,28 +50,26 @@ class SoftwareAPIController(object):
 
     @expose('json')
     @expose('query.xml', content_type='application/xml')
-    def deploy_activate(self, *args):
-        if sc.any_patch_host_installing():
-            raise SoftwareServiceError(error="Rejected: One or more nodes are installing a release.")
+    def deploy_activate(self):
+        reload_release_data()
 
-        result = sc.software_deploy_activate_api(list(args)[0])
+        result = sc.software_deploy_activate_api()
         sc.software_sync()
         return result
 
     @expose('json')
     @expose('query.xml', content_type='application/xml')
-    def deploy_complete(self, *args):
-        if sc.any_patch_host_installing():
-            raise SoftwareServiceError(error="Rejected: One or more nodes are installing a release.")
+    def deploy_complete(self):
+        reload_release_data()
 
-        result = sc.software_deploy_complete_api(list(args)[0])
-
+        result = sc.software_deploy_complete_api()
         sc.software_sync()
         return result
 
     @expose('json')
     @expose('query.xml', content_type='application/xml')
     def deploy_host(self, *args):
+        reload_release_data()
         if len(list(args)) == 0:
             return dict(error="Host must be specified for install")
         force = False
@@ -81,6 +83,7 @@ class SoftwareAPIController(object):
     @expose('json')
     @expose('query.xml', content_type='application/xml')
     def deploy_precheck(self, *args, **kwargs):
+        reload_release_data()
         force = False
         if 'force' in list(args):
             force = True
@@ -92,6 +95,7 @@ class SoftwareAPIController(object):
     @expose('json')
     @expose('query.xml', content_type='application/xml')
     def deploy_start(self, *args, **kwargs):
+        reload_release_data()
         # if --force is provided
         force = 'force' in list(args)
 
@@ -107,6 +111,7 @@ class SoftwareAPIController(object):
 
     @expose('json', method="GET")
     def deploy(self):
+        reload_release_data()
         from_release = request.GET.get("from_release")
         to_release = request.GET.get("to_release")
         result = sc.software_deploy_show_api(from_release, to_release)
@@ -115,25 +120,30 @@ class SoftwareAPIController(object):
     @expose('json')
     @expose('query.xml', content_type='application/xml')
     def install_local(self):
+        reload_release_data()
         result = sc.software_install_local_api()
 
         return result
 
     @expose('json')
     def is_available(self, *args):
+        reload_release_data()
         return sc.is_available(list(args))
 
     @expose('json')
     def is_committed(self, *args):
+        reload_release_data()
         return sc.is_committed(list(args))
 
     @expose('json')
     def is_deployed(self, *args):
+        reload_release_data()
         return sc.is_deployed(list(args))
 
     @expose('json')
     @expose('show.xml', content_type='application/xml')
     def show(self, *args):
+        reload_release_data()
         result = sc.software_release_query_specific_cached(list(args))
 
         return result
@@ -141,6 +151,7 @@ class SoftwareAPIController(object):
     @expose('json')
     @expose('query.xml', content_type='application/xml')
     def upload(self):
+        reload_release_data()
         is_local = False
         temp_dir = None
         uploaded_files = []
@@ -186,12 +197,13 @@ class SoftwareAPIController(object):
     @expose('json')
     @expose('query.xml', content_type='application/xml')
     def query(self, **kwargs):
+        reload_release_data()
         sd = sc.software_release_query_cached(**kwargs)
-
-        return dict(sd=sd)
+        return sd
 
     @expose('json', method="GET")
     def host_list(self):
+        reload_release_data()
         result = sc.deploy_host_list()
         return result
 

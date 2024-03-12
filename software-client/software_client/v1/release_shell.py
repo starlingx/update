@@ -22,10 +22,8 @@ def do_list(cc, args):
     if args.debug:
         utils.print_result_debug(req, data)
     else:
-        header_data_list = ["Release", "RR", "State"]
-        data_list = [(k, v["reboot_required"], v["state"]) for k, v in data["sd"].items()]
-        has_error = 'error' in data and data["error"]
-        utils.print_result_list(header_data_list, data_list, has_error)
+        header_data_list = {"Release": "release_id", "RR": "reboot_required", "State": "state"}
+        utils.display_result_list(header_data_list, data)
 
     return utils.check_rc(req, data)
 
@@ -45,7 +43,8 @@ def do_show(cc, args):
     if args.debug:
         utils.print_result_debug(req, data)
     else:
-        utils.print_release_show_result(req, data, list_packages=list_packages)
+        for d in data:
+            utils.display_detail_result(d)
 
     return utils.check_rc(req, data)
 

@@ -13,6 +13,7 @@ import configparser
 import gc
 import json
 import os
+from packaging import version
 import select
 import sh
 import shutil
@@ -33,10 +34,12 @@ import software.apt_utils as apt_utils
 import software.ostree_utils as ostree_utils
 from software.api import app
 from software.authapi import app as auth_app
-from software.constants import DEPLOY_STATES
+from software.states import DEPLOY_STATES
 from software.base import PatchService
 from software.dc_utils import get_subcloud_groupby_version
+from software.deploy_state import require_deploy_state
 from software.exceptions import APTOSTreeCommandFail
+from software.exceptions import HostNotFound
 from software.exceptions import InternalError
 from software.exceptions import MetadataFail
 from software.exceptions import UpgradeNotSupported
@@ -46,10 +49,10 @@ from software.exceptions import SoftwareError
 from software.exceptions import SoftwareFail
 from software.exceptions import ReleaseInvalidRequest
 from software.exceptions import ReleaseValidationFailure
-from software.exceptions import ReleaseMismatchFailure
 from software.exceptions import ReleaseIsoDeleteFailure
 from software.exceptions import SoftwareServiceError
-from software.release_data import SWReleaseCollection
+from software.release_data import reload_release_data
+from software.release_data import get_SWReleaseCollection
 from software.software_functions import collect_current_load_for_hosts
 from software.software_functions import create_deploy_hosts
 from software.software_functions import parse_release_metadata
@@ -67,9 +70,11 @@ from software.software_functions import SW_VERSION
 from software.software_functions import LOG
 from software.software_functions import audit_log_info
 from software.software_functions import repo_root_dir
-from software.software_functions import ReleaseData
 from software.software_functions import is_deploy_state_in_sync
 from software.software_functions import is_deployment_in_progress
+from software.release_state import ReleaseState
+from software.deploy_host_state import DeployHostState
+from software.deploy_state import DeployState
 from software.release_verify import verify_files
 import software.config as cfg
 import software.utils as utils
@@ -80,6 +85,7 @@ from software.db.api import get_instance
 
 import software.messages as messages
 import software.constants as constants
+from software import states
 
 from tsconfig.tsconfig import INITIAL_CONFIG_COMPLETE_FLAG
 from tsconfig.tsconfig import INITIAL_CONTROLLER_CONFIG_COMPLETE
@@ -106,19 +112,6 @@ pending_queries = []
 thread_death = None
 keep_running = True
 
-DEPLOY_STATE_METADATA_DIR_DICT = \
-    {
-        constants.AVAILABLE: constants.AVAILABLE_DIR,
-        constants.UNAVAILABLE: constants.UNAVAILABLE_DIR,
-        constants.DEPLOYING_START: constants.DEPLOYING_START_DIR,
-        constants.DEPLOYING_HOST: constants.DEPLOYING_HOST_DIR,
-        constants.DEPLOYING_ACTIVATE: constants.DEPLOYING_ACTIVATE_DIR,
-        constants.DEPLOYING_COMPLETE: constants.DEPLOYING_COMPLETE_DIR,
-        constants.DEPLOYED: constants.DEPLOYED_DIR,
-        constants.REMOVING: constants.REMOVING_DIR,
-        constants.ABORTING: constants.ABORTING_DIR,
-        constants.COMMITTED: constants.COMMITTED_DIR,
-    }
 # Limit socket blocking to 5 seconds to allow for thread to shutdown
 api_socket_timeout = 5.0
 
@@ -318,6 +311,8 @@ class PatchMessageSyncReq(messages.PatchMessage):
         # We may need to do this in a separate thread, so that we continue to process hellos
         LOG.info("Handling sync req")
 
+        # NOTE(bqian) sync_from_nbr returns "False" if sync operations failed.
+        # need to think of reattempt to deal w/ the potential failure.
         sc.sync_from_nbr(host)
 
         resp = PatchMessageSyncComplete()
@@ -566,13 +561,34 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
         # LOG.info("Handling hello ack")
 
         sc.hosts_lock.acquire()
-        if not addr[0] in sc.hosts:
-            sc.hosts[addr[0]] = AgentNeighbour(addr[0])
+        try:
+            # NOTE(bqian) seems like trying to tolerant a failure situation
+            # that a host is directed to install a patch but during the installation
+            # software-controller-daemon gets restarted
+            # should remove the sc.hosts which is in memory volatile storage and replaced with
+            # armanent deploy-host entity
+            ip = addr[0]
+            if ip not in sc.hosts:
+                sc.hosts[ip] = AgentNeighbour(ip)
 
-        sc.hosts[addr[0]].install_status = self.status
-        sc.hosts[addr[0]].install_pending = False
-        sc.hosts[addr[0]].install_reject_reason = self.reject_reason
-        sc.hosts_lock.release()
+            sc.hosts[ip].install_status = self.status
+            sc.hosts[ip].install_pending = False
+            sc.hosts[ip].install_reject_reason = self.reject_reason
+            hostname = sc.hosts[ip].hostname
+        finally:
+            sc.hosts_lock.release()
+
+        deploy_host_state = DeployHostState(hostname)
+        # NOTE(bqian) apparently it uses 2 boolean to indicate 2 situations
+        # where there could be 4 combinations
+        if self.status:
+            deploy_host_state.deployed()
+            return
+        elif self.reject_reason:
+            deploy_host_state.deploy_failed()
+            return
+
+        LOG.error("Bug: shouldn't reach here")
 
     def send(self, sock):  # pylint: disable=unused-argument
         LOG.error("Should not get here")
@@ -686,14 +702,14 @@ class SWMessageDeployStateChanged(messages.PatchMessage):
 
         valid_agents = ['deploy-start']
         if 'agent' in data:
-            agent = data['agent']
+            self.agent = data['agent']
         else:
-            agent = 'unknown'
+            self.agent = 'unknown'
 
-        if agent not in valid_agents:
+        if self.agent not in valid_agents:
             # ignore msg from unknown senders
             LOG.info("%s received from unknown agent %s" %
-                     (messages.PATCHMSG_DEPLOY_STATE_CHANGED, agent))
+                     (messages.PATCHMSG_DEPLOY_STATE_CHANGED, self.agent))
             self.valid = False
 
         valid_state = {
@@ -705,20 +721,20 @@ class SWMessageDeployStateChanged(messages.PatchMessage):
             if deploy_state in valid_state:
                 self.deploy_state = valid_state[deploy_state]
                 LOG.info("%s received from %s with deploy-state %s" %
-                         (messages.PATCHMSG_DEPLOY_STATE_CHANGED, agent, deploy_state))
+                         (messages.PATCHMSG_DEPLOY_STATE_CHANGED, self.agent, deploy_state))
             else:
                 self.valid = False
                 LOG.error("%s received from %s with invalid deploy-state %s" %
-                          (messages.PATCHMSG_DEPLOY_STATE_CHANGED, agent, deploy_state))
+                          (messages.PATCHMSG_DEPLOY_STATE_CHANGED, self.agent, deploy_state))
 
         if 'hostname' in data and data['hostname']:
             self.hostname = data['hostname']
 
         if 'host-state' in data and data['host-state']:
             host_state = data['host-state']
-            if host_state not in constants.VALID_HOST_DEPLOY_STATE:
+            if host_state not in states.VALID_HOST_DEPLOY_STATE:
                 LOG.error("%s received from %s with invalid host-state %s" %
-                          (messages.PATCHMSG_DEPLOY_STATE_CHANGED, agent, host_state))
+                          (messages.PATCHMSG_DEPLOY_STATE_CHANGED, self.agent, host_state))
                 self.valid = False
             else:
                 self.host_state = host_state
@@ -728,7 +744,7 @@ class SWMessageDeployStateChanged(messages.PatchMessage):
 
         if not self.valid:
             LOG.error("%s received from %s as invalid %s" %
-                      (messages.PATCHMSG_DEPLOY_STATE_CHANGED, agent, data))
+                      (messages.PATCHMSG_DEPLOY_STATE_CHANGED, self.agent, data))
 
     def handle(self, sock, addr):
         global sc
@@ -763,7 +779,6 @@ class PatchController(PatchService):
         self.socket_lock = threading.RLock()
         self.controller_neighbours_lock = threading.RLock()
         self.hosts_lock = threading.RLock()
-        self.release_data_lock = threading.RLock()
 
         self.hosts = {}
         self.controller_neighbours = {}
@@ -783,8 +798,7 @@ class PatchController(PatchService):
         self.controller_address = None
         self.agent_address = None
         self.patch_op_counter = 1
-        self.release_data = ReleaseData()
-        self.release_data.load_all()
+        reload_release_data()
         try:
             self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
         except OSTreeCommandFail:
@@ -824,11 +838,12 @@ class PatchController(PatchService):
                 if self.hostname == "controller-1" \
                 else "controller-1"
 
+        DeployHostState.register_event_listener(DeployState.host_deploy_updated)
+        DeployState.register_event_listener(ReleaseState.deploy_updated)
+
     @property
     def release_collection(self):
-        # for this stage, the SWReleaseCollection behaves as a broker which
-        # does not hold any release data. it only last one request
-        swrc = SWReleaseCollection(self.release_data)
+        swrc = get_SWReleaseCollection()
         return swrc
 
     def update_config(self):
@@ -886,6 +901,8 @@ class PatchController(PatchService):
         if self.patch_op_counter >= nbr_patch_op_counter:
             return
 
+        # NOTE(bqian) sync_from_nbr returns "False" if sync operations failed.
+        # need to think of reattempt to deal w/ the potential failure.
         self.sync_from_nbr(host)
 
     def sync_from_nbr(self, host):
@@ -936,13 +953,13 @@ class PatchController(PatchService):
                     list_of_dirs = dir_names.stdout.decode("utf-8").rstrip().split()
 
                     for rel_dir in list_of_dirs:
-                        feed_ostree = "%s/%s/ostree_repo/" % (constants.FEED_OSTREE_BASE_DIR, rel_dir)
-                        if not os.path.isdir(feed_ostree):
-                            LOG.info("Skipping feed dir %s", feed_ostree)
+                        feed_repo = "%s/%s/ostree_repo/" % (constants.FEED_OSTREE_BASE_DIR, rel_dir)
+                        if not os.path.isdir(feed_repo):
+                            LOG.info("Skipping feed dir %s", feed_repo)
                             continue
-                        LOG.info("Syncing %s", feed_ostree)
+                        LOG.info("Syncing %s", feed_repo)
                         output = subprocess.check_output(["ostree",
-                                                          "--repo=%s" % feed_ostree,
+                                                          "--repo=%s" % feed_repo,
                                                           "pull",
                                                           "--depth=-1",
                                                           "--mirror",
@@ -951,7 +968,7 @@ class PatchController(PatchService):
                         output = subprocess.check_output(["ostree",
                                                           "summary",
                                                           "--update",
-                                                          "--repo=%s" % feed_ostree],
+                                                          "--repo=%s" % feed_repo],
                                                          stderr=subprocess.STDOUT)
             LOG.info("Synced to mate feed via ostree pull: %s", output)
         except subprocess.CalledProcessError:
@@ -960,20 +977,18 @@ class PatchController(PatchService):
 
         self.read_state_file()
 
-        with self.release_data_lock:
-            with self.hosts_lock:
-                self.interim_state = {}
-                self.release_data.load_all()
-                self.check_patch_states()
+        self.interim_state = {}
+        reload_release_data()
+        self.check_patch_states()
 
-            if os.path.exists(app_dependency_filename):
-                try:
-                    with open(app_dependency_filename, 'r') as f:
-                        self.app_dependencies = json.loads(f.read())
-                except Exception:
-                    LOG.exception("Failed to read app dependencies: %s", app_dependency_filename)
-            else:
-                self.app_dependencies = {}
+        if os.path.exists(app_dependency_filename):
+            try:
+                with open(app_dependency_filename, 'r') as f:
+                    self.app_dependencies = json.loads(f.read())
+            except Exception:
+                LOG.exception("Failed to read app dependencies: %s", app_dependency_filename)
+        else:
+            self.app_dependencies = {}
 
         return True
 
@@ -985,13 +1000,22 @@ class PatchController(PatchService):
         # Default to allowing in-service patching
         self.allow_insvc_patching = True
 
+        # NOTE(bqian) How is this loop relevant?
+        # all_insevc_patching equals not required_reboot in deploy entity
+        # see software_entity.
         for ip in (ip for ip in list(self.hosts) if self.hosts[ip].out_of_date):
-            for release_id in self.release_data.metadata:
-                if self.release_data.metadata[release_id].get("reboot_required") != "N" and \
-                   self.release_data.metadata[release_id]["state"] == constants.DEPLOYING_START:
+            for release in self.release_collection.iterate_releases():
+                # NOTE(bqian) below consolidates DEPLOYING_START to DEPLOYING
+                # all_insevc_patching equals not required_reboot in deploy entity
+                # see software_entity.
+                # also apparently it is a bug to check release state as it will
+                # end up return default (true) when it is not DEPLOYING_START for
+                # example, checking during removal.
+                if release.reboot_required and release.state == states.DEPLOYING:
                     self.allow_insvc_patching = False
+        # NOTE(bqian) this function looks very buggy, should probably be rewritten
 
-    def get_release_dependency_list(self, release):
+    def get_release_dependency_list(self, release_id):
         """
         Returns a list of software releases that are required by this
         release.
@@ -1000,34 +1024,44 @@ class PatchController(PatchService):
                  input param patch_id='R3'
         :param release: The software release version
         """
-        if not self.release_data.metadata[release]["requires"]:
-            return []
-        else:
-            release_dependency_list = []
-            for req_release in self.release_data.metadata[release]["requires"]:
-                release_dependency_list.append(req_release)
-                release_dependency_list = release_dependency_list + \
-                    self.get_release_dependency_list(req_release)
-            return release_dependency_list
 
-    def get_release_required_by_list(self, release):
+        # TODO(bqian): this algorithm will fail if dependency is not sequential.
+        # i.e, if R5 requires R4 and R1, R4 requires R3 and R1, R3 requires R1
+        # this relation will bring R1 before R3.
+        # change below is not fixing the algorithm, it converts directly using
+        # release_data to release_collection wrapper class.
+        release = self.release_collection.get_release_by_id(release_id)
+        if release is None:
+            error = f"Not all required releases are uploaded, missing {release_id}"
+            raise SoftwareServiceError(error=error)
+
+        release_dependency_list = []
+        for req_release in release.requires_release_ids:
+            release_dependency_list.append(req_release)
+            release_dependency_list = release_dependency_list + \
+                self.get_release_dependency_list(req_release)
+        return release_dependency_list
+
+    def get_release_required_by_list(self, release_id):
         """
         Returns a list of software releases that require this
         release.
         Example: If R3 requires R2 and R2 requires R1,
                  then this method will return ['R3', 'R2'] for
                  input param patch_id='R1'
-        :param release: The software release version
+        :param release_id: The software release id
         """
-        if release in self.release_data.metadata:
-            release_required_by_list = []
-            for req_release in self.release_data.metadata:
-                if release in self.release_data.metadata[req_release]["requires"]:
-                    release_required_by_list.append(req_release)
+        release_required_by_list = []
+        # NOTE(bqian) not sure why the check is needed. release_id is always
+        # from the release_data collection.
+        if self.release_collection.get_release_by_id(release_id):
+            for req_release in self.release_collection.iterate_releases():
+                if release_id in req_release.requires_release_ids:
+                    release_required_by_list.append(req_release.id)
                     release_required_by_list = release_required_by_list + \
-                        self.get_release_required_by_list(req_release)
-            return release_required_by_list
-        return []
+                        self.get_release_required_by_list(req_release.id)
+
+        return release_required_by_list
 
     def get_ostree_tar_filename(self, patch_sw_version, patch_id):
         '''
@@ -1044,10 +1078,12 @@ class PatchController(PatchService):
         Deletes the restart script (if any) associated with the patch
         :param patch_id: The patch ID
         '''
-        if not self.release_data.metadata[patch_id].get("restart_script"):
+        release = self.release_collection.get_release_by_id(patch_id)
+        restart_script = release.restart_script
+        if not restart_script:
             return
 
-        restart_script_path = "%s/%s" % (root_scripts_dir, self.release_data.metadata[patch_id]["restart_script"])
+        restart_script_path = "%s/%s" % (root_scripts_dir, restart_script)
         try:
             # Delete the metadata
             os.remove(restart_script_path)
@@ -1063,8 +1099,8 @@ class PatchController(PatchService):
 
         # Pass the current patch state to the semantic check as a series of args
         patch_state_args = []
-        for patch_id in list(self.release_data.metadata):
-            patch_state = '%s=%s' % (patch_id, self.release_data.metadata[patch_id]["state"])
+        for release in self.release_collection.iterate_releases():
+            patch_state = '%s=%s' % (release.id, release.state)
             patch_state_args += ['-p', patch_state]
 
         # Run semantic checks, if any
@@ -1136,25 +1172,11 @@ class PatchController(PatchService):
             # Restore /etc/hosts
             os.rename(ETC_HOSTS_BACKUP_FILE_PATH, ETC_HOSTS_FILE_PATH)
 
-        for release in sorted(list(self.release_data.metadata)):
-            if self.release_data.metadata[release]["state"] == constants.DEPLOYING_START:
-                self.release_data.metadata[release]["state"] = constants.DEPLOYED
-                try:
-                    shutil.move("%s/%s-metadata.xml" % (constants.DEPLOYING_START_DIR, release),
-                                "%s/%s-metadata.xml" % (constants.DEPLOYED_DIR, release))
-                except shutil.Error:
-                    msg = "Failed to move the metadata for %s" % release
-                    LOG.exception(msg)
-                    raise MetadataFail(msg)
-            elif self.release_data.metadata[release]["state"] == constants.REMOVING:
-                self.release_data.metadata[release]["state"] = constants.AVAILABLE
-                try:
-                    shutil.move("%s/%s-metadata.xml" % (constants.REMOVING_DIR, release),
-                                "%s/%s-metadata.xml" % (constants.AVAILABLE_DIR, release))
-                except shutil.Error:
-                    msg = "Failed to move the metadata for %s" % release
-                    LOG.exception(msg)
-                    raise MetadataFail(msg)
+        for release in self.release_collection.iterate_releases():
+            if release.state == states.DEPLOYING:
+                release.update_state(states.DEPLOYED)
+            elif release.state == states.REMOVING:
+                release.update_state(states.AVAILABLE)
 
         msg_info += "Software installation is complete.\n"
         msg_info += "Please reboot before continuing with configuration."
@@ -1184,11 +1206,10 @@ class PatchController(PatchService):
             LOG.info(msg)
             raise SoftwareServiceError(error=msg)
 
-    def _process_upload_upgrade_files(self, upgrade_files, release_data):
+    def _process_upload_upgrade_files(self, upgrade_files):
         """
         Process the uploaded upgrade files
         :param upgrade_files: dict of upgrade files
-        :param release_data: ReleaseData object
         :return: info, warning, error messages
         """
         local_info = ""
@@ -1201,15 +1222,16 @@ class PatchController(PatchService):
 
         to_release = None
         iso_mount_dir = None
+        all_good = True
         try:
-            if not verify_files([upgrade_files[constants.ISO_EXTENSION]],
-                                upgrade_files[constants.SIG_EXTENSION]):
-                raise ReleaseValidationFailure("Invalid signature file")
+            iso = upgrade_files[constants.ISO_EXTENSION]
+            sig = upgrade_files[constants.SIG_EXTENSION]
+            if not verify_files([iso], sig):
+                msg = "Software %s:%s signature validation failed" % (iso, sig)
+                raise ReleaseValidationFailure(error=msg)
 
-            msg = ("iso and signature files upload completed\n"
-                   "Importing iso is in progress\n")
-            LOG.info(msg)
-            local_info += msg
+            LOG.info("iso and signature files upload completed."
+                     "Importing iso is in progress")
 
             iso_file = upgrade_files.get(constants.ISO_EXTENSION)
 
@@ -1258,12 +1280,17 @@ class PatchController(PatchService):
             shutil.copyfile(metadata_file, to_file)
 
             # Update the release metadata
-            abs_stx_release_metadata_file = os.path.join(
-                iso_mount_dir, 'upgrades', f"{constants.RELEASE_GA_NAME % to_release}-metadata.xml")
-            release_data.parse_metadata(abs_stx_release_metadata_file, state=constants.AVAILABLE)
+            # metadata files have been copied over to the metadata/available directory
+            reload_release_data()
             LOG.info("Updated release metadata for %s", to_release)
 
             # Get release metadata
+            # NOTE(bqian) to_release is sw_version (MM.mm), the path isn't correct
+            # also prepatched iso needs to be handled.
+            # should go through the release_data to find the latest release of major release
+            # to_release
+            abs_stx_release_metadata_file = os.path.join(
+                iso_mount_dir, 'upgrades', f"{constants.RELEASE_GA_NAME % to_release}-metadata.xml")
             all_release_meta_info = parse_release_metadata(abs_stx_release_metadata_file)
             release_meta_info = {
                 os.path.basename(upgrade_files[constants.ISO_EXTENSION]): {
@@ -1275,24 +1302,19 @@ class PatchController(PatchService):
                     "sw_version": None,
                 }
             }
-
-        except ReleaseValidationFailure:
-            msg = "Upgrade file signature verification failed"
-            LOG.exception(msg)
-            local_error += msg + "\n"
-        except Exception as e:
-            msg = "Failed to process upgrade files. Error: %s" % str(e)
-            LOG.exception(msg)
-            local_error += msg + "\n"
-            # delete versioned directory
-            if to_release:
-                to_release_dir = os.path.join(constants.SOFTWARE_STORAGE_DIR, "rel-%s" % to_release)
-                shutil.rmtree(to_release_dir, ignore_errors=True)
+        except Exception:
+            all_good = False
+            raise
         finally:
             # Unmount the iso file
             if iso_mount_dir:
                 unmount_iso_load(iso_mount_dir)
                 LOG.info("Unmounted iso file %s", iso_file)
+
+            # remove upload leftover in case of failure
+            if not all_good and to_release:
+                to_release_dir = os.path.join(constants.SOFTWARE_STORAGE_DIR, "rel-%s" % to_release)
+                shutil.rmtree(to_release_dir, ignore_errors=True)
 
         return local_info, local_warning, local_error, release_meta_info
 
@@ -1309,7 +1331,7 @@ class PatchController(PatchService):
         upload_patch_info = []
         try:
             # Create the directories
-            for state_dir in constants.DEPLOY_STATE_METADATA_DIR:
+            for state_dir in states.DEPLOY_STATE_METADATA_DIR:
                 os.makedirs(state_dir, exist_ok=True)
         except os.error:
             msg = "Failed to create directories"
@@ -1320,83 +1342,68 @@ class PatchController(PatchService):
 
             base_patch_filename = os.path.basename(patch_file)
 
+            # NOTE(bqian) does it make sense to link the release_id to name of the patch?
             # Get the release_id from the filename
             # and check to see if it's already uploaded
             # todo(abailey) We should not require the ID as part of the file
             (release_id, _) = os.path.splitext(base_patch_filename)
 
-            patch_metadata = self.release_data.metadata.get(release_id, None)
+            release = self.release_collection.get_release_by_id(release_id)
 
-            if patch_metadata:
-                if patch_metadata["state"] != constants.AVAILABLE:
-                    msg = "%s is being or has already been deployed." % release_id
+            if release:
+                if release.state == states.COMMITTED:
+                    msg = "%s is committed. Metadata not updated" % release_id
                     LOG.info(msg)
                     local_info += msg + "\n"
-                elif patch_metadata["state"] == constants.COMMITTED:
-                    msg = "%s is committed. Metadata not updated" % release_id
+                elif release.state != states.AVAILABLE:
+                    msg = "%s is not currently in available state to be deployed." % release_id
                     LOG.info(msg)
                     local_info += msg + "\n"
                 else:
                     try:
                         # todo(abailey) PatchFile / extract_patch should be renamed
-                        this_release = PatchFile.extract_patch(patch_file,
-                                                               metadata_dir=constants.AVAILABLE_DIR,
-                                                               metadata_only=True,
-                                                               existing_content=self.release_data.contents[release_id],
-                                                               base_pkgdata=self.base_pkgdata)
+                        PatchFile.extract_patch(patch_file,
+                                                metadata_dir=states.AVAILABLE_DIR,
+                                                metadata_only=True,
+                                                existing_content=release.contents,
+                                                base_pkgdata=self.base_pkgdata)
                         PatchFile.unpack_patch(patch_file)
-                        self.release_data.update_release(this_release)
+                        reload_release_data()
                         msg = "%s is already uploaded. Updated metadata only" % release_id
                         LOG.info(msg)
                         local_info += msg + "\n"
-                    except ReleaseMismatchFailure:
-                        msg = "Contents of %s do not match re-uploaded release" % release_id
-                        LOG.exception(msg)
-                        local_error += msg + "\n"
-                    except ReleaseValidationFailure as e:
-                        msg = "Release validation failed for %s" % release_id
-                        if str(e) is not None and str(e) != '':
-                            msg += ":\n%s" % str(e)
-                        LOG.exception(msg)
-                        local_error += msg + "\n"
                     except SoftwareFail:
                         msg = "Failed to upload release %s" % release_id
                         LOG.exception(msg)
                         local_error += msg + "\n"
             else:
                 try:
-                    this_release = PatchFile.extract_patch(patch_file,
-                                                           metadata_dir=constants.AVAILABLE_DIR,
-                                                           base_pkgdata=self.base_pkgdata)
+                    PatchFile.extract_patch(patch_file,
+                                            metadata_dir=states.AVAILABLE_DIR,
+                                            base_pkgdata=self.base_pkgdata)
                     PatchFile.unpack_patch(patch_file)
                     local_info += "%s is now uploaded\n" % release_id
-                    self.release_data.add_release(this_release)
+                    reload_release_data()
 
-                    if not os.path.isfile(INITIAL_CONTROLLER_CONFIG_COMPLETE):
-                        self.release_data.metadata[release_id]["state"] = constants.AVAILABLE
-                    elif len(self.hosts) > 0:
-                        self.release_data.metadata[release_id]["state"] = constants.AVAILABLE
-                    else:
-                        self.release_data.metadata[release_id]["state"] = constants.UNKNOWN
-                except ReleaseValidationFailure as e:
-                    msg = "Release validation failed for %s" % release_id
-                    if str(e) is not None and str(e) != '':
-                        msg += ":\n%s" % str(e)
-                    LOG.exception(msg)
-                    local_error += msg + "\n"
-                    continue
+                    # NOTE(bqian) Below check an exception raise should be revisit,
+                    # if applicable, should be applied to the beginning of all requests.
+                    if len(self.hosts) == 0:
+                        msg = "service is running in incorrect state. No registered host"
+                        raise InternalError(msg)
                 except SoftwareFail:
                     msg = "Failed to upload release %s" % release_id
                     LOG.exception(msg)
                     local_error += msg + "\n"
                     continue
 
-            upload_patch_info.append({
-                base_patch_filename: {
-                    "id": release_id,
-                    "sw_version": self.release_data.metadata[release_id].get("sw_version", None),
-                }
-            })
+            release = self.release_collection.get_release_by_id(release_id)
+            if release:
+                upload_patch_info.append({
+                    base_patch_filename: {
+                        "id": release_id,
+                        "sw_release": release.sw_release,  # MM.mm.pp release version
+                    }
+                })
 
         # create versioned precheck for uploaded patches
         for patch in upload_patch_info:
@@ -1406,23 +1413,20 @@ class PatchController(PatchService):
                 if filename in pf:
                     patch_file = pf
 
-            sw_version = values.get("sw_version")
-            required_patches = self.release_data.metadata[values.get("id")].get("requires")
+            sw_release = values.get("sw_release")
+
+            required_patches = []
+            for dep_id in self.release_collection.get_release_by_id(values.get("id")).requires_release_ids:
+                required_patches.append(version.parse(dep_id))
 
             # sort the required patches list and get the latest, if available
-            req_patch_id = None
-            req_patch_metadata = None
             req_patch_version = None
-            if required_patches:
-                req_patch_id = sorted(required_patches)[-1]
-            if req_patch_id:
-                req_patch_metadata = self.release_data.metadata.get(req_patch_id)
-            if req_patch_metadata:
-                req_patch_version = req_patch_metadata.get("sw_version")
-            if req_patch_id and not req_patch_metadata:
-                LOG.warning("Required patch '%s' is not uploaded." % req_patch_id)
+            if len(required_patches) > 0:
+                req_patch_version = str(sorted(required_patches)[-1])
+                if self.release_collection.get_release_by_id(req_patch_version) is None:
+                    LOG.warning("Required patch '%s' is not uploaded." % req_patch_version)
 
-            PatchFile.create_versioned_precheck(patch_file, sw_version, req_patch_version=req_patch_version)
+            PatchFile.create_versioned_precheck(patch_file, sw_release, req_patch_version=req_patch_version)
 
         return local_info, local_warning, local_error, upload_patch_info
 
@@ -1464,8 +1468,7 @@ class PatchController(PatchService):
             LOG.error(msg)
             msg_error += msg + "\n"
         elif len(upgrade_files) == 2:  # Two upgrade files uploaded
-            tmp_info, tmp_warning, tmp_error, tmp_release_meta_info = self._process_upload_upgrade_files(
-                upgrade_files, self.release_data)
+            tmp_info, tmp_warning, tmp_error, tmp_release_meta_info = self._process_upload_upgrade_files(upgrade_files)
             msg_info += tmp_info
             msg_warning += tmp_warning
             msg_error += tmp_error
@@ -1479,20 +1482,23 @@ class PatchController(PatchService):
             msg_error += tmp_error
             upload_info += tmp_patch_meta_info
 
+        reload_release_data()
+
         return dict(info=msg_info, warning=msg_warning, error=msg_error, upload_info=upload_info)
 
-    def release_apply_remove_order(self, release, running_sw_version, reverse=False):
+    def release_apply_remove_order(self, release_id, running_sw_version, reverse=False):
 
         # If R4 requires R3, R3 requires R2 and R2 requires R1,
         # then release_order = ['R4', 'R3', 'R2', 'R1']
 
         if reverse:
-            release_order = [release] + self.get_release_dependency_list(release)
+            release_order = [release_id] + self.get_release_dependency_list(release_id)
             # If release_order = ['R4', 'R3', 'R2', 'R1']
             # and running_sw_version is the sw_version for R2
             # After the operation below, release_order = ['R4', 'R3']
             for i, rel in enumerate(release_order):
-                if self.release_data.metadata[rel]["sw_version"] == running_sw_version:
+                release = self.release_collection.get_release_by_id(rel)
+                if release.sw_release == running_sw_version:
                     val = i - len(release_order) + 1
                     while val >= 0:
                         release_order.pop()
@@ -1500,7 +1506,7 @@ class PatchController(PatchService):
                     break
 
         else:
-            release_order = [release] + self.get_release_required_by_list(release)
+            release_order = [release_id] + self.get_release_required_by_list(release_id)
         # reverse = True is for apply operation
         # In this case, the release_order = ['R3', 'R4']
         # reverse = False is for remove operation
@@ -1508,7 +1514,9 @@ class PatchController(PatchService):
         if reverse:
             release_order.reverse()
         else:
+            # Note(bqian) this pop is questionable, specified release would not be removed?
             release_order.pop(0)
+
         return release_order
 
     def software_release_delete_api(self, release_ids):
@@ -1563,41 +1571,10 @@ class PatchController(PatchService):
         LOG.info(msg)
         audit_log_info(msg)
 
-        # Verify releases exist and are in proper state first
-        id_verification = all(release_id in self.release_data.metadata for release_id in release_list)
-        for release_id in release_list:
-            if release_id not in self.release_data.metadata:
-                msg = "Release %s does not exist" % release_id
-                LOG.error(msg)
-                msg_error += msg + "\n"
-                id_verification = False
-                continue
-
-            deploystate = self.release_data.metadata[release_id]["state"]
-            ignore_states = [constants.AVAILABLE,
-                             constants.DEPLOYING_START,
-                             constants.DEPLOYING_ACTIVATE,
-                             constants.DEPLOYING_COMPLETE,
-                             constants.DEPLOYING_HOST,
-                             constants.DEPLOYED]
-
-            if deploystate not in ignore_states:
-                msg = f"Release {release_id} is {deploystate} and cannot be deleted."
-                LOG.error(msg)
-                msg_error += msg + "\n"
-                id_verification = False
-                continue
-
-        if not id_verification:
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
         # Handle operation
         for release_id in release_list:
-            release_sw_version = utils.get_major_release_version(
-                self.release_data.metadata[release_id]["sw_version"])
-
-            # Need to support delete of older centos patches (metadata) from upgrades.
-            # todo(abailey): do we need to be concerned about this since this component is new.
+            release = self.release_collection.get_release_by_id(release_id)
+            release_sw_version = release.sw_version
 
             # Delete ostree content if it exists.
             # RPM based patches (from upgrades) will not have ostree contents
@@ -1611,7 +1588,7 @@ class PatchController(PatchService):
                     raise OSTreeTarFail(msg)
 
             package_repo_dir = "%s/rel-%s" % (constants.PACKAGE_FEED_DIR, release_sw_version)
-            packages = [pkg.split("_")[0] for pkg in self.release_data.metadata[release_id].get("packages")]
+            packages = [pkg.split("_")[0] for pkg in release.packages]
             if packages:
                 apt_utils.package_remove(package_repo_dir, packages)
 
@@ -1636,12 +1613,12 @@ class PatchController(PatchService):
                     msg_info += msg + "\n"
 
             # TODO(lbonatti): treat the upcoming versioning changes
-            PatchFile.delete_versioned_directory(self.release_data.metadata[release_id]["sw_version"])
+            PatchFile.delete_versioned_directory(release.sw_release)
 
             try:
                 # Delete the metadata
-                deploystate = self.release_data.metadata[release_id]["state"]
-                metadata_dir = DEPLOY_STATE_METADATA_DIR_DICT[deploystate]
+                deploystate = release.state
+                metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[deploystate]
                 os.remove("%s/%s" % (metadata_dir, metadata_file))
             except OSError:
                 msg = "Failed to remove metadata for %s" % release_id
@@ -1649,7 +1626,7 @@ class PatchController(PatchService):
                 raise MetadataFail(msg)
 
             self.delete_restart_script(release_id)
-            self.release_data.delete_release(release_id)
+            reload_release_data()
             msg = "%s has been deleted" % release_id
             LOG.info(msg)
             msg_info += msg + "\n"
@@ -1688,21 +1665,21 @@ class PatchController(PatchService):
 
         return {"in_sync": is_in_sync}
 
-    def patch_init_release_api(self, release):
+    def patch_init_release_api(self, release_id):
         """
-        Create an empty repo for a new release
+        Create an empty repo for a new release_id
         :return: dict of info, warning and error messages
         """
         msg_info = ""
         msg_warning = ""
         msg_error = ""
 
-        msg = "Initializing repo for: %s" % release
+        msg = "Initializing repo for: %s" % release_id
         LOG.info(msg)
         audit_log_info(msg)
 
-        if release == SW_VERSION:
-            msg = "Rejected: Requested release %s is running release" % release
+        if release_id == SW_VERSION:
+            msg = "Rejected: Requested release %s is running release" % release_id
             msg_error += msg + "\n"
             LOG.info(msg)
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
@@ -1710,22 +1687,13 @@ class PatchController(PatchService):
         # Refresh data
         self.base_pkgdata.loaddirs()
 
-        self.release_data.load_all_metadata(constants.AVAILABLE_DIR, state=constants.AVAILABLE)
-        self.release_data.load_all_metadata(constants.UNAVAILABLE_DIR, state=constants.UNAVAILABLE)
-        self.release_data.load_all_metadata(constants.DEPLOYING_START_DIR, state=constants.DEPLOYING_START)
-        self.release_data.load_all_metadata(constants.DEPLOYING_HOST_DIR, state=constants.DEPLOYING_HOST)
-        self.release_data.load_all_metadata(constants.DEPLOYING_ACTIVATE_DIR, state=constants.DEPLOYING_ACTIVATE)
-        self.release_data.load_all_metadata(constants.DEPLOYING_COMPLETE_DIR, state=constants.DEPLOYING_COMPLETE)
-        self.release_data.load_all_metadata(constants.DEPLOYED_DIR, state=constants.DEPLOYED)
-        self.release_data.load_all_metadata(constants.REMOVING_DIR, state=constants.REMOVING)
-        self.release_data.load_all_metadata(constants.ABORTING_DIR, state=constants.ABORTING)
-        self.release_data.load_all_metadata(constants.COMMITTED_DIR, state=constants.COMMITTED)
+        reload_release_data()
 
-        repo_dir[release] = "%s/rel-%s" % (repo_root_dir, release)
+        repo_dir[release_id] = "%s/rel-%s" % (repo_root_dir, release_id)
 
         # Verify the release doesn't already exist
-        if os.path.exists(repo_dir[release]):
-            msg = "Patch repository for %s already exists" % release
+        if os.path.exists(repo_dir[release_id]):
+            msg = "Patch repository for %s already exists" % release_id
             msg_info += msg + "\n"
             LOG.info(msg)
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
@@ -1734,14 +1702,14 @@ class PatchController(PatchService):
         try:
             # todo(jcasteli)  determine if ostree change needs a createrepo equivalent
             output = "UNDER CONSTRUCTION for OSTREE"
-            LOG.info("Repo[%s] updated:\n%s", release, output)
+            LOG.info("Repo[%s] updated:\n%s", release_id, output)
         except Exception:
-            msg = "Failed to update the repo for %s" % release
+            msg = "Failed to update the repo for %s" % release_id
             LOG.exception(msg)
 
             # Wipe out what was created
-            shutil.rmtree(repo_dir[release])
-            del repo_dir[release]
+            shutil.rmtree(repo_dir[release_id])
+            del repo_dir[release_id]
 
             raise SoftwareFail(msg)
 
@@ -1763,7 +1731,8 @@ class PatchController(PatchService):
         # First, verify that all specified patches exist
         id_verification = True
         for patch_id in patch_ids:
-            if patch_id not in self.release_data.metadata:
+            release = self.release_collection.get_release_by_id(patch_id)
+            if release is None:
                 msg = "Patch %s does not exist" % patch_id
                 LOG.error(msg)
                 msg_error += msg + "\n"
@@ -1773,15 +1742,15 @@ class PatchController(PatchService):
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         required_patches = {}
-        for patch_iter in list(self.release_data.metadata):
-            for req_patch in self.release_data.metadata[patch_iter]["requires"]:
+        for release in self.release_collection.iterate_releases():
+            for req_patch in release.requires_release_ids:
                 if req_patch not in patch_ids:
                     continue
 
                 if req_patch not in required_patches:
                     required_patches[req_patch] = []
 
-                required_patches[req_patch].append(patch_iter)
+                required_patches[req_patch].append(release.id)
 
         for patch_id in patch_ids:
             if patch_id in required_patches:
@@ -1811,10 +1780,7 @@ class PatchController(PatchService):
         # Increment the software_op_counter here
         self.inc_patch_op_counter()
 
-        self.release_data_lock.acquire()
-        # self.release_data.load_all()
         self.check_patch_states()
-        self.release_data_lock.release()
 
         if self.sock_out is None:
             return True
@@ -1863,67 +1829,54 @@ class PatchController(PatchService):
     def software_release_query_cached(self, **kwargs):
         query_state = None
         if "show" in kwargs:
-            if kwargs["show"] == "available":
-                query_state = constants.AVAILABLE
-            if kwargs["show"] == "unavailable":
-                query_state = constants.UNAVAILABLE
-            elif kwargs["show"] == "deploying_start":
-                query_state = constants.DEPLOYING_START
-            elif kwargs["show"] == "deploying_host":
-                query_state = constants.DEPLOYING_HOST
-            elif kwargs["show"] == "deploying_activate":
-                query_state = constants.DEPLOYING_ACTIVATE
-            elif kwargs["show"] == "deploying_complete":
-                query_state = constants.DEPLOYING_COMPLETE
-            elif kwargs["show"] == "deployed":
-                query_state = constants.DEPLOYED
-            elif kwargs["show"] == "removing":
-                query_state = constants.REMOVING
-            elif kwargs["show"] == "aborting":
-                query_state = constants.ABORTING
-            elif kwargs["show"] == "committed":
-                query_state = constants.COMMITTED
+            valid_query_states = [
+                states.AVAILABLE,
+                states.UNAVAILABLE,
+                states.DEPLOYED,
+                states.REMOVING,
+                states.COMMITTED,
+                states.DEPLOYING
+            ]
+            if kwargs["show"] in valid_query_states:
+                query_state = kwargs["show"]
 
         query_release = None
         if "release" in kwargs:
             query_release = kwargs["release"]
 
-        results = {}
-        self.release_data_lock.acquire()
-        if query_state is None and query_release is None:
-            # Return everything
-            results = self.release_data.metadata
+        results = []
+
+        def filter_by_version():
+            for r in self.release_collection.iterate_releases():
+                if r.sw_version in query_release:
+                    yield r
+
+        def filter_by_state():
+            for rel in self.release_collection.iterate_releases_by_state(query_state):
+                yield rel
+
+        if query_state is not None:
+            iterator = filter_by_state
+        elif query_release is not None:
+            iterator = filter_by_version
         else:
-            # Filter results
-            for release_id, data in self.release_data.metadata.items():
-                if query_state is not None and data["state"] != query_state:
-                    continue
-                if query_release is not None and data["sw_version"] != query_release:
-                    continue
-                results[release_id] = data
-        self.release_data_lock.release()
+            iterator = self.release_collection.iterate_releases
+
+        for i in iterator():
+            data = i.to_query_dict()
+            results.append(data)
 
         return results
 
     def software_release_query_specific_cached(self, release_ids):
-        audit_log_info("software release show")
+        LOG.info("software release show")
 
-        results = {"metadata": {},
-                   "contents": {},
-                   "error": ""}
+        results = []
 
-        with self.release_data_lock:
-
-            for release_id in release_ids:
-                if release_id not in list(self.release_data.metadata):
-                    results["error"] += "%s is unrecognized\n" % release_id
-
-            for release_id, data in self.release_data.metadata.items():
-                if release_id in release_ids:
-                    results["metadata"][release_id] = data
-            for release_id, data in self.release_data.contents.items():
-                if release_id in release_ids:
-                    results["contents"][release_id] = data
+        for release_id in release_ids:
+            release = self.release_collection.get_release_by_id(release_id)
+            if release is not None:
+                results.append(release.to_query_dict())
 
         return results
 
@@ -1931,20 +1884,19 @@ class PatchController(PatchService):
         dependencies = set()
         patch_added = False
 
-        with self.release_data_lock:
+        # Add patches to workset
+        for patch_id in sorted(patch_ids):
+            dependencies.add(patch_id)
+            patch_added = True
 
-            # Add patches to workset
-            for patch_id in sorted(patch_ids):
-                dependencies.add(patch_id)
-                patch_added = True
-
-            while patch_added:
-                patch_added = False
-                for patch_id in sorted(dependencies):
-                    for req in self.release_data.metadata[patch_id]["requires"]:
-                        if req not in dependencies:
-                            dependencies.add(req)
-                            patch_added = recursive
+        while patch_added:
+            patch_added = False
+            for patch_id in sorted(dependencies):
+                release = self.release_collection.get_release_by_id(patch_id)
+                for req in release.requires:
+                    if req not in dependencies:
+                        dependencies.add(req)
+                        patch_added = recursive
 
         return sorted(dependencies)
 
@@ -1962,15 +1914,14 @@ class PatchController(PatchService):
         if kwargs.get("recursive") == "yes":
             recursive = True
 
-        with self.release_data_lock:
-
-            # Verify patch IDs
-            for patch_id in sorted(patch_ids):
-                if patch_id not in list(self.release_data.metadata):
-                    errormsg = "%s is unrecognized\n" % patch_id
-                    LOG.info("patch_query_dependencies: %s", errormsg)
-                    results["error"] += errormsg
-                    failure = True
+        # Verify patch IDs
+        for patch_id in sorted(patch_ids):
+            release = self.release_collection.get_release_by_id(patch_id)
+            if release is None:
+                errormsg = "%s is unrecognized\n" % patch_id
+                LOG.info("patch_query_dependencies: %s", errormsg)
+                results["error"] += errormsg
+                failure = True
 
         if failure:
             LOG.info("patch_query_dependencies failed")
@@ -1986,10 +1937,10 @@ class PatchController(PatchService):
         audit_log_info(msg)
 
         try:
-            if not os.path.exists(constants.COMMITTED_DIR):
-                os.makedirs(constants.COMMITTED_DIR)
+            if not os.path.exists(states.COMMITTED_DIR):
+                os.makedirs(states.COMMITTED_DIR)
         except os.error:
-            msg = "Failed to create %s" % constants.COMMITTED_DIR
+            msg = "Failed to create %s" % states.COMMITTED_DIR
             LOG.exception(msg)
             raise SoftwareFail(msg)
 
@@ -2001,10 +1952,9 @@ class PatchController(PatchService):
 
         # Ensure there are only REL patches
         non_rel_list = []
-        with self.release_data_lock:
-            for patch_id in self.release_data.metadata:
-                if self.release_data.metadata[patch_id]['status'] != constants.STATUS_RELEASED:
-                    non_rel_list.append(patch_id)
+        for release in self.release_collection.iterate_releases():
+            if release.status != constants.STATUS_RELEASED:
+                non_rel_list.append(release.id)
 
         if len(non_rel_list) > 0:
             errormsg = "A commit cannot be performed with non-REL status patches in the system:\n"
@@ -2015,13 +1965,13 @@ class PatchController(PatchService):
             return results
 
         # Verify Release IDs
-        with self.release_data_lock:
-            for patch_id in sorted(patch_ids):
-                if patch_id not in list(self.release_data.metadata):
-                    errormsg = "%s is unrecognized\n" % patch_id
-                    LOG.info("patch_commit: %s", errormsg)
-                    results["error"] += errormsg
-                    failure = True
+        for patch_id in sorted(patch_ids):
+            release = self.release_collection.get_release_by_id(patch_id)
+            if release is None:
+                errormsg = "%s is unrecognized\n" % patch_id
+                LOG.info("patch_commit: %s", errormsg)
+                results["error"] += errormsg
+                failure = True
 
         if failure:
             LOG.info("patch_commit: Failed patch ID check")
@@ -2031,11 +1981,10 @@ class PatchController(PatchService):
 
         # Check patch states
         avail_list = []
-        with self.release_data_lock:
-            for patch_id in commit_list:
-                if self.release_data.metadata[patch_id]['state'] != constants.DEPLOYED \
-                        and self.release_data.metadata[patch_id]['state'] != constants.COMMITTED:
-                    avail_list.append(patch_id)
+        for patch_id in commit_list:
+            release = self.release_collection.get_release_by_id(patch_id)
+            if release.state not in [states.DEPLOYED, states.COMMITTED]:
+                avail_list.append(patch_id)
 
         if len(avail_list) > 0:
             errormsg = "The following patches are not applied and cannot be committed:\n"
@@ -2045,22 +1994,21 @@ class PatchController(PatchService):
             results["error"] += errormsg
             return results
 
-        with self.release_data_lock:
-            for patch_id in commit_list:
-                # Fetch file paths that need to be cleaned up to
-                # free patch storage disk space
-                if self.release_data.metadata[patch_id].get("restart_script"):
-                    restart_script_path = "%s/%s" % \
-                        (root_scripts_dir,
-                         self.release_data.metadata[patch_id]["restart_script"])
-                    if os.path.exists(restart_script_path):
-                        cleanup_files.add(restart_script_path)
-                patch_sw_version = utils.get_major_release_version(
-                    self.release_data.metadata[patch_id]["sw_version"])
-                abs_ostree_tar_dir = package_dir[patch_sw_version]
-                software_tar_path = "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id)
-                if os.path.exists(software_tar_path):
-                    cleanup_files.add(software_tar_path)
+        for patch_id in commit_list:
+            release = self.release_collection.get_release_by_id(patch_id)
+            # Fetch file paths that need to be cleaned up to
+            # free patch storage disk space
+            if release.restart_script:
+                restart_script_path = "%s/%s" % \
+                    (root_scripts_dir,
+                     release.restart_script)
+                if os.path.exists(restart_script_path):
+                    cleanup_files.add(restart_script_path)
+            patch_sw_version = release.sw_release
+            abs_ostree_tar_dir = package_dir[patch_sw_version]
+            software_tar_path = "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id)
+            if os.path.exists(software_tar_path):
+                cleanup_files.add(software_tar_path)
 
         # Calculate disk space
         disk_space = 0
@@ -2077,8 +2025,8 @@ class PatchController(PatchService):
         # Move the metadata to the committed dir
         for patch_id in commit_list:
             metadata_fname = "%s-metadata.xml" % patch_id
-            deployed_fname = os.path.join(constants.DEPLOYED_DIR, metadata_fname)
-            committed_fname = os.path.join(constants.COMMITTED_DIR, metadata_fname)
+            deployed_fname = os.path.join(states.DEPLOYED_DIR, metadata_fname)
+            committed_fname = os.path.join(states.COMMITTED_DIR, metadata_fname)
             if os.path.exists(deployed_fname):
                 try:
                     shutil.move(deployed_fname, committed_fname)
@@ -2096,7 +2044,7 @@ class PatchController(PatchService):
                 LOG.exception(msg)
                 raise MetadataFail(msg)
 
-        self.release_data.load_all()
+        reload_release_data()
 
         results["info"] = "The releases have been committed."
         return results
@@ -2129,13 +2077,12 @@ class PatchController(PatchService):
         return rc
 
     def copy_restart_scripts(self):
-        with self.release_data_lock:
-            for patch_id in self.release_data.metadata:
-                if self.release_data.metadata[patch_id]["state"] in \
-                   [constants.DEPLOYING_START, constants.REMOVING] \
-                   and self.release_data.metadata[patch_id].get("restart_script"):
+        applying_states = [states.DEPLOYING, states.REMOVING]
+        for release in self.release_collection.iterate_releases():
+            if release.restart_script:
+                if release.state in applying_states:
                     try:
-                        restart_script_name = self.release_data.metadata[patch_id]["restart_script"]
+                        restart_script_name = release.restart_script
                         restart_script_path = "%s/%s" \
                             % (root_scripts_dir, restart_script_name)
                         dest_path = constants.PATCH_SCRIPTS_STAGING_DIR
@@ -2145,23 +2092,23 @@ class PatchController(PatchService):
                             os.makedirs(dest_path, 0o700)
                         shutil.copyfile(restart_script_path, dest_script_file)
                         os.chmod(dest_script_file, 0o700)
-                        msg = "Creating restart script for %s" % patch_id
+                        msg = "Creating restart script for %s" % release.id
                         LOG.info(msg)
                     except shutil.Error:
-                        msg = "Failed to copy the restart script for %s" % patch_id
+                        msg = "Failed to copy the restart script for %s" % release.id
                         LOG.exception(msg)
                         raise SoftwareError(msg)
-                elif self.release_data.metadata[patch_id].get("restart_script"):
+                else:
                     try:
-                        restart_script_name = self.release_data.metadata[patch_id]["restart_script"]
+                        restart_script_name = release.restart_script
                         restart_script_path = "%s/%s" \
                             % (constants.PATCH_SCRIPTS_STAGING_DIR, restart_script_name)
                         if os.path.exists(restart_script_path):
                             os.remove(restart_script_path)
-                            msg = "Removing restart script for %s" % patch_id
+                            msg = "Removing restart script for %s" % release.id
                             LOG.info(msg)
                     except shutil.Error:
-                        msg = "Failed to delete the restart script for %s" % patch_id
+                        msg = "Failed to delete the restart script for %s" % release.id
                         LOG.exception(msg)
 
     def _update_state_to_peer(self):
@@ -2176,32 +2123,21 @@ class PatchController(PatchService):
         """
         Does basic sanity checks on the release data
         :param deployment: release to be checked
-        :return: release dict (if exists),
+        :return: release object (if exists),
                  bool with success output,
                  strings with info, warning and error messages
         """
-        msg_info = ""
-        msg_warning = ""
-        msg_error = ""
-        success = True
 
         # We need to verify that the software release exists
-        release = self.release_data.metadata.get(deployment, None)
+        release = self.release_collection.get_release_by_id(deployment)
         if not release:
             msg = "Software release version corresponding to the specified release " \
                   "%s does not exist." % deployment
             LOG.error(msg)
-            msg_error += msg + " Try deleting and re-uploading the software for recovery."
-            success = False
+            msg = msg + " Try deleting and re-uploading the software for recovery."
+            raise SoftwareServiceError(error=msg)
 
-        # Check if release state is valid
-        elif release["state"] not in constants.VALID_DEPLOY_START_STATES:
-            msg = "Software release state is invalid: %s" % release["state"]
-            LOG.error(msg)
-            msg_error += msg
-            success = False
-
-        return release, success, msg_info, msg_warning, msg_error
+        return release
 
     def _deploy_precheck(self, release_version: str, force: bool = False,
                          region_name: str = "RegionOne", patch: bool = False) -> dict:
@@ -2289,15 +2225,13 @@ class PatchController(PatchService):
         :param force: if True will ignore minor alarms during precheck
         :return: dict of info, warning and error messages
         """
-        release, success, msg_info, msg_warning, msg_error = self._release_basic_checks(deployment)
-        if not success:
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+        release = self._release_basic_checks(deployment)
         region_name = kwargs["region_name"]
-        release_version = release["sw_version"]
+        release_version = release.sw_release
         patch = not utils.is_upgrade_deploy(SW_VERSION, release_version)
         return self._deploy_precheck(release_version, force, region_name, patch)
 
-    def _deploy_upgrade_start(self, to_release):
+    def _deploy_upgrade_start(self, to_release, commit_id):
         LOG.info("start deploy upgrade to %s from %s" % (to_release, SW_VERSION))
         deploy_script_name = constants.DEPLOY_START_SCRIPT
         cmd_path = utils.get_software_deploy_script(to_release, deploy_script_name)
@@ -2312,7 +2246,6 @@ class PatchController(PatchService):
         postgresql_port = str(cfg.alt_postgresql_port)
         feed = os.path.join(constants.FEED_DIR,
                             "rel-%s/ostree_repo" % major_to_release)
-        commit_id = None
 
         LOG.info("k8s version %s" % k8s_ver)
         upgrade_start_cmd = [cmd_path, SW_VERSION, major_to_release, k8s_ver, postgresql_port,
@@ -2341,9 +2274,19 @@ class PatchController(PatchService):
             LOG.error("Failed to start command: %s. Error %s" % (' '.join(upgrade_start_cmd), e))
             return False
 
-    def deploy_state_changed(self, deploy_state):
+    def deploy_state_changed(self, new_state):
         '''Handle 'deploy state change' event, invoked when operations complete. '''
-        self.db_api_instance.update_deploy(deploy_state)
+
+        deploy_state = DeployState.get_instance()
+        state_event = {
+            DEPLOY_STATES.START_DONE: deploy_state.start_done,
+            DEPLOY_STATES.START_FAILED: deploy_state.start_failed
+        }
+        if new_state in state_event:
+            state_event[new_state]()
+        else:
+            msg = f"Received invalid deploy state update {deploy_state}"
+            LOG.error(msg)
 
     def host_deploy_state_changed(self, hostname, host_deploy_state):
         '''Handle 'host deploy state change' event. '''
@@ -2354,21 +2297,40 @@ class PatchController(PatchService):
         tag.text = text
         return tag
 
+    @require_deploy_state([None],
+                          "There is already a deployment is in progress ({state}). "
+                          "Please complete the current deployment.")
     def software_deploy_start_api(self, deployment: str, force: bool, **kwargs) -> dict:
         """
-        Start deployment by applying the changes to the feed ostree
-        return: dict of info, warning and error messages
+        to start deploy of a specified release.
+        The operation implies deploying all undeployed dependency releases of
+        the specified release. i.e, to deploy release 24.09.1, it implies
+        deploying 24.09.0 and 24.09.1 when 24.09.0 has not been deployed.
+        The operation includes steps:
+        1. find all undeployed dependency releases
+        2. ensure all releases (dependency and specified release) are ready to deployed
+        3. precheck
+        4. transform all involved releases to deploying state
+        5. start the deploy subprocess
         """
-        release, success, msg_info, msg_warning, msg_error = self._release_basic_checks(deployment)
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
+        deploy_release = self._release_basic_checks(deployment)
 
-        if not success:
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+        running_release = self.release_collection.running_release
+        deploy_sw_version = deploy_release.sw_version  # MM.mm
 
-        # TODO(heitormatsui) Enforce deploy-precheck for patch release
+        feed_repo = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, deploy_sw_version)
+        commit_id = deploy_release.commit_id
         patch_release = True
-        if utils.is_upgrade_deploy(SW_VERSION, release["sw_version"]):
+        if utils.is_upgrade_deploy(SW_VERSION, deploy_release.sw_release):
+            # TODO(bqian) remove default latest commit when a commit-id is built into GA metadata
+            if commit_id is None:
+                commit_id = ostree_utils.get_feed_latest_commit(deploy_sw_version)
+
             patch_release = False
-            to_release = release["sw_version"]
+            to_release = deploy_release.sw_release
             ret = self._deploy_precheck(to_release, force, patch=patch_release)
             if ret["system_healthy"] is None:
                 ret["error"] = "Fail to perform deploy precheck. Internal error has occurred.\n" + \
@@ -2380,33 +2342,21 @@ class PatchController(PatchService):
                               "Please fix above issues then retry the deploy.\n"
                 return ret
 
-            if self._deploy_upgrade_start(to_release):
+            if self._deploy_upgrade_start(to_release, commit_id):
                 collect_current_load_for_hosts()
                 create_deploy_hosts()
-                self.db_api_instance.begin_update()
-                try:
-                    # TODO(bqian) replace SW_VERSION below to current running sw_release
-                    # (MM.mm.pp)
-                    self.update_and_sync_deploy_state(self.db_api_instance.create_deploy,
-                                                      SW_VERSION, to_release, True)
-                    self.update_and_sync_deploy_state(self.db_api_instance.update_deploy,
-                                                      DEPLOY_STATES.START)
-                finally:
-                    self.db_api_instance.end_update()
 
-                sw_rel = self.release_collection.get_release_by_id(deployment)
-                if sw_rel is None:
-                    raise InternalError("%s cannot be found" % to_release)
-                sw_rel.update_state(constants.DEPLOYING)
+                release_state = ReleaseState(release_ids=[deploy_release.id])
+                release_state.start_deploy()
+                deploy_state = DeployState.get_instance()
+                deploy_state.start(running_release, to_release, feed_repo, commit_id, deploy_release.reboot_required)
+                self._update_state_to_peer()
+
                 msg_info = "Deployment for %s started" % deployment
             else:
                 msg_error = "Deployment for %s failed to start" % deployment
 
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
-        # Identify if this is apply or remove operation
-        # todo(jcasteli) Remove once the logic to include major release version
-        # in release list is implemented
-        running_sw_version = "23.09.0"
 
         # todo(chuck) Remove once to determine how we are associating a patch
         # with a release.
@@ -2416,17 +2366,23 @@ class PatchController(PatchService):
         #        running_sw_version = self.release_data.metadata[release_id]["sw_version"]
         #        LOG.info("Running software version: %s", running_sw_version)
 
-        higher = utils.compare_release_version(self.release_data.metadata[deployment]["sw_version"],
-                                               running_sw_version)
+        # TODO(bqian) update references of sw_release (string) to SWRelease object
 
-        if higher is None:
+        if deploy_release > running_release:
+            operation = "apply"
+        elif running_release > deploy_release:
+            operation = "remove"
+        else:
+            # NOTE(bqian) The error message doesn't seem right. software version format
+            # or any metadata semantic check should be done during upload. If data
+            # invalid found subsequently, data is considered damaged, should recommend
+            # delete and re-upload
             msg_error += "The software version format for this release is not correct.\n"
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
-        elif higher:
-            operation = "apply"
-        else:
-            operation = "remove"
 
+        # NOTE(bqian) shouldn't that patch release deploy and remove are doing the same thing
+        # in terms of ostree commit, that it deploy to a commit specified by the commit-id that
+        # associated to the release from the deploy start command?
         # If releases are such that:
         # R2 requires R1, R3 requires R2, R4 requires R3
         # If current running release is R2 and command issued is "software deploy start R4"
@@ -2439,7 +2395,7 @@ class PatchController(PatchService):
             create_deploy_hosts()
 
             # reverse = True is used for apply operation
-            deployment_list = self.release_apply_remove_order(deployment, running_sw_version, reverse=True)
+            deployment_list = self.release_apply_remove_order(deployment, running_release.sw_release, reverse=True)
 
             msg = "Deploy start order for apply operation: %s" % ",".join(deployment_list)
             LOG.info(msg)
@@ -2448,10 +2404,10 @@ class PatchController(PatchService):
             # todo(jcasteli) Do we need this block below?
             # Check for patches that can't be applied during an upgrade
             upgrade_check = True
-            for release in deployment_list:
-                if self.release_data.metadata[release]["sw_version"] != SW_VERSION \
-                        and self.release_data.metadata[release].get("apply_active_release_only") == "Y":
-                    msg = "%s cannot be created during an upgrade" % release
+            for release_id in deployment_list:
+                release = self.release_collection.get_release_by_id(release_id)
+                if release.sw_version != SW_VERSION and release.apply_active_release_only == "Y":
+                    msg = "%s cannot be created during an upgrade" % release_id
                     LOG.error(msg)
                     msg_error += msg + "\n"
                     upgrade_check = False
@@ -2463,54 +2419,49 @@ class PatchController(PatchService):
                 self.run_semantic_check(constants.SEMANTIC_PREAPPLY, deployment_list)
 
             # Start applying the releases
-            for release in deployment_list:
-                msg = "Starting deployment for: %s" % release
+            for release_id in deployment_list:
+                release = self.release_collection.get_release_by_id(release_id)
+                msg = "Starting deployment for: %s" % release_id
                 LOG.info(msg)
                 audit_log_info(msg)
 
-                packages = [pkg.split("_")[0] for pkg in self.release_data.metadata[release].get("packages")]
+                packages = [pkg.split("_")[0] for pkg in release.packages]
                 if packages is None:
                     msg = "Unable to determine packages to install"
                     LOG.error(msg)
                     raise MetadataFail(msg)
 
-                if self.release_data.metadata[release]["state"] != constants.AVAILABLE \
-                   or self.release_data.metadata[release]["state"] == constants.COMMITTED:
-                    msg = "%s is already being deployed" % release
+                if release.state not in (states.AVAILABLE, states.COMMITTED):
+                    msg = "%s is already being deployed" % release_id
                     LOG.info(msg)
                     msg_info += msg + "\n"
                     continue
 
-                release_sw_version = utils.get_major_release_version(
-                    self.release_data.metadata[release]["sw_version"])
-
                 latest_commit = ""
                 try:
-                    latest_commit = ostree_utils.get_feed_latest_commit(release_sw_version)
+                    latest_commit = ostree_utils.get_feed_latest_commit(running_release.sw_version)
                     LOG.info("Latest commit: %s" % latest_commit)
                 except OSTreeCommandFail:
-                    LOG.exception("Failure during commit consistency check for %s.", release)
-
-                feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, release_sw_version)
+                    LOG.exception("Failure during commit consistency check for %s.", release_id)
 
                 try:
-                    apt_utils.run_install(feed_ostree, packages)
+                    apt_utils.run_install(feed_repo, packages)
                 except APTOSTreeCommandFail:
                     LOG.exception("Failed to intall Debian package.")
                     raise APTOSTreeCommandFail(msg)
 
                 # Update the feed ostree summary
-                ostree_utils.update_repo_summary_file(feed_ostree)
+                ostree_utils.update_repo_summary_file(feed_repo)
 
                 # Get the latest commit after performing "apt-ostree install".
                 self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
 
                 try:
                     # Move the release metadata to deploying dir
-                    deploystate = self.release_data.metadata[release]["state"]
-                    metadata_dir = DEPLOY_STATE_METADATA_DIR_DICT[deploystate]
+                    deploystate = release.state
+                    metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[deploystate]
 
-                    metadata_file = "%s/%s-metadata.xml" % (metadata_dir, release)
+                    metadata_file = "%s/%s-metadata.xml" % (metadata_dir, release_id)
                     tree = ET.parse(metadata_file)
                     root = tree.getroot()
 
@@ -2525,33 +2476,44 @@ class PatchController(PatchService):
                         outfile.write(tree)
 
                     LOG.info("Latest feed commit: %s added to metadata file" % self.latest_feed_commit)
-
-                    shutil.move(metadata_file,
-                                "%s/%s-metadata.xml" % (constants.DEPLOYING_START_DIR, release))
-
-                    msg_info += "%s is now in the repo\n" % release
+                    msg_info += "%s is now in the repo\n" % release_id
                 except shutil.Error:
-                    msg = "Failed to move the metadata for %s" % release
+                    msg = "Failed to move the metadata for %s" % release_id
                     LOG.exception(msg)
                     raise MetadataFail(msg)
 
-                self.release_data.metadata[release]["commit"] = self.latest_feed_commit
+                reload_release_data()
+                # NOTE(bqian) Below check an exception raise should be revisit, if applicable,
+                # should be applied to the begining of all requests.
+                if len(self.hosts) == 0:
+                    msg = "service is running in incorrect state. No registered host"
+                    raise InternalError(msg)
 
-                if not os.path.isfile(INITIAL_CONTROLLER_CONFIG_COMPLETE):
-                    self.release_data.metadata[release]["state"] = constants.DEPLOYING_START
-                elif len(self.hosts) > 0:
-                    self.release_data.metadata[release]["state"] = constants.DEPLOYING_START
-                else:
-                    self.release_data.metadata[release]["state"] = constants.UNKNOWN
+                # TODO(bqian) get the list of undeployed required release ids
+                # i.e, when deploying 24.03.3, which requires 24.03.2 and 24.03.1, all
+                # 3 release ids should be passed into to create new ReleaseState
+                collect_current_load_for_hosts()
+                create_deploy_hosts()
+                release_state = ReleaseState(release_ids=[release.id])
+                release_state.start_deploy()
+                deploy_state = DeployState.get_instance()
+                to_release = deploy_release.sw_release
+                deploy_state.start(running_release, to_release, feed_repo, commit_id, deploy_release.reboot_required)
+                self._update_state_to_peer()
 
                 with self.hosts_lock:
-                    self.interim_state[release] = list(self.hosts)
+                    self.interim_state[release_id] = list(self.hosts)
+
+                # There is no defined behavior for deploy start for patching releases, so
+                # move the deploy state to start-done
+                deploy_state = DeployState.get_instance()
+                deploy_state.start_done()
+                self._update_state_to_peer()
 
         elif operation == "remove":
             collect_current_load_for_hosts()
             create_deploy_hosts()
-            removed = False
-            deployment_list = self.release_apply_remove_order(deployment, running_sw_version)
+            deployment_list = self.release_apply_remove_order(deployment, running_release.sw_version)
             msg = "Deploy start order for remove operation: %s" % ",".join(deployment_list)
             LOG.info(msg)
             audit_log_info(msg)
@@ -2563,19 +2525,20 @@ class PatchController(PatchService):
 
             # See if any of the patches are marked as unremovable
             unremovable_verification = True
-            for release in deployment_list:
-                if self.release_data.metadata[release].get("unremovable") == "Y":
+            for release_id in deployment_list:
+                release = self.release_collection.get_release_by_id(release_id)
+                if release.unremovable:
                     if remove_unremovable:
-                        msg = "Unremovable release %s being removed" % release
+                        msg = "Unremovable release %s being removed" % release_id
                         LOG.warning(msg)
-                        msg_warning += msg + "\n"
+                        msg_warning = msg + "\n"
                     else:
-                        msg = "Release %s is not removable" % release
+                        msg = "Release %s is not removable" % release_id
                         LOG.error(msg)
                         msg_error += msg + "\n"
                         unremovable_verification = False
-                elif self.release_data.metadata[release]['state'] == constants.COMMITTED:
-                    msg = "Release %s is committed and cannot be removed" % release
+                elif release.state == states.COMMITTED:
+                    msg = "Release %s is committed and cannot be removed" % release_id
                     LOG.error(msg)
                     msg_error += msg + "\n"
                     unremovable_verification = False
@@ -2604,91 +2567,92 @@ class PatchController(PatchService):
             if kwargs.get("skip-semantic") != "yes":
                 self.run_semantic_check(constants.SEMANTIC_PREREMOVE, deployment_list)
 
-            for release in deployment_list:
-                removed = True
-                msg = "Removing release: %s" % release
+            for release_id in deployment_list:
+                release = self.release_collection.get_release_by_id(release_id)
+                msg = "Removing release: %s" % release_id
                 LOG.info(msg)
                 audit_log_info(msg)
 
-                if self.release_data.metadata[release]["state"] == constants.AVAILABLE:
-                    msg = "The deployment for %s has not been created" % release
+                if release.state == states.AVAILABLE:
+                    msg = "The deployment for %s has not been created" % release_id
                     LOG.info(msg)
                     msg_info += msg + "\n"
                     continue
 
-                major_release_sw_version = utils.get_major_release_version(
-                    self.release_data.metadata[release]["sw_version"])
+                major_release_sw_version = release.sw_version
                 # this is an ostree patch
-                # Base commit is fetched from the patch metadata
-                base_commit = self.release_data.contents[release]["base"]["commit"]
-                feed_ostree = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, major_release_sw_version)
+                # Base commit is fetched from the patch metadata.
+                base_commit = release.base_commit_id
+                feed_repo = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, major_release_sw_version)
                 try:
                     # Reset the ostree HEAD
-                    ostree_utils.reset_ostree_repo_head(base_commit, feed_ostree)
+                    ostree_utils.reset_ostree_repo_head(base_commit, feed_repo)
 
                     # Delete all commits that belong to this release
-                    for i in range(int(self.release_data.contents[release]["number_of_commits"])):
-                        commit_to_delete = self.release_data.contents[release]["commit%s" % (i + 1)]["commit"]
-                        ostree_utils.delete_ostree_repo_commit(commit_to_delete, feed_ostree)
+                    # NOTE(bqian) there should be just one commit per release.
+                    commit_to_delete = release.commit_id
+                    ostree_utils.delete_ostree_repo_commit(commit_to_delete, feed_repo)
 
                     # Update the feed ostree summary
-                    ostree_utils.update_repo_summary_file(feed_ostree)
+                    ostree_utils.update_repo_summary_file(feed_repo)
 
                 except OSTreeCommandFail:
-                    LOG.exception("Failure while removing release %s.", release)
+                    LOG.exception("Failure while removing release %s.", release_id)
                 try:
                     # Move the metadata to the deleted dir
-                    deploystate = self.release_data.metadata[release]["state"]
-                    metadata_dir = DEPLOY_STATE_METADATA_DIR_DICT[deploystate]
-                    shutil.move("%s/%s-metadata.xml" % (metadata_dir, release),
-                                "%s/%s-metadata.xml" % (constants.REMOVING_DIR, release))
-                    msg_info += "%s has been removed from the repo\n" % release
+                    self.release_collection.update_state([release_id], states.REMOVING_DIR)
+                    msg_info += "%s has been removed from the repo\n" % release_id
                 except shutil.Error:
-                    msg = "Failed to move the metadata for %s" % release
-                    LOG.exception(msg)
+                    msg = "Failed to move the metadata for %s" % release_id
+                    LOG.Error(msg)
                     raise MetadataFail(msg)
 
-                # update state
-                if not os.path.isfile(INITIAL_CONTROLLER_CONFIG_COMPLETE):
-                    self.release_data.metadata[release]["state"] = constants.REMOVING
-                elif len(self.hosts) > 0:
-                    self.release_data.metadata[release]["state"] = constants.REMOVING
-                else:
-                    self.release_data.metadata[release]["state"] = constants.UNKNOWN
+                if len(self.hosts) == 0:
+                    msg = "service is running in incorrect state. No registered host"
+                    raise InternalError(msg)
+
+                # TODO(bqian) get the list of undeployed required release ids
+                # i.e, when deploying 24.03.3, which requires 24.03.2 and 24.03.1, all
+                # 3 release ids should be passed into to create new ReleaseState
+                collect_current_load_for_hosts()
+                create_deploy_hosts()
+                release_state = ReleaseState(release_ids=[release.id])
+                release_state.start_remove()
+                deploy_state = DeployState.get_instance()
+                to_release = deploy_release.sw_release
+                deploy_state.start(running_release, to_release, feed_repo, commit_id, deploy_release.reboot_required)
+                self._update_state_to_peer()
 
                 # only update lastest_feed_commit if it is an ostree patch
-                if self.release_data.contents[release].get("base") is not None:
+                if release.base_commit_id is not None:
                     # Base Commit in this release's metadata.xml file represents the latest commit
                     # after this release has been removed from the feed repo
-                    self.latest_feed_commit = self.release_data.contents[release]["base"]["commit"]
+                    self.latest_feed_commit = release.base_commit_id
 
                 with self.hosts_lock:
-                    self.interim_state[release] = list(self.hosts)
+                    self.interim_state[release_id] = list(self.hosts)
 
-            if removed:
-                self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
-                self.release_data.metadata[release]["commit"] = self.latest_feed_commit
-                try:
-                    metadata_dir = DEPLOY_STATE_METADATA_DIR_DICT[deploystate]
-                    shutil.move("%s/%s-metadata.xml" % (metadata_dir, deployment),
-                                "%s/%s-metadata.xml" % (constants.DEPLOYING_START_DIR, deployment))
-                    msg_info += "Deployment started for %s\n" % deployment
-                except shutil.Error:
-                    msg = "Failed to move the metadata for %s" % deployment
-                    LOG.exception(msg)
-                    raise MetadataFail(msg)
-
-                # update state
-                if not os.path.isfile(INITIAL_CONTROLLER_CONFIG_COMPLETE):
-                    self.release_data.metadata[deployment]["state"] = constants.DEPLOYING_START
-                elif len(self.hosts) > 0:
-                    self.release_data.metadata[deployment]["state"] = constants.DEPLOYING_START
-                else:
-                    self.release_data.metadata[deployment]["state"] = constants.UNKNOWN
+                # There is no defined behavior for deploy start for patching releases, so
+                # move the deploy state to start-done
+                deploy_state = DeployState.get_instance()
+                deploy_state.start_done()
+                self._update_state_to_peer()
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-    def software_deploy_complete_api(self, release: str) -> dict:
+    def _deploy_complete(self):
+        # TODO(bqian) complete the deploy
+        # as deployment has been already activated, there is no return,
+        # deploy complete can only succeed.
+        # tasks for completion of deploy is to delete leftover data from
+        # previous release. If some data could not be deleted, need to
+        # automatically reattempt to delete it in later statge. (outside
+        # a deployment)
+        return True
+
+    @require_deploy_state([DEPLOY_STATES.ACTIVATE_DONE],
+                          "Must complete deploy activate before completing the deployment")
+    def software_deploy_complete_api(self) -> dict:
         """
         Completes a deployment associated with the release
         :return: dict of info, warning and error messages
@@ -2696,53 +2660,22 @@ class PatchController(PatchService):
         msg_info = ""
         msg_warning = ""
         msg_error = ""
-        if self.release_data.metadata[release]["state"] not in \
-                [constants.DEPLOYING_ACTIVATE, constants.DEPLOYING_COMPLETE]:
-            msg = "%s is not activated yet" % release
-            LOG.info(msg)
-            msg_info += msg + "\n"
-        else:
-            # Set the state to deploying-complete
-            for release_id in sorted(list(self.release_data.metadata)):
-                if self.release_data.metadata[release_id]["state"] == constants.DEPLOYING_ACTIVATE:
-                    self.release_data.metadata[release_id]["state"] = constants.DEPLOYING_COMPLETE
-                    try:
-                        shutil.move("%s/%s-metadata.xml" % (constants.DEPLOYING_ACTIVATE_DIR, release_id),
-                                    "%s/%s-metadata.xml" % (constants.DEPLOYING_COMPLETE_DIR, release_id))
-                    except shutil.Error:
-                        msg = "Failed to move the metadata for %s" % release_id
-                        LOG.exception(msg)
-                        raise MetadataFail(msg)
 
-            # The code for deploy complete is going to execute
-            # Once deploy complete is successfully executed, we move the metadata to their
-            # respective folders
-            for release_id in sorted(list(self.release_data.metadata)):
-                if self.release_data.metadata[release_id]["state"] == constants.REMOVING:
-                    self.release_data.metadata[release_id]["state"] = constants.AVAILABLE
-                    try:
-                        shutil.move("%s/%s-metadata.xml" % (constants.REMOVING_DIR, release_id),
-                                    "%s/%s-metadata.xml" % (constants.AVAILABLE_DIR, release_id))
-                        msg_info += "%s is available\n" % release_id
-                    except shutil.Error:
-                        msg = "Failed to move the metadata for %s" % release_id
-                        LOG.exception(msg)
-                        raise MetadataFail(msg)
-                elif self.release_data.metadata[release_id]["state"] == constants.DEPLOYING_COMPLETE:
-                    self.release_data.metadata[release_id]["state"] = constants.DEPLOYED
+        deploy_state = DeployState.get_instance()
 
-                    try:
-                        shutil.move("%s/%s-metadata.xml" % (constants.DEPLOYING_COMPLETE_DIR, release_id),
-                                    "%s/%s-metadata.xml" % (constants.DEPLOYED_DIR, release_id))
-                        msg_info += "%s has been deployed\n" % release_id
-                    except shutil.Error:
-                        msg = "Failed to move the metadata for %s" % release_id
-                        LOG.exception(msg)
-                        raise MetadataFail(msg)
+        if self._deploy_complete():
+            deploy_state.completed()
+            msg_info += "Deployment has been completed\n"
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-    def software_deploy_activate_api(self, release: str) -> dict:
+    def _activate(self):
+        # TODO(bqian) activate the deployment
+        return True
+
+    @require_deploy_state([DEPLOY_STATES.HOST_DONE, DEPLOY_STATES.ACTIVATE_FAILED],
+                          "Must complete deploying all hosts before activating the deployment")
+    def software_deploy_activate_api(self) -> dict:
         """
         Activates the deployment associated with the release
         :return: dict of info, warning and error messages
@@ -2750,21 +2683,16 @@ class PatchController(PatchService):
         msg_info = ""
         msg_warning = ""
         msg_error = ""
-        if self.release_data.metadata[release]["state"] != constants.DEPLOYING_HOST:
-            msg = "%s is not deployed on host" % release
-            LOG.info(msg)
-            msg_info += msg + "\n"
-        else:
-            try:
-                shutil.move("%s/%s-metadata.xml" % (constants.DEPLOYING_HOST_DIR, release),
-                            "%s/%s-metadata.xml" % (constants.DEPLOYING_ACTIVATE_DIR, release))
-            except shutil.Error:
-                msg = "Failed to move the metadata for %s" % release
-                LOG.exception(msg)
-                raise MetadataFail(msg)
 
-            msg_info += "Deployment for %s has been activated\n" % release
-            self.release_data.metadata[release]["state"] = constants.DEPLOYING_ACTIVATE
+        deploy_state = DeployState.get_instance()
+        deploy_state.activate()
+
+        if self._activate():
+            deploy_state.activate_completed()
+            msg_info += "Deployment has been activated\n"
+        else:
+            deploy_state.activate_failed()
+            msg_error += "Dployment activation has failed.\n"
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
@@ -2776,30 +2704,26 @@ class PatchController(PatchService):
             # Retrieve deploy state from db in list format
             return self.db_api_instance.get_deploy_all()
 
-    def software_deploy_host_api(self, host_ip, force, async_req=False):
+    @require_deploy_state([DEPLOY_STATES.START_DONE, DEPLOY_STATES.HOST, DEPLOY_STATES.HOST_FAILED],
+                          "Current deployment ({state}) is not ready to deploy host")
+    def software_deploy_host_api(self, hostname, force, async_req=False):
         msg_info = ""
         msg_warning = ""
         msg_error = ""
 
-        ip = host_ip
+        deploy_host = self.db_api_instance.get_deploy_host_by_hostname(hostname)
+        if deploy_host is None:
+            raise HostNotFound(hostname)
 
-        self.hosts_lock.acquire()
-        # If not in hosts table, maybe a hostname was used instead
-        if host_ip not in self.hosts:
-            try:
-                ip = utils.gethostbyname(host_ip)
-                if ip not in self.hosts:
-                    # Translated successfully, but IP isn't in the table.
-                    # Raise an exception to drop out to the failure handling
-                    raise SoftwareError("Host IP (%s) not in table" % ip)
-            except Exception:
-                self.hosts_lock.release()
-                msg = "Unknown host specified: %s" % host_ip
-                msg_error += msg + "\n"
-                LOG.error("Error in host-install: %s", msg)
-                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+        deploy_state = DeployState.get_instance()
+        deploy_host_state = DeployHostState(hostname)
+        deploy_state.deploy_host()
+        deploy_host_state.deploy_started()
 
-        msg = "Running software deploy host for %s (%s), force=%s, async_req=%s" % (host_ip, ip, force, async_req)
+        # NOTE(bqian) Get IP address to fulfill the need of patching structure.
+        # need to review the design
+        ip = socket.getaddrinfo(hostname, 0)[0][4][0]
+        msg = "Running software deploy host for %s (%s), force=%s, async_req=%s" % (hostname, ip, force, async_req)
         LOG.info(msg)
         audit_log_info(msg)
 
@@ -2820,9 +2744,10 @@ class PatchController(PatchService):
                 major_release, force, async_req)
             msg_info += msg + "\n"
             LOG.info(msg)
-            set_host_target_load(host_ip, major_release)
+            set_host_target_load(hostname, major_release)
             # TODO(heitormatsui) update host deploy status
 
+        self.hosts_lock.acquire()
         self.hosts[ip].install_pending = True
         self.hosts[ip].install_status = False
         self.hosts[ip].install_reject_reason = None
@@ -2842,22 +2767,13 @@ class PatchController(PatchService):
             msg = "Host installation request sent to %s." % self.hosts[ip].hostname
             msg_info += msg + "\n"
             LOG.info("host-install async_req: %s", msg)
-            for release in sorted(list(self.release_data.metadata)):
-                if self.release_data.metadata[release]["state"] == constants.DEPLOYING_START:
-                    try:
-                        shutil.move("%s/%s-metadata.xml" % (constants.DEPLOYING_START_DIR, release),
-                                    "%s/%s-metadata.xml" % (constants.DEPLOYING_HOST_DIR, release))
-                        msg_info += "%s has been activated\n" % release
-                    except shutil.Error:
-                        msg = "Failed to move the metadata for %s" % release
-                        LOG.exception(msg)
-                        raise MetadataFail(msg)
-                    self.release_data.metadata[release]["state"] = constants.DEPLOYING_HOST
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+            # TODO(bqian) update deploy state to deploy-host
 
         # Now we wait, up to ten mins. future enhancement: Wait on a condition
         resp_rx = False
         max_time = time.time() + 600
+        # NOTE(bqian) loop below blocks REST API service (slow thread)
+        # Consider remove.
         while time.time() < max_time:
             self.hosts_lock.acquire()
             if ip not in self.hosts:
@@ -2898,17 +2814,6 @@ class PatchController(PatchService):
             msg_error += msg + "\n"
             LOG.error("Error in host-install: %s", msg)
 
-        for release in sorted(list(self.release_data.metadata)):
-            if self.release_data.metadata[release]["state"] == constants.DEPLOYING_START:
-                try:
-                    shutil.move("%s/%s-metadata.xml" % (constants.DEPLOYING_START_DIR, release),
-                                "%s/%s-metadata.xml" % (constants.DEPLOYING_HOST_DIR, release))
-                    msg_info += "%s has been activated\n" % release
-                except shutil.Error:
-                    msg = "Failed to move the metadata for %s" % release
-                    LOG.exception(msg)
-                    raise MetadataFail(msg)
-                self.release_data.metadata[release]["state"] = constants.DEPLOYING_HOST
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     def drop_host(self, host_ip, sync_nbr=True):
@@ -2961,56 +2866,33 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
+    def check_releases_state(self, release_ids, state):
+        """check all releases to be in the specified state"""
+        all_matched = True
+
+        for release_id in release_ids:
+            release = self.release_collection.get_release_by_id(release_id)
+            if release is None:
+                all_matched = False
+                break
+
+            if release.state != state:
+                all_matched = False
+                break
+        return all_matched
+
     def is_available(self, release_ids):
-        all_available = True
-
-        with self.release_data_lock:
-
-            for release_id in release_ids:
-                if release_id not in self.release_data.metadata:
-                    all_available = False
-                    break
-
-                if self.release_data.metadata[release_id]["state"] != \
-                        constants.AVAILABLE:
-                    all_available = False
-                    break
-
-        return all_available
+        return self.check_releases_state(release_ids, states.AVAILABLE)
 
     def is_deployed(self, release_ids):
-        all_deployed = True
-
-        with self.release_data_lock:
-
-            for release_id in release_ids:
-                if release_id not in self.release_data.metadata:
-                    all_deployed = False
-                    break
-
-                if self.release_data.metadata[release_id]["state"] != constants.DEPLOYED:
-                    all_deployed = False
-                    break
-
-        return all_deployed
+        return self.check_releases_state(release_ids, states.DEPLOYED)
 
     def is_committed(self, release_ids):
-        all_committed = True
+        return self.check_releases_state(release_ids, states.COMMITTED)
 
-        with self.release_data_lock:
-
-            for release_id in release_ids:
-                if release_id not in self.release_data.metadata:
-                    all_committed = False
-                    break
-
-                if self.release_data.metadata[release_id]["state"] != \
-                        constants.COMMITTED:
-                    all_committed = False
-                    break
-
-        return all_committed
-
+    # NOTE(bqian) report_app_dependencies function not being called?
+    # which means self.app_dependencies will always be empty and file
+    # app_dependency_filename will never exist?
     def report_app_dependencies(self, patch_ids, **kwargs):
         """
         Handle report of application dependencies
@@ -3022,8 +2904,6 @@ class PatchController(PatchService):
 
         LOG.info("Handling app dependencies report: app=%s, patch_ids=%s",
                  appname, ','.join(patch_ids))
-
-        self.release_data_lock.acquire()
 
         if len(patch_ids) == 0:
             if appname in self.app_dependencies:
@@ -3043,20 +2923,15 @@ class PatchController(PatchService):
         except Exception:
             LOG.exception("Failed in report_app_dependencies")
             raise SoftwareFail("Internal failure")
-        finally:
-            self.release_data_lock.release()
 
         return True
 
+    # NOTE(bqian) unused function query_app_dependencies
     def query_app_dependencies(self):
         """
         Query application dependencies
         """
-        self.release_data_lock.acquire()
-
         data = self.app_dependencies
-
-        self.release_data_lock.release()
 
         return dict(data)
 
@@ -3203,7 +3078,7 @@ class PatchController(PatchService):
             all_host_upgrades.append({
                 "hostname": deploy_host.get("hostname"),
                 "current_sw_version": to_maj_min_release if deploy_host.get(
-                    "state") == constants.DEPLOYED else from_maj_min_release,
+                    "state") == states.DEPLOYED else from_maj_min_release,
                 "target_sw_version": to_maj_min_release,
                 "host_state": deploy_host.get("state")
             })
@@ -3550,7 +3425,7 @@ class PatchControllerMainThread(threading.Thread):
                         SEND_MSG_INTERVAL_IN_SECONDS)
 
                     # Only send the deploy state update from the active controller
-                    if is_deployment_in_progress(sc.release_data.metadata) and utils.is_active_controller():
+                    if is_deployment_in_progress() and utils.is_active_controller():
                         try:
                             sc.socket_lock.acquire()
                             deploy_state_update = SoftwareMessageDeployStateUpdate()

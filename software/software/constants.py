@@ -4,7 +4,6 @@ Copyright (c) 2023-2024 Wind River Systems, Inc.
 SPDX-License-Identifier: Apache-2.0
 
 """
-from enum import Enum
 import os
 try:
     # The tsconfig module is only available at runtime
@@ -34,90 +33,7 @@ RC_UNHEALTHY = 3
 DEPLOY_PRECHECK_SCRIPT = "deploy-precheck"
 DEPLOY_START_SCRIPT = "software-deploy-start"
 
-AVAILABLE_DIR = "%s/metadata/available" % SOFTWARE_STORAGE_DIR
-UNAVAILABLE_DIR = "%s/metadata/unavailable" % SOFTWARE_STORAGE_DIR
-DEPLOYING_DIR = "%s/metadata/deploying" % SOFTWARE_STORAGE_DIR
-DEPLOYED_DIR = "%s/metadata/deployed" % SOFTWARE_STORAGE_DIR
-REMOVING_DIR = "%s/metadata/removing" % SOFTWARE_STORAGE_DIR
-
-# TODO(bqian) states to be removed once current references are removed
-DEPLOYING_START_DIR = "%s/metadata/deploying_start" % SOFTWARE_STORAGE_DIR
-DEPLOYING_HOST_DIR = "%s/metadata/deploying_host" % SOFTWARE_STORAGE_DIR
-DEPLOYING_ACTIVATE_DIR = "%s/metadata/deploying_activate" % SOFTWARE_STORAGE_DIR
-DEPLOYING_COMPLETE_DIR = "%s/metadata/deploying_complete" % SOFTWARE_STORAGE_DIR
-ABORTING_DIR = "%s/metadata/aborting" % SOFTWARE_STORAGE_DIR
-COMMITTED_DIR = "%s/metadata/committed" % SOFTWARE_STORAGE_DIR
 SEMANTICS_DIR = "%s/semantics" % SOFTWARE_STORAGE_DIR
-
-DEPLOY_STATE_METADATA_DIR = \
-    [
-        AVAILABLE_DIR,
-        UNAVAILABLE_DIR,
-        DEPLOYING_DIR,
-        DEPLOYED_DIR,
-        REMOVING_DIR,
-        # TODO(bqian) states to be removed once current references are removed
-        DEPLOYING_START_DIR,
-        DEPLOYING_HOST_DIR,
-        DEPLOYING_ACTIVATE_DIR,
-        DEPLOYING_COMPLETE_DIR,
-        ABORTING_DIR,
-        COMMITTED_DIR,
-    ]
-
-# new release state needs to be added to VALID_RELEASE_STATES list
-AVAILABLE = 'available'
-UNAVAILABLE = 'unavailable'
-DEPLOYING = 'deploying'
-DEPLOYED = 'deployed'
-REMOVING = 'removing'
-
-DELETABLE_STATE = [AVAILABLE, UNAVAILABLE]
-
-# TODO(bqian) states to be removed once current references are removed
-ABORTING = 'aborting'
-COMMITTED = 'committed'
-DEPLOYING_ACTIVATE = 'deploying-activate'
-DEPLOYING_COMPLETE = 'deploying-complete'
-DEPLOYING_HOST = 'deploying-host'
-DEPLOYING_START = 'deploying-start'
-UNAVAILABLE = 'unavailable'
-UNKNOWN = 'n/a'
-
-VALID_DEPLOY_START_STATES = [
-    AVAILABLE,
-    DEPLOYED,
-]
-
-# host deploy substate
-HOST_DEPLOY_PENDING = 'pending'
-HOST_DEPLOY_STARTED = 'deploy-started'
-HOST_DEPLOY_DONE = 'deploy-done'
-HOST_DEPLOY_FAILED = 'deploy-failed'
-
-VALID_HOST_DEPLOY_STATE = [
-    HOST_DEPLOY_PENDING,
-    HOST_DEPLOY_STARTED,
-    HOST_DEPLOY_DONE,
-    HOST_DEPLOY_FAILED
-]
-
-VALID_RELEASE_STATES = [AVAILABLE, UNAVAILABLE, DEPLOYING, DEPLOYED,
-                        REMOVING]
-
-RELEASE_STATE_TO_DIR_MAP = {AVAILABLE: AVAILABLE_DIR,
-                            UNAVAILABLE: UNAVAILABLE_DIR,
-                            DEPLOYING: DEPLOYING_DIR,
-                            DEPLOYED: DEPLOYED_DIR,
-                            REMOVING: REMOVING_DIR}
-
-# valid release state transition below could still be changed as
-# development continue
-RELEASE_STATE_VALID_TRANSITION = {
-    AVAILABLE: [DEPLOYING],
-    DEPLOYING: [DEPLOYED],
-    DEPLOYED: [REMOVING, UNAVAILABLE]
-}
 
 STATUS_DEVELOPEMENT = 'DEV'
 STATUS_OBSOLETE = 'OBS'
@@ -146,11 +62,6 @@ SEMANTIC_PREREMOVE = 'pre-remove'
 SEMANTIC_ACTIONS = [SEMANTIC_PREAPPLY, SEMANTIC_PREREMOVE]
 
 CHECKOUT_FOLDER = "checked_out_commit"
-
-DEPLOYMENT_STATE_ACTIVE = "Active"
-DEPLOYMENT_STATE_INACTIVE = "Inactive"
-DEPLOYMENT_STATE_PRESTAGING = "Prestaging"
-DEPLOYMENT_STATE_PRESTAGED = "Prestaged"
 
 FEED_DIR = "/var/www/pages/feed/"
 UPGRADE_FEED_DIR = FEED_DIR
@@ -183,23 +94,3 @@ LAST_IN_SYNC = "last_in_sync"
 
 SYSTEM_MODE_SIMPLEX = "simplex"
 SYSTEM_MODE_DUPLEX = "duplex"
-
-
-
-class DEPLOY_STATES(Enum):
-    ACTIVATE = 'activate'
-    ACTIVATE_DONE = 'activate-done'
-    ACTIVATE_FAILED = 'activate-failed'
-    START = 'start'
-    START_DONE = 'start-done'
-    START_FAILED = 'start-failed'
-    HOST = 'host'
-    HOST_DONE = 'host-done'
-    HOST_FAILED = 'host-failed'
-
-
-class DEPLOY_HOST_STATES(Enum):
-    DEPLOYED = 'deployed'
-    DEPLOYING = 'deploying'
-    FAILED = 'failed'
-    PENDING = 'pending'

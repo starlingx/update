@@ -130,7 +130,7 @@ class TestSoftwareFunction(unittest.TestCase):
             self.assertEqual(val["install_instructions"], r.install_instructions)
             self.assertEqual(val["warnings"], r.warnings)
             self.assertEqual(val["status"], r.status)
-            self.assertEqual(val["unremovable"], r.unremovable)
+            self.assertEqual(val["unremovable"] == 'Y', r.unremovable)
             if val["restart_script"] is None:
                 self.assertIsNone(r.restart_script)
             else:
@@ -159,7 +159,7 @@ class TestSoftwareFunction(unittest.TestCase):
         self.assertEqual(val["install_instructions"], r.install_instructions)
         self.assertEqual(val["warnings"], r.warnings)
         self.assertEqual(val["status"], r.status)
-        self.assertEqual(val["unremovable"], r.unremovable)
+        self.assertEqual(val["unremovable"] == 'Y', r.unremovable)
         if val["restart_script"] is None:
             self.assertIsNone(r.restart_script)
         else:
@@ -178,7 +178,7 @@ class TestSoftwareFunction(unittest.TestCase):
             self.assertEqual(val["install_instructions"], r.install_instructions)
             self.assertEqual(val["warnings"], r.warnings)
             self.assertEqual(val["status"], r.status)
-            self.assertEqual(val["unremovable"], r.unremovable)
+            self.assertEqual(val["unremovable"] == 'Y', r.unremovable)
             if val["restart_script"] is None:
                 self.assertIsNone(r.restart_script)
             else:

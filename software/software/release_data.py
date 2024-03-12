@@ -7,11 +7,13 @@
 import os
 from packaging import version
 import shutil
-from software import constants
+import threading
+from software import states
 from software.exceptions import FileSystemError
-from software.exceptions import InternalError
+from software.exceptions import ReleaseNotFound
 from software.software_functions import LOG
 from software import utils
+from software.software_functions import ReleaseData
 
 
 class SWRelease(object):
@@ -22,6 +24,7 @@ class SWRelease(object):
         self._metadata = metadata
         self._contents = contents
         self._sw_version = None
+        self._release = None
 
     @property
     def metadata(self):
@@ -40,21 +43,8 @@ class SWRelease(object):
         return self.metadata['state']
 
     @staticmethod
-    def is_valid_state_transition(from_state, to_state):
-        if to_state not in constants.VALID_RELEASE_STATES:
-            msg = "Invalid state %s." % to_state
-            LOG.error(msg)
-            # this is a bug
-            raise InternalError(msg)
-
-        if from_state in constants.RELEASE_STATE_VALID_TRANSITION:
-            if to_state in constants.RELEASE_STATE_VALID_TRANSITION[from_state]:
-                return True
-        return False
-
-    @staticmethod
-    def ensure_state_transition(to_state):
-        to_dir = constants.RELEASE_STATE_TO_DIR_MAP[to_state]
+    def _ensure_state_transition(to_state):
+        to_dir = states.RELEASE_STATE_TO_DIR_MAP[to_state]
         if not os.path.isdir(to_dir):
             try:
                 os.makedirs(to_dir, mode=0o755, exist_ok=True)
@@ -63,27 +53,27 @@ class SWRelease(object):
                 raise FileSystemError(error)
 
     def update_state(self, state):
-        if SWRelease.is_valid_state_transition(self.state, state):
-            LOG.info("%s state from %s to %s" % (self.id, self.state, state))
-            SWRelease.ensure_state_transition(state)
+        LOG.info("%s state from %s to %s" % (self.id, self.state, state))
+        SWRelease._ensure_state_transition(state)
 
-            to_dir = constants.RELEASE_STATE_TO_DIR_MAP[state]
-            from_dir = constants.RELEASE_STATE_TO_DIR_MAP[self.state]
-            try:
-                shutil.move("%s/%s-metadata.xml" % (from_dir, self.id),
-                            "%s/%s-metadata.xml" % (to_dir, self.id))
-            except shutil.Error:
-                msg = "Failed to move the metadata for %s" % self.id
-                LOG.exception(msg)
-                raise FileSystemError(msg)
+        to_dir = states.RELEASE_STATE_TO_DIR_MAP[state]
+        from_dir = states.RELEASE_STATE_TO_DIR_MAP[self.state]
+        try:
+            shutil.move("%s/%s-metadata.xml" % (from_dir, self.id),
+                        "%s/%s-metadata.xml" % (to_dir, self.id))
+        except shutil.Error:
+            msg = "Failed to move the metadata for %s" % self.id
+            LOG.exception(msg)
+            raise FileSystemError(msg)
 
-            self.metadata['state'] = state
-        else:
-            # this is a bug
-            error = "Invalid state transition %s, current is %s, target state is %s" % \
-                    (self.id, self.state, state)
-            LOG.info(error)
-            raise InternalError(error)
+        self.metadata['state'] = state
+
+    @property
+    def version_obj(self):
+        '''returns packaging.version object'''
+        if self._release is None:
+            self._release = version.parse(self.sw_release)
+        return self._release
 
     @property
     def sw_release(self):
@@ -97,7 +87,14 @@ class SWRelease(object):
             self._sw_version = utils.get_major_release_version(self.sw_release)
         return self._sw_version
 
+    @property
+    def component(self):
+        return self._get_by_key('component')
+
     def _get_latest_commit(self):
+        if 'number_of_commits' not in self.contents:
+            return None
+
         num_commits = self.contents['number_of_commits']
         if int(num_commits) > 0:
             commit_tag = "commit%s" % num_commits
@@ -118,6 +115,14 @@ class SWRelease(object):
             # may consider raise InvalidRelease exception when iso comes with
             # latest commit
             return None
+
+    @property
+    def base_commit_id(self):
+        commit = None
+        base = self.contents.get('base')
+        if base:
+            commit = base.get('commit')
+        return commit
 
     def _get_by_key(self, key, default=None):
         if key in self._metadata:
@@ -147,15 +152,27 @@ class SWRelease(object):
 
     @property
     def unremovable(self):
-        return self._get_by_key('unremovable')
+        return self._get_by_key('unremovable') == "Y"
 
     @property
     def reboot_required(self):
-        return self._get_by_key('reboot_required')
+        return self._get_by_key('reboot_required') == "Y"
+
+    @property
+    def requires_release_ids(self):
+        return self._get_by_key('requires') or []
+
+    @property
+    def packages(self):
+        return self._get_by_key('packages')
 
     @property
     def restart_script(self):
         return self._get_by_key('restart_script')
+
+    @property
+    def apply_active_release_only(self):
+        return self._get_by_key('apply_active_release_only')
 
     @property
     def commit_checksum(self):
@@ -167,15 +184,76 @@ class SWRelease(object):
             # latest commit
             return None
 
+    def get_all_dependencies(self, filter_states=None):
+        """
+        :return: sorted list of all direct and indirect required releases
+        raise ReleaseNotFound if one of the release is not uploaded.
+        """
+        def _get_all_deps(release_id, release_collection, deps):
+            release = release_collection[release_id]
+            if release is None:
+                raise ReleaseNotFound([release_id])
+
+            if filter_states and release.state not in filter_states:
+                return
+
+            for id in release.requires_release_ids:
+                if id not in deps:
+                    deps.append(id)
+                    _get_all_deps(id, release_collection, deps)
+
+        all_deps = []
+        release_collection = get_SWReleaseCollection()
+        _get_all_deps(self.id, release_collection, all_deps)
+        releases = sorted([release_collection[id] for id in all_deps])
+        return releases
+
+    def __lt__(self, other):
+        return self.version_obj < other.version_obj
+
+    def __le__(self, other):
+        return self.version_obj <= other.version_obj
+
+    def __eq__(self, other):
+        return self.version_obj == other.version_obj
+
+    def __ge__(self, other):
+        return self.version_obj >= other.version_obj
+
+    def __gt__(self, other):
+        return self.version_obj > other.version_obj
+
+    def __ne__(self, other):
+        return self.version_obj != other.version_obj
+
     @property
     def is_ga_release(self):
         ver = version.parse(self.sw_release)
-        _, _, pp = ver.release
+        if len(ver.release) == 2:
+            pp = 0
+        else:
+            _, _, pp = ver.release
         return pp == 0
 
     @property
     def is_deletable(self):
-        return self.state in constants.DELETABLE_STATE
+        return self.state in states.DELETABLE_STATE
+
+    def to_query_dict(self):
+        data = {"release_id": self.id,
+                "state": self.state,
+                "sw_version": self.sw_release,
+                "component": self.component,
+                "status": self.status,
+                "unremovable": self.unremovable,
+                "summary": self.summary,
+                "description": self.description,
+                "install_instructions": self.install_instructions,
+                "warnings": self.warnings,
+                "reboot_required": self.reboot_required,
+                "requires": self.requires_release_ids[:],
+                "packages": self.packages[:]}
+        return data
 
 
 class SWReleaseCollection(object):
@@ -191,10 +269,22 @@ class SWReleaseCollection(object):
             sw_release = SWRelease(rel_id, rel_data, contents)
             self._sw_releases[rel_id] = sw_release
 
+    @property
+    def running_release(self):
+        latest = None
+        for rel in self.iterate_releases_by_state(states.DEPLOYED):
+            if latest is None or rel.version_obj > latest.version_obj:
+                latest = rel
+
+        return latest
+
     def get_release_by_id(self, rel_id):
         if rel_id in self._sw_releases:
             return self._sw_releases[rel_id]
         return None
+
+    def __getitem__(self, rel_id):
+        return self.get_release_by_id(rel_id)
 
     def get_release_by_commit_id(self, commit_id):
         for _, sw_release in self._sw_releases:
@@ -222,12 +312,41 @@ class SWReleaseCollection(object):
         for release_id in list_of_releases:
             release = self.get_release_by_id(release_id)
             if release is not None:
-                if SWRelease.is_valid_state_transition(release.state, state):
-                    SWRelease.ensure_state_transition(state)
-            else:
-                LOG.error("release %s not found" % release_id)
-
-        for release_id in list_of_releases:
-            release = self.get_release_by_id(release_id)
-            if release is not None:
                 release.update_state(state)
+
+
+class LocalStorage(object):
+    def __init__(self):
+        self._storage = threading.local()
+
+    def get_value(self, key):
+        if hasattr(self._storage, key):
+            return getattr(self._storage, key)
+        else:
+            return None
+
+    def set_value(self, key, value):
+        setattr(self._storage, key, value)
+
+    def void_value(self, key):
+        if hasattr(self._storage, key):
+            delattr(self._storage, key)
+
+
+_local_storage = LocalStorage()
+
+
+def get_SWReleaseCollection():
+    release_data = _local_storage.get_value('release_data')
+    if release_data is None:
+        LOG.info("Load release_data")
+        release_data = ReleaseData()
+        release_data.load_all()
+        LOG.info("release_data loaded")
+        _local_storage.set_value('release_data', release_data)
+
+    return SWReleaseCollection(release_data)
+
+
+def reload_release_data():
+    _local_storage.void_value('release_data')

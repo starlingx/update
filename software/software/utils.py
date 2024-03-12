@@ -43,20 +43,19 @@ class ExceptionHook(hooks.PecanHook):
         status = 500
 
         if isinstance(e, SoftwareServiceError):
-            LOG.warning("An issue is detected. Signature [%s]" % signature)
+            # Only the exceptions that are pre-categorized as "expected" that
+            # are known as operational or environmental, the detail (possibly
+            # with recovery/resolve instruction) are to be displayed to the end
+            # user
+            LOG.warning("%s. Signature [%s]" % (e.error, signature))
             # TODO(bqian) remove the logging after it is stable
             LOG.exception(e)
 
             data = dict(info=e.info, warning=e.warning, error=e.error)
         else:
+            # with an exception that is not pre-categorized as "expected", it is a
+            # bug. Or not properly categorizing the exception itself is a bug.
             err_msg = "Internal error occurred. Error signature [%s]" % signature
-            try:
-                # If exception contains error details, send that to user
-                if str(e):
-                    err_msg = "Error \"%s\", Error signature [%s]" % (str(e), signature)
-            except Exception:
-                pass
-            LOG.error(err_msg)
             LOG.exception(e)
             data = dict(info="", warning="", error=err_msg)
         return webob.Response(json.dumps(data), status=status)

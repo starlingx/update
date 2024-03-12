@@ -32,11 +32,11 @@ from software.exceptions import OSTreeTarFail
 from software.exceptions import ReleaseUploadFailure
 from software.exceptions import ReleaseValidationFailure
 from software.exceptions import ReleaseMismatchFailure
-from software.exceptions import SoftwareFail
 from software.exceptions import SoftwareServiceError
 from software.exceptions import VersionedDeployPrecheckFailure
 
 import software.constants as constants
+from software import states
 import software.utils as utils
 from software.sysinv_utils import get_ihost_list
 
@@ -81,7 +81,7 @@ def configure_logging(logtofile=True, level=logging.INFO):
         my_exec = os.path.basename(sys.argv[0])
 
         log_format = '%(asctime)s: ' \
-                     + my_exec + '[%(process)s]: ' \
+                     + my_exec + '[%(process)s:%(thread)d]: ' \
                      + '%(filename)s(%(lineno)s): ' \
                      + '%(levelname)s: %(message)s'
 
@@ -231,10 +231,13 @@ class ReleaseData(object):
     """
 
     def __init__(self):
+        self._reset()
+
+    def _reset(self):
         #
         # The metadata dict stores all metadata associated with a release.
         # This dict is keyed on release_id, with metadata for each release stored
-        # in a nested dict. (See parse_metadata method for more info)
+        # in a nested dict. (See parse_metadata_string method for more info)
         #
         self.metadata = {}
 
@@ -253,8 +256,8 @@ class ReleaseData(object):
         for release_id in list(updated_release.metadata):
             # Update all fields except state
             cur_state = self.metadata[release_id]['state']
+            updated_release.metadata[release_id]['state'] = cur_state
             self.metadata[release_id].update(updated_release.metadata[release_id])
-            self.metadata[release_id]['state'] = cur_state
 
     def delete_release(self, release_id):
         del self.contents[release_id]
@@ -294,22 +297,21 @@ class ReleaseData(object):
         outfile.close()
         os.rename(new_filename, filename)
 
-    def parse_metadata(self,
-                       filename,
-                       state=None):
+    def parse_metadata_file(self,
+                            filename,
+                            state=None):
         """
         Parse an individual release metadata XML file
         :param filename: XML file
         :param state: Indicates Applied, Available, or Committed
         :return: Release ID
         """
-
         with open(filename, "r") as f:
             text = f.read()
 
         return self.parse_metadata_string(text, state)
 
-    def parse_metadata_string(self, text, state):
+    def parse_metadata_string(self, text, state=None):
         root = ElementTree.fromstring(text)
         #
         #    <patch>
@@ -391,31 +393,35 @@ class ReleaseData(object):
 
         return release_id
 
-    def load_all_metadata(self,
-                          loaddir,
-                          state=None):
+    def _read_all_metafile(self, path):
         """
-        Parse all metadata files in the specified dir
-        :return:
+        Load metadata from all xml files in the specified path
+        :param path: path of directory that xml files is in
         """
-        for fname in glob.glob("%s/*.xml" % loaddir):
-            self.parse_metadata(fname, state)
+        for filename in glob.glob("%s/*.xml" % path):
+            with open(filename, "r") as f:
+                text = f.read()
+            yield filename, text
 
     def load_all(self):
         # Reset the data
         self.__init__()
-        self.load_all_metadata(constants.AVAILABLE_DIR, state=constants.AVAILABLE)
-        self.load_all_metadata(constants.UNAVAILABLE_DIR, state=constants.UNAVAILABLE)
-        self.load_all_metadata(constants.DEPLOYING_START_DIR, state=constants.DEPLOYING_START)
-        self.load_all_metadata(constants.DEPLOYING_HOST_DIR, state=constants.DEPLOYING_HOST)
-        self.load_all_metadata(constants.DEPLOYING_ACTIVATE_DIR, state=constants.DEPLOYING_ACTIVATE)
-        self.load_all_metadata(constants.DEPLOYING_COMPLETE_DIR, state=constants.DEPLOYING_COMPLETE)
-        self.load_all_metadata(constants.DEPLOYED_DIR, state=constants.DEPLOYED)
-        self.load_all_metadata(constants.REMOVING_DIR, state=constants.REMOVING)
-        self.load_all_metadata(constants.ABORTING_DIR, state=constants.ABORTING)
-        self.load_all_metadata(constants.COMMITTED_DIR, state=constants.COMMITTED)
 
-        # load the release metadata from feed directory or filesystem db
+        state_map = {
+            states.AVAILABLE: states.AVAILABLE_DIR,
+            states.UNAVAILABLE: states.UNAVAILABLE_DIR,
+            states.DEPLOYING: states.DEPLOYING_DIR,
+            states.DEPLOYED: states.DEPLOYED_DIR,
+            states.REMOVING: states.REMOVING_DIR,
+        }
+
+        for state, path in state_map.items():
+            for filename, text in self._read_all_metafile(path):
+                try:
+                    self.parse_metadata_string(text, state=state)
+                except Exception as e:
+                    err_msg = f"Failed parsing {filename}, {e}"
+                    LOG.exception(err_msg)
 
     def query_line(self,
                    release_id,
@@ -636,54 +642,56 @@ class PatchFile(object):
                 raise SystemExit(e.returncode)
 
     @staticmethod
-    def read_patch(path, cert_type=None):
+    def read_patch(path, dest, cert_type=None):
         # We want to enable signature checking by default
         # Note: cert_type=None is required if we are to enforce 'no dev patches on a formal load' rule.
 
         # Open the patch file and extract the contents to the current dir
         tar = tarfile.open(path, "r:gz")
 
-        tar.extract("signature")
+        tar.extract("signature", path=dest)
         try:
-            tar.extract(detached_signature_file)
+            tar.extract(detached_signature_file, path=dest)
         except KeyError:
             msg = "Patch has not been signed"
             LOG.warning(msg)
 
         # Filelist used for signature validation and verification
-        sig_filelist = ["metadata.tar", "software.tar"]
+        filelist = ["metadata.tar", "software.tar"]
 
         # Check if conditional scripts are inside the patch
         # If yes then add them to signature checklist
         if "semantics.tar" in [f.name for f in tar.getmembers()]:
-            sig_filelist.append("semantics.tar")
+            filelist.append("semantics.tar")
         if "pre-install.sh" in [f.name for f in tar.getmembers()]:
-            sig_filelist.append("pre-install.sh")
+            filelist.append("pre-install.sh")
         if "post-install.sh" in [f.name for f in tar.getmembers()]:
-            sig_filelist.append("post-install.sh")
+            filelist.append("post-install.sh")
 
-        for f in sig_filelist:
-            tar.extract(f)
+        for f in filelist:
+            tar.extract(f, path=dest)
 
         # Verify the data integrity signature first
-        sigfile = open("signature", "r")
+        sigfile = open(os.path.join(dest, "signature"), "r")
         sig = int(sigfile.read(), 16)
         sigfile.close()
 
         expected_sig = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+        sig_filelist = [os.path.join(dest, f) for f in filelist]
         for f in sig_filelist:
             sig ^= get_md5(f)
 
         if sig != expected_sig:
-            msg = "Patch failed verification"
+            msg = "Software failed signature verification."
             LOG.error(msg)
-            raise ReleaseValidationFailure(msg)
+            raise ReleaseValidationFailure(error=msg)
 
         # Verify detached signature
-        if os.path.exists(detached_signature_file):
+        sig_file = os.path.join(dest, detached_signature_file)
+        if os.path.exists(sig_file):
             sig_valid = verify_files(
                 sig_filelist,
-                detached_signature_file,
+                sig_file,
                 cert_type=cert_type)
             if sig_valid is True:
                 msg = "Signature verified, patch has been signed"
@@ -693,20 +701,21 @@ class PatchFile(object):
                 msg = "Signature check failed"
                 if cert_type is None:
                     LOG.error(msg)
-                raise ReleaseValidationFailure(msg)
+                raise ReleaseValidationFailure(error=msg)
         else:
-            msg = "Patch has not been signed"
+            msg = "Software has not been signed."
             if cert_type is None:
                 LOG.error(msg)
-            raise ReleaseValidationFailure(msg)
+            raise ReleaseValidationFailure(error=msg)
 
         # Restart script
         for f in tar.getmembers():
-            if f.name not in sig_filelist:
-                tar.extract(f)
+            if f.name not in filelist:
+                tar.extract(f, path=dest)
 
-        tar = tarfile.open("metadata.tar")
-        tar.extractall()
+        metadata = os.path.join(dest, "metadata.tar")
+        tar = tarfile.open(metadata)
+        tar.extractall(path=dest)
 
     @staticmethod
     def query_patch(patch, field=None):
@@ -716,12 +725,6 @@ class PatchFile(object):
         # Create a temporary working directory
         tmpdir = tempfile.mkdtemp(prefix="patch_")
 
-        # Save the current directory, so we can chdir back after
-        orig_wd = os.getcwd()
-
-        # Change to the tmpdir
-        os.chdir(tmpdir)
-
         r = {}
 
         try:
@@ -729,7 +732,7 @@ class PatchFile(object):
                 # Need to determine the cert_type
                 for cert_type_str in cert_type_all:
                     try:
-                        PatchFile.read_patch(abs_patch, cert_type=[cert_type_str])
+                        PatchFile.read_patch(abs_patch, tmpdir, cert_type=[cert_type_str])
                     except ReleaseValidationFailure:
                         pass
                     else:
@@ -738,15 +741,17 @@ class PatchFile(object):
                         break
 
             if "cert" not in r:
+                # NOTE(bqian) below reads like a bug in certain cases. need to revisit.
                 # If cert is unknown, then file is not yet open for reading.
                 # Try to open it for reading now, using all available keys.
                 # We can't omit cert_type, or pass None, because that will trigger the code
                 # path used by installed product, in which dev keys are not accepted unless
                 # a magic file exists.
-                PatchFile.read_patch(abs_patch, cert_type=cert_type_all)
+                PatchFile.read_patch(abs_patch, tmpdir, cert_type=cert_type_all)
 
             thispatch = ReleaseData()
-            patch_id = thispatch.parse_metadata("metadata.xml")
+            filename = os.path.join(tmpdir, "metadata.xml")
+            patch_id = thispatch.parse_metadata_file(filename)
 
             if field is None or field == "id":
                 r["id"] = patch_id
@@ -761,20 +766,14 @@ class PatchFile(object):
                     r[field] = thispatch.query_line(patch_id, field)
 
         except ReleaseValidationFailure as e:
-            msg = "Patch validation failed during extraction"
+            msg = "Patch validation failed during extraction. %s" % str(e)
             LOG.exception(msg)
             raise e
-        except ReleaseMismatchFailure as e:
-            msg = "Patch Mismatch during extraction"
+        except tarfile.TarError as te:
+            msg = "Extract software failed %s" % str(te)
             LOG.exception(msg)
-            raise e
-        except tarfile.TarError:
-            msg = "Failed during patch extraction"
-            LOG.exception(msg)
-            raise ReleaseValidationFailure(msg)
+            raise ReleaseValidationFailure(error=msg)
         finally:
-            # Change back to original working dir
-            os.chdir(orig_wd)
             shutil.rmtree(tmpdir)
 
         return r
@@ -790,45 +789,34 @@ class PatchFile(object):
         # Create a temporary working directory
         tmpdir = tempfile.mkdtemp(prefix="patch_")
 
-        # Save the current directory, so we can chdir back after
-        orig_wd = os.getcwd()
-
-        # Change to the tmpdir
-        os.chdir(tmpdir)
-
         try:
             cert_type = None
             meta_data = PatchFile.query_patch(abs_patch)
             if 'cert' in meta_data:
                 cert_type = meta_data['cert']
-            PatchFile.read_patch(abs_patch, cert_type=cert_type)
-            ReleaseData.modify_metadata_text("metadata.xml", key, value)
+            PatchFile.read_patch(abs_patch, tmpdir, cert_type=cert_type)
+            path = os.path.join(tmpdir, "metadata.xml")
+            ReleaseData.modify_metadata_text(path, key, value)
             PatchFile.write_patch(new_abs_patch, cert_type=cert_type)
             os.rename(new_abs_patch, abs_patch)
             rc = True
 
-        except ReleaseValidationFailure as e:
-            raise e
-        except ReleaseMismatchFailure as e:
-            raise e
-        except tarfile.TarError:
-            msg = "Failed during patch extraction"
+        except tarfile.TarError as te:
+            msg = "Extract software failed %s" % str(te)
             LOG.exception(msg)
-            raise ReleaseValidationFailure(msg)
+            raise ReleaseValidationFailure(error=msg)
         except Exception as e:
             template = "An exception of type {0} occurred. Arguments:\n{1!r}"
             message = template.format(type(e).__name__, e.args)
-            print(message)
+            LOG.exception(message)
         finally:
-            # Change back to original working dir
-            os.chdir(orig_wd)
             shutil.rmtree(tmpdir)
 
         return rc
 
     @staticmethod
     def extract_patch(patch,
-                      metadata_dir=constants.AVAILABLE_DIR,
+                      metadata_dir=states.AVAILABLE_DIR,
                       metadata_only=False,
                       existing_content=None,
                       base_pkgdata=None):
@@ -845,23 +833,18 @@ class PatchFile(object):
         # Create a temporary working directory
         tmpdir = tempfile.mkdtemp(prefix="patch_")
 
-        # Save the current directory, so we can chdir back after
-        orig_wd = os.getcwd()
-
-        # Change to the tmpdir
-        os.chdir(tmpdir)
-
         try:
             # Open the patch file and extract the contents to the tmpdir
-            PatchFile.read_patch(abs_patch)
+            PatchFile.read_patch(abs_patch, tmpdir)
 
             thispatch = ReleaseData()
-            patch_id = thispatch.parse_metadata("metadata.xml")
+            filename = os.path.join(tmpdir, "metadata.xml")
+            with open(filename, "r") as f:
+                text = f.read()
+
+            patch_id = thispatch.parse_metadata_string(text)
 
             if patch_id is None:
-                print("Failed to import patch")
-                # Change back to original working dir
-                os.chdir(orig_wd)
                 shutil.rmtree(tmpdir)
                 return None
 
@@ -872,15 +855,15 @@ class PatchFile(object):
                 if not base_pkgdata.check_release(patch_sw_version):
                     msg = "Software version %s for release %s is not installed" % (patch_sw_version, patch_id)
                     LOG.exception(msg)
-                    raise ReleaseValidationFailure(msg)
+                    raise ReleaseValidationFailure(error=msg)
 
             if metadata_only:
                 # This is a re-import. Ensure the content lines up
                 if existing_content is None \
                         or existing_content != thispatch.contents[patch_id]:
-                    msg = "Contents of re-imported patch do not match"
-                    LOG.exception(msg)
-                    raise ReleaseMismatchFailure(msg)
+                    msg = f"Contents of {patch_id} do not match re-uploaded release"
+                    LOG.error(msg)
+                    raise ReleaseMismatchFailure(error=msg)
 
             patch_sw_version = utils.get_major_release_version(
                 thispatch.metadata[patch_id]["sw_version"])
@@ -888,42 +871,41 @@ class PatchFile(object):
             if not os.path.exists(abs_ostree_tar_dir):
                 os.makedirs(abs_ostree_tar_dir)
 
-            shutil.move("metadata.xml",
+            shutil.move(os.path.join(tmpdir, "metadata.xml"),
                         "%s/%s-metadata.xml" % (abs_metadata_dir, patch_id))
-            shutil.move("software.tar",
+            shutil.move(os.path.join(tmpdir, "software.tar"),
                         "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id))
+            v = "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id)
+            LOG.info("software.tar %s" % v)
 
             # restart_script may not exist in metadata.
             if thispatch.metadata[patch_id].get("restart_script"):
                 if not os.path.exists(root_scripts_dir):
                     os.makedirs(root_scripts_dir)
-                restart_script_name = thispatch.metadata[patch_id]["restart_script"]
-                shutil.move(restart_script_name,
-                            "%s/%s" % (root_scripts_dir, restart_script_name))
+                restart_script_name = os.path.join(tmpdir, thispatch.metadata[patch_id]["restart_script"])
+                if os.path.isfile(restart_script_name):
+                    shutil.move(restart_script_name, os.path.join(root_scripts_dir, restart_script_name))
 
-        except ReleaseValidationFailure as e:
-            raise e
-        except ReleaseMismatchFailure as e:
-            raise e
-        except tarfile.TarError:
-            msg = "Failed during patch extraction"
+        except tarfile.TarError as te:
+            msg = "Extract software failed %s" % str(te)
             LOG.exception(msg)
-            raise ReleaseValidationFailure(msg)
-        except KeyError:
-            msg = "Failed during patch extraction"
+            raise ReleaseValidationFailure(error=msg)
+        except KeyError as ke:
+            # NOTE(bqian) assuming this is metadata missing key.
+            # this try except should be narror down to protect more specific
+            # routine accessing external data (metadata) only.
+            msg = "Software metadata missing required value for %s" % str(ke)
             LOG.exception(msg)
-            raise ReleaseValidationFailure(msg)
-        except OSError:
-            msg = "Failed during patch extraction"
-            LOG.exception(msg)
-            raise SoftwareFail(msg)
-        except IOError:  # pylint: disable=duplicate-except
-            msg = "Failed during patch extraction"
-            LOG.exception(msg)
-            raise SoftwareFail(msg)
+            raise ReleaseValidationFailure(error=msg)
+            # except OSError:
+            #     msg = "Failed during patch extraction"
+            #     LOG.exception(msg)
+            #     raise SoftwareFail(msg)
+            # except IOError:  # pylint: disable=duplicate-except
+            #     msg = "Failed during patch extraction"
+            #     LOG.exception(msg)
+            #     raise SoftwareFail(msg)
         finally:
-            # Change back to original working dir
-            os.chdir(orig_wd)
             shutil.rmtree(tmpdir)
 
         return thispatch
@@ -939,17 +921,16 @@ class PatchFile(object):
         # Create a temporary working directory
         patch_tmpdir = tempfile.mkdtemp(prefix="patch_")
 
-        # Save the current directory, so we can chdir back after
-        orig_wd = os.getcwd()
-
-        # Change to the tmpdir
-        os.chdir(patch_tmpdir)
-
         # Load the patch
         abs_patch = os.path.abspath(patch)
-        PatchFile.read_patch(abs_patch)
+        PatchFile.read_patch(abs_patch, patch_tmpdir)
         thispatch = ReleaseData()
-        patch_id = thispatch.parse_metadata("metadata.xml")
+
+        filename = os.path.join(patch_tmpdir, "metadata.xml")
+        with open(filename, "r") as f:
+            text = f.read()
+
+        patch_id = thispatch.parse_metadata_string(text)
 
         patch_sw_version = utils.get_major_release_version(
             thispatch.metadata[patch_id]["sw_version"])
@@ -982,7 +963,6 @@ class PatchFile(object):
             raise OSTreeTarFail(msg)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
-            os.chdir(orig_wd)
             shutil.rmtree(patch_tmpdir)
 
     @staticmethod
@@ -1316,13 +1296,15 @@ def is_deploy_state_in_sync():
     return False
 
 
-def is_deployment_in_progress(release_metadata):
+def is_deployment_in_progress():
     """
     Check if at least one deployment is in progress
     :param release_metadata: dict of release metadata
     :return: bool true if in progress, false otherwise
     """
-    return any(release['state'] == constants.DEPLOYING for release in release_metadata.values())
+    dbapi = get_instance()
+    deploys = dbapi.get_deploy_all()
+    return len(deploys) > 0
 
 
 def set_host_target_load(hostname, major_release):
