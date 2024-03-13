@@ -127,7 +127,7 @@ def load_import(from_release, to_release, iso_mount_dir):
 
         # Copy to_release_feed/pxelinux.cfg.files to /var/pxeboot/pxelinux.cfg.files
         pxeboot_cfg_files = glob.glob(os.path.join(to_feed_dir, 'pxeboot', 'pxelinux.cfg.files',
-                                                   '*' + from_major_rel))
+                                                   '*' + to_major_rel))
         for pxeboot_cfg_file in pxeboot_cfg_files:
             if os.path.isfile(pxeboot_cfg_file):
                 shutil.copyfile(pxeboot_cfg_file, os.path.join(VAR_PXEBOOT_DIR,
@@ -139,6 +139,7 @@ def load_import(from_release, to_release, iso_mount_dir):
         pxeboot_update_filename = "pxeboot-update-%s.sh" % to_major_rel
         shutil.copyfile(os.path.join(to_feed_dir, "upgrades", pxeboot_update_filename),
                         os.path.join("/etc", pxeboot_update_filename))
+        os.chmod(os.path.join("/etc", pxeboot_update_filename), mode=0o755)
         LOG.info("Copied pxeboot-update-%s.sh to %s", to_major_rel, "/etc")
 
     except Exception as e:
