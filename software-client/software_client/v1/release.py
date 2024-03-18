@@ -67,7 +67,7 @@ class ReleaseManager(base.Manager):
         valid_files = [os.path.abspath(software_file) for software_file in releases if os.path.isfile(
             software_file) and os.path.splitext(software_file)[1] in constants.SUPPORTED_UPLOAD_FILE_EXT]
         invalid_files = [os.path.abspath(software_file) for software_file in releases
-                        if os.path.abspath(software_file) not in valid_files]
+                         if os.path.abspath(software_file) not in valid_files]
 
         for software_file in invalid_files:
             if os.path.isdir(software_file):
@@ -110,7 +110,7 @@ class ReleaseManager(base.Manager):
         for release_dir in release_dirs:
             if os.path.isdir(release_dir):
                 raw_files = [f for f in os.listdir(release_dir)
-                            if os.path.isfile(os.path.join(release_dir, f))]
+                             if os.path.isfile(os.path.join(release_dir, f))]
 
                 # Get absolute path of files
                 raw_files = [os.path.abspath(os.path.join(release_dir, f)) for f in raw_files]
@@ -127,13 +127,13 @@ class ReleaseManager(base.Manager):
         temp_iso_files = [f for f in all_raw_files if f.endswith(constants.ISO_EXTENSION)]
         if len(temp_iso_files) > 1:  # Verify that only one ISO file is being uploaded
             print("Only one ISO file can be uploaded at a time. Found: %s" %
-                temp_iso_files, file=sys.stderr)
+                  temp_iso_files, file=sys.stderr)
             return 1
 
         temp_sig_files = [f for f in all_raw_files if f.endswith(constants.SIG_EXTENSION)]
         if len(temp_sig_files) > 1:  # Verify that only one SIG file is being uploaded
             print("Only one SIG file can be uploaded at a time. Found: %s" %
-                temp_sig_files, file=sys.stderr)
+                  temp_sig_files, file=sys.stderr)
             return 1
 
 
@@ -141,6 +141,8 @@ class ReleaseManager(base.Manager):
             _, ext = os.path.splitext(software_file)
             if ext in constants.SUPPORTED_UPLOAD_FILE_EXT:
                 to_upload_files[software_file] = (software_file, open(software_file, 'rb'))
+            else:
+                print("Skipping unsupported file: %s" % software_file, file=sys.stderr)
 
         encoder = MultipartEncoder(fields=to_upload_files)
         headers = {'Content-Type': encoder.content_type}
@@ -151,14 +153,14 @@ class ReleaseManager(base.Manager):
         else:
             utils.print_software_op_result(req, data)
             data = json.loads(req.text)
-            data_list = [(k, v["id"])
-                         for d in data["upload_info"] for k, v in d.items()
+            data_list = [(lambda key, value: (key, value["id"]))(k, v)
+                         for d in data["upload_info"]
+                         for k, v in d.items()
                          if not k.endswith(".sig")]
 
             header_data_list = ["Uploaded File", "Id"]
             has_error = 'error' in data and data["error"]
             utils.print_result_list(header_data_list, data_list, has_error)
-
         return utils.check_rc(req, data)
 
     def commit_patch(self, args):
@@ -241,7 +243,7 @@ class ReleaseManager(base.Manager):
 
         print()
         commit_warning = "WARNING: Committing a patch is an irreversible operation. " + \
-                        "Committed patches cannot be removed."
+            "Committed patches cannot be removed."
         print(textwrap.fill(commit_warning, width=utils.TERM_WIDTH, subsequent_indent=' ' * 9))
         print()
 
