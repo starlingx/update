@@ -104,7 +104,7 @@ class ReleaseManager(base.Manager):
         signal.signal(signal.SIGINT, signal.SIG_IGN)
 
         to_upload_files = {}
-        raw_files = []
+        all_raw_files = []
 
         # Find all files that need to be uploaded in given directories
         for release_dir in release_dirs:
@@ -114,27 +114,30 @@ class ReleaseManager(base.Manager):
 
                 # Get absolute path of files
                 raw_files = [os.path.abspath(os.path.join(release_dir, f)) for f in raw_files]
+
+                # Append files from directory into the full list
+                all_raw_files.extend(raw_files)
             else:
                 print("Skipping invalid directory: %s" % release_dir, file=sys.stderr)
 
-        if len(raw_files) == 0:
+        if len(all_raw_files) == 0:
             print("No file to upload")
             return 0
 
-        temp_iso_files = [f for f in raw_files if f.endswith(constants.ISO_EXTENSION)]
+        temp_iso_files = [f for f in all_raw_files if f.endswith(constants.ISO_EXTENSION)]
         if len(temp_iso_files) > 1:  # Verify that only one ISO file is being uploaded
             print("Only one ISO file can be uploaded at a time. Found: %s" %
                 temp_iso_files, file=sys.stderr)
             return 1
 
-        temp_sig_files = [f for f in raw_files if f.endswith(constants.SIG_EXTENSION)]
+        temp_sig_files = [f for f in all_raw_files if f.endswith(constants.SIG_EXTENSION)]
         if len(temp_sig_files) > 1:  # Verify that only one SIG file is being uploaded
             print("Only one SIG file can be uploaded at a time. Found: %s" %
                 temp_sig_files, file=sys.stderr)
             return 1
 
 
-        for software_file in sorted(set(raw_files)):
+        for software_file in sorted(set(all_raw_files)):
             _, ext = os.path.splitext(software_file)
             if ext in constants.SUPPORTED_UPLOAD_FILE_EXT:
                 to_upload_files[software_file] = (software_file, open(software_file, 'rb'))
@@ -147,6 +150,15 @@ class ReleaseManager(base.Manager):
             utils.print_result_debug(req, data)
         else:
             utils.print_software_op_result(req, data)
+            data = json.loads(req.text)
+            data_list = [(k, v["id"])
+                         for d in data["upload_info"] for k, v in d.items()
+                         if not k.endswith(".sig")]
+
+            header_data_list = ["Uploaded File", "Id"]
+            has_error = 'error' in data and data["error"]
+            utils.print_result_list(header_data_list, data_list, has_error)
+
         return utils.check_rc(req, data)
 
     def commit_patch(self, args):

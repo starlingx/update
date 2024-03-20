@@ -145,14 +145,13 @@ def do_is_committed(cc, args):
 @utils.arg('release',
            metavar='(iso + sig) | patch',
            nargs="+",  # accepts a list
-           help='Software releases to upload')
-@utils.arg('--local',
-           required=False,
-           default=False,
-           action='store_true',
            help=('pair of install iso and sig files for major release '
                  '(GA or patched) and/or one or more files containing a '
                  'patch release. NOTE: specify at most ONE pair of (iso + sig)'))
+@utils.arg('--local',
+           required=False,
+           default=False,
+           action='store_true')
 def do_upload(cc, args):
     """Upload a software release"""
     req, data = cc.release.upload(args)
@@ -175,8 +174,13 @@ def do_upload(cc, args):
 
 
 @utils.arg('release',
+           metavar='directory',
            nargs="+",  # accepts a list
-           help='Directory containing software releases to upload')
+           help=('directory containing software releases files to upload. '
+                 'The release files may be either a pair of install iso and '
+                 'sig files for major release (GA or patched) and/or one or '
+                 'more files containing a patch release. NOTE: specify at most '
+                 'ONE pair of (iso + sig)'))
 def do_upload_dir(cc, args):
     """Upload a software release dir"""
     return cc.release.upload_dir(args)
