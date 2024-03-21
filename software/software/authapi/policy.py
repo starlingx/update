@@ -30,10 +30,6 @@ base_rules = [
                        'role:admin and (project_name:admin or ' +
                        'project_name:services)',
                        description='Admin user in system projects.'),
-    policy.RuleDefault('reader_in_system_projects',
-                       'role:reader and (project_name:admin or ' +
-                       'project_name:services)',
-                       description='Reader user in system projects.'),
     policy.RuleDefault('default', 'rule:admin_in_system_projects',
                        description='Default rule.'),
 ]

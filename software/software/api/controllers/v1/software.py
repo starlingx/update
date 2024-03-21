@@ -6,8 +6,8 @@ SPDX-License-Identifier: Apache-2.0
 """
 import cgi
 import json
+import logging
 import os
-from oslo_log import log
 from pecan import expose
 from pecan import request
 from pecan import Response
@@ -20,7 +20,7 @@ import software.utils as utils
 import software.constants as constants
 
 
-LOG = log.getLogger(__name__)
+LOG = logging.getLogger('main_logger')
 
 
 class SoftwareAPIController(object):

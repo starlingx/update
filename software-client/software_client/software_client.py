@@ -392,17 +392,12 @@ class SoftwareClientShell(object):
         args.os_endpoint_type = endpoint_type
         client = sclient.get_client(api_version, auth_mode, **(args.__dict__))
 
-        return args.func(client, args)
-        # TODO(bqian) reenable below once Exception classes are defined
-        """
         try:
-            args.func(client, args)
+            return args.func(client, args)
         except exc.Unauthorized:
             raise exc.CommandError("Invalid Identity credentials.")
         except exc.HTTPForbidden:
             raise exc.CommandError("Error: Forbidden")
-        """
-
 
     def do_bash_completion(self, args):
         """Prints all of the commands and options to stdout.
@@ -452,7 +447,6 @@ def main():
     except Exception as e:
         print(e, file=sys.stderr)
         sys.exit(1)
-    sys.exit(0)
 
 
 if __name__ == "__main__":

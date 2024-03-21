@@ -111,9 +111,6 @@ def get_client(api_version, auth_mode, session=None, service_type=SERVICE_TYPE, 
         session = _make_session(**kwargs)
 
     if not endpoint:
-        exception_msg = ('Either provide Keystone credentials or '
-                         'user-defined endpoint and token or '
-                         'execute software command as root (sudo)')
         if session:
             try:
                 interface = kwargs.get('os_endpoint_type')
@@ -122,12 +119,14 @@ def get_client(api_version, auth_mode, session=None, service_type=SERVICE_TYPE, 
                                                 interface=interface,
                                                 region_name=region_name)
             except Exception as e:
+                msg = ('Failed to get openstack endpoint')
                 raise exc.EndpointException(
                     ('%(message)s, error was: %(error)s') %
-                     {'message': exception_msg, 'error': e})
+                     {'message': msg, 'error': e})
         elif local_root:
             endpoint = API_ENDPOINT
         else:
+            exception_msg = ('Missing / invalid authorization credentials')
             raise exc.AmbigiousAuthSystem(exception_msg)
 
     if endpoint:
