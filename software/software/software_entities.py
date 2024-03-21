@@ -276,8 +276,8 @@ class DeployHandler(Deploy):
         """
         super().query(from_release, to_release)
         for deploy in self.data.get("deploy", []):
-            if (deploy.get("from_release") == from_release
-                    and deploy.get("to_release") == to_release):
+            if (deploy.get("from_release") == from_release and
+                    deploy.get("to_release") == to_release):
                 return deploy
         return []
 
@@ -325,7 +325,7 @@ class DeployHostHandler(DeployHosts):
         super().__init__()
         self.data = get_software_filesystem_data()
 
-    def create(self, hostname, state:DEPLOY_HOST_STATES=None):
+    def create(self, hostname, state: DEPLOY_HOST_STATES = None):
         super().create(hostname, state)
         deploy = self.query(hostname)
         if deploy:

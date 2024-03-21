@@ -25,6 +25,8 @@ import textwrap
 from oslo_utils import importutils
 from six.moves import zip
 
+from software_client.common.http_errors import HTTP_ERRORS
+
 
 TERM_WIDTH = 72
 
@@ -114,6 +116,46 @@ def check_rc(req, data):
         rc = 1
 
     return rc
+
+
+def _display_info(text):
+    ''' display the basic info json object '''
+    try:
+        data = json.loads(text)
+    except Exception:
+        print(f"Invalid response format: {text}")
+        return
+
+    if "error" in data and data["error"] != "":
+        print("Error:\n%s" % data["error"])
+    elif "warning" in data and data["warning"] != "":
+        print("Warning:\n%s" % data["warning"])
+    elif "info" in data and data["info"] != "":
+        print(data["info"])
+
+
+def display_info(resp):
+    '''
+    This function displays basic REST API return, w/ info json object:
+    {
+        "info":"",
+        "warning":"",
+        "error":"",
+    }
+    '''
+
+    status_code = resp.status_code
+    text = resp.text
+
+    if resp.status_code == 500:
+        # all 500 error comes with basic info json object
+        _display_info(text)
+    elif resp.status_code in HTTP_ERRORS:
+        # any 4xx and 5xx errors does not contain API information.
+        print("Error:\n%s", HTTP_ERRORS[status_code])
+    else:
+        # print out the basic info json object
+        _display_info(text)
 
 
 def print_result_list(header_data_list, data_list, has_error, sort_key=0):

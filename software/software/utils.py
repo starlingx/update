@@ -42,10 +42,10 @@ class ExceptionHook(hooks.PecanHook):
 
         if isinstance(e, SoftwareServiceError):
             LOG.warning("An issue is detected. Signature [%s]" % signature)
+            # TODO(bqian) remove the logging after it is stable
             LOG.exception(e)
 
             data = dict(info=e.info, warning=e.warning, error=e.error)
-            data['error'] = data['error'] + " Error signature [%s]" % signature
         else:
             err_msg = "Internal error occurred. Error signature [%s]" % signature
             LOG.error(err_msg)

@@ -1178,7 +1178,6 @@ def create_deploy_hosts():
         raise err
 
 
-
 def collect_current_load_for_hosts():
     load_data = {
         "current_loads": []

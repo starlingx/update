@@ -83,7 +83,7 @@ class ReleaseManager(base.Manager):
 
         path = '/v1/software/upload'
         if is_local:
-            to_upload_filenames = json.dumps(valid_files)
+            to_upload_filenames = valid_files
             headers = {'Content-Type': 'text/plain'}
             return self._create(path, body=to_upload_filenames, headers=headers)
         else:
