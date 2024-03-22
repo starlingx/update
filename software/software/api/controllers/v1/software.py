@@ -239,3 +239,16 @@ class SoftwareAPIController(object):
     @expose(method='GET', template='json')
     def in_sync_controller(self):
         return sc.in_sync_controller_api()
+
+    @expose(method='GET', template='json')
+    def software_upgrade(self):
+        return sc.get_software_upgrade()
+
+    @expose(method='GET', template='json')
+    def software_host_upgrade(self, *args):
+        args_list = list(args)
+        if not args_list:
+            return sc.get_all_software_host_upgrade()
+
+        hostname = args_list[0]
+        return sc.get_one_software_host_upgrade(hostname)

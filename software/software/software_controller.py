@@ -2915,7 +2915,6 @@ class PatchController(PatchService):
             return None
         deploy = deploy[0]
 
-
         deploy_host_list = []
         for host in deploy_hosts:
             state = host.get("state")
@@ -2948,6 +2947,75 @@ class PatchController(PatchService):
 
         func(*args, **kwargs)
         self._update_state_to_peer()
+
+    def _get_software_upgrade(self):
+        """
+        Get the current software upgrade from/to versions and state
+        :return: dict of from_release, to_release and state
+        """
+
+        all_deploy = self.db_api_instance.get_deploy_all()
+
+        if not all_deploy:
+            return None
+
+        deploy = all_deploy[0]
+        from_maj_min_release = utils.get_major_release_version(deploy.get("from_release"))
+        to_maj_min_release = utils.get_major_release_version(deploy.get("to_release"))
+        state = deploy.get("state")
+
+        return {
+            "from_release": from_maj_min_release,
+            "to_release": to_maj_min_release,
+            "state": state
+        }
+
+    def get_software_upgrade(self):
+        return self._get_software_upgrade()
+
+    def get_all_software_host_upgrade(self):
+        """
+        Get all software host upgrade from/to versions and state
+        :return: list of dict of hostname, current_sw_version, target_sw_version and host_state
+        """
+        deploy = self._get_software_upgrade()
+        deploy_hosts = self.db_api_instance.get_deploy_host()
+
+        if deploy is None or deploy_hosts is None:
+            return None
+
+        from_maj_min_release = deploy.get("from_release")
+        to_maj_min_release = deploy.get("to_release")
+
+        all_host_upgrades = []
+        for deploy_host in deploy_hosts:
+            all_host_upgrades.append({
+                "hostname": deploy_host.get("hostname"),
+                "current_sw_version": to_maj_min_release if deploy_host.get(
+                    "state") == constants.DEPLOYED else from_maj_min_release,
+                "target_sw_version": to_maj_min_release,
+                "host_state": deploy_host.get("state")
+            })
+
+        return all_host_upgrades
+
+    def get_one_software_host_upgrade(self, hostname):
+        """
+        Get the given software host upgrade from/to versions and state
+        :param hostname: hostname
+        :return: array of dict of hostname, current_sw_version, target_sw_version and host_state
+        """
+
+        all_host_upgrades = self.get_all_software_host_upgrade()
+
+        if not all_host_upgrades:
+            return None
+
+        for host_upgrade in all_host_upgrades:
+            if host_upgrade.get("hostname") == hostname:
+                return [host_upgrade]
+
+        return None
 
 
 class PatchControllerApiThread(threading.Thread):
