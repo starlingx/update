@@ -117,6 +117,11 @@ class ReleaseVersionDoNotExist(SoftwareError):
     pass
 
 
+class VersionedDeployPrecheckFailure(SoftwareError):
+    """Versioned deploy-precheck script cannot be created"""
+    pass
+
+
 class FileSystemError(SoftwareError):
     """
     A failure during a linux file operation.
