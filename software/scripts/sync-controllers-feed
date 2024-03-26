@@ -29,7 +29,7 @@ def sync_controllers(to_release, feed, controller):
         "--delete",
         "--exclude", "tmp",
         feed,
-        f"rsync://{controller}/feed/rel-{to_release}/"
+        f"rsync://{controller}/feed"
     ]
     subprocess.run(cmd)
 

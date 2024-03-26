@@ -14,6 +14,7 @@ Run platform upgrade prep data migration as a standalone executable
 
 import logging as LOG
 import os
+import shutil
 import subprocess
 import sys
 
@@ -231,6 +232,31 @@ class DataMigration(object):
         finally:
             devnull.close()
 
+    def create_platform_config(self):
+        """
+        Create platform config for target release
+        """
+        try:
+            platform_config_dir = os.path.join(PLATFORM_PATH, "config")
+            from_config_dir = os.path.join(platform_config_dir, self.from_release)
+            to_config_dir = os.path.join(platform_config_dir, self.to_release)
+            shutil.copytree(from_config_dir, to_config_dir)
+        except Exception as e:
+            LOG.exception("Failed to create platform config for release %s. "
+                          "Error: %s" % (self.to_release, str(e)))
+            raise
+
+    def create_rabbitmq_directory(self):
+        """
+        Create the target release rabbitmq directory
+        """
+        try:
+            rabbit_dir = os.path.join("/var/lib/rabbitmq", self.to_release, "mnesia")
+            os.makedirs(rabbit_dir, exist_ok=True)
+        except Exception as e:
+            LOG.exception("Failed to create rabbitmq directory. Error: %s" % str(e))
+            raise
+
 
 def main(sys_argv):
     args = upgrade_utils.parse_arguments(sys_argv)
@@ -284,6 +310,12 @@ def main(sys_argv):
 
         # Export /etc directory to $rootdir/etc
         data_migration.export_etc()
+
+        # Create platform config
+        data_migration.create_platform_config()
+
+        # Create rabbitmq directory
+        data_migration.create_rabbitmq_directory()
 
         LOG.info("Data migration preparation completed successfully.")
 

@@ -75,7 +75,7 @@ umount_all() {
         dst=${src_dst[1]}
 
         info "Unmounting $dst"
-        umount_output=$(sudo umount $dst 2>&1)
+        umount_output=$(sudo umount -l $dst 2>&1)
         if [ $? -ne 0 ]; then
             # ignore messages that are not harmful
             if [[ ! $umount_output =~ ("not mounted"|"no mount point specified") ]]; then
