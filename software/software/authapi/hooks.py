@@ -121,14 +121,8 @@ class AccessPolicyHook(hooks.PecanHook):
                 except Exception:
                     raise exc.HTTPForbidden()
             else:
-                method = state.request.method
-                if method == 'GET':
-                    has_api_access = policy.authorize(
-                        'reader_in_system_projects', {},
-                        context.to_dict(), do_raise=False)
-                else:
-                    has_api_access = policy.authorize(
-                        'admin_in_system_projects', {},
-                        context.to_dict(), do_raise=False)
+                has_api_access = policy.authorize(
+                    'admin_in_system_projects', {},
+                    context.to_dict(), do_raise=False)
                 if not has_api_access:
                     raise exc.HTTPForbidden()

@@ -48,10 +48,14 @@ class ExceptionHook(hooks.PecanHook):
             data = dict(info=e.info, warning=e.warning, error=e.error)
         else:
             err_msg = "Internal error occurred. Error signature [%s]" % signature
+            try:
+                # If exception contains error details, send that to user
+                if str(e):
+                    err_msg = "Error \"%s\", Error signature [%s]" % (str(e), signature)
+            except Exception:
+                pass
             LOG.error(err_msg)
             LOG.exception(e)
-            # Unexpected exceptions, exception message is not sent to the user.
-            # Instead state as internal error
             data = dict(info="", warning="", error=err_msg)
         return webob.Response(json.dumps(data), status=status)
 

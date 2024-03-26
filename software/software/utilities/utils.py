@@ -5,6 +5,7 @@
 #
 
 import keyring
+import logging
 import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -20,9 +21,7 @@ from software.utilities.constants import KEYRING_PERMDIR
 
 from software.utilities import constants
 
-from oslo_log import log
-
-LOG = log.getLogger(__name__)
+LOG = logging.getLogger('main_logger')
 
 DB_CONNECTION = "postgresql://%s:%s@127.0.0.1/%s\n"
 KUBERNETES_CONF_PATH = "/etc/kubernetes"

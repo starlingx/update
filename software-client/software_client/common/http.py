@@ -111,6 +111,44 @@ class ServiceCatalog(object):
         return matching_endpoints[0][endpoint_type]
 
 
+def _extract_error_json_text(body_json):
+    error_json = {}
+    if 'error_message' in body_json:
+        raw_msg = body_json['error_message']
+        if 'error' in raw_msg:
+            raw_error = jsonutils.loads(raw_msg)
+            error_json = {'faultstring': raw_error.get('error'),
+                          'debuginfo': raw_error.get('info')}
+        elif 'error_message' in raw_msg:
+            raw_error = jsonutils.loads(raw_msg)
+            raw_msg = raw_error['error_message']
+            error_json = jsonutils.loads(raw_msg)
+    return error_json
+
+
+def _extract_error_json(body, resp):
+    """Return error_message from the HTTP response body."""
+    try:
+        content_type = resp.headers.get("Content-Type", "")
+    except AttributeError:
+        content_type = ""
+    if content_type.startswith("application/json"):
+        try:
+            body_json = resp.json()
+            return _extract_error_json_text(body_json)
+        except AttributeError:
+            body_json = jsonutils.loads(body)
+            return _extract_error_json_text(body_json)
+        except ValueError:
+            return {}
+    else:
+        try:
+            body_json = jsonutils.loads(body)
+            return _extract_error_json_text(body_json)
+        except ValueError:
+            return {}
+
+
 class SessionClient(adapter.LegacyJsonAdapter):
 
     def __init__(self, *args, **kwargs):
@@ -136,8 +174,16 @@ class SessionClient(adapter.LegacyJsonAdapter):
         endpoint_filter.setdefault('service_type', self.service_type)
         endpoint_filter.setdefault('region_name', self.region_name)
 
-        return self.session.request(url, method,
+        resp = self.session.request(url, method,
                                     raise_exc=False, **kwargs)
+        if 400 <= resp.status_code < 600:
+            error_json = _extract_error_json(resp.content, resp)
+            raise exceptions.from_response(
+                resp, error_json.get('faultstring'),
+                error_json.get('debuginfo'), method, url)
+        elif resp.status_code in (300, 301, 302, 305):
+            raise exceptions.from_response(resp, method=method, url=url)
+        return resp
 
     def json_request(self, method, url, **kwargs):
         kwargs.setdefault('headers', {})
@@ -183,8 +229,6 @@ class SessionClient(adapter.LegacyJsonAdapter):
             body = None
         return resp, body
 
-
-
     def raw_request(self, method, url, **kwargs):
         kwargs.setdefault('headers', {})
         kwargs['headers'].setdefault('Content-Type',
@@ -222,6 +266,14 @@ class SessionClient(adapter.LegacyJsonAdapter):
         headers = {'Content-Type': enc.content_type,
                    "X-Auth-Token": self.session.get_token()}
         response = requests.post(requests_url, data=enc, headers=headers)
+        if kwargs.get('check_exceptions'):
+            if response.status_code != 200:
+                err_message = _extract_error_json(response.text, response)
+                fault_text = (
+                    err_message.get("faultstring")
+                    or "Unknown error in SessionClient while uploading request with multipart"
+                )
+                raise exceptions.HTTPBadRequest(fault_text)
 
         return response.json()
 
@@ -356,6 +408,26 @@ class HTTPClient(httplib2.Http):
         else:
             self.http_log_resp(_logger, resp, body)
 
+        status_code = self.get_status_code(resp)
+        if status_code == 401:
+            raise exceptions.HTTPUnauthorized(body)
+        elif status_code == 403:
+            reason = "Not allowed/Proper role is needed"
+            if body_str is not None:
+                error_json = self._extract_error_json(body_str)
+                reason = error_json.get('faultstring')
+                if reason is None:
+                    reason = error_json.get('description')
+            raise exceptions.Forbidden(reason)
+        elif 400 <= status_code < 600:
+            _logger.warn("Request returned failure status: %s", status_code)  # pylint: disable=deprecated-method
+            error_json = self._extract_error_json(body_str)
+            raise exceptions.from_response(
+                resp, error_json.get('faultstring'),
+                error_json.get('debuginfo'), *args)
+        elif status_code in (300, 301, 302, 305):
+            raise exceptions.from_response(resp, *args)
+
         return resp, body
 
     def json_request(self, method, url, **kwargs):
@@ -383,6 +455,9 @@ class HTTPClient(httplib2.Http):
         content_type = resp['content-type'] \
             if resp.get('content-type', None) else None
 
+        # Add status_code attribute to make compatible with session resp
+        setattr(resp, 'status_code', resp.status)
+
         if resp.status == 204 or resp.status == 205 or content_type is None:
             return resp, list()
 
@@ -395,8 +470,6 @@ class HTTPClient(httplib2.Http):
         else:
             body = None
 
-        # Add status_code attribute to make compatible with session resp
-        setattr(resp, 'status_code', resp.status)
         return resp, body
 
     def multipart_request(self, method, url, **kwargs):
@@ -491,6 +564,21 @@ class HTTPClient(httplib2.Http):
     #################
     # UTILS
     #################
+    def _extract_error_json(self, body):
+        error_json = {}
+        try:
+            body_json = json.loads(body)
+            if 'error' in body_json:
+                error_json = {'faultstring': body_json.get('error'),
+                            'debuginfo': body_json.get('info')}
+            elif 'error_message' in body_json:
+                raw_msg = body_json['error_message']
+                error_json = json.loads(raw_msg)
+        except ValueError:
+            return {}
+
+        return error_json
+
     def _strip_credentials(self, kwargs):
         if kwargs.get('body') and self.password:
             log_kwargs = kwargs.copy()
