@@ -62,6 +62,7 @@ from software.software_functions import PatchFile
 from software.software_functions import package_dir
 from software.software_functions import repo_dir
 from software.software_functions import root_scripts_dir
+from software.software_functions import set_host_target_load
 from software.software_functions import SW_VERSION
 from software.software_functions import LOG
 from software.software_functions import audit_log_info
@@ -524,11 +525,13 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
         messages.PatchMessage.__init__(self, messages.PATCHMSG_AGENT_INSTALL_REQ)
         self.ip = None
         self.force = False
+        self.major_release = None
 
     def encode(self):
         global sc
         messages.PatchMessage.encode(self)
         self.message['force'] = self.force
+        self.message['major_release'] = self.major_release
 
     def handle(self, sock, addr):
         LOG.error("Should not get here")
@@ -2373,8 +2376,8 @@ class PatchController(PatchService):
                 return ret
             elif not ret["system_healthy"]:
                 ret["info"] = "The following issues have been detected, which prevent " \
-                               "deploying %s\n" % deployment + ret["info"] + \
-                               "Please fix above issues then retry the deploy.\n"
+                              "deploying %s\n" % deployment + ret["info"] + \
+                              "Please fix above issues then retry the deploy.\n"
                 return ret
 
             if self._deploy_upgrade_start(to_release):
@@ -2805,6 +2808,21 @@ class PatchController(PatchService):
             force = True
             self.copy_restart_scripts()
 
+        # Check if there is a major release deployment in progress
+        # and set agent request parameters accordingly
+        major_release = None
+        upgrade_in_progress = self.get_software_upgrade()
+        if upgrade_in_progress:
+            major_release = upgrade_in_progress["to_release"]
+            force = False
+            async_req = False
+            msg = "Running major release deployment, major_release=%s, force=%s, async_req=%s" % (
+                major_release, force, async_req)
+            msg_info += msg + "\n"
+            LOG.info(msg)
+            set_host_target_load(host_ip, major_release)
+            # TODO(heitormatsui) update host deploy status
+
         self.hosts[ip].install_pending = True
         self.hosts[ip].install_status = False
         self.hosts[ip].install_reject_reason = None
@@ -2813,6 +2831,7 @@ class PatchController(PatchService):
         installreq = PatchMessageAgentInstallReq()
         installreq.ip = ip
         installreq.force = force
+        installreq.major_release = major_release
         installreq.encode()
         self.socket_lock.acquire()
         installreq.send(self.sock_out)

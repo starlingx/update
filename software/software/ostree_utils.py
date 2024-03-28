@@ -169,21 +169,34 @@ def reset_ostree_repo_head(commit, repo_path):
         raise OSTreeCommandFail(msg)
 
 
-def pull_ostree_from_remote():
+def pull_ostree_from_remote(remote=None):
     """
     Pull from remote ostree to sysroot ostree
     """
 
-    cmd = "ostree pull %s --depth=-1" % constants.OSTREE_REMOTE
+    cmd = "ostree pull %s --depth=-1"
+    ref_cmd = ""
+    if not remote:
+        ref = constants.OSTREE_REMOTE
+    else:
+        ref = "%s:%s" % (remote, constants.OSTREE_REF)
+        cmd += " --mirror"
+        ref_cmd = "ostree refs --create=%s %s" % (ref, constants.OSTREE_REF)
 
     try:
-        subprocess.run(cmd, shell=True, check=True, capture_output=True)
+        subprocess.run(cmd % ref, shell=True, check=True, capture_output=True)
     except subprocess.CalledProcessError as e:
-        msg = "Failed to pull from %s remote into sysroot ostree" % constants.OSTREE_REMOTE
+        msg = "Failed to pull from %s remote into sysroot ostree" % ref
         info_msg = "OSTree Pull Error: return code: %s , Output: %s" \
                    % (e.returncode, e.stderr.decode("utf-8"))
         LOG.info(info_msg)
         raise OSTreeCommandFail(msg)
+
+    if ref_cmd:
+        try:
+            subprocess.run(ref_cmd, shell=True, check=True)
+        except subprocess.CalledProcessError:
+            msg = "Failed to create ref %s for remote %s" % (ref, remote)
 
 
 def delete_ostree_repo_commit(commit, repo_path):
@@ -206,16 +219,19 @@ def delete_ostree_repo_commit(commit, repo_path):
         raise OSTreeCommandFail(msg)
 
 
-def create_deployment():
+def create_deployment(ref=None):
     """
     Create a new deployment while retaining the previous ones
     """
 
-    cmd = "ostree admin deploy %s --no-prune --retain" % constants.OSTREE_REF
+    if not ref:
+        ref = constants.OSTREE_REF
+    cmd = "ostree admin deploy %s --no-prune --retain" % ref
+
     try:
         subprocess.run(cmd, shell=True, check=True, capture_output=True)
     except subprocess.CalledProcessError as e:
-        msg = "Failed to create an ostree deployment for sysroot ref %s." % constants.OSTREE_REF
+        msg = "Failed to create an ostree deployment for sysroot ref %s." % ref
         info_msg = "OSTree Deployment Error: return code: %s , Output: %s" \
                    % (e.returncode, e.stderr.decode("utf-8"))
         LOG.info(info_msg)
@@ -507,3 +523,26 @@ def write_to_feed_ostree(patch_name, patch_sw_version):
                    % (vars(e))
         LOG.info(info_msg)
         raise OSTreeCommandFail(msg)
+
+
+def add_ostree_remote(major_release, nodetype):
+    """
+    Add a new ostree remote from a major release feed
+    :param major_release: major release corresponding to the new remote
+    :param nodetype: type of the node where the software agent is running
+    """
+    rel_name = "rel-%s" % major_release
+    if nodetype == "controller":
+        feed_ostree_url = "file://%s/%s/ostree_repo/" % (
+            constants.FEED_OSTREE_BASE_DIR, rel_name)
+    else:
+        feed_ostree_url = "http://%s:8080/feed/%s/ostree_repo/" % (
+            constants.CONTROLLER_FLOATING_HOSTNAME, rel_name)
+    cmd = ["ostree", "remote", "add", "--no-gpg-verify",
+           "--if-not-exists", rel_name, feed_ostree_url, constants.OSTREE_REF]
+    try:
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError as e:
+        LOG.exception("Error adding %s ostree remote: %s" % (major_release, str(e)))
+        raise
+    return rel_name

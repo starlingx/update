@@ -76,12 +76,12 @@ def pull_restart_scripts_from_controller():
     # are not present, it should not raise any exception
     try:
         output = subprocess.check_output(["rsync",
-                                        "-acv",
-                                        "--delete",
-                                        "--exclude", "tmp",
-                                        "rsync://controller/repo/software-scripts/",
-                                        "%s/" % insvc_software_scripts],
-                                        stderr=subprocess.STDOUT)
+                                          "-acv",
+                                          "--delete",
+                                          "--exclude", "tmp",
+                                          "rsync://controller/repo/software-scripts/",
+                                          "%s/" % insvc_software_scripts],
+                                         stderr=subprocess.STDOUT)
         LOG.info("Synced restart scripts from controller: %s", output)
     except subprocess.CalledProcessError as e:
         if "No such file or directory" in e.output.decode("utf-8"):
@@ -115,6 +115,28 @@ def check_install_uuid():
         return False
 
     return True
+
+
+def copy_target_release_pxeboot_files(major_release):
+    """
+    Copy pxeboot files from the target feed during
+    major release deployment. These files are copied
+    during the release upload, but only to the host
+    where it is uploaded, so this method is needed to
+    copy the files to other hosts.
+
+    :param major_release: target major release
+    """
+    # copy to_release pxeboot files to /var/pxeboot/pxelinux.cfg.files
+    pxeboot_feed_dir = "/var/www/pages/feed/rel-%s/pxeboot/pxelinux.cfg.files/*" % major_release
+    pxeboot_dest_dir = "/var/pxeboot/pxelinux.cfg.files/"
+    cmd = "rsync -ac %s %s" % (pxeboot_feed_dir, pxeboot_dest_dir)
+    try:
+        subprocess.check_call(cmd, shell=True)
+        LOG.info("Copied %s pxeboot files successfully to %s." % (major_release, pxeboot_dest_dir))
+    except subprocess.CalledProcessError as e:
+        LOG.exception("Error copying pxeboot files from %s to %s: %s" % (
+            pxeboot_feed_dir, pxeboot_dest_dir, str(e)))
 
 
 class PatchMessageSendLatestFeedCommit(messages.PatchMessage):
@@ -317,18 +339,21 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
     def __init__(self):
         messages.PatchMessage.__init__(self, messages.PATCHMSG_AGENT_INSTALL_REQ)
         self.force = False
+        self.major_release = None
 
     def decode(self, data):
         messages.PatchMessage.decode(self, data)
         if 'force' in data:
             self.force = data['force']
+        if 'major_release' in data:
+            self.major_release = data['major_release']
 
     def encode(self):
         # Nothing to add to the HELLO_AGENT, so just call the super class
         messages.PatchMessage.encode(self)
 
     def handle(self, sock, addr):
-        LOG.info("Handling host install request, force=%s", self.force)
+        LOG.info("Handling host install request, force=%s, major_release=%s", self.force, self.major_release)
         global pa
         resp = PatchMessageAgentInstallResp()
 
@@ -346,7 +371,7 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
                 resp.reject_reason = 'Node must be locked.'
                 resp.send(sock, addr)
                 return
-        resp.status = pa.handle_install()
+        resp.status = pa.handle_install(major_release=self.major_release)
         resp.send(sock, addr)
 
     def send(self, sock):  # pylint: disable=unused-argument
@@ -433,7 +458,7 @@ class PatchAgent(PatchService):
         self.listener.bind(('', self.port))
         self.listener.listen(2)  # Allow two connections, for two controllers
 
-    def query(self):
+    def query(self, major_release=None):
         """Check current patch state """
         if not check_install_uuid():
             LOG.info("Failed install_uuid check. Skipping query")
@@ -448,6 +473,13 @@ class PatchAgent(PatchService):
         active_sysroot_commit = ostree_utils.get_sysroot_latest_commit()
         self.latest_sysroot_commit = active_sysroot_commit
         self.last_repo_revision = active_sysroot_commit
+
+        if major_release:
+            upgrade_feed_commit = ostree_utils.get_feed_latest_commit(major_release)
+            LOG.info("Major release deployment for %s with commit %s" % (major_release,
+                                                                         upgrade_feed_commit))
+            self.changes = True
+            return True
 
         # latest_feed_commit is sent from patch controller
         # if unprovisioned (no mgmt ip) attempt to query it
@@ -471,7 +503,8 @@ class PatchAgent(PatchService):
     def handle_install(self,
                        verbose_to_stdout=False,
                        disallow_insvc_patch=False,
-                       delete_older_deployments=False):
+                       delete_older_deployments=False,
+                       major_release=None):
         #
         # The disallow_insvc_patch parameter is set when we're installing
         # the patch during init. At that time, we don't want to deal with
@@ -522,10 +555,19 @@ class PatchAgent(PatchService):
             hello_ack = PatchMessageHelloAgentAck()
             hello_ack.send(self.sock_out)
 
+        remote = None
+        ref = None
+        if major_release:
+            nodetype = utils.get_platform_conf("nodetype")
+            remote = ostree_utils.add_ostree_remote(major_release, nodetype)
+            ref = "%s:%s" % (remote, constants.OSTREE_REF)
+            LOG.info("OSTree remote added: %s" % remote)
+            copy_target_release_pxeboot_files(major_release)
+
         # Build up the install set
         if verbose_to_stdout:
             print("Checking for software updates...")
-        self.query()  # sets self.changes
+        self.query(major_release=major_release)  # sets self.changes
 
         changed = False
         success = True
@@ -537,7 +579,7 @@ class PatchAgent(PatchService):
                 # Pull changes from remote to the sysroot ostree
                 # The remote value is configured inside
                 # "/sysroot/ostree/repo/config" file
-                ostree_utils.pull_ostree_from_remote()
+                ostree_utils.pull_ostree_from_remote(remote=remote)
                 setflag(ostree_pull_completed_deployment_pending_file)
             except OSTreeCommandFail:
                 LOG.exception("Failed to pull changes and create deployment"
@@ -546,7 +588,7 @@ class PatchAgent(PatchService):
 
             try:
                 # Create a new deployment once the changes are pulled
-                ostree_utils.create_deployment()
+                ostree_utils.create_deployment(ref=ref)
 
                 changed = True
                 clearflag(ostree_pull_completed_deployment_pending_file)

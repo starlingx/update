@@ -1323,3 +1323,28 @@ def is_deployment_in_progress(release_metadata):
     :return: bool true if in progress, false otherwise
     """
     return any(release['state'] == constants.DEPLOYING for release in release_metadata.values())
+
+
+def set_host_target_load(hostname, major_release):
+    """
+    Set target_load on the sysinv db for a host during deploy
+    host for major release deployment. This action is needed
+    so that sysinv behaves correctly when the host is unlocked
+    and after it reboots running the new software load.
+
+    :param hostname: host being deployed
+    :param major_release: target major release
+    TODO(heitormatsui): delete this function once sysinv upgrade tables are deprecated
+    """
+    load_query = "select id from loads where software_version = '%s'" % major_release
+    host_query = "select id from i_host where hostname = '%s'" % hostname
+    update_query = ("update host_upgrade set software_load = (%s), target_load = (%s) "
+                    "where forihostid = (%s)") % (load_query, load_query, host_query)
+    cmd = "sudo -u postgres psql -d sysinv -c \"%s\"" % update_query
+    try:
+        subprocess.check_call(cmd, shell=True)
+        LOG.info("Host %s target_load set to %s" % (hostname, major_release))
+    except subprocess.CalledProcessError as e:
+        LOG.exception("Error setting target_load to %s for %s: %s" % (
+            major_release, hostname, str(e)))
+        raise

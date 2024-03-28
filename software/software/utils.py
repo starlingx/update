@@ -4,6 +4,7 @@ Copyright (c) 2023-2024 Wind River Systems, Inc.
 SPDX-License-Identifier: Apache-2.0
 
 """
+import configparser
 import hashlib
 from pecan import hooks
 import json
@@ -446,16 +447,17 @@ def get_platform_conf(key):
     """
     Get the value of given key in platform.conf
     :param key: key to get
-    :return: value
+    :return: value corresponding to key
     """
+    default_section = "DEFAULT"
     value = None
 
     with open(PLATFORM_CONF_FILE) as fp:
-        lines = fp.readlines()
-        for line in lines:
-            if line.find(key) != -1:
-                value = line.split('=')[1]
-                value = value.replace('\n', '')
-                break
-
+        config = ("[%s]\n" % default_section) + fp.read()
+        cp = configparser.ConfigParser()
+        try:
+            cp.read_string(config)
+            value = cp[default_section][key]
+        except Exception:
+            LOG.error("Cannot get '%s' from platform.conf file." % key)
     return value
