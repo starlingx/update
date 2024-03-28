@@ -122,10 +122,9 @@ class DeployManager(base.Manager):
             print("Respond code %d. Error: %s" % (req.status_code, req.reason))
             return 1
 
-        if not data or data.get("data"):
+        if not data:
             print("No deploy in progress.")
         else:
-            data = data.get("data")
             data = data[0]
             data["reboot_required"] = "Yes" if data.get("reboot_required") else "No"
             data_list = [[k, v] for k, v in data.items()]

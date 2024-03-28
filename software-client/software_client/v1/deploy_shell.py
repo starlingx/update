@@ -21,12 +21,14 @@ from software_client.common import utils
            help="List all deployments that have this state")
 def do_show(cc, args):
     """Show the software deployments states"""
+    # TODO(bqian) modify the cli to display with generic tabulated output
     return cc.deploy.show()
 
 
 def do_host_list(cc, args):
     """List of hosts for software deployment """
     req, data = cc.deploy.host_list()
+    # TODO(bqian) modify display with generic tabulated output
     if args.debug:
         utils.print_result_debug(req, data)
     else:

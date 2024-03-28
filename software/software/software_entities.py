@@ -325,7 +325,7 @@ class DeployHostHandler(DeployHosts):
         super().__init__()
         self.data = get_software_filesystem_data()
 
-    def create(self, hostname, state: DEPLOY_HOST_STATES = None):
+    def create(self, hostname, state: DEPLOY_HOST_STATES = DEPLOY_HOST_STATES.PENDING):
         super().create(hostname, state)
         deploy = self.query(hostname)
         if deploy:

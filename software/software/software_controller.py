@@ -2363,6 +2363,8 @@ class PatchController(PatchService):
                 create_deploy_hosts()
                 self.db_api_instance.begin_update()
                 try:
+                    # TODO(bqian) replace SW_VERSION below to current running sw_release
+                    # (MM.mm.pp)
                     self.update_and_sync_deploy_state(self.db_api_instance.create_deploy,
                                                       SW_VERSION, to_release, True)
                     self.update_and_sync_deploy_state(self.db_api_instance.update_deploy,
@@ -3020,7 +3022,7 @@ class PatchController(PatchService):
         deploy_hosts = self.db_api_instance.get_deploy_host()
         deploy = self.db_api_instance.get_deploy_all()
         if not deploy:
-            return None
+            return []
         deploy = deploy[0]
 
         deploy_host_list = []

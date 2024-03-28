@@ -189,8 +189,7 @@ def print_result_list(header_data_list, data_list, has_error, sort_key=0):
 
 
 def print_software_deploy_host_list_result(req, data):
-    if req.status_code == 200 and data:
-        data = data.get("data", None)
+    if req.status_code == 200:
         if not data:
             print("No deploy in progress.\n")
             return

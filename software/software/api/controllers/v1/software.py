@@ -10,7 +10,6 @@ import logging
 import os
 from pecan import expose
 from pecan import request
-from pecan import Response
 import shutil
 
 from software.exceptions import SoftwareError
@@ -110,9 +109,8 @@ class SoftwareAPIController(object):
     def deploy(self):
         from_release = request.GET.get("from_release")
         to_release = request.GET.get("to_release")
-        result = dict(data=sc.software_deploy_show_api(from_release, to_release))
-        response_data = json.dumps(result)
-        return Response(body=response_data, status_code=200)
+        result = sc.software_deploy_show_api(from_release, to_release)
+        return result
 
     @expose('json')
     @expose('query.xml', content_type='application/xml')
@@ -194,9 +192,8 @@ class SoftwareAPIController(object):
 
     @expose('json', method="GET")
     def host_list(self):
-        query_hosts = dict(data=sc.deploy_host_list())
-        response_data = json.dumps(query_hosts)
-        return Response(body=response_data, status_code=200)
+        result = sc.deploy_host_list()
+        return result
 
     @expose(method='GET', template='json')
     def in_sync_controller(self):
