@@ -210,7 +210,7 @@ class DeployHosts(ABC):
         pass
 
     @abstractmethod
-    def update(self, hostname: str, state: str):
+    def update(self, hostname: str, state: DEPLOY_HOST_STATES):
         """
         Update a deploy-host entry
 

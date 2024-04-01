@@ -54,6 +54,22 @@ def get_ihost_list():
         raise
 
 
+def is_host_locked_and_online(host):
+    for ihost in get_ihost_list():
+        if (host == ihost.hostname and ihost.availability == constants.AVAILABILITY_ONLINE and
+                ihost.administrative == constants.ADMIN_LOCKED):
+            return True
+    return False
+
+
+def get_system_info():
+    """Returns system type and system mode"""
+    token, endpoint = utils.get_endpoints_token()
+    sysinv_client = get_sysinv_client(token=token, endpoint=endpoint)
+    system_info = sysinv_client.isystem.list()[0]
+    return system_info.system_type, system_info.system_mode
+
+
 def get_dc_role():
     try:
         token, endpoint = utils.get_endpoints_token()

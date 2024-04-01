@@ -53,7 +53,7 @@ def update_deploy_state(server_addr, server_port, agent, deploy_state=None, host
         "agent": agent,
         "deploy-state": deploy_state,
         "hostname": host,
-        "host_state": host_state
+        "host-state": host_state
     }
 
     msg_txt = json.dumps(msg)

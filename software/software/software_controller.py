@@ -55,6 +55,7 @@ from software.release_data import reload_release_data
 from software.release_data import get_SWReleaseCollection
 from software.software_functions import collect_current_load_for_hosts
 from software.software_functions import create_deploy_hosts
+from software.software_functions import deploy_host_validations
 from software.software_functions import parse_release_metadata
 from software.software_functions import configure_logging
 from software.software_functions import mount_iso_load
@@ -757,7 +758,7 @@ class SWMessageDeployStateChanged(messages.PatchMessage):
                      (self.deploy_state, self.agent))
             sc.deploy_state_changed(self.deploy_state)
         else:
-            LOG.info("Received %s deploy state changed to %s, agent %s" %
+            LOG.info("Received %s deploy host state changed to %s, agent %s" %
                      (self.hostname, self.host_state, self.agent))
             sc.host_deploy_state_changed(self.hostname, self.host_state)
 
@@ -2715,6 +2716,7 @@ class PatchController(PatchService):
         if deploy_host is None:
             raise HostNotFound(hostname)
 
+        deploy_host_validations(hostname)
         deploy_state = DeployState.get_instance()
         deploy_host_state = DeployHostState(hostname)
         deploy_state.deploy_host()

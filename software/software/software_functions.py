@@ -39,6 +39,8 @@ import software.constants as constants
 from software import states
 import software.utils as utils
 from software.sysinv_utils import get_ihost_list
+from software.sysinv_utils import get_system_info
+from software.sysinv_utils import is_host_locked_and_online
 
 
 try:
@@ -1215,14 +1217,17 @@ def create_deploy_hosts():
     Create deploy-hosts entities based on hostnames
     from sysinv.
     """
+    db_api_instance = get_instance()
+    db_api_instance.begin_update()
     try:
-        db_api_instance = get_instance()
         for ihost in get_ihost_list():
             db_api_instance.create_deploy_host(ihost.hostname)
         LOG.info("Deploy-hosts entities created successfully.")
     except Exception as err:
         LOG.exception("Error in deploy-hosts entities creation")
         raise err
+    finally:
+        db_api_instance.end_update()
 
 
 def collect_current_load_for_hosts():
@@ -1330,3 +1335,86 @@ def set_host_target_load(hostname, major_release):
         LOG.exception("Error setting target_load to %s for %s: %s" % (
             major_release, hostname, str(e)))
         raise
+
+
+def validate_host_state_to_deploy_host(hostname):
+    """
+    Check if the deployment host state for the hostname is pending.
+
+    If the validation fails raise SoftwareServiceError exception.
+
+    :param hostname: Hostname of the host to be deployed
+    """
+
+    host_state = get_instance().get_deploy_host_by_hostname(hostname).get("state")
+    if host_state != states.DEPLOY_HOST_STATES.PENDING.value:
+        msg = (f"Host state is {host_state} and should be "
+               f"{states.DEPLOY_HOST_STATES.PENDING.value}")
+        raise SoftwareServiceError(msg)
+
+def deploy_host_validations(hostname):
+    """
+    Check the conditions below:
+    Host state is pending.
+    If system mode is duplex, check if provided hostname satisfy the right deployment order.
+    Host is locked and online.
+
+    If one of the validations fail, raise SoftwareServiceError exception, except if system
+    is a simplex.
+
+    :param hostname: Hostname of the host to be deployed
+    """
+    validate_host_state_to_deploy_host(hostname)
+    _, system_mode = get_system_info()
+    simplex = (system_mode == constants.SYSTEM_MODE_SIMPLEX)
+    if simplex:
+        LOG.info("System mode is simplex. Skipping deploy order validation...")
+    else:
+        validate_host_deploy_order(hostname)
+    if not is_host_locked_and_online(hostname):
+        msg = f"Host {hostname} must be {constants.ADMIN_LOCKED}."
+        raise SoftwareServiceError(msg)
+
+
+def validate_host_deploy_order(hostname):
+    """
+    Check if the host to be deployed satisfy the major release deployment right
+    order of controller-1 -> controller-0 -> storages -> computes
+    and for patch release: controllers -> storages -> computes
+
+    Case one of the validations failed raise SoftwareError exception
+
+    :param hostname: Hostname of the host to be deployed.
+    """
+    db_api_instance = get_instance()
+    controllers_list = [constants.CONTROLLER_1_HOSTNAME, constants.CONTROLLER_0_HOSTNAME]
+    storage_list = []
+    workers_list = []
+    is_patch_release = False
+    deploy = db_api_instance.get_deploy_all()[0]
+    to_release = deploy.get("from_release")
+    if to_release != (constants.MAJOR_RELEASE % utils.get_major_release_version(to_release)):
+        is_patch_release = True
+    for host in get_ihost_list():
+        if host.personality == constants.STORAGE:
+            storage_list.append(host.hostname)
+        if host.personality == constants.WORKER:
+            workers_list.append(host.hostname)
+
+    ordered_storage_list = sorted(storage_list, key=lambda x: int(x.split("-")[1]))
+    ordered_list = controllers_list + ordered_storage_list + workers_list
+
+    for host in db_api_instance.get_deploy_host():
+        if host.get("state") == states.DEPLOY_HOST_STATES.DEPLOYED.value:
+            ordered_list.remove(host.get("hostname"))
+    if not ordered_list:
+        raise SoftwareServiceError("All hosts are already in deployed state.")
+    # If there is only workers nodes there is no order to deploy
+    if hostname == ordered_list[0] or (ordered_list[0] in workers_list and hostname in workers_list):
+        return
+    # If deployment is a patch release bypass the controllers order
+    elif is_patch_release and ordered_list[0] in controllers_list and hostname in controllers_list:
+        return
+    else:
+        raise SoftwareServiceError(f"{hostname.capitalize()} do not satisfy the right order of deployment "
+                                   f"should be {ordered_list[0]}")

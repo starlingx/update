@@ -19,6 +19,8 @@ from tsconfig.tsconfig import SW_VERSION
 ADDRESS_VERSION_IPV4 = 4
 ADDRESS_VERSION_IPV6 = 6
 CONTROLLER_FLOATING_HOSTNAME = "controller"
+CONTROLLER_0_HOSTNAME = '%s-0' % CONTROLLER_FLOATING_HOSTNAME
+CONTROLLER_1_HOSTNAME = '%s-1' % CONTROLLER_FLOATING_HOSTNAME
 
 DISTRIBUTED_CLOUD_ROLE_SYSTEMCONTROLLER = 'systemcontroller'
 SYSTEM_CONTROLLER_REGION = 'SystemController'
@@ -74,6 +76,7 @@ PATCH_EXTENSION = ".patch"
 SUPPORTED_UPLOAD_FILE_EXT = [ISO_EXTENSION, SIG_EXTENSION, PATCH_EXTENSION]
 SCRATCH_DIR = "/scratch"
 RELEASE_GA_NAME = "starlingx-%s"
+MAJOR_RELEASE = "%s.0"
 
 # Precheck constants
 LICENSE_FILE = "/etc/platform/.license"
@@ -94,3 +97,11 @@ LAST_IN_SYNC = "last_in_sync"
 
 SYSTEM_MODE_SIMPLEX = "simplex"
 SYSTEM_MODE_DUPLEX = "duplex"
+
+# Personalities
+CONTROLLER = 'controller'
+STORAGE = 'storage'
+WORKER = 'worker'
+
+AVAILABILITY_ONLINE = 'online'
+ADMIN_LOCKED = 'locked'
