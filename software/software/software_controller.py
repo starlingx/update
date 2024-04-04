@@ -2511,6 +2511,8 @@ class PatchController(PatchService):
                     LOG.exception(msg)
                     raise MetadataFail(msg)
 
+                self.release_data.metadata[release]["commit"] = self.latest_feed_commit
+
                 if not os.path.isfile(INITIAL_CONTROLLER_CONFIG_COMPLETE):
                     self.release_data.metadata[release]["state"] = constants.DEPLOYING_START
                 elif len(self.hosts) > 0:
@@ -2640,6 +2642,8 @@ class PatchController(PatchService):
                     self.interim_state[release] = list(self.hosts)
 
             if removed:
+                self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
+                self.release_data.metadata[release]["commit"] = self.latest_feed_commit
                 try:
                     metadata_dir = DEPLOY_STATE_METADATA_DIR_DICT[deploystate]
                     shutil.move("%s/%s-metadata.xml" % (metadata_dir, deployment),
