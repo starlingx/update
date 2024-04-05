@@ -131,8 +131,20 @@ def read_config():
 
 def get_mgmt_ip():
     # Check if initial config is complete
-    if not os.path.exists('/etc/platform/.initial_config_complete'):
+    if not os.path.exists(tsc.INITIAL_CONFIG_COMPLETE_FLAG):
         return None
+
+    # Due to https://storyboard.openstack.org/#!/story/2010722
+    # the management IP for AIO-SX can be reconfigured during the startup.
+    # Check if /var/run/.<node>_config_complete exists to be sure that IP
+    # address will be the correct mgmt IP
+    try:
+        if tsc.system_mode == constants.SYSTEM_MODE_SIMPLEX and \
+           not os.path.exists(tsc.VOLATILE_CONTROLLER_CONFIG_COMPLETE):
+            return None
+    except Exception:
+        logging.info("not able to get system_mode, continue sw-patch services")
+
     mgmt_hostname = socket.gethostname()
     return utils.gethostbyname(mgmt_hostname)
 
