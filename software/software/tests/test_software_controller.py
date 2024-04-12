@@ -3,6 +3,10 @@
 #
 # Copyright (c) 2023-2024 Wind River Systems, Inc.
 #
+
+# This import has to be first
+from software.tests import base  # pylint: disable=unused-import
+
 from software.software_controller import PatchController
 from software.software_controller import ReleaseValidationFailure
 import unittest
@@ -144,8 +148,12 @@ class TestSoftwareController(unittest.TestCase):
     @patch('software.software_controller.os.path.isfile')
     @patch('software.software_controller.json.load')
     @patch('software.software_controller.open', new_callable=mock_open)
+    @patch('software.software_controller.utils.get_platform_conf', return_value='simplex')
+    @patch('software.software_controller.open', new_callable=mock_open)
     def test_in_sync_controller_api_files_identical(self,
+                                                    mock_dummy_open_config,  # pylint: disable=unused-argument
                                                     mock_dummy,  # pylint: disable=unused-argument
+                                                    mock_dummy_open,  # pylint: disable=unused-argument
                                                     mock_json_load,
                                                     mock_isfile):
         controller = PatchController()
@@ -159,8 +167,12 @@ class TestSoftwareController(unittest.TestCase):
     @patch('software.software_controller.os.path.isfile')
     @patch('software.software_controller.json.load')
     @patch('software.software_controller.open', new_callable=mock_open)
+    @patch('software.software_controller.utils.get_platform_conf', return_value='simplex')
+    @patch('software.software_controller.open', new_callable=mock_open)
     def test_in_sync_controller_api_files_not_identical(self,
+                                                        mock_dummy_open_config,  # pylint: disable=unused-argument
                                                         mock_dummy,  # pylint: disable=unused-argument
+                                                        mock_dummy_open,  # pylint: disable=unused-argument
                                                         mock_json_load,
                                                         mock_isfile):
         controller = PatchController()
@@ -174,8 +186,12 @@ class TestSoftwareController(unittest.TestCase):
     @patch('software.software_controller.os.path.isfile')
     @patch('software.software_controller.json.load')
     @patch('software.software_controller.open', new_callable=mock_open)
+    @patch('software.software_controller.utils.get_platform_conf', return_value='simplex')
+    @patch('software.software_controller.open', new_callable=mock_open)
     def test_in_sync_controller_api_files_not_exist(self,
+                                                    mock_dummy_open_config,  # pylint: disable=unused-argument
                                                     mock_dummy,  # pylint: disable=unused-argument
+                                                    mock_dummy_open,  # pylint: disable=unused-argument
                                                     mock_json_load,  # pylint: disable=unused-argument
                                                     mock_isfile):
         controller = PatchController()
@@ -188,8 +204,12 @@ class TestSoftwareController(unittest.TestCase):
     @patch('software.software_controller.os.path.isfile')
     @patch('software.software_controller.json.load')
     @patch('software.software_controller.open', new_callable=mock_open)
+    @patch('software.software_controller.utils.get_platform_conf', return_value='simplex')
+    @patch('software.software_controller.open', new_callable=mock_open)
     def test_in_sync_controller_api_one_file_exist(self,
+                                                   mock_dummy_open_config,  # pylint: disable=unused-argument
                                                    mock_dummy,  # pylint: disable=unused-argument
+                                                   mock_dummy_open,  # pylint: disable=unused-argument
                                                    mock_json_load,  # pylint: disable=unused-argument
                                                    mock_isfile):
         controller = PatchController()
@@ -204,8 +224,12 @@ class TestSoftwareController(unittest.TestCase):
 
     @patch('software.software_controller.json.load')
     @patch('software.software_controller.open', new_callable=mock_open)
+    @patch('software.software_controller.utils.get_platform_conf', return_value='simplex')
+    @patch('software.software_controller.open', new_callable=mock_open)
     def test_get_software_host_upgrade_deployed(self,
+                                                mock_dummy_open_config,  # pylint: disable=unused-argument
                                                 mock_dummy,  # pylint: disable=unused-argument
+                                                mock_dummy_open,  # pylint: disable=unused-argument
                                                 mock_json_load,  # pylint: disable=unused-argument
                                                 ):
         controller = PatchController()
@@ -229,8 +253,12 @@ class TestSoftwareController(unittest.TestCase):
 
     @patch('software.software_controller.json.load')
     @patch('software.software_controller.open', new_callable=mock_open)
+    @patch('software.software_controller.utils.get_platform_conf', return_value='simplex')
+    @patch('software.software_controller.open', new_callable=mock_open)
     def test_get_software_host_upgrade_deploying(self,
+                                                 mock_dummy_open_config,  # pylint: disable=unused-argument
                                                  mock_dummy,  # pylint: disable=unused-argument
+                                                 mock_dummy_open,  # pylint: disable=unused-argument
                                                  mock_json_load,  # pylint: disable=unused-argument
                                                  ):
         controller = PatchController()
@@ -254,8 +282,12 @@ class TestSoftwareController(unittest.TestCase):
 
     @patch('software.software_controller.json.load')
     @patch('software.software_controller.open', new_callable=mock_open)
+    @patch('software.software_controller.utils.get_platform_conf', return_value='simplex')
+    @patch('software.software_controller.open', new_callable=mock_open)
     def test_get_all_software_host_upgrade_deploying(self,
+                                                     mock_dummy_open_config,  # pylint: disable=unused-argument
                                                      mock_dummy,  # pylint: disable=unused-argument
+                                                     mock_dummy_open,  # pylint: disable=unused-argument
                                                      mock_json_load,  # pylint: disable=unused-argument
                                                      ):
         controller = PatchController()
@@ -284,22 +316,31 @@ class TestSoftwareController(unittest.TestCase):
 
     @patch('software.software_controller.json.load')
     @patch('software.software_controller.open', new_callable=mock_open)
+    @patch('software.software_controller.utils.get_platform_conf', return_value='simplex')
+    @patch('software.software_controller.open', new_callable=mock_open)
     def test_get_software_host_upgrade_none_state(self,
+                                                  mock_dummy_open_config,  # pylint: disable=unused-argument
                                                   mock_dummy,  # pylint: disable=unused-argument
+                                                  mock_dummy_open,  # pylint: disable=unused-argument
                                                   mock_json_load,  # pylint: disable=unused-argument
                                                   ):
         controller = PatchController()
 
         # Test when the deploy or deploy_hosts is None
-        controller._get_software_upgrade = MagicMock(return_value=None)  # pylint: disable=protected-access
+        controller._get_software_upgrade = MagicMock(  # pylint: disable=protected-access
+            return_value=None)
         controller.db_api_instance.get_deploy_host.return_value = None
         result = controller.get_one_software_host_upgrade("host1")
         self.assertIsNone(result)
 
     @patch('software.software_controller.json.load')
     @patch('software.software_controller.open', new_callable=mock_open)
+    @patch('software.software_controller.utils.get_platform_conf', return_value='simplex')
+    @patch('software.software_controller.open', new_callable=mock_open)
     def test_get_software_upgrade_get_deploy_all(self,
+                                                 mock_dummy_open_config,  # pylint: disable=unused-argument
                                                  mock_dummy,  # pylint: disable=unused-argument
+                                                 mock_dummy_open,  # pylint: disable=unused-argument
                                                  mock_json_load,  # pylint: disable=unused-argument
                                                  ):
 
@@ -329,8 +370,12 @@ class TestSoftwareController(unittest.TestCase):
 
     @patch('software.software_controller.json.load')
     @patch('software.software_controller.open', new_callable=mock_open)
+    @patch('software.software_controller.utils.get_platform_conf', return_value='simplex')
+    @patch('software.software_controller.open', new_callable=mock_open)
     def test_get_software_upgrade_get_deploy_all_none(self,
+                                                      mock_dummy_open_config,  # pylint: disable=unused-argument
                                                       mock_dummy,  # pylint: disable=unused-argument
+                                                      mock_dummy_open,  # pylint: disable=unused-argument
                                                       mock_json_load,  # pylint: disable=unused-argument
                                                       ):
 

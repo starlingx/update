@@ -23,6 +23,10 @@ import threading
 import time
 from wsgiref import simple_server
 
+from fm_api import fm_api
+from fm_api import constants as fm_constants
+
+
 from oslo_config import cfg as oslo_cfg
 
 import software.apt_utils as apt_utils
@@ -63,6 +67,8 @@ from software.software_functions import LOG
 from software.software_functions import audit_log_info
 from software.software_functions import repo_root_dir
 from software.software_functions import ReleaseData
+from software.software_functions import is_deploy_state_in_sync
+from software.software_functions import is_deployment_in_progress
 from software.release_verify import verify_files
 import software.config as cfg
 import software.utils as utils
@@ -786,6 +792,11 @@ class PatchController(PatchService):
         self.check_patch_states()
         self.base_pkgdata = BasePackageData()
 
+        # This is for alarm cache. It will be used to store the last raising alarm id
+        self.usm_alarm = {constants.LAST_IN_SYNC: False}
+        self.hostname = socket.gethostname()
+        self.fm_api = fm_api.FaultAPIs()
+
         self.allow_insvc_patching = True
 
         if os.path.exists(app_dependency_filename):
@@ -801,6 +812,14 @@ class PatchController(PatchService):
             self.read_state_file()
         else:
             self.write_state_file()
+
+        system_mode = utils.get_platform_conf("system_mode")
+        if system_mode == constants.SYSTEM_MODE_SIMPLEX:
+            self.standby_controller = "controller-0"
+        elif system_mode == constants.SYSTEM_MODE_DUPLEX:
+            self.standby_controller = "controller-0" \
+                if self.hostname == "controller-1" \
+                else "controller-1"
 
     @property
     def release_collection(self):
@@ -3062,6 +3081,65 @@ class PatchController(PatchService):
         func(*args, **kwargs)
         self._update_state_to_peer()
 
+    def handle_deploy_state_sync(self, alarm_instance_id):
+        """
+        Handle the deploy state sync.
+        If deploy state is in sync, clear the alarm.
+        If not, raise the alarm.
+        """
+        is_in_sync = is_deploy_state_in_sync()
+
+        # Deploy in sync state is not changed, no need to update the alarm
+        if is_in_sync == self.usm_alarm.get(constants.LAST_IN_SYNC):
+            return
+
+        try:
+            out_of_sync_alarm_fault = sc.fm_api.get_fault(
+                fm_constants.FM_ALARM_ID_SW_UPGRADE_DEPLOY_STATE_OUT_OF_SYNC, alarm_instance_id)
+
+            LOG.info("software.json in sync: %s", is_in_sync)
+
+            if out_of_sync_alarm_fault and is_in_sync:
+                # There was an out of sync alarm raised, but local software.json is in sync,
+                # we clear the alarm
+                LOG.info("Clearing alarm: %s ", out_of_sync_alarm_fault.alarm_id)
+                self.fm_api.clear_fault(
+                    fm_constants.FM_ALARM_ID_SW_UPGRADE_DEPLOY_STATE_OUT_OF_SYNC,
+                    alarm_instance_id)
+
+                # Deploy in sync state is changed, update the cache
+                self.usm_alarm[constants.LAST_IN_SYNC] = is_in_sync
+
+            elif (not out_of_sync_alarm_fault) and (not is_in_sync):
+                # There was no out of sync alarm raised, but local software.json is not in sync,
+                # we raise the alarm
+                LOG.info("Raising alarm: %s ",
+                         fm_constants.FM_ALARM_ID_SW_UPGRADE_DEPLOY_STATE_OUT_OF_SYNC)
+                out_of_sync_fault = fm_api.Fault(
+                    alarm_id=fm_constants.FM_ALARM_ID_SW_UPGRADE_DEPLOY_STATE_OUT_OF_SYNC,
+                    alarm_state=fm_constants.FM_ALARM_STATE_SET,
+                    entity_type_id=fm_constants.FM_ENTITY_TYPE_HOST,
+                    entity_instance_id=alarm_instance_id,
+                    severity=fm_constants.FM_ALARM_SEVERITY_MAJOR,
+                    reason_text="Software deployment in progress",
+                    alarm_type=fm_constants.FM_ALARM_TYPE_11,
+                    probable_cause=fm_constants.ALARM_PROBABLE_CAUSE_65,
+                    proposed_repair_action="Wait for deployment to complete",
+                    service_affecting=False
+                )
+
+                self.fm_api.set_fault(out_of_sync_fault)
+
+                # Deploy in sync state is changed, update the cache
+                self.usm_alarm[constants.LAST_IN_SYNC] = is_in_sync
+
+            else:
+                # Shouldn't come to here
+                LOG.error("Unexpected case in handling deploy state sync. ")
+
+        except Exception as ex:
+            LOG.exception("Failed in handling deploy state sync. Error: %s" % str(ex))
+
     def _get_software_upgrade(self):
         """
         Get the current software upgrade from/to versions and state
@@ -3244,7 +3322,15 @@ class PatchControllerMainThread(threading.Thread):
         # We only can use one inverval
         SEND_MSG_INTERVAL_IN_SECONDS = 30.0
 
+        alarm_instance_id = "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST,
+                                       sc.standby_controller)
+
         try:
+            # Update the out of sync alarm cache when the thread starts
+            out_of_sync_alarm_fault = sc.fm_api.get_fault(
+                fm_constants.FM_ALARM_ID_SW_UPGRADE_DEPLOY_STATE_OUT_OF_SYNC, alarm_instance_id)
+            sc.usm_alarm[constants.LAST_IN_SYNC] = not out_of_sync_alarm_fault
+
             sock_in = sc.setup_socket()
 
             while sock_in is None:
@@ -3445,11 +3531,12 @@ class PatchControllerMainThread(threading.Thread):
                         SEND_MSG_INTERVAL_IN_SECONDS)
 
                     # Only send the deploy state update from the active controller
-                    if utils.is_active_controller():
+                    if is_deployment_in_progress(sc.release_data.metadata) and utils.is_active_controller():
                         try:
                             sc.socket_lock.acquire()
                             deploy_state_update = SoftwareMessageDeployStateUpdate()
                             deploy_state_update.send(sc.sock_out)
+                            sc.handle_deploy_state_sync(alarm_instance_id)
                         except Exception as e:
                             LOG.exception("Failed to send deploy state update. Error: %s", str(e))
                         finally:

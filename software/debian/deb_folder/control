@@ -9,6 +9,7 @@ Build-Depends: debhelper-compat (= 13),
  python3-wheel,
  build-info-dev
 Build-Depends-Indep:
+ python3-fm-api,
  python3-keystonemiddleware,
  python3-oslo.config
 Standards-Version: 4.5.1
@@ -20,7 +21,8 @@ Architecture: all
 Depends: ${python3:Depends},
  ${misc:Depends},
  gir1.2-ostree-1.0,
- python3-argcomplete
+ python3-argcomplete,
+ python3-fm-api,
 Description: StarlingX unified software deployment and management
  StarlingX unified software deployment and management.
 

@@ -22,6 +22,7 @@ import webob
 import software.constants as constants
 from software.exceptions import StateValidationFailure
 from software.exceptions import SoftwareServiceError
+from tsconfig.tsconfig import PLATFORM_CONF_FILE
 
 
 LOG = logging.getLogger('main_logger')
@@ -439,3 +440,22 @@ def is_active_controller():
 
     keyring_file = f"/opt/platform/.keyring/{constants.SW_VERSION}/.CREDENTIAL"
     return os.path.exists(keyring_file)
+
+
+def get_platform_conf(key):
+    """
+    Get the value of given key in platform.conf
+    :param key: key to get
+    :return: value
+    """
+    value = None
+
+    with open(PLATFORM_CONF_FILE) as fp:
+        lines = fp.readlines()
+        for line in lines:
+            if line.find(key) != -1:
+                value = line.split('=')[1]
+                value = value.replace('\n', '')
+                break
+
+    return value

@@ -1287,3 +1287,39 @@ def parse_release_metadata(filename):
             continue
         data[child.tag] = child.text
     return data
+
+
+def is_deploy_state_in_sync():
+    """
+    Check if deploy state in sync
+    :return: bool true if in sync, false otherwise
+    """
+    if os.path.isfile(constants.SOFTWARE_JSON_FILE) \
+            and os.path.isfile(constants.SYNCED_SOFTWARE_JSON_FILE):
+
+        working_data_deploy_state = utils.load_from_json_file(
+            constants.SOFTWARE_JSON_FILE)
+
+        synced_data_deploy_state = utils.load_from_json_file(
+            constants.SYNCED_SOFTWARE_JSON_FILE)
+
+        working_deploy_state = working_data_deploy_state.get("deploy", {})
+
+        synced_deploy_state = synced_data_deploy_state.get("deploy", {})
+
+        working_deploy_host_state = working_data_deploy_state.get("deploy_host", {})
+
+        synced_deploy_host_state = synced_data_deploy_state.get("deploy_host", {})
+
+        return working_deploy_state == synced_deploy_state \
+            and working_deploy_host_state == synced_deploy_host_state
+    return False
+
+
+def is_deployment_in_progress(release_metadata):
+    """
+    Check if at least one deployment is in progress
+    :param release_metadata: dict of release metadata
+    :return: bool true if in progress, false otherwise
+    """
+    return any(release['state'] == constants.DEPLOYING for release in release_metadata.values())

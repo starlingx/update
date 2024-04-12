@@ -179,6 +179,12 @@ WORKER_SUMMARY_DIR = "%s/summary" % SOFTWARE_STORAGE_DIR
 WORKER_DATETIME_FORMAT = "%Y%m%dT%H%M%S%f"
 UNKNOWN_SOFTWARE_VERSION = "0.0.0"
 
+LAST_IN_SYNC = "last_in_sync"
+
+SYSTEM_MODE_SIMPLEX = "simplex"
+SYSTEM_MODE_DUPLEX = "duplex"
+
+
 
 class DEPLOY_STATES(Enum):
     ACTIVATE = 'activate'

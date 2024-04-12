@@ -53,6 +53,7 @@
     nodeset: debian-bullseye
     required-projects:
       - starlingx/config
+      - starlingx/fault
     files:
       - software/*
     vars:
@@ -66,6 +67,7 @@
     nodeset: debian-bullseye
     required-projects:
       - starlingx/config
+      - starlingx/fault
     files:
       - software/*
     vars:
