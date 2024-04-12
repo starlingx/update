@@ -335,6 +335,8 @@ class ReleaseData(object):
 
         self.metadata[release_id]["sw_version"] = "unknown"
 
+        # commit is derived from apt-ostree command run in software deploy start
+
         for key in ["status",
                     "unremovable",
                     "sw_version",
@@ -343,7 +345,8 @@ class ReleaseData(object):
                     "install_instructions",
                     "restart_script",
                     "warnings",
-                    "apply_active_release_only"]:
+                    "apply_active_release_only",
+                    "commit"]:
             value = root.findtext(key)
             if value is not None:
                 self.metadata[release_id][key] = value
