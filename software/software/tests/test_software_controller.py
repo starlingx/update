@@ -201,3 +201,152 @@ class TestSoftwareController(unittest.TestCase):
         mock_isfile.side_effect = [False, True]
         result = controller.in_sync_controller_api()
         self.assertEqual(result, {"in_sync": False})
+
+    @patch('software.software_controller.json.load')
+    @patch('software.software_controller.open', new_callable=mock_open)
+    def test_get_software_host_upgrade_deployed(self,
+                                                mock_dummy,  # pylint: disable=unused-argument
+                                                mock_json_load,  # pylint: disable=unused-argument
+                                                ):
+        controller = PatchController()
+        controller._get_software_upgrade = MagicMock(return_value={  # pylint: disable=protected-access
+            "from_release": "1.0.0",
+            "to_release": "2.0.0"
+        })
+        controller.db_api_instance.get_deploy_host = MagicMock(return_value=[
+            {"hostname": "host1", "state": constants.DEPLOYED},
+            {"hostname": "host2", "state": constants.DEPLOYING}
+        ])
+
+        # Test when the host is deployed
+        result = controller.get_one_software_host_upgrade("host1")
+        self.assertEqual(result, [{
+            "hostname": "host1",
+            "current_sw_version": "2.0.0",
+            "target_sw_version": "2.0.0",
+            "host_state": constants.DEPLOYED
+        }])
+
+    @patch('software.software_controller.json.load')
+    @patch('software.software_controller.open', new_callable=mock_open)
+    def test_get_software_host_upgrade_deploying(self,
+                                                 mock_dummy,  # pylint: disable=unused-argument
+                                                 mock_json_load,  # pylint: disable=unused-argument
+                                                 ):
+        controller = PatchController()
+        controller._get_software_upgrade = MagicMock(return_value={  # pylint: disable=protected-access
+            "from_release": "1.0.0",
+            "to_release": "2.0.0"
+        })
+        controller.db_api_instance.get_deploy_host = MagicMock(return_value=[
+            {"hostname": "host1", "state": constants.DEPLOYED},
+            {"hostname": "host2", "state": constants.DEPLOYING}
+        ])
+
+        # Test when the host is deploying
+        result = controller.get_one_software_host_upgrade("host2")
+        self.assertEqual(result, [{
+            "hostname": "host2",
+            "current_sw_version": "1.0.0",
+            "target_sw_version": "2.0.0",
+            "host_state": constants.DEPLOYING
+        }])
+
+    @patch('software.software_controller.json.load')
+    @patch('software.software_controller.open', new_callable=mock_open)
+    def test_get_all_software_host_upgrade_deploying(self,
+                                                     mock_dummy,  # pylint: disable=unused-argument
+                                                     mock_json_load,  # pylint: disable=unused-argument
+                                                     ):
+        controller = PatchController()
+        controller._get_software_upgrade = MagicMock(return_value={  # pylint: disable=protected-access
+            "from_release": "1.0.0",
+            "to_release": "2.0.0"
+        })
+        controller.db_api_instance.get_deploy_host = MagicMock(return_value=[
+            {"hostname": "host1", "state": constants.DEPLOYED},
+            {"hostname": "host2", "state": constants.DEPLOYING}
+        ])
+
+        # Test when the host is deploying
+        result = controller.get_all_software_host_upgrade()
+        self.assertEqual(result, [{
+            "hostname": "host1",
+            "current_sw_version": "2.0.0",
+            "target_sw_version": "2.0.0",
+            "host_state": constants.DEPLOYED
+        }, {
+            "hostname": "host2",
+            "current_sw_version": "1.0.0",
+            "target_sw_version": "2.0.0",
+            "host_state": constants.DEPLOYING
+        }])
+
+    @patch('software.software_controller.json.load')
+    @patch('software.software_controller.open', new_callable=mock_open)
+    def test_get_software_host_upgrade_none_state(self,
+                                                  mock_dummy,  # pylint: disable=unused-argument
+                                                  mock_json_load,  # pylint: disable=unused-argument
+                                                  ):
+        controller = PatchController()
+
+        # Test when the deploy or deploy_hosts is None
+        controller._get_software_upgrade = MagicMock(return_value=None)  # pylint: disable=protected-access
+        controller.db_api_instance.get_deploy_host.return_value = None
+        result = controller.get_one_software_host_upgrade("host1")
+        self.assertIsNone(result)
+
+    @patch('software.software_controller.json.load')
+    @patch('software.software_controller.open', new_callable=mock_open)
+    def test_get_software_upgrade_get_deploy_all(self,
+                                                 mock_dummy,  # pylint: disable=unused-argument
+                                                 mock_json_load,  # pylint: disable=unused-argument
+                                                 ):
+
+        controller = PatchController()
+
+        # Create a mock instance of the db_api
+        db_api_instance_mock = MagicMock()
+        controller.db_api_instance = db_api_instance_mock
+
+        # Create a mock return value for the get_deploy_all method
+        deploy_all_mock = [{"from_release": "1.0.0", "to_release": "2.0.0", "state": "start"}]
+        db_api_instance_mock.get_deploy_all.return_value = deploy_all_mock
+
+        # Call the method being tested
+        result = controller._get_software_upgrade()  # pylint: disable=protected-access
+
+        # Verify that the expected methods were called
+        db_api_instance_mock.get_deploy_all.assert_called_once()
+
+        # Verify the expected result
+        expected_result = {
+            "from_release": "1.0",
+            "to_release": "2.0",
+            "state": "start"
+        }
+        self.assertEqual(result, expected_result)
+
+    @patch('software.software_controller.json.load')
+    @patch('software.software_controller.open', new_callable=mock_open)
+    def test_get_software_upgrade_get_deploy_all_none(self,
+                                                      mock_dummy,  # pylint: disable=unused-argument
+                                                      mock_json_load,  # pylint: disable=unused-argument
+                                                      ):
+
+        controller = PatchController()
+
+        # Create a mock instance of the db_api
+        db_api_instance_mock = MagicMock()
+        controller.db_api_instance = db_api_instance_mock
+
+        # Create a mock return value for the get_deploy_all method
+        db_api_instance_mock.get_deploy_all.return_value = None
+
+        # Call the method being tested
+        result = controller._get_software_upgrade()  # pylint: disable=protected-access
+
+        # Verify that the expected methods were called
+        db_api_instance_mock.get_deploy_all.assert_called_once()
+
+        self.assertEqual(result, None)
