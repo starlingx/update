@@ -240,6 +240,8 @@ class DataMigration(object):
             platform_config_dir = os.path.join(PLATFORM_PATH, "config")
             from_config_dir = os.path.join(platform_config_dir, self.from_release)
             to_config_dir = os.path.join(platform_config_dir, self.to_release)
+            if os.path.isdir(to_config_dir):
+                shutil.rmtree(to_config_dir)
             shutil.copytree(from_config_dir, to_config_dir)
         except Exception as e:
             LOG.exception("Failed to create platform config for release %s. "

@@ -5,15 +5,15 @@
 #
 
 # This import has to be first
-from software.tests import base  # pylint: disable=unused-import
-
+from software.tests import base  # pylint: disable=unused-import # noqa: F401
 from software.software_controller import PatchController
-from software.software_controller import ReleaseValidationFailure
+from software.exceptions import ReleaseValidationFailure
 import unittest
 from unittest.mock import MagicMock
 from unittest.mock import mock_open
 from unittest.mock import patch
 from software import constants
+from software import states
 
 
 class TestSoftwareController(unittest.TestCase):
@@ -65,8 +65,7 @@ class TestSoftwareController(unittest.TestCase):
 
         # Call the function being tested
         with patch('software.software_controller.SW_VERSION', '1.0.0'):
-            info, warning, error, release_meta_info = controller._process_upload_upgrade_files(self.upgrade_files,   # pylint: disable=protected-access
-                                                                                               controller.release_data)
+            info, warning, error, release_meta_info = controller._process_upload_upgrade_files(self.upgrade_files)   # pylint: disable=protected-access
 
         # Verify that the expected functions were called with the expected arguments
         mock_verify_files.assert_called_once_with([self.upgrade_files[constants.ISO_EXTENSION]],
@@ -85,7 +84,7 @@ class TestSoftwareController(unittest.TestCase):
         # Verify that the expected messages were returned
         self.assertEqual(
             info,
-            'iso and signature files upload completed\nImporting iso is in progress\nLoad import successful')
+            'Load import successful')
         self.assertEqual(warning, '')
         self.assertEqual(error, '')
         self.assertEqual(
@@ -114,17 +113,14 @@ class TestSoftwareController(unittest.TestCase):
 
         # Call the function being tested
         with patch('software.software_controller.SW_VERSION', '1.0'):
-            info, warning, error, _ = controller._process_upload_upgrade_files(self.upgrade_files,  # pylint: disable=protected-access
-                                                                               controller.release_data)
-
-        # Verify that the expected messages were returned
-        self.assertEqual(info, '')
-        self.assertEqual(warning, '')
-        self.assertEqual(error, 'Upgrade file signature verification failed\n')
+            try:
+                controller._process_upload_upgrade_files(self.upgrade_files)  # pylint: disable=protected-access
+            except ReleaseValidationFailure as e:
+                self.assertEqual(e.error, 'Software test.iso:test.sig signature validation failed')
 
     @patch('software.software_controller.PatchController.__init__', return_value=None)
     @patch('software.software_controller.verify_files',
-           side_effect=ReleaseValidationFailure('Invalid signature file'))
+           side_effect=ReleaseValidationFailure(error='Invalid signature file'))
     @patch('software.software_controller.PatchController.major_release_upload_check')
     def test_process_upload_upgrade_files_validation_error(self,
                                                            mock_major_release_upload_check,
@@ -137,13 +133,10 @@ class TestSoftwareController(unittest.TestCase):
         mock_major_release_upload_check.return_value = True
 
         # Call the function being tested
-        info, warning, error, _ = controller._process_upload_upgrade_files(self.upgrade_files,  # pylint: disable=protected-access
-                                                                           controller.release_data)
-
-        # Verify that the expected messages were returned
-        self.assertEqual(info, '')
-        self.assertEqual(warning, '')
-        self.assertEqual(error, 'Upgrade file signature verification failed\n')
+        try:
+            controller._process_upload_upgrade_files(self.upgrade_files)  # pylint: disable=protected-access
+        except ReleaseValidationFailure as e:
+            self.assertEqual(e.error, "Invalid signature file")
 
     @patch('software.software_controller.os.path.isfile')
     @patch('software.software_controller.json.load')
@@ -238,8 +231,8 @@ class TestSoftwareController(unittest.TestCase):
             "to_release": "2.0.0"
         })
         controller.db_api_instance.get_deploy_host = MagicMock(return_value=[
-            {"hostname": "host1", "state": constants.DEPLOYED},
-            {"hostname": "host2", "state": constants.DEPLOYING}
+            {"hostname": "host1", "state": states.DEPLOYED},
+            {"hostname": "host2", "state": states.DEPLOYING}
         ])
 
         # Test when the host is deployed
@@ -248,7 +241,7 @@ class TestSoftwareController(unittest.TestCase):
             "hostname": "host1",
             "current_sw_version": "2.0.0",
             "target_sw_version": "2.0.0",
-            "host_state": constants.DEPLOYED
+            "host_state": states.DEPLOYED
         }])
 
     @patch('software.software_controller.json.load')
@@ -267,8 +260,8 @@ class TestSoftwareController(unittest.TestCase):
             "to_release": "2.0.0"
         })
         controller.db_api_instance.get_deploy_host = MagicMock(return_value=[
-            {"hostname": "host1", "state": constants.DEPLOYED},
-            {"hostname": "host2", "state": constants.DEPLOYING}
+            {"hostname": "host1", "state": states.DEPLOYED},
+            {"hostname": "host2", "state": states.DEPLOYING}
         ])
 
         # Test when the host is deploying
@@ -277,7 +270,7 @@ class TestSoftwareController(unittest.TestCase):
             "hostname": "host2",
             "current_sw_version": "1.0.0",
             "target_sw_version": "2.0.0",
-            "host_state": constants.DEPLOYING
+            "host_state": states.DEPLOYING
         }])
 
     @patch('software.software_controller.json.load')
@@ -296,8 +289,8 @@ class TestSoftwareController(unittest.TestCase):
             "to_release": "2.0.0"
         })
         controller.db_api_instance.get_deploy_host = MagicMock(return_value=[
-            {"hostname": "host1", "state": constants.DEPLOYED},
-            {"hostname": "host2", "state": constants.DEPLOYING}
+            {"hostname": "host1", "state": states.DEPLOYED},
+            {"hostname": "host2", "state": states.DEPLOYING}
         ])
 
         # Test when the host is deploying
@@ -306,12 +299,12 @@ class TestSoftwareController(unittest.TestCase):
             "hostname": "host1",
             "current_sw_version": "2.0.0",
             "target_sw_version": "2.0.0",
-            "host_state": constants.DEPLOYED
+            "host_state": states.DEPLOYED
         }, {
             "hostname": "host2",
             "current_sw_version": "1.0.0",
             "target_sw_version": "2.0.0",
-            "host_state": constants.DEPLOYING
+            "host_state": states.DEPLOYING
         }])
 
     @patch('software.software_controller.json.load')
@@ -394,4 +387,4 @@ class TestSoftwareController(unittest.TestCase):
         # Verify that the expected methods were called
         db_api_instance_mock.get_deploy_all.assert_called_once()
 
-        self.assertEqual(result, None)
+        self.assertIsNone(result)

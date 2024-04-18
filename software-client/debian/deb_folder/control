@@ -5,6 +5,7 @@ Maintainer: StarlingX Developers <StarlingX-discuss@lists.StarlingX.io>
 Build-Depends: debhelper-compat (= 13),
  dh-python,
  python3-all,
+ python3-tabulate,
  python3-setuptools,
  python3-wheel
 Build-Depends-Indep:

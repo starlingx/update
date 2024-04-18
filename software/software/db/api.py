@@ -9,7 +9,7 @@ import logging
 import threading
 from software.software_entities import DeployHandler
 from software.software_entities import DeployHostHandler
-from software.constants import DEPLOY_STATES
+from software.states import DEPLOY_STATES
 
 LOG = logging.getLogger('main_logger')
 
@@ -32,9 +32,9 @@ class SoftwareAPI:
         self.deploy_handler = DeployHandler()
         self.deploy_host_handler = DeployHostHandler()
 
-    def create_deploy(self, from_release, to_release, reboot_required: bool):
+    def create_deploy(self, from_release, to_release, feed_repo, commit_id, reboot_required: bool):
         self.begin_update()
-        self.deploy_handler.create(from_release, to_release, reboot_required)
+        self.deploy_handler.create(from_release, to_release, feed_repo, commit_id, reboot_required)
         self.end_update()
 
     def get_deploy(self, from_release, to_release):
@@ -76,6 +76,13 @@ class SoftwareAPI:
         self.begin_update()
         try:
             return self.deploy_host_handler.query_all()
+        finally:
+            self.end_update()
+
+    def get_deploy_host_by_hostname(self, hostname):
+        self.begin_update()
+        try:
+            return self.deploy_host_handler.query(hostname)
         finally:
             self.end_update()
 

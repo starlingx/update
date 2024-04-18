@@ -21,14 +21,35 @@ import json
 import os
 import re
 import textwrap
-
+from tabulate import tabulate
 from oslo_utils import importutils
 from six.moves import zip
 
 from software_client.common.http_errors import HTTP_ERRORS
 
+# TODO(bqian) remove below overrides when switching to
+# system command style CLI display for USM CLI is ready
+from tabulate import _table_formats
+from tabulate import TableFormat
+from tabulate import Line
+from tabulate import DataRow
+
+simple = TableFormat(
+    lineabove=Line("", "-", "  ", ""),
+    linebelowheader=Line("", "=", "  ", ""),
+    linebetweenrows=None,
+    linebelow=Line("", "-", "  ", ""),
+    headerrow=DataRow("", "  ", ""),
+    datarow=DataRow("", "  ", ""),
+    padding=0,
+    with_header_hide=["lineabove", "linebelow"],
+)
+
+# _table_formats['pretty'] = simple
+#####################################################
 
 TERM_WIDTH = 72
+
 
 class HelpFormatter(argparse.HelpFormatter):
     def start_section(self, heading):
@@ -156,6 +177,41 @@ def display_info(resp):
     else:
         # print out the basic info json object
         _display_info(text)
+
+
+def display_result_list(header_data_list, data):
+    header = [h for h in header_data_list]
+    table = []
+    for d in data:
+        row = []
+        for _, k in header_data_list.items():
+            row.append(d[k])
+        table.append(row)
+    if len(table) == 0:
+        print("No data")
+    else:
+        print(tabulate(table, header, tablefmt='pretty', colalign=("left", "left")))
+
+
+def display_detail_result(data):
+    header = ["Property", "Value"]
+    table = []
+    for k, v in data.items():
+        if isinstance(v, list):
+            if len(v) > 0:
+                row = [k, v[0]]
+                v.pop(0)
+            else:
+                row = [k, '']
+            table.append(row)
+
+            for r in v:
+                row = ['', r]
+                table.append(row)
+        else:
+            row = [k, v]
+            table.append(row)
+    print(tabulate(table, header, tablefmt='pretty', colalign=("left", "left")))
 
 
 def print_result_list(header_data_list, data_list, has_error, sort_key=0):

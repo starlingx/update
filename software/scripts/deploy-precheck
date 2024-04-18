@@ -100,7 +100,7 @@ class HealthCheck(object):
             print("Could not check required patches...")
             return False, required_patches
 
-        applied_patches = list(response.json()["sd"].keys())
+        applied_patches = [release['release_id'] for release in response.json()]
         missing_patch = list(set(required_patches) - set(applied_patches))
         if missing_patch:
             success = False

@@ -10,35 +10,10 @@ CONTROLLER_FLOATING_HOSTNAME = "controller"
 
 SOFTWARE_STORAGE_DIR = "/opt/software"
 
-AVAILABLE_DIR = "%s/metadata/available" % SOFTWARE_STORAGE_DIR
-UNAVAILABLE_DIR = "%s/metadata/unavailable" % SOFTWARE_STORAGE_DIR
-DEPLOYING_START_DIR = "%s/metadata/deploying_start" % SOFTWARE_STORAGE_DIR
-DEPLOYING_HOST_DIR = "%s/metadata/deploying_host" % SOFTWARE_STORAGE_DIR
-DEPLOYING_ACTIVATE_DIR = "%s/metadata/deploying_activate" % SOFTWARE_STORAGE_DIR
-DEPLOYING_COMPLETE_DIR = "%s/metadata/deploying_complete" % SOFTWARE_STORAGE_DIR
-DEPLOYED_DIR = "%s/metadata/deployed" % SOFTWARE_STORAGE_DIR
-REMOVING_DIR = "%s/metadata/removing" % SOFTWARE_STORAGE_DIR
-ABORTING_DIR = "%s/metadata/aborting" % SOFTWARE_STORAGE_DIR
-COMMITTED_DIR = "%s/metadata/committed" % SOFTWARE_STORAGE_DIR
-SEMANTICS_DIR = "%s/semantics" % SOFTWARE_STORAGE_DIR
-
 PATCH_AGENT_STATE_IDLE = "idle"
 PATCH_AGENT_STATE_INSTALLING = "installing"
 PATCH_AGENT_STATE_INSTALL_FAILED = "install-failed"
 PATCH_AGENT_STATE_INSTALL_REJECTED = "install-rejected"
-
-ABORTING = 'aborting'
-AVAILABLE = 'available'
-COMMITTED = 'committed'
-DEPLOYED = 'deployed'
-DEPLOYING_ACTIVATE = 'deploying-activate'
-DEPLOYING_COMPLETE = 'deploying-complete'
-DEPLOYING_HOST = 'deploying-host'
-DEPLOYING_START = 'deploying-start'
-REMOVING = 'removing'
-UNAVAILABLE = 'unavailable'
-UNKNOWN = 'n/a'
-
 
 STATUS_DEVELOPEMENT = 'DEV'
 STATUS_OBSOLETE = 'OBS'
@@ -61,9 +36,11 @@ PATCH_EXTENSION = ".patch"
 SUPPORTED_UPLOAD_FILE_EXT = [ISO_EXTENSION, SIG_EXTENSION, PATCH_EXTENSION]
 SCRATCH_DIR = "/scratch"
 
+# host deploy state
 DEPLOYING = 'deploying'
 FAILED = 'failed'
 PENDING = 'pending'
+DEPLOYED = 'deployed'
 
 # Authorization modes of software cli
 KEYSTONE = 'keystone'
