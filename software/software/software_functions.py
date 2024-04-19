@@ -162,19 +162,19 @@ def write_xml_file(top,
         outfile.write(minidom.parseString(rough_xml).toprettyxml(indent="  "))
 
 
-def get_release_from_patch(patchfile):
+def get_release_from_patch(patchfile, key="sw_version"):
     rel = ""
     try:
         metadata_str = subprocess.check_output(['tar', '--to-command=tar -xO', '-xf', patchfile, 'metadata.tar'])
         root = ElementTree.fromstring(metadata_str)
         # Extract release version
-        rel = root.findtext('sw_version')
+        rel = root.findtext(key)
     except subprocess.CalledProcessError as e:
         LOG.error("Failed to run tar command")
         LOG.error("Command output: %s", e.output)
         raise e
     except Exception as e:
-        print("Failed to parse patch software version")
+        print("Failed to parse patch %s" % key)
         raise e
     return rel
 

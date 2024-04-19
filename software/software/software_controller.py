@@ -73,6 +73,7 @@ from software.software_functions import audit_log_info
 from software.software_functions import repo_root_dir
 from software.software_functions import is_deploy_state_in_sync
 from software.software_functions import is_deployment_in_progress
+from software.software_functions import get_release_from_patch
 from software.release_state import ReleaseState
 from software.deploy_host_state import DeployHostState
 from software.deploy_state import DeployState
@@ -1343,11 +1344,9 @@ class PatchController(PatchService):
 
             base_patch_filename = os.path.basename(patch_file)
 
-            # NOTE(bqian) does it make sense to link the release_id to name of the patch?
-            # Get the release_id from the filename
+            # Get the release_id from the patch's metadata
             # and check to see if it's already uploaded
-            # todo(abailey) We should not require the ID as part of the file
-            (release_id, _) = os.path.splitext(base_patch_filename)
+            release_id = get_release_from_patch(patch_file,'id')
 
             release = self.release_collection.get_release_by_id(release_id)
 
