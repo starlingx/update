@@ -12,7 +12,6 @@ from software.authapi import acl
 from software.authapi import config
 from software.authapi import hooks
 from software.authapi import policy
-from software.parsable_error import ParsableErrorMiddleware
 from software.utils import ExceptionHook
 
 auth_opts = [
@@ -56,7 +55,6 @@ def setup_app(pecan_config=None, extra_hooks=None):
         debug=False,
         force_canonical=getattr(pecan_config.app, 'force_canonical', True),
         hooks=app_hooks,
-        wrap_app=ParsableErrorMiddleware,
         guess_content_type_from_ext=False,  # Avoid mime-type lookup
     )
 

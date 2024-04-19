@@ -7,7 +7,7 @@
 from oslo_utils import importutils
 
 from software_client import exc
-from software_client.constants import TOKEN, KEYSTONE, LOCAL_ROOT
+from software_client.constants import LOCAL_ROOT
 
 
 SERVICE_NAME = 'usm'
@@ -121,8 +121,7 @@ def get_client(api_version, auth_mode, session=None, service_type=SERVICE_TYPE, 
             except Exception as e:
                 msg = ('Failed to get openstack endpoint')
                 raise exc.EndpointException(
-                    ('%(message)s, error was: %(error)s') %
-                     {'message': msg, 'error': e})
+                    ('%(message)s, error was: %(error)s') % {'message': msg, 'error': e})
         elif local_root:
             endpoint = API_ENDPOINT
         else:

@@ -22,7 +22,9 @@ import software_client
 from software_client import client as sclient
 from software_client import exc
 from software_client.common import utils
-from software_client.constants import TOKEN, KEYSTONE, LOCAL_ROOT
+from software_client.constants import LOCAL_ROOT
+from software_client.constants import KEYSTONE
+from software_client.constants import TOKEN
 
 
 VIRTUAL_REGION = 'SystemController'
@@ -250,7 +252,6 @@ class SoftwareClientShell(object):
         parser.add_argument('--os-project-domain-name',
                             default=utils.env('OS_PROJECT_DOMAIN_NAME'),
                             help='Defaults to env[OS_PROJECT_DOMAIN_NAME].')
-
 
         # All commands are considered restricted, unless explicitly set to False
         parser.set_defaults(restricted=True)

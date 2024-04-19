@@ -91,7 +91,7 @@ class HealthCheck(object):
         :return: boolean indicating success/failure and list of patches
                  that are not in the 'deployed' state
         """
-        url = self._software_endpoint + '/query?show=deployed'
+        url = self._software_endpoint + '/release?show=deployed'
         headers = {"X-Auth-Token": self._software_token}
         response = requests.get(url, headers=headers, timeout=10)
 
@@ -233,7 +233,7 @@ class PatchHealthCheck(HealthCheck):
 
     def _get_required_patches(self):
         """Get required patches for a target release"""
-        url = self._software_endpoint + '/query'
+        url = self._software_endpoint + '/release'
         headers = {"X-Auth-Token": self._software_token}
         response = requests.get(url, headers=headers, timeout=10)
 
@@ -242,9 +242,9 @@ class PatchHealthCheck(HealthCheck):
             return []
 
         required_patches = []
-        for release, values in response.json()["sd"].items():
-            if values["sw_version"] == self._target_release:
-                required_patches.extend(values["requires"])
+        for release in response.json():
+            if release["sw_version"] == self._target_release:
+                required_patches.extend(release["requires"])
                 break
 
         return required_patches

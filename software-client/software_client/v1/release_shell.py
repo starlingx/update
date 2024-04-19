@@ -13,19 +13,23 @@ from software_client.common import utils
            help='filter against a release ID')
 # --state is an optional argument. default: "all"
 @utils.arg('--state',
-           default="all",
+           default=None,
            required=False,
            help='filter against a release state')
 def do_list(cc, args):
     """List the software releases"""
-    req, data = cc.release.list(args)
+    resp, data = cc.release.list(args)
     if args.debug:
-        utils.print_result_debug(req, data)
-    else:
+        utils.print_result_debug(resp, data)
+
+    rc = utils.check_rc(resp, data)
+    if rc == 0:
         header_data_list = {"Release": "release_id", "RR": "reboot_required", "State": "state"}
         utils.display_result_list(header_data_list, data)
+    else:
+        utils.display_info(resp)
 
-    return utils.check_rc(req, data)
+    return rc
 
 
 @utils.arg('release',
@@ -38,17 +42,20 @@ def do_list(cc, args):
            help='list packages contained in the release')
 def do_show(cc, args):
     """Show the software release"""
-    list_packages = args.packages
-    req, data = cc.release.show(args)
+    resp, data = cc.release.show(args)
     if args.debug:
-        utils.print_result_debug(req, data)
+        utils.print_result_debug(resp, data)
+
+    rc = utils.check_rc(resp, data)
+    if rc == 0:
+        utils.display_detail_result(data)
     else:
-        for d in data:
-            utils.display_detail_result(d)
+        utils.display_info(resp)
 
-    return utils.check_rc(req, data)
+    return rc
 
 
+# NOTE(bqian) need to review the commit patch CLI
 @utils.arg('patch',
            nargs="+",  # accepts a list
            help='Patch ID/s to commit')
@@ -72,24 +79,27 @@ def do_commit_patch(cc, args):
 
 
 def do_install_local(cc, args):
-    """ Trigger patch install/remove on the local host.
+    """Trigger patch install/remove on the local host.
         This command can only be used for patch installation
-        prior to initial configuration."""
-    req, data = cc.release.install_local()
+        prior to initial configuration.
+    """
+    resp, data = cc.release.install_local()
     if args.debug:
-        utils.print_result_debug(req, data)
-    else:
-        utils.print_software_op_result(req, data)
+        utils.print_result_debug(resp, data)
 
-    return utils.check_rc(req, data)
+    utils.display_info(resp)
+
+    return utils.check_rc(resp, data)
 
 
+# NOTE (bqian) verify this CLI is needed
 @utils.arg('release',
            nargs="+",  # accepts a list
            help='List of releases')
 def do_is_available(cc, args):
     """Query Available state for list of releases.
-       Returns True if all are Available, False otherwise."""
+       Returns True if all are Available, False otherwise.
+    """
     req, result = cc.release.is_available(args.release)
     rc = 1
     if req.status_code == 200:
@@ -103,12 +113,14 @@ def do_is_available(cc, args):
     return rc
 
 
+# NOTE (bqian) verify this CLI is needed
 @utils.arg('release',
            nargs="+",  # accepts a list
            help='List of releases')
 def do_is_deployed(cc, args):
     """Query Deployed state for list of releases.
-       Returns True if all are Deployed, False otherwise."""
+       Returns True if all are Deployed, False otherwise.
+    """
     req, result = cc.release.is_deployed(args.release)
     rc = 1
     if req.status_code == 200:
@@ -122,12 +134,14 @@ def do_is_deployed(cc, args):
     return rc
 
 
+# NOTE (bqian) verify this CLI is needed
 @utils.arg('release',
            nargs="+",  # accepts a list
            help='List of releases')
 def do_is_committed(cc, args):
     """Query Committed state for list of releases.
-       Returns True if all are Committed, False otherwise."""
+       Returns True if all are Committed, False otherwise.
+    """
     req, result = cc.release.is_committed(args.release)
     rc = 1
     if req.status_code == 200:
@@ -138,6 +152,25 @@ def do_is_committed(cc, args):
         print("An internal error has occurred. Please check /var/log/software.log for details")
     else:
         print("Error: %s has occurred. %s" % (req.status_code, req.reason))
+    return rc
+
+
+def _print_upload_result(resp, data, debug):
+    if debug:
+        utils.print_result_debug(resp, data)
+
+    rc = utils.check_rc(resp, data)
+
+    utils.display_info(resp)
+    if rc == 0:
+        if data["upload_info"]:
+            upload_info = data["upload_info"]
+            data_list = [{"file": k, "release": v["id"]}
+                         for d in upload_info for k, v in d.items()
+                         if not k.endswith(".sig")]
+
+            header_data_list = {"Uploaded File": "file", "Release": "release"}
+            utils.display_result_list(header_data_list, data_list)
     return rc
 
 
@@ -153,23 +186,10 @@ def do_is_committed(cc, args):
            action='store_true')
 def do_upload(cc, args):
     """Upload a software release"""
-    req, data = cc.release.upload(args)
-    if args.debug:
-        utils.print_result_debug(req, data)
-    else:
-        utils.print_software_op_result(req, data)
-        data_list = [(k, v["id"])
-                     for d in data["upload_info"] for k, v in d.items()
-                     if not k.endswith(".sig")]
+    resp, data = cc.release.upload(args)
+    _print_upload_result(resp, data, args.debug)
 
-        header_data_list = ["Uploaded File", "Id"]
-        has_error = 'error' in data and data["error"]
-        utils.print_result_list(header_data_list, data_list, has_error)
-    rc = 0
-    if utils.check_rc(req, data) != 0:
-        # We hit a failure.  Update rc but keep looping
-        rc = 1
-    return rc
+    return utils.check_rc(resp, data)
 
 
 @utils.arg('release',
@@ -182,7 +202,10 @@ def do_upload(cc, args):
                  'ONE pair of (iso + sig)'))
 def do_upload_dir(cc, args):
     """Upload a software release dir"""
-    return cc.release.upload_dir(args)
+    resp, data = cc.release.upload_dir(args)
+    _print_upload_result(resp, data, args.debug)
+
+    return utils.check_rc(resp, data)
 
 
 @utils.arg('release',
@@ -190,6 +213,9 @@ def do_upload_dir(cc, args):
            help='Release ID to delete')
 def do_delete(cc, args):
     """Delete the software release"""
-    resp, body = cc.release.release_delete(args.release)
+    resp, data = cc.release.release_delete(args.release)
+    if args.debug:
+        utils.print_result_debug(resp, data)
+
     utils.display_info(resp)
-    return utils.check_rc(resp, body)
+    return utils.check_rc(resp, data)

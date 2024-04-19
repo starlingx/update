@@ -24,23 +24,41 @@ def do_show(cc, args):
     resp, data = cc.deploy.show()
     if args.debug:
         utils.print_result_debug(resp, data)
+
+    rc = utils.check_rc(resp, data)
+    if rc == 0:
+        if len(data) == 0:
+            print("No deploy in progress")
+        else:
+            header_data_list = {"From Release": "from_release",
+                                "To Release": "to_release",
+                                "RR": "reboot_required",
+                                "State": "state"}
+            utils.display_result_list(header_data_list, data)
     else:
-        header_data_list = {"From Release": "from_release", "To Release": "to_release", "RR": "reboot_required", "State": "state"}
-        utils.display_result_list(header_data_list, data)
+        utils.display_info(resp)
 
-    return utils.check_rc(resp, data)
-
+    return rc
 
 def do_host_list(cc, args):
     """List of hosts for software deployment """
     resp, data = cc.deploy.host_list()
     if args.debug:
         utils.print_result_debug(resp, data)
-    else:
-        header_data_list = {"Host": "hostname", "From Release": "software_release", "To Release": "target_release", "RR": "reboot_required", "State": "host_state"}
-        utils.display_result_list(header_data_list, data)
 
-    return utils.check_rc(resp, data)
+    rc = utils.check_rc(resp, data)
+    if rc == 0:
+        if len(data) == 0:
+            print("No deploy in progress")
+        else:
+            header_data_list = {"Host": "hostname", "From Release": "software_release",
+                                "To Release": "target_release", "RR": "reboot_required",
+                                "State": "host_state"}
+            utils.display_result_list(header_data_list, data)
+    else:
+        utils.display_info(resp)
+
+    return rc
 
 
 @utils.arg('deployment',
@@ -51,18 +69,18 @@ def do_host_list(cc, args):
            required=False,
            help='Allow bypassing non-critical checks')
 @utils.arg('--region_name',
-           default='RegionOne',
+           default=None,
            required=False,
            help='Run precheck against a subcloud')
 def do_precheck(cc, args):
     """Verify whether prerequisites for installing the software deployment are satisfied"""
-    req, data = cc.deploy.precheck(args)
+    resp, data = cc.deploy.precheck(args)
     if args.debug:
-        utils.print_result_debug(req, data)
-    else:
-        utils.print_software_op_result(req, data)
+        utils.print_result_debug(resp, data)
 
-    return utils.check_rc(req, data)
+    utils.display_info(resp)
+
+    return utils.check_rc(resp, data)
 
 
 @utils.arg('deployment',
@@ -77,8 +95,8 @@ def do_start(cc, args):
     resp, data = cc.deploy.start(args)
     if args.debug:
         utils.print_result_debug(resp, data)
-    else:
-        utils.display_info(resp)
+
+    utils.display_info(resp)
 
     return utils.check_rc(resp, data)
 
@@ -92,25 +110,34 @@ def do_start(cc, args):
            help="Force deploy host")
 def do_host(cc, args):
     """Deploy prestaged software deployment to the host"""
-    return cc.deploy.host(args)
+    resp, data = cc.deploy.host(args)
+
+    if args.debug:
+        utils.print_result_debug(resp, data)
+
+    utils.display_info(resp)
+
+    return utils.check_rc(resp, data)
 
 
 def do_activate(cc, args):
     """Activate the software deployment"""
-    req, data = cc.deploy.activate(args)
+    resp, data = cc.deploy.activate(args)
     if args.debug:
-        utils.print_result_debug(req, data)
-    else:
-        utils.print_software_op_result(req, data)
+        utils.print_result_debug(resp, data)
 
-    return utils.check_rc(req, data)
+    utils.display_info(resp)
+
+    return utils.check_rc(resp, data)
+
 
 def do_complete(cc, args):
     """Complete the software deployment"""
-    req, data = cc.deploy.complete(args)
-    if args.debug:
-        utils.print_result_debug(req, data)
-    else:
-        utils.print_software_op_result(req, data)
+    resp, data = cc.deploy.complete(args)
 
-    return utils.check_rc(req, data)
+    if args.debug:
+        utils.print_result_debug(resp, data)
+
+    utils.display_info(resp)
+
+    return utils.check_rc(resp, data)

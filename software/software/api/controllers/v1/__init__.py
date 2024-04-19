@@ -22,7 +22,10 @@ from wsme import types as wtypes
 
 from software.api.controllers.v1 import base
 from software.api.controllers.v1 import link
-from software.api.controllers.v1 import software
+from software.api.controllers.v1.software import SoftwareAPIController
+from software.api.controllers.v1.release import ReleaseController
+from software.api.controllers.v1.deploy import DeployController
+from software.api.controllers.v1.deploy_host import DeployHostController
 
 
 class MediaType(base.APIBase):
@@ -49,6 +52,9 @@ class V1(base.APIBase):
     "Links that point to a specific URL for this version and documentation"
 
     software = [link.Link]
+    release = [link.Link]
+    deploy = [link.Link]
+    deploy_host = [link.Link]
     "Links to the software resource"
 
     @classmethod
@@ -56,18 +62,38 @@ class V1(base.APIBase):
         v1 = V1()
         v1.id = "v1"
         v1.links = [link.Link.make_link('self', pecan.request.host_url,
-                                        'v1', '', bookmark=True),
-                    ]
+                                        'v1', '', bookmark=True)]
+
         v1.media_types = [MediaType('application/json',
                           'application/vnd.openstack.software.v1+json')]
+
+        v1.release = [link.Link.make_link('self', pecan.request.host_url,
+                                          'release', ''),
+                      link.Link.make_link('bookmark',
+                                          pecan.request.host_url,
+                                          'release', '',
+                                          bookmark=True)]
+
+        v1.deploy = [link.Link.make_link('self', pecan.request.host_url,
+                                         'deploy', ''),
+                     link.Link.make_link('bookmark',
+                                         pecan.request.host_url,
+                                         'deploy', '',
+                                         bookmark=True)]
+
+        v1.deploy_host = [link.Link.make_link('self', pecan.request.host_url,
+                                              'deploy_host', ''),
+                          link.Link.make_link('bookmark',
+                                              pecan.request.host_url,
+                                              'deploy_host', '',
+                                              bookmark=True)]
 
         v1.software = [link.Link.make_link('self', pecan.request.host_url,
                                            'software', ''),
                        link.Link.make_link('bookmark',
                                            pecan.request.host_url,
                                            'software', '',
-                                           bookmark=True)
-                       ]
+                                           bookmark=True)]
 
         return v1
 
@@ -75,7 +101,10 @@ class V1(base.APIBase):
 class Controller(rest.RestController):
     """Version 1 API controller root."""
 
-    software = software.SoftwareAPIController()
+    software = SoftwareAPIController()
+    release = ReleaseController()
+    deploy = DeployController()
+    deploy_host = DeployHostController()
 
     @wsme_pecan.wsexpose(V1)
     def get(self):

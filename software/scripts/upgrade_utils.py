@@ -53,7 +53,7 @@ def get_token_endpoint(config, service_type="platform"):
         raise Exception("Failed to get token and endpoint. Error: %s", str(e))
 
     if service_type == "usm":
-        endpoint += "/v1/software"
+        endpoint += "/v1"
 
     return token, endpoint
 

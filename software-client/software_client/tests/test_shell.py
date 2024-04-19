@@ -15,7 +15,7 @@ from testtools import matchers
 import keystoneauth1
 
 from software_client import exc
-from software_client import software_client
+from software_client.software_client import SoftwareClientShell
 from software_client.tests import utils
 
 FAKE_ENV = {'OS_USERNAME': 'username',
@@ -49,7 +49,7 @@ class ShellTest(utils.BaseTestCase):
         orig = sys.stdout
         try:
             sys.stdout = StringIO()
-            _shell = software_client.SoftwareClientShell()
+            _shell = SoftwareClientShell()
             _shell.main(argstr.split())
         except SystemExit:
             exc_type, exc_value, exc_traceback = sys.exc_info()
