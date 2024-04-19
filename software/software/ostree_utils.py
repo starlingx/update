@@ -549,3 +549,37 @@ def add_ostree_remote(major_release, nodetype):
         LOG.exception("Error adding %s ostree remote: %s" % (major_release, str(e)))
         raise
     return rel_name
+
+
+def delete_ostree_remote(remote):
+    """
+    Delete an ostree remote
+    :param remote: remote name to be deleted
+    """
+    cmd = ["ostree", "remote", "delete", "--if-exists", remote]
+    try:
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError as e:
+        LOG.exception("Error deleting %s ostree remote: %s" % (remote, str(e)))
+
+
+def check_commit_id(remote, commit_id):
+    """
+    Check if commit_id matches with the commit_id from the remote ostree_repo
+    :param remote: ostree remote name to be checked against
+    :param commit_id: commit_id sent by the controller to the agent
+    :return: boolean indicating if commit_id matches with remote commit_id
+    """
+    commit_id_match = False
+    cmd = "ostree remote summary %s | grep 'Latest Commit' -A1" % remote
+    try:
+        # output should be similar to:
+        # Latest Commit (<n> bytes):
+        #       <ostree_commit_id>
+        output = subprocess.check_output(cmd, shell=True, text=True,
+                                         stderr=subprocess.STDOUT).strip()
+        remote_commit_id = output.split("\n")[1].strip()
+        commit_id_match = commit_id == remote_commit_id
+    except subprocess.CalledProcessError as e:
+        LOG.exception("Error getting remote commit_id: %s: %s" % (str(e), e.stdout))
+    return commit_id_match

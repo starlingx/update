@@ -523,12 +523,14 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
         self.ip = None
         self.force = False
         self.major_release = None
+        self.commit_id = None
 
     def encode(self):
         global sc
         messages.PatchMessage.encode(self)
         self.message['force'] = self.force
         self.message['major_release'] = self.major_release
+        self.message['commit_id'] = self.commit_id
 
     def handle(self, sock, addr):
         LOG.error("Should not get here")
@@ -2747,13 +2749,15 @@ class PatchController(PatchService):
         # Check if there is a major release deployment in progress
         # and set agent request parameters accordingly
         major_release = None
+        commit_id = None
         if self.check_upgrade_in_progress():
             upgrade_release = self.get_software_upgrade()
             major_release = upgrade_release["to_release"]
+            commit_id = ostree_utils.get_feed_latest_commit(major_release)
             force = False
             async_req = False
-            msg = "Running major release deployment, major_release=%s, force=%s, async_req=%s" % (
-                major_release, force, async_req)
+            msg = "Running major release deployment, major_release=%s, force=%s, async_req=%s, commit_id=%s" % (
+                major_release, force, async_req, commit_id)
             msg_info += msg + "\n"
             LOG.info(msg)
             set_host_target_load(hostname, major_release)
@@ -2768,6 +2772,7 @@ class PatchController(PatchService):
         installreq.ip = ip
         installreq.force = force
         installreq.major_release = major_release
+        installreq.commit_id = commit_id
         installreq.encode()
         self.socket_lock.acquire()
         installreq.send(self.sock_out)

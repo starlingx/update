@@ -340,6 +340,7 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
         messages.PatchMessage.__init__(self, messages.PATCHMSG_AGENT_INSTALL_REQ)
         self.force = False
         self.major_release = None
+        self.commit_id = None
 
     def decode(self, data):
         messages.PatchMessage.decode(self, data)
@@ -347,13 +348,16 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
             self.force = data['force']
         if 'major_release' in data:
             self.major_release = data['major_release']
+        if 'commit_id' in data:
+            self.commit_id = data['commit_id']
 
     def encode(self):
         # Nothing to add to the HELLO_AGENT, so just call the super class
         messages.PatchMessage.encode(self)
 
     def handle(self, sock, addr):
-        LOG.info("Handling host install request, force=%s, major_release=%s", self.force, self.major_release)
+        LOG.info("Handling host install request, force=%s, major_release=%s, commit_id=%s",
+                 self.force, self.major_release, self.commit_id)
         global pa
         resp = PatchMessageAgentInstallResp()
 
@@ -372,7 +376,7 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
                 resp.reject_reason = 'Node must be locked.'
                 resp.send(sock, addr)
                 return
-        resp.status = pa.handle_install(major_release=self.major_release)
+        resp.status = pa.handle_install(major_release=self.major_release, commit_id=self.commit_id)
         resp.send(sock, addr)
 
     def send(self, sock):  # pylint: disable=unused-argument
@@ -477,10 +481,8 @@ class PatchAgent(PatchService):
         self.latest_sysroot_commit = active_sysroot_commit
         self.last_repo_revision = active_sysroot_commit
 
+        # checks if this is a major release deployment operation
         if major_release:
-            upgrade_feed_commit = ostree_utils.get_feed_latest_commit(major_release)
-            LOG.info("Major release deployment for %s with commit %s" % (major_release,
-                                                                         upgrade_feed_commit))
             self.changes = True
             return True
 
@@ -507,7 +509,8 @@ class PatchAgent(PatchService):
                        verbose_to_stdout=False,
                        disallow_insvc_patch=False,
                        delete_older_deployments=False,
-                       major_release=None):
+                       major_release=None,
+                       commit_id=None):
         #
         # The disallow_insvc_patch parameter is set when we're installing
         # the patch during init. At that time, we don't want to deal with
@@ -561,10 +564,23 @@ class PatchAgent(PatchService):
         remote = None
         ref = None
         if major_release:
+            LOG.info("Major release deployment for %s with commit %s" % (major_release, commit_id))
+
+            # add remote
             nodetype = utils.get_platform_conf("nodetype")
             remote = ostree_utils.add_ostree_remote(major_release, nodetype)
-            ref = "%s:%s" % (remote, constants.OSTREE_REF)
             LOG.info("OSTree remote added: %s" % remote)
+
+            # check if remote commit_id matches with the one sent by the controller
+            commit_id_match = ostree_utils.check_commit_id(remote, commit_id)
+            if not commit_id_match:
+                LOG.exception("The OSTree commit_id %s sent by the controller "
+                              "doesn't match with the remote commit_id." % commit_id)
+                ostree_utils.delete_ostree_remote(remote)
+                LOG.info("OSTree remote deleted: %s" % remote)
+                return False
+
+            ref = "%s:%s" % (remote, constants.OSTREE_REF)
             copy_target_release_pxeboot_files(major_release)
 
         # Build up the install set
