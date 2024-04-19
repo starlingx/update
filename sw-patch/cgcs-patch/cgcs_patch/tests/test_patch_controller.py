@@ -394,6 +394,54 @@ CONTENTS_WITH_OSTREE_DATA = \
     }
 
 
+CHECK_PATCH_STATES_QUERY_BUG = \
+    {
+        "value": {
+            "First_Patch_APPLIED": {"sw_version": "12.34",
+                                    "requires": [],
+                                    "patchstate": "Partial-Apply",
+                                    "repostate": "Applied"},
+            "Second_Patch_APPLIED": {"sw_version": "12.34",
+                                     "requires": ["First_Patch_APPLIED"],
+                                     "patchstate": "Partial-Apply",
+                                     "repostate": "Applied"},
+            "Third_Patch_CURRENT": {"sw_version": "12.34",
+                                    "requires": ["Second_Patch_APPLIED"],
+                                    "patchstate": "Applied",
+                                    "repostate": "Applied"},
+            "Fourth_Patch_NEWLY_APPLIED": {"sw_version": "12.34",
+                                           "requires": ["Third_Patch_CURRENT"],
+                                           "patchstate": "Partial-Apply",
+                                           "repostate": "Applied"}},
+        "patch_id_list": ["First_Patch_APPLIED", "Second_Patch_APPLIED",
+                          "Third_Patch_CURRENT", "Fourth_Patch_NEWLY_APPLIED"]
+    }
+
+
+CONTENTS_WITH_OSTREE_DATA_QUERY_BUG = \
+    {
+        "First_Patch_APPLIED": {
+            "base": {"commit": "basecommit1"},
+            "number_of_commits": 1,
+            "commit1": {"commit": "commitFirstPatch"}
+        },
+        "Second_Patch_APPLIED": {
+            "base": {"commit": "commitFirstPatch"},
+            "number_of_commits": 1,
+            "commit1": {"commit": "commitSecondPatch"}
+        },
+        "Third_Patch_CURRENT": {
+            "base": {"commit": "commitSecondPatch"},
+            "number_of_commits": 1,
+            "commit1": {"commit": "commitThirdPatch"},
+        },
+        "Fourth_Patch_NEWLY_APPLIED": {
+            "base": {"commit": "commitThirdPatch"},
+            "number_of_commits": 1,
+            "commit1": {"commit": "commitFourthPatch"}
+        }
+    }
+
 IMPORTED_PATCH_CONTENTS = \
     {
         "First_Patch": {
@@ -1468,3 +1516,48 @@ class CgcsPatchControllerTestCase(testtools.TestCase):
         self.assertIsNotNone(results.get("Second_Patch"))
         self.assertIsNone(results.get("Third_Patch"))
         self.assertIsNone(results.get("Fourth_Patch"))
+
+    def test_previously_applied_goes_to_partial_applied(self):
+        # bug description: Applied patches go to a Partial-Applied state after applying a new patch
+        #   after the system reboot all patches correctly goes to the applied state.
+        #
+        # it goes like this, before applying the new patch (PATCH_0005), sw-patch reports the following
+        #
+        #          Patch ID            RR  Release  Patch State
+        # ===========================  ==  =======  ===========
+        # PATCH_0001                   Y     9.0      Applied
+        # PATCH_0002                   Y     9.0      Applied
+        # PATCH_0003                   Y     9.0      Applied
+        # PATCH_0004                   Y     9.0      Applied
+        # PATCH_0005                   Y     9.0      Available
+        #
+        # Then after applying the latest patch, previously applied patches go to partial-applied, as follows:
+        #
+        #          Patch ID            RR  Release   Patch State
+        # ===========================  ==  =======  =============
+        # PATCH_0001                   Y    9.0     Partial-Apply
+        # PATCH_0002                   Y    9.0     Partial-Apply
+        # PATCH_0003                   Y    9.0     Partial-Apply
+        # PATCH_0004                   Y    9.0        Applied
+        # PATCH_0005                   Y    9.0     Partial-Apply
+        #
+        #  This happens because the previously applied patches commit doesn't match the latest_sysroot_commit,
+        #  but the latest applied patch (in our example PATCH_0004) do have their commit matching,
+        #  so we need to mark their dependent patches as a Applied.
+        #
+
+        self.create_patch_data(self.pc, CHECK_PATCH_STATES_QUERY_BUG,
+                               CONTENTS_WITH_OSTREE_DATA_QUERY_BUG)
+        test_ip1 = '127.0.0.1'
+        an_1 = AgentNeighbour(test_ip1)
+        an_1.out_of_date = True
+        an_1.sw_version = "12.34"
+        an_1.latest_sysroot_commit = "commitThirdPatch"
+        self.pc.interim_state = []
+        self.pc.hosts = {test_ip1: an_1}
+        self.pc.check_patch_states()
+
+        self.assertEqual(self.pc.patch_data.metadata["Third_Patch_CURRENT"]["patchstate"], "Applied")
+        self.assertEqual(self.pc.patch_data.metadata["First_Patch_APPLIED"]["patchstate"], "Applied")
+        self.assertEqual(self.pc.patch_data.metadata["Second_Patch_APPLIED"]["patchstate"], "Applied")
+        self.assertEqual(self.pc.patch_data.metadata["Fourth_Patch_NEWLY_APPLIED"]["patchstate"], "Partial-Apply")
