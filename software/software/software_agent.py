@@ -359,6 +359,7 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
 
         if not self.force:
             setflag(node_is_software_updated_rr_file)
+            resp.reboot_required = True
 
         if not os.path.exists(node_is_locked_file):
             if self.force:
@@ -383,6 +384,7 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
         messages.PatchMessage.__init__(self, messages.PATCHMSG_AGENT_INSTALL_RESP)
         self.status = False
         self.reject_reason = None
+        self.reboot_required = False
 
     def encode(self):
         global pa
@@ -390,6 +392,7 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
         self.message['status'] = self.status
         if self.reject_reason is not None:
             self.message['reject_reason'] = self.reject_reason
+        self.message['reboot_required'] = self.reboot_required
 
     def handle(self, sock, addr):
         LOG.error("Should not get here")

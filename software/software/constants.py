@@ -14,6 +14,7 @@ try:
 except Exception:
     pass
 
+from fm_api import constants as fm_constants
 from tsconfig.tsconfig import SW_VERSION
 
 ADDRESS_VERSION_IPV4 = 4
@@ -105,3 +106,26 @@ WORKER = 'worker'
 
 AVAILABILITY_ONLINE = 'online'
 ADMIN_LOCKED = 'locked'
+
+SOFTWARE_ALARMS = {
+    fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_SUCCESS_RR: {
+        "entity_type_id": fm_constants.FM_ENTITY_TYPE_HOST,
+        "severity": fm_constants.FM_ALARM_SEVERITY_WARNING,
+        "reason_text": ("Deploy host completed, unlock the host to apply "
+                        "the new software release"),
+        "alarm_type": fm_constants.FM_ALARM_TYPE_11,
+        "probable_cause": fm_constants.ALARM_PROBABLE_CAUSE_65,
+        "proposed_repair_action": "Unlock host",
+        "service_affecting": True,
+    },
+    fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_FAILURE: {
+        "entity_type_id": fm_constants.FM_ENTITY_TYPE_HOST,
+        "severity": fm_constants.FM_ALARM_SEVERITY_MAJOR,
+        "reason_text": "Deploy host failed, check logs for errors",
+        "alarm_type": fm_constants.FM_ALARM_TYPE_11,
+        "probable_cause": fm_constants.ALARM_PROBABLE_CAUSE_65,
+        "proposed_repair_action": ("Check the logs for errors, fix the issues manually "
+                                   "and retry"),
+        "service_affecting": True,
+    }
+}
