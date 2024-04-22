@@ -313,14 +313,17 @@ def mount_new_deployment(deployment_dir):
             LOG.warning(info_msg)
             raise OSTreeCommandFail(msg)
     finally:
-        try:
-            sh.mount("/usr/local/kubernetes/current/stage1")
-            sh.mount("/usr/local/kubernetes/current/stage2")
-        except sh.ErrorReturnCode:
-            msg = "Failed to mount kubernetes. Please manually run these commands:\n" \
-                  "sudo mount /usr/local/kubernetes/current/stage1\n" \
-                  "sudo mount /usr/local/kubernetes/current/stage2\n"
-            LOG.info(msg)
+        # Handle the switch from bind mounts to symlinks for K8s versions.
+        # Can be removed once the switch is complete.
+        if os.path.isdir('/usr/local/kubernetes/current'):
+            try:
+                sh.mount("/usr/local/kubernetes/current/stage1")
+                sh.mount("/usr/local/kubernetes/current/stage2")
+            except sh.ErrorReturnCode:
+                msg = "Failed to mount kubernetes. Please manually run these commands:\n" \
+                    "sudo mount /usr/local/kubernetes/current/stage1\n" \
+                    "sudo mount /usr/local/kubernetes/current/stage2\n"
+                LOG.info(msg)
 
 
 def delete_older_deployments():
