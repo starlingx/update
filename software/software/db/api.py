@@ -110,11 +110,11 @@ class SoftwareAPI:
     def begin_update(self):
         tid = threading.get_native_id()
         msg = f"{tid} is to acquire lock."
-        LOG.info(msg)
+        LOG.debug(msg)
         SoftwareAPI._lock.acquire()
 
     def end_update(self):
         SoftwareAPI._lock.release()
         tid = threading.get_native_id()
         msg = f"{tid} released lock."
-        LOG.info(msg)
+        LOG.debug(msg)
