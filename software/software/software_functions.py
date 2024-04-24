@@ -1337,25 +1337,9 @@ def set_host_target_load(hostname, major_release):
         raise
 
 
-def validate_host_state_to_deploy_host(hostname):
-    """
-    Check if the deployment host state for the hostname is pending.
-
-    If the validation fails raise SoftwareServiceError exception.
-
-    :param hostname: Hostname of the host to be deployed
-    """
-
-    host_state = get_instance().get_deploy_host_by_hostname(hostname).get("state")
-    if host_state != states.DEPLOY_HOST_STATES.PENDING.value:
-        msg = (f"Host state is {host_state} and should be "
-               f"{states.DEPLOY_HOST_STATES.PENDING.value}")
-        raise SoftwareServiceError(msg)
-
 def deploy_host_validations(hostname):
     """
     Check the conditions below:
-    Host state is pending.
     If system mode is duplex, check if provided hostname satisfy the right deployment order.
     Host is locked and online.
 
@@ -1364,7 +1348,6 @@ def deploy_host_validations(hostname):
 
     :param hostname: Hostname of the host to be deployed
     """
-    validate_host_state_to_deploy_host(hostname)
     _, system_mode = get_system_info()
     simplex = (system_mode == constants.SYSTEM_MODE_SIMPLEX)
     if simplex:

@@ -4,14 +4,9 @@
 # Copyright (c) 2024 Wind River Systems, Inc.
 #
 import unittest
-from unittest.mock import MagicMock
-from unittest.mock import patch
 
-from software import states
-from software.exceptions import SoftwareServiceError
 from software.release_data import SWReleaseCollection
 from software.software_functions import ReleaseData
-from software.software_functions import validate_host_state_to_deploy_host
 
 metadata = """<?xml version="1.0" ?>
 <patch>
@@ -191,17 +186,3 @@ class TestSoftwareFunction(unittest.TestCase):
                 self.assertEqual(val["restart_script"], r.restart_script)
             self.assertEqual(val["commit_id"], r.commit_id)
             self.assertEqual(val["checksum"], r.commit_checksum)
-
-
-    @patch('software.db.api.SoftwareAPI')
-    def test_validate_host_state_to_deploy_host_raises_exception_if_deploy_host_state_is_wrong(self, software_api_mock):
-        # Arrange
-        deploy_host_state = states.DEPLOY_HOST_STATES.DEPLOYED.value
-        deploy_by_hostname = MagicMock(return_value={"state": deploy_host_state})
-        software_api_mock.return_value = MagicMock(get_deploy_host_by_hostname=deploy_by_hostname)
-        with self.assertRaises(SoftwareServiceError) as error:
-        # Actions
-            validate_host_state_to_deploy_host(hostname="abc")
-        # Assertions
-        error_msg = "Host state is deployed and should be pending"
-        self.assertEqual(str(error.exception), error_msg)
