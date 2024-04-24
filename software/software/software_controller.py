@@ -2723,8 +2723,13 @@ class PatchController(PatchService):
         deploy_host = self.db_api_instance.get_deploy_host_by_hostname(hostname)
         if deploy_host is None:
             raise HostNotFound(hostname)
-
-        deploy_host_validations(hostname)
+        deploy = self.db_api_instance.get_deploy_all()[0]
+        to_release = deploy.get("to_release")
+        release_id = None
+        for release in self.release_collection.iterate_releases():
+            if to_release == release.sw_release:
+                release_id = release.id
+        deploy_host_validations(hostname, self.release_collection.get_release_by_id(release_id).is_ga_release)
         deploy_state = DeployState.get_instance()
         deploy_host_state = DeployHostState(hostname)
         deploy_state.deploy_host()

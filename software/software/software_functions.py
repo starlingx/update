@@ -1341,7 +1341,7 @@ def set_host_target_load(hostname, major_release):
         raise
 
 
-def deploy_host_validations(hostname):
+def deploy_host_validations(hostname, is_major_release: bool):
     """
     Check the conditions below:
     If system mode is duplex, check if provided hostname satisfy the right deployment order.
@@ -1351,19 +1351,24 @@ def deploy_host_validations(hostname):
     is a simplex.
 
     :param hostname: Hostname of the host to be deployed
+    :param is_major_release: Bool field indicating if is major release
     """
     _, system_mode = get_system_info()
     simplex = (system_mode == constants.SYSTEM_MODE_SIMPLEX)
+    db_api_instance = get_instance()
+    deploy = db_api_instance.get_current_deploy()
     if simplex:
         LOG.info("System mode is simplex. Skipping deploy order validation...")
     else:
-        validate_host_deploy_order(hostname)
-    if not is_host_locked_and_online(hostname):
-        msg = f"Host {hostname} must be {constants.ADMIN_LOCKED}."
-        raise SoftwareServiceError(error=msg)
+        validate_host_deploy_order(hostname, is_major_release)
+    # If the deployment is not RR the host does not need to be locked and online.
+    if deploy.get(constants.REBOOT_REQUIRED):
+        if not is_host_locked_and_online(hostname):
+            msg = f"Host {hostname} must be {constants.ADMIN_LOCKED}."
+            raise SoftwareServiceError(error=msg)
 
 
-def validate_host_deploy_order(hostname):
+def validate_host_deploy_order(hostname, is_major_release: bool):
     """
     Check if the host to be deployed satisfy the major release deployment right
     order of controller-1 -> controller-0 -> storages -> computes
@@ -1372,16 +1377,12 @@ def validate_host_deploy_order(hostname):
     Case one of the validations failed raise SoftwareError exception
 
     :param hostname: Hostname of the host to be deployed.
+    :param is_major_release: Bool field indicating if is major release
     """
     db_api_instance = get_instance()
     controllers_list = [constants.CONTROLLER_1_HOSTNAME, constants.CONTROLLER_0_HOSTNAME]
     storage_list = []
     workers_list = []
-    is_patch_release = False
-    deploy = db_api_instance.get_deploy_all()[0]
-    to_release = deploy.get("from_release")
-    if to_release != (constants.MAJOR_RELEASE % utils.get_major_release_version(to_release)):
-        is_patch_release = True
     for host in get_ihost_list():
         if host.personality == constants.STORAGE:
             storage_list.append(host.hostname)
@@ -1400,7 +1401,7 @@ def validate_host_deploy_order(hostname):
     if hostname == ordered_list[0] or (ordered_list[0] in workers_list and hostname in workers_list):
         return
     # If deployment is a patch release bypass the controllers order
-    elif is_patch_release and ordered_list[0] in controllers_list and hostname in controllers_list:
+    elif not is_major_release and ordered_list[0] in controllers_list and hostname in controllers_list:
         return
     else:
         errmsg = f"{hostname} does not satisfy the right order of deployment " + \

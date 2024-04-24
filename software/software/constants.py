@@ -48,6 +48,7 @@ PATCH_AGENT_STATE_INSTALLING = "installing"
 PATCH_AGENT_STATE_INSTALL_FAILED = "install-failed"
 PATCH_AGENT_STATE_INSTALL_REJECTED = "install-rejected"
 
+REBOOT_REQUIRED = "reboot_required"
 
 FEED_OSTREE_BASE_DIR = "/var/www/pages/feed"
 OSTREE_BASE_DEPLOYMENT_DIR = "/ostree/deploy/debian/deploy/"
