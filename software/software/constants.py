@@ -36,6 +36,7 @@ RC_UNHEALTHY = 3
 DEPLOY_PRECHECK_SCRIPT = "deploy-precheck"
 UPGRADE_UTILS_SCRIPT = "upgrade_utils.py"
 DEPLOY_START_SCRIPT = "software-deploy-start"
+DEPLOY_CLEANUP_SCRIPT = "deploy-cleanup"
 
 SEMANTICS_DIR = "%s/semantics" % SOFTWARE_STORAGE_DIR
 
@@ -59,6 +60,24 @@ DEBIAN_RELEASE = "bullseye"
 STARLINGX_RELEASE = SW_VERSION
 PATCH_SCRIPTS_STAGING_DIR = "/var/www/pages/updates/software-scripts"
 SYSROOT_OSTREE = "/sysroot/ostree/repo"
+STAGING_DIR = "/sysroot/upgrade"
+ROOT_DIR = "%s/sysroot" % STAGING_DIR
+POSTGRES_PATH = "/var/lib/postgresql"
+PLATFORM_PATH = "/opt/platform"
+RABBIT_PATH = '/var/lib/rabbitmq'
+ETCD_PATH = "/opt/etcd"
+ARMADA = "armada"
+CONFIG = "config"
+DEPLOY = "deploy"
+FLUXCD = "fluxcd"
+HELM = "helm"
+KEYRING = ".keyring"
+PUPPET = "puppet"
+SYSINV = "sysinv"
+UPGRADE = "upgrade"
+VIM = "nfv/vim"
+
+DEPLOY_CLEANUP_FOLDERS_NAME = [ARMADA, CONFIG, DEPLOY, FLUXCD, HELM, KEYRING, PUPPET, SYSINV, VIM]
 
 LOOPBACK_INTERFACE_NAME = "lo"
 
