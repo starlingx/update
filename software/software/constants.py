@@ -33,6 +33,7 @@ RC_SUCCESS = 0
 RC_UNHEALTHY = 3
 
 DEPLOY_PRECHECK_SCRIPT = "deploy-precheck"
+UPGRADE_UTILS_SCRIPT = "upgrade_utils.py"
 DEPLOY_START_SCRIPT = "software-deploy-start"
 
 SEMANTICS_DIR = "%s/semantics" % SOFTWARE_STORAGE_DIR
