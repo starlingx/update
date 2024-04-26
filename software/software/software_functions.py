@@ -993,6 +993,10 @@ class PatchFile(object):
                 tar.extract(constants.DEPLOY_PRECHECK_SCRIPT, path=versioned_dir)
                 os.chmod(versioned_script, mode=0o755)
                 LOG.info("Versioned precheck script copied to %s." % versioned_script)
+                # precheck script requires upgrade utils module to work and it should
+                # be included together with precheck script
+                tar.extract(constants.UPGRADE_UTILS_SCRIPT, path=versioned_dir)
+                LOG.info("Versioned upgrade_utils module copied to %s." % versioned_script)
             # in case patch does not contain a precheck script
             # then symlink to required patch versioned directory
             else:
