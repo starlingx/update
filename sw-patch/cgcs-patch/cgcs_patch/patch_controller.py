@@ -864,10 +864,11 @@ class PatchController(PatchService):
                     continue
 
                 if patch_id not in skip_patch:
-                    if self.patch_data.metadata[patch_id]["repostate"] == constants.AVAILABLE and \
+                    if self.patch_data.metadata[patch_id]["repostate"] in [constants.AVAILABLE, constants.APPLIED] and \
                             self.hosts[ip].latest_sysroot_commit == \
                             self.patch_data.contents[patch_id]["commit1"]["commit"]:
-                        self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_REMOVE
+                        if self.patch_data.metadata[patch_id]["repostate"] == constants.AVAILABLE:
+                            self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_REMOVE
                         patch_dependency_list = self.get_patch_dependency_list(patch_id)
                         for req_patch in patch_dependency_list:
                             if self.patch_data.metadata[req_patch]["repostate"] == constants.AVAILABLE:
@@ -879,6 +880,12 @@ class PatchController(PatchService):
                             self.hosts[ip].latest_sysroot_commit != \
                             self.patch_data.contents[patch_id]["commit1"]["commit"]:
                         self.patch_data.metadata[patch_id]["patchstate"] = constants.PARTIAL_APPLY
+                        # previously_applied bug description: when applying a new reboot-required patch,
+                        #  previously applied patches becomes partial-apply, until the system reboot
+                        #  this happens because the previously applied patches commit doesn't match the latest_sysroot_commit,
+                        #  but the latest patch do have their commit matching, so we need to find them
+                        #  and mark their dependent patches as a applied.
+                        # Look for the test_previously_applied_goes_to_partial_applied test case to see the bug in action.
                     if self.patch_data.metadata[patch_id].get("reboot_required") != "N" and \
                             (self.patch_data.metadata[patch_id]["patchstate"] == constants.PARTIAL_APPLY or
                              self.patch_data.metadata[patch_id]["patchstate"] == constants.PARTIAL_REMOVE):
