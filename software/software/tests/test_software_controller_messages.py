@@ -19,7 +19,7 @@ from software.software_controller import PatchMessageQueryDetailedResp
 from software.software_controller import PatchMessageAgentInstallReq
 from software.software_controller import PatchMessageAgentInstallResp
 from software.software_controller import PatchMessageDropHostReq
-
+from software.states import DEPLOY_HOST_STATES
 
 FAKE_AGENT_ADDRESS = "127.0.0.1"
 FAKE_AGENT_MCAST_GROUP = "239.1.1.4"
@@ -35,7 +35,7 @@ class FakeSoftwareController(object):
         self.allow_insvc_softwareing = True
         self.controller_address = FAKE_CONTROLLER_ADDRESS
         self.controller_neighbours = {}
-        self.hosts = {}
+        self.hosts = {FAKE_HOST_IP: {"hostname": "controller-0"}}
         self.interim_state = {}
         self.latest_feed_commit = FAKE_OSTREE_FEED_COMMIT
         self.patch_op_counter = 0
@@ -143,12 +143,16 @@ class SoftwareControllerMessagesTestCase(testtools.TestCase):
                 mock_sock.sendall.assert_called()
 
     @mock.patch('software.software_controller.sc', FakeSoftwareController())
-    def test_message_class_handle(self):
+    @mock.patch('software.db.api.SoftwareAPI.get_deploy_host_by_hostname',
+                return_value={"state": DEPLOY_HOST_STATES.DEPLOYING})
+    @mock.patch('software.software_entities.DeployHostHandler.update', return_value=True)
+    def test_message_class_handle(self, mock_get_deploy_host_by_hostname, mock_update):  # pylint: disable=unused-argument
         """'handle' method tests"""
         addr = [FAKE_CONTROLLER_ADDRESS, ]  # addr is a list
         mock_sock = mock.Mock()
         special_setup = {
             PatchMessageDropHostReq: ('ip', FAKE_HOST_IP),
+            PatchMessageAgentInstallResp: ('status', True),
         }
 
         for message_class in SoftwareControllerMessagesTestCase.message_classes:

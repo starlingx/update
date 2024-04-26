@@ -581,16 +581,10 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
             sc.hosts_lock.release()
 
         deploy_host_state = DeployHostState(hostname)
-        # NOTE(bqian) apparently it uses 2 boolean to indicate 2 situations
-        # where there could be 4 combinations
         if self.status:
             deploy_host_state.deployed()
-            return
-        elif self.reject_reason:
+        else:
             deploy_host_state.deploy_failed()
-            return
-
-        LOG.error("Bug: shouldn't reach here")
 
     def send(self, sock):  # pylint: disable=unused-argument
         LOG.error("Should not get here")
@@ -1346,7 +1340,7 @@ class PatchController(PatchService):
 
             # Get the release_id from the patch's metadata
             # and check to see if it's already uploaded
-            release_id = get_release_from_patch(patch_file,'id')
+            release_id = get_release_from_patch(patch_file, 'id')
 
             release = self.release_collection.get_release_by_id(release_id)
 
