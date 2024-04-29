@@ -109,8 +109,8 @@ def import_versioned_module(version, submodule=None):
 
 def check_rc(req, data):
     rc = 0
-    if req.status_code == 200 and data:
-        if 'error' in data and data["error"] != "":
+    if req.status_code == 200:
+        if data and 'error' in data and data["error"] != "":
             rc = 1
     else:
         rc = 1

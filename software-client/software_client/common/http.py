@@ -26,6 +26,7 @@ from oslo_utils import encodeutils
 import requests
 from requests_toolbelt import MultipartEncoder
 import socket
+from pecan.core import Response as PCResponse
 
 import six
 from six.moves.urllib.parse import urlparse
@@ -148,6 +149,30 @@ def _extract_error_json(body, resp):
         except ValueError:
             return {}
 
+class Response(object):
+    """SessionClient and HttpClient do not return the same
+    response object. This calss is to create a common response
+    data to fulfill the need of CLI and also isolate the
+    implementation of different Client adapters.
+
+    For now, CLI only needs content text and the status_code
+    """
+
+    def __init__(self, status_code, text):
+        self._status_code = status_code
+        if isinstance(text, bytes):
+            self._text = text.decode()
+        else:
+            self._text = text
+
+    @property
+    def status_code(self):
+        return self._status_code
+
+    @property
+    def text(self):
+        return self._text
+
 
 class SessionClient(adapter.LegacyJsonAdapter):
 
@@ -201,7 +226,7 @@ class SessionClient(adapter.LegacyJsonAdapter):
                 _logger.error('Could not decode response body as JSON')
         else:
             body = None
-        return resp, body
+        return Response(resp.status_code, resp.text), body
 
     def multipart_request(self, method, url, **kwargs):
         kwargs.setdefault('headers', {})
@@ -223,7 +248,7 @@ class SessionClient(adapter.LegacyJsonAdapter):
                 _logger.error('Could not decode response body as JSON')
         else:
             body = None
-        return resp, body
+        return Response(resp.status_code, resp.text), body
 
     def raw_request(self, method, url, **kwargs):
         kwargs.setdefault('headers', {})
@@ -380,7 +405,8 @@ class HTTPClient(httplib2.Http):
 
         self.http_log_req(_logger, args, log_kargs)
         try:
-            resp, body = self.request(*args, **kargs)
+            _, body = self.request(*args, **kargs)
+            resp = PCResponse(body=body)
         except requests.exceptions.SSLError as e:
             raise exceptions.SslCertificateValidationError(reason=str(e))
         except Exception as e:
@@ -395,34 +421,9 @@ class HTTPClient(httplib2.Http):
             # picked up for making http requests
             self.connections.clear()
 
-        # Read body into string if it isn't obviously image data
-        body_str = None
-        if 'content-type' in resp and resp['content-type'] != 'application/octet-stream':
-            body_str = ''.join([chunk for chunk in body.decode('utf8')])
-            self.http_log_resp(_logger, resp, body_str)
-            body = body_str
-        else:
-            self.http_log_resp(_logger, resp, body)
-
-        status_code = self.get_status_code(resp)
-        if status_code == 401:
-            raise exceptions.HTTPUnauthorized(body)
-        elif status_code == 403:
-            reason = "Not allowed/Proper role is needed"
-            if body_str is not None:
-                error_json = self._extract_error_json(body_str)
-                reason = error_json.get('faultstring')
-                if reason is None:
-                    reason = error_json.get('description')
-            raise exceptions.Forbidden(reason)
-        elif 400 <= status_code < 600:
-            _logger.warn("Request returned failure status: %s", status_code)  # pylint: disable=deprecated-method
-            error_json = self._extract_error_json(body_str)
-            raise exceptions.from_response(
-                resp, error_json.get('faultstring'),
-                error_json.get('debuginfo'), *args)
-        elif status_code in (300, 301, 302, 305):
-            raise exceptions.from_response(resp, *args)
+        # NOTE (bqian) Do not recreate and raise exceptions. Let the
+        # display_error utility function to handle the well formatted
+        # response for webob.exc.HTTPClientError
 
         return resp, body
 
@@ -448,25 +449,7 @@ class HTTPClient(httplib2.Http):
             resp, body_iter = self._cs_request(
                 connection_url, method, **kwargs)
 
-        content_type = resp['content-type'] \
-            if resp.get('content-type', None) else None
-
-        # Add status_code attribute to make compatible with session resp
-        setattr(resp, 'status_code', resp.status)
-
-        if resp.status == 204 or resp.status == 205 or content_type is None:
-            return resp, list()
-
-        if 'application/json' in content_type:
-            body = ''.join([chunk for chunk in body_iter])
-            try:
-                body = json.loads(body)
-            except ValueError:
-                _logger.error('Could not decode response body as JSON')
-        else:
-            body = None
-
-        return resp, body
+        return Response(resp.status_code, resp.text), resp.json_body
 
     def multipart_request(self, method, url, **kwargs):
         return self.upload_request_with_multipart(method, url, **kwargs)
