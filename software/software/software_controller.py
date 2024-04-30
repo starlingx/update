@@ -545,6 +545,7 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
         messages.PatchMessage.__init__(self, messages.PATCHMSG_AGENT_INSTALL_RESP)
         self.status = False
         self.reject_reason = None
+        self.reboot_required = False
 
     def decode(self, data):
         messages.PatchMessage.decode(self, data)
@@ -552,6 +553,8 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
             self.status = data['status']
         if 'reject_reason' in data:
             self.reject_reason = data['reject_reason']
+        if 'reboot_required' in data:
+            self.reboot_required = data['reboot_required']
 
     def encode(self):
         # Nothing to add, so just call the super class
@@ -564,11 +567,11 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
 
         sc.hosts_lock.acquire()
         try:
-            # NOTE(bqian) seems like trying to tolerant a failure situation
+            # NOTE(bqian) seems like trying to tolerate a failure situation
             # that a host is directed to install a patch but during the installation
             # software-controller-daemon gets restarted
             # should remove the sc.hosts which is in memory volatile storage and replaced with
-            # armanent deploy-host entity
+            # permanent deploy-host entity
             ip = addr[0]
             if ip not in sc.hosts:
                 sc.hosts[ip] = AgentNeighbour(ip)
@@ -583,8 +586,15 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
         deploy_host_state = DeployHostState(hostname)
         if self.status:
             deploy_host_state.deployed()
+            if self.reboot_required:
+                sc.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_SUCCESS_RR,
+                                         fm_constants.FM_ALARM_STATE_SET,
+                                         "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, hostname))
         else:
             deploy_host_state.deploy_failed()
+            sc.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_FAILURE,
+                                     fm_constants.FM_ALARM_STATE_SET,
+                                     "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, hostname))
 
     def send(self, sock):  # pylint: disable=unused-argument
         LOG.error("Should not get here")
@@ -2683,10 +2693,10 @@ class PatchController(PatchService):
 
         if self._activate():
             deploy_state.activate_completed()
-            msg_info += "Deployment has been activated\n"
+            msg_info += "Deployment has been activated.\n"
         else:
             deploy_state.activate_failed()
-            msg_error += "Dployment activation has failed.\n"
+            msg_error += "Deployment activation has failed.\n"
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
@@ -2715,6 +2725,13 @@ class PatchController(PatchService):
         deploy_state.deploy_host()
         deploy_host_state.deploy_started()
 
+        # if in a 'deploy host' reentrant scenario, i.e. retrying after
+        # a failure, then clear the failure alarm before retrying
+        entity_instance_id = "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, hostname)
+        self.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_FAILURE,
+                                   fm_constants.FM_ALARM_STATE_CLEAR,
+                                   entity_instance_id)
+
         # NOTE(bqian) Get IP address to fulfill the need of patching structure.
         # need to review the design
         ip = socket.getaddrinfo(hostname, 0)[0][4][0]
@@ -2740,7 +2757,6 @@ class PatchController(PatchService):
             msg_info += msg + "\n"
             LOG.info(msg)
             set_host_target_load(hostname, major_release)
-            # TODO(heitormatsui) update host deploy status
 
         self.hosts_lock.acquire()
         self.hosts[ip].install_pending = True
@@ -2969,6 +2985,38 @@ class PatchController(PatchService):
 
         func(*args, **kwargs)
         self._update_state_to_peer()
+
+    def manage_software_alarm(self, alarm_id, alarm_state, entity_instance_id):
+        try:
+            if alarm_id not in constants.SOFTWARE_ALARMS:
+                raise Exception("Unknown software alarm '%s'." % alarm_id)
+
+            # deal with the alarm clear scenario
+            if alarm_state == fm_constants.FM_ALARM_STATE_CLEAR:
+                LOG.info("Clearing alarm: %s for %s" % (alarm_id, entity_instance_id))
+                self.fm_api.clear_fault(alarm_id, entity_instance_id)
+                return
+
+            # if not clear alarm scenario, create the alarm
+            alarm_data = constants.SOFTWARE_ALARMS.get(alarm_id)
+            alarm = fm_api.Fault(
+                alarm_id=alarm_id,
+                alarm_state=alarm_state,
+                entity_type_id=alarm_data.get("entity_type_id"),
+                entity_instance_id=entity_instance_id,
+                severity=alarm_data.get("severity"),
+                reason_text=alarm_data.get("reason_text"),
+                alarm_type=alarm_data.get("alarm_type"),
+                probable_cause=alarm_data.get("probable_cause"),
+                proposed_repair_action=alarm_data.get("proposed_repair_action"),
+                service_affecting=alarm_data.get("service_affecting"),
+            )
+            LOG.info("Raising alarm: %s for %s" % (alarm_id, entity_instance_id))
+            self.fm_api.set_fault(alarm)
+        except Exception as e:
+            LOG.exception("Failed to manage alarm %s with action %s: %s" % (
+                alarm_id, alarm_state, str(e)
+            ))
 
     def handle_deploy_state_sync(self, alarm_instance_id):
         """
