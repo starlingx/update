@@ -2730,9 +2730,9 @@ class PatchController(PatchService):
         # Check if there is a major release deployment in progress
         # and set agent request parameters accordingly
         major_release = None
-        upgrade_in_progress = self.get_software_upgrade()
-        if upgrade_in_progress:
-            major_release = upgrade_in_progress["to_release"]
+        if self.check_upgrade_in_progress():
+            upgrade_release = self.get_software_upgrade()
+            major_release = upgrade_release["to_release"]
             force = False
             async_req = False
             msg = "Running major release deployment, major_release=%s, force=%s, async_req=%s" % (
@@ -3050,6 +3050,20 @@ class PatchController(PatchService):
             "to_release": to_maj_min_release,
             "state": state
         }
+
+    def check_upgrade_in_progress(self):
+        """
+        Check if major release upgrade is in progress
+        """
+        _upgrade_in_progress = False
+        upgrade_release = self._get_software_upgrade()
+        if not upgrade_release:
+            return _upgrade_in_progress
+        from_release = version.Version(upgrade_release["from_release"])
+        to_release = version.Version(upgrade_release["to_release"])
+        if (from_release.major != to_release.major) or (from_release.minor != to_release.minor):
+            _upgrade_in_progress = True
+        return _upgrade_in_progress
 
     def get_software_upgrade(self):
         return self._get_software_upgrade()
