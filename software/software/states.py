@@ -106,6 +106,8 @@ class DEPLOY_STATES(Enum):
     ACTIVATE_DONE = 'activate-done'
     ACTIVATE_FAILED = 'activate-failed'
 
+    COMPLETED = 'completed'
+
     ABORT = 'abort'
     ABORT_DONE = 'abort-done'
 

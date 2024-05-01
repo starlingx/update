@@ -35,6 +35,7 @@ import software.ostree_utils as ostree_utils
 from software.api import app
 from software.authapi import app as auth_app
 from software.states import DEPLOY_STATES
+from software.states import DEPLOY_HOST_STATES
 from software.base import PatchService
 from software.dc_utils import get_subcloud_groupby_version
 from software.deploy_state import require_deploy_state
@@ -2661,13 +2662,11 @@ class PatchController(PatchService):
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     def _deploy_complete(self):
-        # TODO(bqian) complete the deploy
-        # as deployment has been already activated, there is no return,
-        # deploy complete can only succeed.
-        # tasks for completion of deploy is to delete leftover data from
-        # previous release. If some data could not be deleted, need to
-        # automatically reattempt to delete it in later statge. (outside
-        # a deployment)
+        is_all_hosts_in_deployed_state = all(host_state.get("state") == DEPLOY_HOST_STATES.DEPLOYED.value
+                                             for host_state in self.db_api_instance.get_deploy_host())
+        if not is_all_hosts_in_deployed_state:
+            raise SoftwareServiceError(f"Complete not allowed because there are hosts not"
+                                       f" in {DEPLOY_HOST_STATES.DEPLOYED.value} state.")
         return True
 
     @require_deploy_state([DEPLOY_STATES.ACTIVATE_DONE],

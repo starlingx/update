@@ -31,9 +31,10 @@ deploy_state_transition = {
                                 DEPLOY_STATES.HOST_DONE],
     DEPLOY_STATES.HOST_DONE: [DEPLOY_STATES.ABORT, DEPLOY_STATES.ACTIVATE],
     DEPLOY_STATES.ACTIVATE: [DEPLOY_STATES.ACTIVATE_DONE, DEPLOY_STATES.ACTIVATE_FAILED],
-    DEPLOY_STATES.ACTIVATE_DONE: [DEPLOY_STATES.ABORT, None],  # abort after deploy-activated?
+    DEPLOY_STATES.ACTIVATE_DONE: [DEPLOY_STATES.ABORT, DEPLOY_STATES.COMPLETED],  # abort after deploy-activated?
     DEPLOY_STATES.ACTIVATE_FAILED: [DEPLOY_STATES.ACTIVATE, DEPLOY_STATES.ABORT],
-    DEPLOY_STATES.ABORT_DONE: []  # waitng for being deleted
+    DEPLOY_STATES.ABORT_DONE: [],  # waiting for being deleted
+    DEPLOY_STATES.COMPLETED: [None]
 }
 
 
@@ -171,15 +172,7 @@ class DeployState(object):
         self.transform(DEPLOY_STATES.ACTIVATE_FAILED)
 
     def completed(self):
-        self.transform(None)
-        # delete the deploy and deploy host entities
-        db_api = get_instance()
-        db_api.begin_update()
-        try:
-            db_api.delete_deploy_host_all()
-            db_api.delete_deploy()
-        finally:
-            db_api.end_update()
+        self.transform(DEPLOY_STATES.COMPLETED)
 
 
 def require_deploy_state(require_states, prompt):
