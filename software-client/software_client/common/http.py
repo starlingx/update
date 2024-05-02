@@ -176,13 +176,9 @@ class SessionClient(adapter.LegacyJsonAdapter):
 
         resp = self.session.request(url, method,
                                     raise_exc=False, **kwargs)
-        if 400 <= resp.status_code < 600:
-            error_json = _extract_error_json(resp.content, resp)
-            raise exceptions.from_response(
-                resp, error_json.get('faultstring'),
-                error_json.get('debuginfo'), method, url)
-        elif resp.status_code in (300, 301, 302, 305):
-            raise exceptions.from_response(resp, method=method, url=url)
+        # NOTE (bqian) Do not recreate and raise exceptions. Let the
+        # display_error utility function to handle the well formatted
+        # response for webob.exc.HTTPClientError
         return resp
 
     def json_request(self, method, url, **kwargs):
@@ -270,8 +266,8 @@ class SessionClient(adapter.LegacyJsonAdapter):
             if response.status_code != 200:
                 err_message = _extract_error_json(response.text, response)
                 fault_text = (
-                    err_message.get("faultstring")
-                    or "Unknown error in SessionClient while uploading request with multipart"
+                    err_message.get("faultstring") or
+                    "Unknown error in SessionClient while uploading request with multipart"
                 )
                 raise exceptions.HTTPBadRequest(fault_text)
 
@@ -475,7 +471,6 @@ class HTTPClient(httplib2.Http):
     def multipart_request(self, method, url, **kwargs):
         return self.upload_request_with_multipart(method, url, **kwargs)
 
-
     def raw_request(self, method, url, **kwargs):
         if not self.local_root:
             self.authenticate_and_fetch_endpoint_url()
@@ -539,8 +534,8 @@ class HTTPClient(httplib2.Http):
                              'tenantName': self.tenant_name, }, }
 
         resp, resp_body = self._cs_request(token_url, "POST",
-                                            body=json.dumps(body),
-                                            content_type="application/json")
+                                           body=json.dumps(body),
+                                           content_type="application/json")
         status_code = self.get_status_code(resp)
         if status_code != 200:
             raise exceptions.HTTPUnauthorized(resp_body)
@@ -570,7 +565,7 @@ class HTTPClient(httplib2.Http):
             body_json = json.loads(body)
             if 'error' in body_json:
                 error_json = {'faultstring': body_json.get('error'),
-                            'debuginfo': body_json.get('info')}
+                              'debuginfo': body_json.get('info')}
             elif 'error_message' in body_json:
                 raw_msg = body_json['error_message']
                 error_json = json.loads(raw_msg)

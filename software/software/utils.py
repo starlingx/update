@@ -52,6 +52,9 @@ class ExceptionHook(hooks.PecanHook):
             LOG.exception(e)
 
             data = dict(info=e.info, warning=e.warning, error=e.error)
+        elif isinstance(e, webob.exc.HTTPClientError):
+            LOG.warning("%s. Signature [%s]" % (str(e), signature))
+            raise e
         else:
             # with an exception that is not pre-categorized as "expected", it is a
             # bug. Or not properly categorizing the exception itself is a bug.
@@ -274,6 +277,12 @@ def get_all_files(temp_dir=constants.SCRATCH_DIR):
     except Exception:
         LOG.exception("Failed to get files from %s", temp_dir)
         return []
+
+
+def get_local_region_name():
+    config = CONF.get('keystone_authtoken')
+    region_name = config.region_name
+    return region_name
 
 
 def get_auth_token_and_endpoint(user: dict, service_type: str, region_name: str, interface: str):

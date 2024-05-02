@@ -6,3 +6,4 @@ coverage
 httplib2
 pylint
 stestr
+tabulate

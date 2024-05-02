@@ -1360,7 +1360,7 @@ def deploy_host_validations(hostname):
         validate_host_deploy_order(hostname)
     if not is_host_locked_and_online(hostname):
         msg = f"Host {hostname} must be {constants.ADMIN_LOCKED}."
-        raise SoftwareServiceError(msg)
+        raise SoftwareServiceError(error=msg)
 
 
 def validate_host_deploy_order(hostname):
@@ -1395,7 +1395,7 @@ def validate_host_deploy_order(hostname):
         if host.get("state") == states.DEPLOY_HOST_STATES.DEPLOYED.value:
             ordered_list.remove(host.get("hostname"))
     if not ordered_list:
-        raise SoftwareServiceError("All hosts are already in deployed state.")
+        raise SoftwareServiceError(error="All hosts are already in deployed state.")
     # If there is only workers nodes there is no order to deploy
     if hostname == ordered_list[0] or (ordered_list[0] in workers_list and hostname in workers_list):
         return
@@ -1403,5 +1403,6 @@ def validate_host_deploy_order(hostname):
     elif is_patch_release and ordered_list[0] in controllers_list and hostname in controllers_list:
         return
     else:
-        raise SoftwareServiceError(f"{hostname.capitalize()} do not satisfy the right order of deployment "
-                                   f"should be {ordered_list[0]}")
+        errmsg = f"{hostname} does not satisfy the right order of deployment " + \
+                 f"should be {ordered_list[0]}"
+        raise SoftwareServiceError(error=errmsg)

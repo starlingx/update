@@ -20,70 +20,68 @@ from software_client.tests import utils
 import software_client.v1.release
 
 RELEASE = {
-  'sd':
-  {'starlingx-24.03.0': {
-    'state': 'deployed',
-    'sw_version': '24.03.0',
-    'status': 'REL',
-    'unremovable': 'Y',
-    'summary': 'STX 24.03 GA release',
-    'description': 'STX 24.03 major GA release',
-    'install_instructions': '',
-    'warnings': '',
-    'apply_active_release_only': '',
-    'reboot_required': 'Y',
-    'requires': [],
-    'packages': []
+    'sd': {
+        'starlingx-24.03.0': {
+            'state': 'deployed',
+            'sw_version': '24.03.0',
+            'status': 'REL',
+            'unremovable': 'Y',
+            'summary': 'STX 24.03 GA release',
+            'description': 'STX 24.03 major GA release',
+            'install_instructions': '',
+            'warnings': '',
+            'apply_active_release_only': '',
+            'reboot_required': 'Y',
+            'requires': [],
+            'packages': []
+        }
     }
-  }
 }
 
 fixtures = {
-    '/v1/software/query?show=all':
+    '/v1/release?show=all':
     {
         'GET': (
             {},
             {'sd': RELEASE['sd']},
         ),
     },
-    '/v1/software/show/1':
+    '/v1/release/1':
     {
-        'POST': (
+        'DELETE': (
+            {},
+            None,
+        ),
+        'GET': (
             {},
             True,
         ),
+
     },
-    '/v1/software/delete/1':
-    {
-        'POST': (
-            {},
-            {},
-        ),
-    },
-    '/v1/software/is_available/1':
-    {
-        'POST': (
-            {},
-            True,
-        ),
-    },
-    '/v1/software/is_deployed/1':
-    {
-        'POST': (
-            {},
-            False,
-        ),
-    },
-    '/v1/software/is_committed/1':
-    {
-        'POST': (
-            {},
-            False,
-        ),
-    },
-    '/v1/software/install_local':
+    '/v1/release/1/is_available':
     {
         'GET': (
+            {},
+            True,
+        ),
+    },
+    '/v1/release/1/is_deployed':
+    {
+        'GET': (
+            {},
+            False,
+        ),
+    },
+    '/v1/release/1/is_committed':
+    {
+        'GET': (
+            {},
+            False,
+        ),
+    },
+    '/v1/deploy/install_local':
+    {
+        'POST': (
             {},
             {},
         ),
@@ -112,7 +110,7 @@ class ReleaseManagerTest(testtools.TestCase):
         args = Args(**input)
         release = self.mgr.list(args)
         expect = [
-            ('GET', '/v1/software/query?show=all', {}, None),
+            ('GET', '/v1/release?show=all', {}, None),
         ]
         self.assertEqual(self.api.calls, expect)
         self.assertEqual(len(release), 2)
@@ -122,7 +120,7 @@ class ReleaseManagerTest(testtools.TestCase):
         args = Args(**input)
         release = self.mgr.show(args)
         expect = [
-            ('POST', '/v1/software/show/1', {}, {}),
+            ('GET', '/v1/release/1', {}, None),
         ]
         self.assertEqual(self.api.calls, expect)
         self.assertEqual(len(release), 2)
@@ -130,7 +128,7 @@ class ReleaseManagerTest(testtools.TestCase):
     def test_release_delete(self):
         response = self.mgr.release_delete("1")
         expect = [
-            ('POST', '/v1/software/delete/1', {}, {}),
+            ('DELETE', '/v1/release/1', {}, None),
         ]
         self.assertEqual(self.api.calls, expect)
         self.assertEqual(len(response), 2)
@@ -138,7 +136,7 @@ class ReleaseManagerTest(testtools.TestCase):
     def test_is_available(self):
         response = self.mgr.is_available('1')
         expect = [
-            ('POST', '/v1/software/is_available/1', {}, {}),
+            ('GET', '/v1/release/1/is_available', {}, None),
         ]
         self.assertEqual(self.api.calls, expect)
         self.assertTrue(response[1], True)
@@ -146,7 +144,7 @@ class ReleaseManagerTest(testtools.TestCase):
     def test_is_deployed(self):
         response = self.mgr.is_deployed('1')
         expect = [
-            ('POST', '/v1/software/is_deployed/1', {}, {}),
+            ('GET', '/v1/release/1/is_deployed', {}, None),
         ]
         self.assertEqual(self.api.calls, expect)
         self.assertFalse(response[1], False)
@@ -154,7 +152,7 @@ class ReleaseManagerTest(testtools.TestCase):
     def test_is_committed(self):
         response = self.mgr.is_committed('1')
         expect = [
-            ('POST', '/v1/software/is_committed/1', {}, {}),
+            ('GET', '/v1/release/1/is_committed', {}, None),
         ]
         self.assertEqual(self.api.calls, expect)
         self.assertFalse(response[1], True)
@@ -164,7 +162,7 @@ class ReleaseManagerTest(testtools.TestCase):
         args = Args(**input)
         response = self.mgr.upload(args)
         expect = [
-            ('POST', '/v1/software/upload', {}, {}),
+            ('POST', '/v1/release', {}, {}),
         ]
         self.assertNotEqual(self.api.calls, expect)
         self.assertEqual(response, 0)
@@ -174,7 +172,7 @@ class ReleaseManagerTest(testtools.TestCase):
         args = Args(**input)
         response = self.mgr.upload_dir(args)
         expect = [
-            ('POST', '/v1/software/upload', {}, {}),
+            ('POST', '/v1/release', {}, {}),
         ]
         self.assertNotEqual(self.api.calls, expect)
         self.assertEqual(response, 0)
@@ -182,15 +180,12 @@ class ReleaseManagerTest(testtools.TestCase):
     def test_install_local(self):
         self.mgr.install_local()
         expect = [
-            ('GET', '/v1/software/install_local', {}, None),
+            ('POST', '/v1/deploy/install_local', {}, None),
         ]
         self.assertEqual(self.api.calls, expect)
 
     def test_commit_patch(self):
-        input = {'sw_version': '1', 'all': ''}
-        args = Args(**input)
-        kernel = self.mgr.commit_patch(args)
         expect = [
-            ('GET', '/v1/software/commit_patch/1', {}, None),
+            ('POST', '/v1/release/1/commit_patch', {}, None),
         ]
         self.assertNotEqual(self.api.calls, expect)

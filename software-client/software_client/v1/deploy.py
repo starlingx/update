@@ -7,7 +7,6 @@
 import re
 import requests
 import signal
-import sys
 import time
 
 from software_client.common import base
@@ -27,15 +26,16 @@ class DeployManager(base.Manager):
         # args.deployment is a string
         deployment = args.deployment
 
-        # args.region is a string
-        region_name = args.region_name
-
-        path = "/v1/software/deploy_precheck/%s" % (deployment)
+        path = "/v1/deploy/%s/precheck" % (deployment)
+        body = {}
         if args.force:
-            path += "/force"
-        path += "?region_name=%s" % region_name
+            body["force"] = "true"
 
-        return self._create(path, body={})
+        if args.region_name:
+            body["region_name"] = args.region_name
+
+        res = self._post(path, body=body)
+        return res
 
     def start(self, args):
         # args.deployment is a string
@@ -45,51 +45,31 @@ class DeployManager(base.Manager):
         signal.signal(signal.SIGINT, signal.SIG_IGN)
 
         # Issue deploy_start request
+        path = "/v1/deploy/%s/start" % (deployment)
+        body = {}
         if args.force:
-            path = "/v1/software/deploy_start/%s/force" % (deployment)
-        else:
-            path = "/v1/software/deploy_start/%s" % (deployment)
+            body["force"] = "true"
 
-        return self._create(path, body={})
+        return self._post(path, body=body)
 
     def host(self, args):
         # args.deployment is a string
         hostname = args.host
 
         # Issue deploy_host request and poll for results
-        path = "/v1/software/deploy_host/%s" % (hostname)
+        path = "/v1/deploy_host/%s" % (hostname)
 
         if args.force:
             path += "/force"
 
-        req, data = self._create(path, body={})
-        if req.status_code == 200:
-            if 'error' in data and data["error"] != "":
-                print("Error:")
-                print(data["error"])
-                rc = 1
-            else:
-                # NOTE(bqian) should consider return host_list instead.
-                rc = self.wait_for_install_complete(hostname)
-        elif req.status_code == 500:
-            print("An internal error has occurred. "
-                "Please check /var/log/software.log for details")
-            rc = 1
-        else:
-            m = re.search("(Error message:.*)", req.text, re.MULTILINE)
-            if m:
-                print(m.group(0))
-            else:
-                print("%s %s" % (req.status_code, req.reason))
-            rc = 1
-        return rc
+        return self._create(path)
 
     def activate(self, args):
         # Ignore interrupts during this function
         signal.signal(signal.SIGINT, signal.SIG_IGN)
 
         # Issue deploy_start request
-        path = "/v1/software/deploy_activate"
+        path = "/v1/deploy/activate"
 
         return self._create(path, body={})
 
@@ -98,20 +78,20 @@ class DeployManager(base.Manager):
         signal.signal(signal.SIGINT, signal.SIG_IGN)
 
         # Issue deploy_start request
-        path = "/v1/software/deploy_complete/"
+        path = "/v1/deploy/complete"
 
         return self._create(path, body={})
 
     def host_list(self):
-        path = '/v1/software/host_list'
+        path = '/v1/deploy_host'
         return self._list(path, "")
 
     def show(self):
-        path = '/v1/software/deploy'
-        return self._list(path, "")
+        path = '/v1/deploy'
+        return self._list(path)
 
     def wait_for_install_complete(self, hostname):
-        url = "/v1/software/host_list"
+        url = "/v1/deploy_host"
         rc = 0
 
         max_retries = 4

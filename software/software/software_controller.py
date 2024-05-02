@@ -1140,7 +1140,7 @@ class PatchController(PatchService):
             # Disallow the install
             msg = "This command can only be used before initial system configuration."
             LOG.exception(msg)
-            raise SoftwareFail(msg)
+            raise SoftwareServiceError(error=msg)
 
         update_hosts_file = False
 
@@ -2224,15 +2224,18 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error, system_healthy=system_healthy)
 
-    def software_deploy_precheck_api(self, deployment: str, force: bool = False, **kwargs) -> dict:
+    def software_deploy_precheck_api(self, deployment: str, force: bool = False, region_name=None) -> dict:
         """
         Verify if system satisfy the requisites to upgrade to a specified deployment.
         :param deployment: full release name, e.g. starlingx-MM.mm.pp
         :param force: if True will ignore minor alarms during precheck
         :return: dict of info, warning and error messages
         """
+
         release = self._release_basic_checks(deployment)
-        region_name = kwargs["region_name"]
+        if region_name is None:
+            region_name = utils.get_local_region_name()
+
         release_version = release.sw_release
         patch = not utils.is_upgrade_deploy(SW_VERSION, release_version)
         return self._deploy_precheck(release_version, force, region_name, patch)

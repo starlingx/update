@@ -36,6 +36,9 @@ class Manager(object):
     def _create_multipart(self, url, **kwargs):
         return self.api.multipart_request('POST', url, **kwargs)
 
+    def _post(self, url, **kwargs):
+        return self.api.json_request('POST', url, **kwargs)
+
     def _list(self, url, response_key=None, obj_class=None, body=None):
         resp, body = self.api.json_request('GET', url)
         if response_key:
@@ -47,6 +50,14 @@ class Manager(object):
             data = body
 
         return resp, data
+
+    def _fetch(self, url):
+        resp, body = self.api.json_request('GET', url)
+        data = body
+        return resp, data
+
+    def _delete(self, url):
+        return self.api.json_request('DELETE', url)
 
 
 class Resource(object):

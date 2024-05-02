@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-import json
 import os
 import signal
 import sys
@@ -27,27 +26,40 @@ class ReleaseManager(base.Manager):
     resource_class = Release
 
     def list(self, args):
-        state = args.state  # defaults to "all"
-        extra_opts = ""
+        path = "/v1/release"
+        state = args.state
+        additions = []
+        if state:
+            additions.append("show=%s" % state)
+
         if args.release:
-            extra_opts = "&release=%s" % args.release
-        path = "/v1/software/query?show=%s%s" % (state, extra_opts)
+            additions.append("release=%s" % args.release)
+
+        if len(additions) > 0:
+            path = path + "?" + "&".join(additions)
+
         return self._list(path, "")
+
+    def show(self, args):
+        releases = "/".join(args.release)
+
+        path = "/v1/release/%s" % (releases)
+        return self._fetch(path)
 
     def is_available(self, release):
         releases = "/".join(release)
-        path = '/v1/software/is_available/%s' % (releases)
-        return self._create(path, body={})
+        path = '/v1/release/%s/is_available' % (releases)
+        return self._fetch(path)
 
     def is_deployed(self, release):
         releases = "/".join(release)
-        path = '/v1/software/is_deployed/%s' % (releases)
-        return self._create(path, body={})
+        path = '/v1/release/%s/is_deployed' % (releases)
+        return self._fetch(path)
 
     def is_committed(self, release):
         releases = "/".join(release)
-        path = '/v1/software/is_committed/%s' % (releases)
-        return self._create(path, body={})
+        path = '/v1/release/%s/is_committed' % (releases)
+        return self._fetch(path)
 
     def upload(self, args):
         rc = 0
@@ -81,7 +93,7 @@ class ReleaseManager(base.Manager):
             print("No file to be uploaded.")
             return rc
 
-        path = '/v1/software/upload'
+        path = '/v1/release'
         if is_local:
             to_upload_filenames = valid_files
             headers = {'Content-Type': 'text/plain'}
@@ -136,7 +148,6 @@ class ReleaseManager(base.Manager):
                   temp_sig_files, file=sys.stderr)
             return 1
 
-
         for software_file in sorted(set(all_raw_files)):
             _, ext = os.path.splitext(software_file)
             if ext in constants.SUPPORTED_UPLOAD_FILE_EXT:
@@ -146,22 +157,8 @@ class ReleaseManager(base.Manager):
 
         encoder = MultipartEncoder(fields=to_upload_files)
         headers = {'Content-Type': encoder.content_type}
-        path = '/v1/software/upload'
-        req, data = self._create_multipart(path, body=encoder, headers=headers)
-        if args.debug:
-            utils.print_result_debug(req, data)
-        else:
-            utils.print_software_op_result(req, data)
-            data = json.loads(req.text)
-            data_list = [(lambda key, value: (key, value["id"]))(k, v)
-                         for d in data["upload_info"]
-                         for k, v in d.items()
-                         if not k.endswith(".sig")]
-
-            header_data_list = ["Uploaded File", "Id"]
-            has_error = 'error' in data and data["error"]
-            utils.print_result_list(header_data_list, data_list, has_error)
-        return utils.check_rc(req, data)
+        path = '/v1/release'
+        return self._create_multipart(path, body=encoder, headers=headers)
 
     def commit_patch(self, args):
         # Ignore interrupts during this function
@@ -179,7 +176,7 @@ class ReleaseManager(base.Manager):
         elif args.all:
             # Get a list of all patches
             extra_opts = "&release=%s" % relopt
-            url = "/v1/software/query?show=patch%s" % (extra_opts)
+            url = "/v1/release?show=patch%s" % (extra_opts)
 
             resp, body = self._list(url, "")
 
@@ -265,16 +262,10 @@ class ReleaseManager(base.Manager):
         # Ignore interrupts during this function
         signal.signal(signal.SIGINT, signal.SIG_IGN)
 
-        path = "/v1/software/install_local"
-        return self._list(path, "")
-
-    def show(self, args):
-        releases = "/".join(args.release)
-
-        path = "/v1/software/show/%s" % (releases)
-        return self._create(path, body={})
+        path = "/v1/deploy/install_local"
+        return self._post(path)
 
     def release_delete(self, release_id):
         release_ids = "/".join(release_id)
-        path = '/v1/software/delete/%s' % release_ids
-        return self._create(path, body={})
+        path = '/v1/release/%s' % release_ids
+        return self._delete(path)
