@@ -23,7 +23,6 @@ class DeployController(RestController):
         'precheck': ['POST'],
         'start': ['POST'],
         'complete': ['POST'],
-        'is_sync_controller': ['GET'],
         'software_upgrade': ['GET'],
     }
 
@@ -73,10 +72,6 @@ class DeployController(RestController):
         to_release = request.GET.get("to_release")
         result = sc.software_deploy_show_api(from_release, to_release)
         return result
-
-    @expose(method='GET', template='json')
-    def in_sync_controller(self):
-        return sc.in_sync_controller_api()
 
     @expose(method='GET', template='json')
     def software_upgrade(self):
