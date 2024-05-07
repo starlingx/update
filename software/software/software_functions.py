@@ -5,6 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 """
 
+import contextlib
 import getopt
 import glob
 import hashlib
@@ -1406,3 +1407,20 @@ def validate_host_deploy_order(hostname):
         errmsg = f"{hostname} does not satisfy the right order of deployment " + \
                  f"should be {ordered_list[0]}"
         raise SoftwareServiceError(error=errmsg)
+
+
+@contextlib.contextmanager
+def mount_remote_directory(remote_dir, local_dir):
+    try:
+        subprocess.check_call(["/bin/nfs-mount", remote_dir, local_dir])
+    except subprocess.CalledProcessError as e:
+        LOG.error("Error mounting remote %s into local %s: %s" % (remote_dir, local_dir, str(e)))
+        raise
+
+    try:
+        yield
+    finally:
+        try:
+            subprocess.check_call(["/bin/umount", local_dir])
+        except subprocess.CalledProcessError as e:
+            LOG.error("Error unmounting %s: %s" % (local_dir, str(e)))

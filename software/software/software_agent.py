@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 
+import software.agent_hooks as agent_hooks
 import software.ostree_utils as ostree_utils
 from software.software_functions import configure_logging
 from software.software_functions import LOG
@@ -115,28 +116,6 @@ def check_install_uuid():
         return False
 
     return True
-
-
-def copy_target_release_pxeboot_files(major_release):
-    """
-    Copy pxeboot files from the target feed during
-    major release deployment. These files are copied
-    during the release upload, but only to the host
-    where it is uploaded, so this method is needed to
-    copy the files to other hosts.
-
-    :param major_release: target major release
-    """
-    # copy to_release pxeboot files to /var/pxeboot/pxelinux.cfg.files
-    pxeboot_feed_dir = "/var/www/pages/feed/rel-%s/pxeboot/pxelinux.cfg.files/*" % major_release
-    pxeboot_dest_dir = "/var/pxeboot/pxelinux.cfg.files/"
-    cmd = "rsync -ac %s %s" % (pxeboot_feed_dir, pxeboot_dest_dir)
-    try:
-        subprocess.check_call(cmd, shell=True)
-        LOG.info("Copied %s pxeboot files successfully to %s." % (major_release, pxeboot_dest_dir))
-    except subprocess.CalledProcessError as e:
-        LOG.exception("Error copying pxeboot files from %s to %s: %s" % (
-            pxeboot_feed_dir, pxeboot_dest_dir, str(e)))
 
 
 class PatchMessageSendLatestFeedCommit(messages.PatchMessage):
@@ -561,10 +540,17 @@ class PatchAgent(PatchService):
             hello_ack = PatchMessageHelloAgentAck()
             hello_ack.send(self.sock_out)
 
+        # TODO(heitormatsui): create hook manager for other scenarios,
+        #  e.g. major release downgrade during abort/rollback
+        hook_manager = agent_hooks.HookManager(agent_hooks.MAJOR_RELEASE_UPGRADE,
+                                               {"major_release": major_release})
         remote = None
         ref = None
         if major_release:
             LOG.info("Major release deployment for %s with commit %s" % (major_release, commit_id))
+
+            # run deploy host pre-hooks for major release
+            hook_manager.run_pre_hooks()
 
             # add remote
             nodetype = utils.get_platform_conf("nodetype")
@@ -581,7 +567,6 @@ class PatchAgent(PatchService):
                 return False
 
             ref = "%s:%s" % (remote, constants.OSTREE_REF)
-            copy_target_release_pxeboot_files(major_release)
 
         # Build up the install set
         if verbose_to_stdout:
@@ -660,6 +645,10 @@ class PatchAgent(PatchService):
             self.patch_failed = False
             clearflag(patch_failed_file)
             self.state = constants.PATCH_AGENT_STATE_IDLE
+
+            # run deploy host post-hooks for major release
+            if major_release:
+                hook_manager.run_post_hooks()
         else:
             # Update the patch_failed flag
             self.patch_failed = True
