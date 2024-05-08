@@ -57,13 +57,6 @@ unmount_filesystems() {
     local rc=0
 
     info "Attempting to unmount filesystems under ${rootdir}..."
-    k8s_umount_output=$(sudo umount ${rootdir}/usr/local/kubernetes/current 2>&1)
-    if [ $? -ne 0 ]; then
-        if [[ ! $k8s_umount_output =~ "not mounted" ]]; then
-            rc=1
-            error $k8s_umount_output
-        fi
-    fi
     sudo ${rootdir}/usr/sbin/software-deploy/chroot_mounts.sh ${rootdir} -u
     if [ $? -ne 0 ]; then
         rc=1

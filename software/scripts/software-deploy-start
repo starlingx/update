@@ -115,8 +115,6 @@ sudo ostree --repo=${repo} checkout ${commit_id} ${rootdir} || handle_error $? "
 # create proper mounts on deploy file system
 info "Creating mount points..."
 sudo ${script_dir}/chroot_mounts.sh ${rootdir} || handle_error $? "Failed to mount required mount points"
-
-sudo mount --bind ${rootdir}/usr/local/kubernetes/${k8s_ver} ${rootdir}/usr/local/kubernetes/current
 sudo cp /etc/kubernetes/admin.conf ${rootdir}/etc/kubernetes/
 info "Mount points created successfully"
 
