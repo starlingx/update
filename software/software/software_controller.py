@@ -1428,9 +1428,10 @@ class PatchController(PatchService):
             # sort the required patches list and get the latest, if available
             req_patch_version = None
             if len(required_patches) > 0:
-                req_patch_version = str(sorted(required_patches)[-1])
-                if self.release_collection.get_release_by_id(req_patch_version) is None:
-                    LOG.warning("Required patch '%s' is not uploaded." % req_patch_version)
+                req_patch = str(sorted(required_patches)[-1])
+                _, req_patch_version, _, _ = utils.get_component_and_versions(req_patch)
+                if self.release_collection.get_release_by_id(req_patch) is None:
+                    LOG.warning("Required patch '%s' is not uploaded." % req_patch)
 
             PatchFile.create_versioned_precheck(patch_file, sw_release, req_patch_version=req_patch_version)
 
