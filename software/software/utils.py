@@ -85,6 +85,28 @@ def get_major_release_version(sw_release_version):
             return None
 
 
+def get_component_and_versions(release_name):
+    """
+    Given a full release name (component-MM.mm.pp) or release version (MM.mm.pp), get:
+    - component name (component) if present,
+    - release version (MM.mm.pp)
+    - software (or major) version (MM.mm)
+    - patch version (pp)
+    """
+    component_separator = "-"
+    version_separator = "."
+    try:
+        component = None
+        release_version = release_name
+        if component_separator in release_name:
+            component, release_version = release_name.split(component_separator)
+        software_version = release_version.rsplit(version_separator, 1)[0]
+        patch_version = release_version.rsplit(version_separator, 1)[1]
+    except Exception:
+        return None, None, None, None
+    return component, release_version, software_version, patch_version
+
+
 def get_feed_path(sw_version):
     sw_ver = get_major_release_version(sw_version)
     path = os.path.join(constants.UPGRADE_FEED_DIR, f"rel-{sw_ver}")
