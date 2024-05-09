@@ -277,35 +277,52 @@ def import_databases(target_port, from_path=None):
                                 "sudo -u postgres psql --port=%s -f " % target_port + data +
                                 " " + db_elem))
 
-    VIM_DB_NAME = 'vim_db_v1'
-    temp_db_path = '/tmp/'
-    db_dir = os.path.join(constants.PLATFORM_PATH, 'nfv/vim', constants.SW_VERSION)
-    db_path = os.path.join(db_dir, VIM_DB_NAME)
-
-    import_commands.append(
-        ("remove %s" % db_dir,
-         "rm %s -rf" % db_dir))
-
-    import_commands.append(
-        ("create %s" % db_dir,
-         "mkdir %s -p" % db_dir))
-
-    import_commands.append(
-        ("nfv-vim",
-         "nfv-vim-manage db-load-data -d %s -f %s" %
-         (temp_db_path, os.path.join(from_dir, 'vim.data'))))
-
-    # copy the vim db
-    import_commands.append(
-        ('move database to %s' % db_path,
-         ("mv %s %s" % (os.path.join(temp_db_path, VIM_DB_NAME),
-          db_path))))
-
     # Execute import commands
     for cmd in import_commands:
         try:
             print("Importing %s" % cmd[0])
             LOG.info("Executing import command: %s" % cmd[1])
+            subprocess.check_call([cmd[1]], shell=True, stdout=devnull, stderr=sout)
+
+        except subprocess.CalledProcessError as ex:
+            LOG.exception("Failed to execute command: '%s' during upgrade "
+                          "processing, return code: %d" %
+                          (cmd[1], ex.returncode))
+            raise
+
+
+def migrate_vim_database(from_release, to_release):
+    """Migrates the VIM DB."""
+
+    LOG.info("Migrating VIM DB")
+
+    # The VIM DB is special because it's being used during orchestrated upgrades
+    vim_commands = []
+    from_db_dir = os.path.join(constants.PLATFORM_PATH, 'nfv/vim', from_release)
+    to_db_dir = os.path.join(constants.PLATFORM_PATH, 'nfv/vim', to_release)
+    db_files = ["vim_db_v1"]
+
+    # Prepare N+1 dir
+    vim_commands.append(
+        (f"remove {to_db_dir}",
+         f"rm -rf {to_db_dir}"))
+
+    vim_commands.append(
+        (f"create {to_db_dir}",
+         f"mkdir -p {to_db_dir}"))
+
+    for v in db_files:
+        from_file = os.path.join(from_db_dir, v)
+        to_file = os.path.join(to_db_dir, v)
+        vim_commands.append(
+            (f"Hard-link VIM DB file {from_file}",
+             f"ln {from_file} {to_file}"))
+
+    # Execute migrate commands
+    for cmd in vim_commands:
+        try:
+            print("Migrating VIM DB: %s" % cmd[0])
+            LOG.info("Executing migration command: %s" % cmd[1])
             subprocess.check_call([cmd[1]], shell=True, stdout=devnull, stderr=sout)
 
         except subprocess.CalledProcessError as ex:
@@ -699,6 +716,9 @@ def upgrade_controller(from_release, to_release, target_port):
     # Import databases
     print("Importing databases...")
     import_databases(target_port)
+
+    print("Migrating the VIM DB...")
+    migrate_vim_database(from_release, to_release)
 
     role = get_system_role(target_port)
     shared_services = get_shared_services(target_port)
