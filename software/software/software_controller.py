@@ -51,6 +51,7 @@ from software.exceptions import ReleaseInvalidRequest
 from software.exceptions import ReleaseValidationFailure
 from software.exceptions import ReleaseIsoDeleteFailure
 from software.exceptions import SoftwareServiceError
+from software.exceptions import InvalidOperation
 from software.release_data import reload_release_data
 from software.release_data import get_SWReleaseCollection
 from software.software_functions import collect_current_load_for_hosts
@@ -708,7 +709,7 @@ class SWMessageDeployStateChanged(messages.PatchMessage):
         self.valid = True
         self.agent = None
 
-        valid_agents = ['deploy-start']
+        valid_agents = ['deploy-start', 'deploy-activate']
         if 'agent' in data:
             self.agent = data['agent']
         else:
@@ -722,7 +723,9 @@ class SWMessageDeployStateChanged(messages.PatchMessage):
 
         valid_state = {
             DEPLOY_STATES.START_DONE.value: DEPLOY_STATES.START_DONE,
-            DEPLOY_STATES.START_FAILED.value: DEPLOY_STATES.START_FAILED
+            DEPLOY_STATES.START_FAILED.value: DEPLOY_STATES.START_FAILED,
+            DEPLOY_STATES.ACTIVATE_FAILED.value: DEPLOY_STATES.ACTIVATE_FAILED,
+            DEPLOY_STATES.ACTIVATE_DONE.value: DEPLOY_STATES.ACTIVATE_DONE
         }
         if 'deploy-state' in data and data['deploy-state']:
             deploy_state = data['deploy-state']
@@ -2290,7 +2293,9 @@ class PatchController(PatchService):
         deploy_state = DeployState.get_instance()
         state_event = {
             DEPLOY_STATES.START_DONE: deploy_state.start_done,
-            DEPLOY_STATES.START_FAILED: deploy_state.start_failed
+            DEPLOY_STATES.START_FAILED: deploy_state.start_failed,
+            DEPLOY_STATES.ACTIVATE_DONE: deploy_state.activate_completed,
+            DEPLOY_STATES.ACTIVATE_FAILED: deploy_state.activate_failed
         }
         if new_state in state_event:
             state_event[new_state]()
@@ -2680,11 +2685,66 @@ class PatchController(PatchService):
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     def _activate(self):
-        # TODO(bqian) activate the deployment
+        deploy = self.db_api_instance.get_deploy_all()
+        if deploy:
+            deploy = deploy[0]
+        else:
+            msg = "Deployment is missing unexpectedly"
+            raise InvalidOperation(msg)
+
+        deploying = ReleaseState(release_state=states.DEPLOYING)
+        if deploying.is_major_release_deployment():
+            return self._activate_major_release(deploy)
+        else:
+            return self.activate_patching_release()
+
+    def activate_patching_release(self):
+        deploy_state = DeployState.get_instance()
+        deploy_state.activate()
+        # patching release activate operations go here
+        deploy_state.activate_completed()
         return True
 
+    def _activate_major_release(self, deploy):
+        cmd_path = "/usr/bin/software-deploy-activate"
+        from_release = utils.get_major_release_version(deploy.get("from_release"))
+        to_release = utils.get_major_release_version(deploy.get("to_release"))
+
+        upgrade_activate_cmd = [cmd_path, from_release, to_release]
+
+        try:
+            LOG.info("starting subprocess %s" % ' '.join(upgrade_activate_cmd))
+            subprocess.Popen(' '.join(upgrade_activate_cmd), start_new_session=True, shell=True)
+            LOG.info("subprocess started")
+        except subprocess.SubprocessError as e:
+            LOG.error("Failed to start command: %s. Error %s" % (' '.join(upgrade_activate_cmd), e))
+            return False
+
+        return True
+
+    def _check_pre_activate(self):
+        # check current deployment, deploy to all hosts have completed,
+        # the deploy state is host-done, or
+        # activate-failed' as reattempt from a previous failed activate
+        deploy_state = DeployState.get_deploy_state()
+        if deploy_state not in [DEPLOY_STATES.HOST_DONE, DEPLOY_STATES.ACTIVATE_FAILED]:
+            msg = "Must complete deploying all hosts before activating the deployment"
+            raise InvalidOperation(msg)
+
+        deploy_hosts = self.db_api_instance.get_deploy_host()
+        invalid_hosts = []
+        for deploy_host in deploy_hosts:
+            if deploy_host['state'] not in [states.DEPLOYED]:
+                invalid_hosts.append(deploy_host)
+
+        if len(invalid_hosts) > 0:
+            msg = "All hosts must have completed deployment before activating the deployment"
+            for invalid_host in invalid_hosts:
+                msg += "%s: %s\n" % (invalid_host["hostname"], invalid_host["state"])
+            raise InvalidOperation(msg)
+
     @require_deploy_state([DEPLOY_STATES.HOST_DONE, DEPLOY_STATES.ACTIVATE_FAILED],
-                          "Must complete deploying all hosts before activating the deployment")
+                          "Activate deployment only when current deployment state is {require_states}")
     def software_deploy_activate_api(self) -> dict:
         """
         Activates the deployment associated with the release
@@ -2694,15 +2754,17 @@ class PatchController(PatchService):
         msg_warning = ""
         msg_error = ""
 
+        self._check_pre_activate()
+
         deploy_state = DeployState.get_instance()
         deploy_state.activate()
 
-        if self._activate():
-            deploy_state.activate_completed()
-            msg_info += "Deployment has been activated.\n"
-        else:
+        try:
+            self._activate()
+            msg_info = "Deploy activate has started"
+        except Exception:
             deploy_state.activate_failed()
-            msg_error += "Deployment activation has failed.\n"
+            raise
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 

@@ -32,7 +32,7 @@ def get_udp_socket(server_addr, server_port):
     return sock
 
 
-def update_deploy_state(server_addr, server_port, agent, deploy_state=None, host=None, host_state=None, timeout=1):
+def update_deploy_state(agent, deploy_state=None, host=None, host_state=None, timeout=1):
     """
     Send MessageDeployStateChanged message to software-controller via
     upd packet, wait for ack or raise exception.
@@ -46,6 +46,10 @@ def update_deploy_state(server_addr, server_port, agent, deploy_state=None, host
          "host-state": "<host-deploy-substate>"
     }
     """
+
+    server_addr = "controller"
+    cfg.read_config()
+    server_port = cfg.controller_port
 
     msg = {
         "msgtype": PATCHMSG_DEPLOY_STATE_CHANGED,
@@ -104,9 +108,5 @@ def update_state():
 
     args = parser.parse_args()
 
-    server = "controller"
-    cfg.read_config()
-    server_port = cfg.controller_port
-    update_deploy_state(server, int(server_port), args.agent,
-                        deploy_state=args.state,
+    update_deploy_state(args.agent, deploy_state=args.state,
                         host=args.host, host_state=args.host_state)
