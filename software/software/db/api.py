@@ -44,6 +44,14 @@ class SoftwareAPI:
         finally:
             self.end_update()
 
+    def get_current_deploy(self):
+        self.begin_update()
+        try:
+            deploy = self.deploy_handler.query_all()
+            return deploy[0] if deploy else None
+        finally:
+            self.end_update()
+
     def get_deploy_all(self):
         self.begin_update()
         try:
