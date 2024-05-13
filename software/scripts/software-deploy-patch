@@ -1,0 +1,70 @@
+#!/usr/bin/python3
+# -*- encoding: utf-8 -*-
+#
+# vim: tabstop=4 shiftwidth=4 softtabstop=4
+#
+# Copyright (c) 2023-2024 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+# This script is to start a patch release deployment asynchronously. It does the following:
+# 1. Installs package in feed repo using apt-ostree
+# 2. If installation is successful, change deploy state to "start-done"
+# 3. If failure in installation, change deploy state to "start-failed"
+
+import argparse
+import logging as LOG
+import subprocess
+import sys
+import upgrade_utils
+
+
+report_agent="deploy-start"
+
+def deploy_update_state(state):
+    # update deploy state to start-done
+    cmd_path = "/usr/bin/software-deploy-update"
+    software_deploy_update = [cmd_path, "-s", state, report_agent]
+
+    subprocess.run(' '.join(software_deploy_update), shell=True)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--repo', dest='repo_dir', type=str, help='Add repo_dir')
+    parser.add_argument('--branch', dest='branch', type=str, help='Add branch')
+    parser.add_argument('--feed', dest='feed', type=str, help='Add feed')
+    parser.add_argument('--component', dest='component', type=str, help='Add component')
+    parser.add_argument('--packages', dest='packages', type=str, help='Add packages')
+
+    args = parser.parse_args()
+
+    try:
+        subprocess.run(
+            ["apt-ostree", "compose", "install",
+             "--repo", args.repo_dir,
+             "--branch", args.branch,
+             "--feed", args.feed,
+             "--component", args.component,
+             args.packages],
+            check=True,
+            capture_output=True)
+
+    except Exception as e:
+        info_msg = '"apt-ostree compose install" error: return code %s , Output: %s' \
+            % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.error(info_msg)
+        state = "start-failed"
+        deploy_update_state(state)
+        LOG.error("Update deploy state %s" %state)
+        return 1
+
+    state = "start-done"
+    deploy_update_state(state)
+    LOG.info("Update deploy state %s" %state)
+
+
+if __name__ == "__main__":
+    upgrade_utils.configure_logging("/var/log/software.log", log_level=LOG.INFO)
+    sys.exit(main())
