@@ -2163,6 +2163,12 @@ class PatchController(PatchService):
 
         precheck_script = utils.get_precheck_script(release_version)
 
+        if not os.path.isfile(precheck_script) and patch:
+            # Precheck script may not be available for some patches
+            # In that case, report system as healthy with info message to proceed
+            msg_info = f"No deploy-precheck script available for patch version {release_version}"
+            return dict(info=msg_info, warning=msg_warning, error=msg_error, system_healthy=True)
+
         if not os.path.isfile(precheck_script):
             msg = "Release files for deployment %s are not present on the system, " \
                   "cannot proceed with the precheck." % release_version
@@ -2238,7 +2244,11 @@ class PatchController(PatchService):
             region_name = utils.get_local_region_name()
 
         release_version = release.sw_release
-        patch = not utils.is_upgrade_deploy(SW_VERSION, release_version)
+
+        # Check all fields (MM.mm.pp) of release_version to set patch flag
+        # TODO(jvazhapp): fix patch flag for prepatched iso scenario
+        patch = (not utils.is_upgrade_deploy(SW_VERSION, release_version) and
+                 version.Version(release_version).micro != 0)
         return self._deploy_precheck(release_version, force, region_name, patch)
 
     def _deploy_upgrade_start(self, to_release, commit_id):
