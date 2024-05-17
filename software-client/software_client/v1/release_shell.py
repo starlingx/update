@@ -48,6 +48,8 @@ def do_show(cc, args):
 
     rc = utils.check_rc(resp, data)
     if rc == 0:
+        if not args.packages and 'packages' in data:
+            del data['packages']
         utils.display_detail_result(data)
     else:
         utils.display_info(resp)
