@@ -40,6 +40,7 @@ def do_show(cc, args):
 
     return rc
 
+
 def do_host_list(cc, args):
     """List of hosts for software deployment """
     resp, data = cc.deploy.host_list()
@@ -78,9 +79,14 @@ def do_precheck(cc, args):
     if args.debug:
         utils.print_result_debug(resp, data)
 
-    utils.display_info(resp)
+    rc = utils.check_rc(resp, data)
+    if rc == 0:
+        if data["system_healthy"] is False:
+            print("System is unhealthy for deploy")
+            rc = 1
 
-    return utils.check_rc(resp, data)
+    utils.display_info(resp)
+    return rc
 
 
 @utils.arg('deployment',
@@ -96,9 +102,14 @@ def do_start(cc, args):
     if args.debug:
         utils.print_result_debug(resp, data)
 
-    utils.display_info(resp)
+    rc = utils.check_rc(resp, data)
+    if rc == 0:
+        if "system_healthy" in data and data["system_healthy"] is False:
+            print("System is unhealthy for deploy")
+            rc = 1
 
-    return utils.check_rc(resp, data)
+    utils.display_info(resp)
+    return rc
 
 
 @utils.arg('host',

@@ -149,6 +149,7 @@ def _extract_error_json(body, resp):
         except ValueError:
             return {}
 
+
 class Response(object):
     """SessionClient and HttpClient do not return the same
     response object. This calss is to create a common response
