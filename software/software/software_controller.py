@@ -3082,7 +3082,7 @@ class PatchController(PatchService):
                     entity_type_id=fm_constants.FM_ENTITY_TYPE_HOST,
                     entity_instance_id=alarm_instance_id,
                     severity=fm_constants.FM_ALARM_SEVERITY_MAJOR,
-                    reason_text="Software deployment in progress",
+                    reason_text="Software deployment data is out of sync",
                     alarm_type=fm_constants.FM_ALARM_TYPE_11,
                     probable_cause=fm_constants.ALARM_PROBABLE_CAUSE_65,
                     proposed_repair_action="Wait for deployment to complete",
