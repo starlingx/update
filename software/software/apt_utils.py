@@ -72,11 +72,13 @@ def package_remove(feed_dir, sw_release, packages):
         raise APTOSTreeCommandFail(msg)
 
 
-def run_install(repo_dir, packages):
+def run_install(repo_dir, sw_release, packages):
     """
     Run Debian package upgrade.
 
     :param repo_dir: the path to the ostree repo
+    :param sw_release: Patch release version (MM.mm.pp)
+    :param packages: List of Debian packages
     """
     try:
         LOG.info("Running apt-ostree install")
@@ -87,6 +89,7 @@ def run_install(repo_dir, packages):
              "--repo", repo_dir,
              "--branch", "starlingx",
              "--feed", cfg.package_feed,
+             "--component", sw_release,
              packages],
             check=True,
             capture_output=True)
