@@ -53,7 +53,7 @@ deploy_state_transition = {
     DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED: [DEPLOY_STATES.ACTIVATE_ROLLBACK],  # deploy host rollback is reentrant
 
     # deploy complete
-    DEPLOY_STATES.COMPLETED: [DEPLOY_STATES.ACTIVATE_ROLLBACK]
+    DEPLOY_STATES.COMPLETED: [DEPLOY_STATES.ACTIVATE_ROLLBACK, None]
 }
 
 
@@ -91,19 +91,29 @@ class DeployState(object):
         db_api_instance = get_instance()
         deploy_hosts = db_api_instance.get_deploy_host()
         deploy_state = DeployState.get_instance()
+        current_state = DeployState.get_deploy_state()
         all_states = []
         for deploy_host in deploy_hosts:
             if deploy_host['state'] not in all_states:
                 all_states.append(deploy_host['state'])
 
         LOG.info("Host deploy state %s" % str(all_states))
-        if DEPLOY_HOST_STATES.FAILED.value in all_states:
-            deploy_state.deploy_host_failed()
-        elif DEPLOY_HOST_STATES.PENDING.value in all_states or \
-                DEPLOY_HOST_STATES.DEPLOYING.value in all_states:
-            deploy_state.deploy_host()
-        elif all_states == [DEPLOY_HOST_STATES.DEPLOYED.value]:
-            deploy_state.deploy_host_done()
+        if current_state in [DEPLOY_STATES.HOST, DEPLOY_STATES.HOST_FAILED]:
+            if DEPLOY_HOST_STATES.FAILED.value in all_states:
+                deploy_state.deploy_host_failed()
+            elif DEPLOY_HOST_STATES.PENDING.value in all_states or \
+                    DEPLOY_HOST_STATES.DEPLOYING.value in all_states:
+                deploy_state.deploy_host()
+            elif all_states == [DEPLOY_HOST_STATES.DEPLOYED.value]:
+                deploy_state.deploy_host_done()
+        elif current_state in [DEPLOY_STATES.HOST_ROLLBACK, DEPLOY_STATES.HOST_ROLLBACK_FAILED]:
+            if DEPLOY_HOST_STATES.ROLLBACK_FAILED in all_states:
+                deploy_state.deploy_host_rollback_failed()
+            elif DEPLOY_HOST_STATES.ROLLBACK_PENDING in all_states or \
+                    DEPLOY_HOST_STATES.ROLLBACK_DEPLOYING in all_states:
+                deploy_state.deploy_host_rollback()
+            elif all_states == [DEPLOY_HOST_STATES.ROLLBACK_DEPLOYED.value]:
+                deploy_state.deploy_host_rollback_done()
 
     def __init__(self):
         self._from_release = None

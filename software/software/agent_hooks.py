@@ -142,6 +142,7 @@ POST = "post"
 
 # actions
 MAJOR_RELEASE_UPGRADE = "major_release_upgrade"
+MAJOR_RELEASE_ROLLBACK = "major_release_rollback"
 
 # agent hooks mapping per action
 AGENT_HOOKS = {
@@ -150,8 +151,14 @@ AGENT_HOOKS = {
         POST: [
             CopyPxeFilesHook,
             ReconfigureKernelHook,
-        ]
-    }
+        ],
+    },
+    MAJOR_RELEASE_ROLLBACK: {
+        PRE: [],
+        POST: [
+            ReconfigureKernelHook,
+        ],
+    },
 }
 
 
