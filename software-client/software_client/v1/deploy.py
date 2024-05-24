@@ -64,6 +64,15 @@ class DeployManager(base.Manager):
 
         return self._create(path)
 
+    def abort(self, args):
+        # Ignore interrupts during this function
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+        # Issue deploy_abort request
+        path = "/v1/deploy/abort"
+
+        return self._create(path, body={})
+
     def activate(self, args):
         # Ignore interrupts during this function
         signal.signal(signal.SIGINT, signal.SIG_IGN)

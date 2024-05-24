@@ -17,6 +17,7 @@ DEPLOY_COMMAND_MODULES = [
 #     - precheck
 #     - start
 #     - host
+#     - abort
 #     - activate
 #     - complete
 #     - delete

@@ -161,14 +161,25 @@ class Deploy(ABC):
         pass
 
     @abstractmethod
-    def update(self, new_state: DEPLOY_STATES):
+    def update(self, from_release=None, to_release=None, feed_repo=None, commit_id=None, reboot_required: bool = None,
+               new_state: DEPLOY_STATES = None):
         """
         Update a deployment entry.
 
-        :param new_state: The state of the deployment.
+        :param from_release: The current release version.
+        :param to_release: The target release version.
+        :param feed_repo: ostree repo feed path.
+        :param commit_id: commit-id to deploy.
+        :param reboot_required: If is required to do host reboot.
+        :param new_state: The new state.
 
         """
-        check_instances([new_state], DEPLOY_STATES)
+        str_params = [from_release, to_release, feed_repo, commit_id]
+        if new_state:
+            check_instances([new_state], DEPLOY_STATES)
+        if reboot_required:
+            check_instances([reboot_required], bool)
+        check_instances([param for param in str_params if param is not None], str)
 
     @abstractmethod
     def delete(self):
@@ -235,9 +246,11 @@ class DeployHosts(ABC):
 class DeployHandler(Deploy):
     def create(self, from_release, to_release, feed_repo, commit_id, reboot_required, state=DEPLOY_STATES.START):
         """
-        Create a new deploy with given from and to release version
+        Create a new deployment with given from and to release version
         :param from_release: The current release version.
         :param to_release: The target release version.
+        :param feed_repo: ostree repo feed path
+        :param commit_id: commit-id to deploy
         :param reboot_required: If is required to do host reboot.
         :param state: The state of the deployment.
         """
@@ -292,19 +305,40 @@ class DeployHandler(Deploy):
         data = get_software_filesystem_data()
         return data.get("deploy", [])
 
-    def update(self, new_state: DEPLOY_STATES):
+    def update(self, from_release=None, to_release=None, feed_repo=None, commit_id=None,
+               reboot_required: bool = None, new_state: DEPLOY_STATES = None):
         """
-        Update deploy state based on from and to release version
-        :param new_state: The new state
+        Update deployment state and the given params.
+
+        :param from_release: The current release version.
+        :param to_release: The target release version.
+        :param feed_repo: ostree repo feed path.
+        :param commit_id: commit-id to deploy.
+        :param reboot_required: If is required to do host reboot.
+        :param new_state: The new state.
         """
-        super().update(new_state)
+        super().update(from_release, to_release, feed_repo, commit_id, reboot_required, new_state)
         deploy = self.query_all()
         if not deploy:
             raise DeployDoNotExist("Error to update deploy state. No deploy in progress.")
 
         data = get_software_filesystem_data()
         try:
-            data["deploy"][0]["state"] = new_state.value
+            if new_state:
+                data["deploy"][0]["state"] = new_state.value
+
+            updates = {
+                "from_release": from_release,
+                "to_release": to_release,
+                "feed_repo": feed_repo,
+                "commit_id": commit_id,
+                "reboot_required": reboot_required
+            }
+
+            for key, value in updates.items():
+                if value is not None:
+                    data["deploy"][0][key] = value
+
             save_to_json_file(constants.SOFTWARE_JSON_FILE, data)
         except Exception as e:
             LOG.exception(e)
