@@ -939,8 +939,8 @@ class PatchFile(object):
 
         patch_id = thispatch.parse_metadata_string(text)
 
-        sw_release = thispatch.metadata[patch_id]["sw_version"] # MM.mm.pp
-        sw_version = utils.get_major_release_version(sw_release) # MM.mm
+        sw_release = thispatch.metadata[patch_id]["sw_version"]  # MM.mm.pp
+        sw_version = utils.get_major_release_version(sw_release)  # MM.mm
         abs_ostree_tar_dir = package_dir[sw_version]
         ostree_tar_filename = "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id)
         package_repo_dir = "%s/rel-%s" % (constants.PACKAGE_FEED_DIR, sw_version)

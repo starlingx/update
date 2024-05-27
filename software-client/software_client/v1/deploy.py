@@ -57,7 +57,19 @@ class DeployManager(base.Manager):
         hostname = args.host
 
         # Issue deploy_host request and poll for results
-        path = "/v1/deploy_host/%s" % (hostname)
+        path = "/v1/deploy_host/%s" % hostname
+
+        if args.force:
+            path += "/force"
+
+        return self._create(path)
+
+    def host_rollback(self, args):
+        # args.deployment is a string
+        hostname = args.host
+
+        # Issue deploy_host request and poll for results
+        path = "/v1/deploy_host/%s/rollback" % hostname
 
         if args.force:
             path += "/force"

@@ -31,11 +31,21 @@ class DeployHostController(RestController):
         reload_release_data()
         if len(list(args)) == 0:
             return dict(error="Host must be specified for install")
+
         force = False
         if len(list(args)) > 1 and 'force' in list(args)[1:]:
             force = True
 
-        result = sc.software_deploy_host_api(list(args)[0], force, async_req=True)
+        rollback = False
+        if len(list(args)) > 1 and 'rollback' in list(args[1:]):
+            rollback = True
+
+        if rollback:
+            result = sc.software_deploy_host_rollback_api(list(args)[0], force,
+                                                          async_req=True)
+        else:
+            result = sc.software_deploy_host_api(list(args)[0], force,
+                                                 async_req=True)
 
         return result
 
