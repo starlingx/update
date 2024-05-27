@@ -269,36 +269,6 @@ class SessionClient(adapter.LegacyJsonAdapter):
 
         return endpoint.rstrip('/') + '/' + url.lstrip('/')
 
-    def upload_request_with_data(self, method, url, **kwargs):
-        requests_url = self._get_connection_url(url)
-        headers = {"X-Auth-Token": self.session.get_token()}
-        files = {'file': ("for_upload",
-                          kwargs['body'],
-                          )}
-        data = kwargs.get('data')
-        req = requests.post(requests_url, headers=headers, files=files,
-                            data=data)
-        return req.json()
-
-    def upload_request_with_multipart(self, method, url, **kwargs):
-        requests_url = self._get_connection_url(url)
-        fields = kwargs.get('data')
-
-        enc = MultipartEncoder(fields)
-        headers = {'Content-Type': enc.content_type,
-                   "X-Auth-Token": self.session.get_token()}
-        response = requests.post(requests_url, data=enc, headers=headers)
-        if kwargs.get('check_exceptions'):
-            if response.status_code != 200:
-                err_message = _extract_error_json(response.text, response)
-                fault_text = (
-                    err_message.get("faultstring") or
-                    "Unknown error in SessionClient while uploading request with multipart"
-                )
-                raise exceptions.HTTPBadRequest(fault_text)
-
-        return response.json()
-
 
 class HTTPClient(httplib2.Http):
     """Handles the REST calls and responses, include authn."""
@@ -338,6 +308,9 @@ class HTTPClient(httplib2.Http):
 
         # httplib2 overrides
         self.disable_ssl_certificate_validation = insecure
+        self.ca_file = kwargs.get('ca_file', None)
+        self.cert_file = kwargs.get('cert_file', None)
+        self.key_file = kwargs.get('key_file', None)
 
         self.service_catalog = None
 
@@ -464,28 +437,27 @@ class HTTPClient(httplib2.Http):
         connection_url = self._get_connection_url(url)
         return self._cs_request(connection_url, method, **kwargs)
 
-    def upload_request_with_data(self, method, url, **kwargs):
-        if not self.local_root:
-            self.authenticate_and_fetch_endpoint_url()
-        connection_url = self._get_connection_url(url)
-        headers = {"X-Auth-Token": self.auth_token}
-        files = {'file': ("for_upload",
-                          kwargs['body'],
-                          )}
-        data = kwargs.get('data')
-        req = requests.post(connection_url, headers=headers,
-                            files=files, data=data,
-                            timeout=UPLOAD_REQUEST_TIMEOUT)
-        return req.json()
-
     def upload_request_with_multipart(self, method, url, **kwargs):
         if not self.local_root:
             self.authenticate_and_fetch_endpoint_url()
         connection_url = self._get_connection_url(url)
+        kwargs['headers']['X-Auth-Token'] = self.auth_token
+
+        if self.disable_ssl_certificate_validation:
+            verify = False
+        else:
+            verify = self.ca_file or True
+
+        # 'cert' is path to ssl client cert file or cert and key as a tuple
+        cert = self.cert_file
+        if cert and self.key_file:
+            cert = (cert, self.key_file)
 
         response = requests.post(connection_url,
                                  data=kwargs.get('body'),
                                  headers=kwargs.get('headers'),
+                                 verify=verify,
+                                 cert=cert,
                                  timeout=UPLOAD_REQUEST_TIMEOUT)
 
         return response, response.json()
