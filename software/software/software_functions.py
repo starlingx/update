@@ -1412,6 +1412,12 @@ def validate_host_deploy_order(hostname, is_major_release: bool):
 
 @contextlib.contextmanager
 def mount_remote_directory(remote_dir, local_dir):
+    # validate paths
+    remote_path = re.match(r"^[a-zA-Z0-9-]+:[a-zA-Z0-9.-_\/]+$", remote_dir)
+    if not remote_path:
+        raise OSError("Invalid remote path. Should follow format <hostname>:<path>")
+    if not os.path.isdir(local_dir):
+        os.mkdir(local_dir, 0o755)
     try:
         subprocess.check_call(["/bin/nfs-mount", remote_dir, local_dir])
     except subprocess.CalledProcessError as e:
