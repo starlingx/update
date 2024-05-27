@@ -266,8 +266,8 @@ class DeployHandler(Deploy):
             else:
                 deploy_data.append(new_deploy)
             save_to_json_file(constants.SOFTWARE_JSON_FILE, data)
-        except Exception:
-            LOG.exception()
+        except Exception as e:
+            LOG.exception(e)
 
     def query(self, from_release, to_release):
         """
@@ -306,8 +306,8 @@ class DeployHandler(Deploy):
         try:
             data["deploy"][0]["state"] = new_state.value
             save_to_json_file(constants.SOFTWARE_JSON_FILE, data)
-        except Exception:
-            LOG.exception()
+        except Exception as e:
+            LOG.exception(e)
 
     def delete(self):
         """
@@ -322,8 +322,8 @@ class DeployHandler(Deploy):
         try:
             data["deploy"].clear()
             save_to_json_file(constants.SOFTWARE_JSON_FILE, data)
-        except Exception:
-            LOG.exception()
+        except Exception as e:
+            LOG.exception(e)
 
 
 class DeployHostHandler(DeployHosts):
