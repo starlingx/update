@@ -13,6 +13,7 @@ Run platform upgrade deploy precheck as a standalone executable
 """
 
 import argparse
+import json
 import os
 import re
 import requests
@@ -36,7 +37,7 @@ SUPPORTED_K8S_VERSIONS = [
 
 RC_SUCCESS = 0
 RC_UNHEALTHY = 3
-
+STATE_DEPLOYED = 'deployed'
 
 class HealthCheck(object):
     """This class represents a general health check object
@@ -57,9 +58,6 @@ class HealthCheck(object):
             upgrade_utils.get_token_endpoint(config, service_type="platform")
         self._sysinv_client = upgrade_utils.get_sysinv_client(self._sysinv_token,
                                                               self._sysinv_endpoint)
-        # get usm token and endpoint
-        self._software_token, self._software_endpoint = \
-            upgrade_utils.get_token_endpoint(config, service_type="usm")
 
     def _check_license(self, version):
         """
@@ -91,23 +89,21 @@ class HealthCheck(object):
         :return: boolean indicating success/failure and list of patches
                  that are not in the 'deployed' state
         """
-        url = self._software_endpoint + '/release?show=deployed'
-        headers = {"X-Auth-Token": self._software_token}
-        response = requests.get(url, headers=headers, timeout=10)
-
         success = True
-        if response.status_code != 200:
-            print("Could not check required patches...")
-            return False, required_patches
+        releases = self._config.get("releases", "")
+        deployed_releases  = []
+        for release in json.loads(releases):
+            if release['state'] == STATE_DEPLOYED:
+                deployed_releases.append(release)
 
-        applied_patches = [release['release_id'] for release in response.json()]
+        applied_patches = [release['release_id'] for release in deployed_releases]
         missing_patch = list(set(required_patches) - set(applied_patches))
         if missing_patch:
             success = False
 
         return success, missing_patch
 
-    def run_health_check(self):
+    def run_general_health_check(self):
         """Run general health check using sysinv client"""
         force = self._config.get("force", False)
         health_ok = success = True
@@ -233,16 +229,9 @@ class PatchHealthCheck(HealthCheck):
 
     def _get_required_patches(self):
         """Get required patches for a target release"""
-        url = self._software_endpoint + '/release'
-        headers = {"X-Auth-Token": self._software_token}
-        response = requests.get(url, headers=headers, timeout=10)
-
-        if response.status_code != 200:
-            print("Could not get required patches...")
-            return []
-
+        releases = self._config.get("releases")
         required_patches = []
-        for release in response.json():
+        for release in json.loads(releases):
             if release["sw_version"] == self._target_release:
                 required_patches.extend(release["requires"])
                 break
@@ -299,6 +288,9 @@ def parse_config(args=None):
     parser.add_argument("--patch",
                         help="Set precheck to run against a patch release",
                         action="store_true")
+    parser.add_argument("--releases",
+                        help="Releases",
+                        default="")
 
     # if args was not passed will use sys.argv by default
     parsed_args = parser.parse_args(args)
@@ -312,16 +304,15 @@ def main(argv=None):
     health_ok = True
     output = ""
 
-    # execute general health check
-    general_health_check = HealthCheck(config)
-    general_health_ok, general_output = general_health_check.run_health_check()
-
-    # execute release-specific health check
     if patch_release:
-        specific_health_check = PatchHealthCheck(config)
+        health_check = PatchHealthCheck(config)
     else:
-        specific_health_check = UpgradeHealthCheck(config)
-    specific_health_ok, specific_output = specific_health_check.run_health_check()
+        health_check = UpgradeHealthCheck(config)
+
+    # execute general health check
+    general_health_ok, general_output = health_check.run_general_health_check()
+    # execute release-specific health check
+    specific_health_ok, specific_output = health_check.run_health_check()
 
     # combine health check results removing extra line breaks/blank spaces from the output
     health_ok = general_health_ok and specific_health_ok
