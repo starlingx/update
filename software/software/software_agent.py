@@ -46,7 +46,7 @@ insvc_software_scripts = "/run/software/software-scripts"
 insvc_software_flags = "/run/software/software-flags"
 insvc_software_restart_agent = "/run/software/.restart.software-agent"
 
-run_insvc_software_scripts_cmd = "/usr/sbin/run-software-scripts"
+run_install_software_scripts_cmd = "/usr/sbin/run-software-scripts"
 
 pa = None
 
@@ -69,7 +69,7 @@ def clearflag(fname):
             LOG.exception("Failed to clear %s flag", fname)
 
 
-def pull_restart_scripts_from_controller():
+def pull_install_scripts_from_controller():
     # If the rsync fails, it raises an exception to
     # the caller "handle_install()" and fails the
     # host-install request for this host.
@@ -580,6 +580,11 @@ class PatchAgent(PatchService):
                 os.path.exists(ostree_pull_completed_deployment_pending_file) or \
                 os.path.exists(mount_pending_file):
             try:
+                LOG.info("Running pre-install patch-scripts")
+                pull_install_scripts_from_controller()
+                subprocess.check_output([run_install_software_scripts_cmd, "preinstall"],
+                                        stderr=subprocess.STDOUT)
+
                 # Pull changes from remote to the sysroot ostree
                 # The remote value is configured inside
                 # "/sysroot/ostree/repo/config" file
@@ -588,6 +593,10 @@ class PatchAgent(PatchService):
             except OSTreeCommandFail:
                 LOG.exception("Failed to pull changes and create deployment"
                               "during host-install.")
+                success = False
+            except subprocess.CalledProcessError as e:
+                LOG.exception("Failed to execute pre-install scripts.")
+                LOG.error("Command output: %s", e.output)
                 success = False
 
             try:
@@ -623,15 +632,15 @@ class PatchAgent(PatchService):
                         setflag(mount_pending_file)
                         ostree_utils.mount_new_deployment(deployment_dir)
                         clearflag(mount_pending_file)
-                        LOG.info("Running in-service patch-scripts")
-                        pull_restart_scripts_from_controller()
-                        subprocess.check_output(run_insvc_software_scripts_cmd, stderr=subprocess.STDOUT)
+                        LOG.info("Running post-install patch-scripts")
+                        subprocess.check_output([run_install_software_scripts_cmd, "postinstall"],
+                                                stderr=subprocess.STDOUT)
 
                         # Clear the node_is_patched flag, since we've handled it in-service
                         clearflag(node_is_patched_file)
                         self.node_is_patched = False
                     except subprocess.CalledProcessError as e:
-                        LOG.exception("In-Service patch installation failed")
+                        LOG.exception("Failed to execute post-install scripts.")
                         LOG.error("Command output: %s", e.output)
                         success = False
 

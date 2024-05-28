@@ -19,6 +19,8 @@ metadata = """<?xml version="1.0" ?>
   <status>TST</status>
   <unremovable>Y</unremovable>
   <reboot_required>Y</reboot_required>
+  <pre_install>pre-install.sh</pre_install>
+  <post_install>post-install.sh</post_install>
   <contents>
     <ostree>
       <number_of_commits>1</number_of_commits>
@@ -47,7 +49,8 @@ metadata2 = """<?xml version="1.0" ?>
   <status>DEV</status>
   <unremovable>N</unremovable>
   <reboot_required>N</reboot_required>
-  <restart_script>23.09_NRR_INSVC_example-cgcs-patch-restart</restart_script>
+  <pre_install>pre-install.sh</pre_install>
+  <post_install>post-install.sh</post_install>
   <contents>
     <ostree>
       <number_of_commits>1</number_of_commits>
@@ -76,7 +79,8 @@ expected_values = [
         "warnings": "Sample warning2",
         "status": "DEV",
         "unremovable": "N",
-        "restart_script": "23.09_NRR_INSVC_example-cgcs-patch-restart",
+        "pre_install": "pre-install.sh",
+        "post_install": "post-install.sh",
         "commit_id": "0b53576092a189133d56eac49ae858c1218f480a4a859eaca2b47f2604a4e0e7",
         "checksum": "2f742b1b719f19b302c306604659ccf4aa61a1fdb7742ac79b009c79af18c79b",
     },
@@ -90,7 +94,8 @@ expected_values = [
         "warnings": "Sample warning",
         "status": "TST",
         "unremovable": "Y",
-        "restart_script": None,
+        "pre_install": "pre-install.sh",
+        "post_install": "post-install.sh",
         "commit_id": "38453dcb1aeb5bb9394ed02c0e6b8f2f913d00a827c89faf98cb63dff503b8e2",
         "checksum": "2f742b1b719f19b302c306604659ccf4aa61a1fdb7742ac79b009c79af18c79b",
     }
@@ -132,10 +137,10 @@ class TestSoftwareFunction(unittest.TestCase):
             self.assertEqual(val["warnings"], r.warnings)
             self.assertEqual(val["status"], r.status)
             self.assertEqual(val["unremovable"] == 'Y', r.unremovable)
-            if val["restart_script"] is None:
-                self.assertIsNone(r.restart_script)
+            if val["pre_install"] is None:
+                self.assertIsNone(r.pre_install)
             else:
-                self.assertEqual(val["restart_script"], r.restart_script)
+                self.assertEqual(val["pre_install"], r.pre_install)
             self.assertEqual(val["commit_id"], r.commit_id)
             self.assertEqual(val["checksum"], r.commit_checksum)
 
@@ -161,10 +166,10 @@ class TestSoftwareFunction(unittest.TestCase):
         self.assertEqual(val["warnings"], r.warnings)
         self.assertEqual(val["status"], r.status)
         self.assertEqual(val["unremovable"] == 'Y', r.unremovable)
-        if val["restart_script"] is None:
-            self.assertIsNone(r.restart_script)
+        if val["pre_install"] is None:
+            self.assertIsNone(r.pre_install)
         else:
-            self.assertEqual(val["restart_script"], r.restart_script)
+            self.assertEqual(val["pre_install"], r.pre_install)
         self.assertEqual(val["commit_id"], r.commit_id)
         self.assertEqual(val["checksum"], r.commit_checksum)
 
@@ -180,9 +185,9 @@ class TestSoftwareFunction(unittest.TestCase):
             self.assertEqual(val["warnings"], r.warnings)
             self.assertEqual(val["status"], r.status)
             self.assertEqual(val["unremovable"] == 'Y', r.unremovable)
-            if val["restart_script"] is None:
-                self.assertIsNone(r.restart_script)
+            if val["pre_install"] is None:
+                self.assertIsNone(r.pre_install)
             else:
-                self.assertEqual(val["restart_script"], r.restart_script)
+                self.assertEqual(val["pre_install"], r.pre_install)
             self.assertEqual(val["commit_id"], r.commit_id)
             self.assertEqual(val["checksum"], r.commit_checksum)

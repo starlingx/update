@@ -1,13 +1,20 @@
 #!/bin/bash
 #
-# Copyright (c) 2023 Wind River Systems, Inc.
+# Copyright (c) 2023-2024 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
 
 . /etc/software/software-functions
 
-declare SCRIPTS=$(find $PATCH_SCRIPTDIR -type f -executable | sort)
+if [ -z "$1" ]
+then
+    loginfo "No input parameter provided to identify script type."
+    exit 0
+fi
+
+declare DIR="${PATCH_SCRIPTDIR}/${1}"
+declare SCRIPTS=$(find $DIR -type f -executable | sort)
 declare -i NUM_SCRIPTS=$(echo "$SCRIPTS" | wc -l)
 
 if [ $NUM_SCRIPTS -eq 0 ]
@@ -18,10 +25,10 @@ fi
 
 loginfo "Running $NUM_SCRIPTS in-service patch scripts"
 
-declare SCRIPTLOG=/var/log/software-insvc.log
+declare SCRIPTLOG=/var/log/software.log
 cat <<EOF >>$SCRIPTLOG
 ############################################################
-`date "+%FT%T.%3N"`: Running $NUM_SCRIPTS in-service patch scripts:
+`date "+%FT%T.%3N"`: Running $NUM_SCRIPTS install patch scripts:
 
 $SCRIPTS
 

@@ -1082,22 +1082,29 @@ class PatchController(PatchService):
         ostree_tar_filename = "%s/%s-software.tar" % (ostree_tar_dir, patch_id)
         return ostree_tar_filename
 
-    def delete_restart_script(self, patch_id):
+    def delete_install_script(self, patch_id):
         '''
-        Deletes the restart script (if any) associated with the patch
+        Deletes the install scripts associated with the patch
         :param patch_id: The patch ID
         '''
         release = self.release_collection.get_release_by_id(patch_id)
-        restart_script = release.restart_script
-        if not restart_script:
-            return
+        pre_install = release.pre_install
+        post_install = release.post_install
 
-        restart_script_path = "%s/%s" % (root_scripts_dir, restart_script)
+        pre_install_path = None
+        post_install_path = None
+        if pre_install:
+            pre_install_path = "%s/%s" % (root_scripts_dir, pre_install)
+        if post_install:
+            post_install_path = "%s/%s" % (root_scripts_dir, post_install)
         try:
-            # Delete the metadata
-            os.remove(restart_script_path)
+            # Delete the install scripts
+            if pre_install_path:
+                os.remove(pre_install_path)
+            if post_install_path:
+                os.remove(post_install_path)
         except OSError:
-            msg = "Failed to remove restart script for %s" % patch_id
+            msg = "Failed to remove the install script for %s" % patch_id
             LOG.exception(msg)
             raise SoftwareError(msg)
 
@@ -1633,7 +1640,7 @@ class PatchController(PatchService):
                 LOG.exception(msg)
                 raise MetadataFail(msg)
 
-            self.delete_restart_script(release_id)
+            self.delete_install_script(release_id)
             reload_release_data()
             msg = "%s has been deleted" % release_id
             LOG.info(msg)
@@ -2002,17 +2009,23 @@ class PatchController(PatchService):
             results["error"] += errormsg
             return results
 
+
         for patch_id in commit_list:
-            release = self.release_collection.get_release_by_id(patch_id)
             # Fetch file paths that need to be cleaned up to
             # free patch storage disk space
-            if release.restart_script:
-                restart_script_path = "%s/%s" % \
-                    (root_scripts_dir,
-                     release.restart_script)
-                if os.path.exists(restart_script_path):
-                    cleanup_files.add(restart_script_path)
-            patch_sw_version = release.sw_release
+            pre_install_filename = self.release_data.metadata[patch_id].get("pre_install")
+            post_install_filename = self.release_data.metadata[patch_id].get("post_install")
+
+            if pre_install_filename:
+                pre_install_script_path = "%s/%s" % (root_scripts_dir, pre_install_filename)
+                post_install_script_path = "%s/%s" % (root_scripts_dir, post_install_filename)
+                if os.path.exists(pre_install_script_path):
+                    cleanup_files.add(pre_install_script_path)
+                if os.path.exists(post_install_script_path):
+                    cleanup_files.add(post_install_script_path)
+
+            patch_sw_version = utils.get_major_release_version(
+                self.release_data.metadata[patch_id]["sw_version"])
             abs_ostree_tar_dir = package_dir[patch_sw_version]
             software_tar_path = "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id)
             if os.path.exists(software_tar_path):
@@ -2084,40 +2097,39 @@ class PatchController(PatchService):
                     break
         return rc
 
-    def copy_restart_scripts(self):
+    def copy_install_scripts(self):
         applying_states = [states.DEPLOYING, states.REMOVING]
         for release in self.release_collection.iterate_releases():
-            if release.restart_script:
-                if release.state in applying_states:
-                    try:
-                        restart_script_name = release.restart_script
-                        restart_script_path = "%s/%s" \
-                            % (root_scripts_dir, restart_script_name)
-                        dest_path = constants.PATCH_SCRIPTS_STAGING_DIR
-                        dest_script_file = "%s/%s" \
-                            % (constants.PATCH_SCRIPTS_STAGING_DIR, restart_script_name)
+            pre_install = release.pre_install
+            post_install = release.post_install
+            folder = ["preinstall", "postinstall"]
+            if release.state in applying_states:
+                try:
+                    for i, file in enumerate(file for file in (pre_install, post_install) if file):
+                        script_path = "%s/%s" % (root_scripts_dir, file)
+                        dest_path = constants.PATCH_SCRIPTS_STAGING_DIR + "/" + folder[i]
+                        dest_script_file = "%s/%s" % (dest_path, file)
                         if not os.path.exists(dest_path):
                             os.makedirs(dest_path, 0o700)
-                        shutil.copyfile(restart_script_path, dest_script_file)
+                        shutil.copyfile(script_path, dest_script_file)
                         os.chmod(dest_script_file, 0o700)
-                        msg = "Creating restart script for %s" % release.id
+                        msg = "Creating install script %s for %s" % (file, release.id)
                         LOG.info(msg)
-                    except shutil.Error:
-                        msg = "Failed to copy the restart script for %s" % release.id
-                        LOG.exception(msg)
-                        raise SoftwareError(msg)
-                else:
-                    try:
-                        restart_script_name = release.restart_script
-                        restart_script_path = "%s/%s" \
-                            % (constants.PATCH_SCRIPTS_STAGING_DIR, restart_script_name)
-                        if os.path.exists(restart_script_path):
-                            os.remove(restart_script_path)
-                            msg = "Removing restart script for %s" % release.id
-                            LOG.info(msg)
-                    except shutil.Error:
-                        msg = "Failed to delete the restart script for %s" % release.id
-                        LOG.exception(msg)
+                except shutil.Error:
+                    msg = "Failed to copy the install script %s for %s" % (file, release.id)
+                    LOG.exception(msg)
+                    raise SoftwareError(msg)
+            else:
+                try:
+                    for i, file in enumerate(file for file in (pre_install, post_install) if file):
+                        script_path = "%s/%s/%s" % (constants.PATCH_SCRIPTS_STAGING_DIR, folder[i], file)
+                        if os.path.exists(script_path):
+                            os.remove(script_path)
+                        msg = "Removing install script %s for %s" % (file, release.id)
+                        LOG.info(msg)
+                except shutil.Error:
+                    msg = "Failed to delete the install script %s for %s" % (file, release.id)
+                    LOG.exception(msg)
 
     def _update_state_to_peer(self):
         state_update_msg = SoftwareMessageDeployStateUpdate()
@@ -2773,7 +2785,7 @@ class PatchController(PatchService):
         if self.allow_insvc_patching:
             LOG.info("Allowing in-service patching")
             force = True
-            self.copy_restart_scripts()
+            self.copy_install_scripts()
 
         # Check if there is a major release deployment in progress
         # and set agent request parameters accordingly

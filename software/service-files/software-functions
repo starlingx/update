@@ -12,7 +12,8 @@
 # Source platform.conf, for nodetype and subfunctions
 . /etc/platform/platform.conf
 
-declare PATCH_SCRIPTDIR=/run/software/software-scripts
+declare PRE_INSTALL_SCRIPTDIR=/run/software/software-scripts/preinstall
+declare POST_INSTALL_SCRIPTDIR=/run/software/software-scripts/postinstall
 declare PATCH_FLAGDIR=/run/software/software-flags
 declare -i PATCH_STATUS_OK=0
 declare -i PATCH_STATUS_FAILED=1
