@@ -184,8 +184,9 @@ def require_deploy_state(require_states, prompt):
                 return res
             else:
                 msg = ""
+                require_states_text = ", ".join([state.value for state in require_states])
                 if prompt:
-                    msg = prompt.format(state=state, require_states=require_states)
+                    msg = prompt.format(state=state, require_states=require_states_text)
                 raise InvalidOperation(msg)
         return exec_op
     return wrap
