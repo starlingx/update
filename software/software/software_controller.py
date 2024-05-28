@@ -3545,6 +3545,17 @@ class PatchControllerMainThread(threading.Thread):
 
 
 def main():
+    software_conf = constants.SOFTWARE_CONFIG_FILE_LOCAL
+
+    pkg_feed = ('"http://controller:8080/updates/debian/rel-%s/ %s updates"'
+               % (constants.STARLINGX_RELEASE, constants.DEBIAN_RELEASE))
+
+    config = configparser.ConfigParser()
+    config.read(software_conf)
+    config.set("runtime", "package_feed",pkg_feed)
+    with open(software_conf, "w+") as configfile:
+        config.write(configfile)
+
     # The following call to CONF is to ensure the oslo config
     # has been called to specify a valid config dir.
     # Otherwise oslo_policy will fail when it looks for its files.

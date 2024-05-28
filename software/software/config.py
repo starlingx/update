@@ -87,8 +87,8 @@ def read_config():
         'agent_port': "5495",
         'alt_postgresql_port': "6666",
         "package_feed":
-            "http://controller:8080/updates/debian/rel-%s/ bullseye updates"
-            % constants.STARLINGX_RELEASE,
+            "http://controller:8080/updates/debian/rel-%s/ %s updates"
+            % (constants.STARLINGX_RELEASE, constants.DEBIAN_RELEASE),
     }
 
     global controller_mcast_group
