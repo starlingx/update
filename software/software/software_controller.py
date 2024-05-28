@@ -2199,8 +2199,18 @@ class PatchController(PatchService):
 
         # TODO(heitormatsui) if different region was passed as parameter then
         #  need to discover the subcloud auth_url to pass to precheck script
+        # TODO(jvazhapp) the region_name will not be 'RegionOne' (for standalone
+        #  clouds or subcloud)
         if region_name != "RegionOne":
             pass
+
+        # Get releases info required for precheck
+        releases = self.software_release_query_cached()
+        for release in releases:
+            keys_to_delete = ['packages', 'summary', 'description',
+                              'install_instructions', 'warnings', 'component']
+            for key in keys_to_delete:
+                del release[key]
 
         cmd = [precheck_script,
                "--auth_url=%s" % auth_url,
@@ -2209,7 +2219,8 @@ class PatchController(PatchService):
                "--project_name=%s" % project_name,
                "--user_domain_name=%s" % user_domain_name,
                "--project_domain_name=%s" % project_domain_name,
-               "--region_name=%s" % region_name]
+               "--region_name=%s" % region_name,
+               "--releases=%s" % json.dumps(releases)]
         if force:
             cmd.append("--force")
         if patch:
