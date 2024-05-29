@@ -23,6 +23,7 @@ class DeployController(RestController):
         'precheck': ['POST'],
         'start': ['POST'],
         'complete': ['POST'],
+        'delete': ['DELETE'],
         'software_upgrade': ['GET'],
     }
 
@@ -39,6 +40,14 @@ class DeployController(RestController):
         reload_release_data()
 
         result = sc.software_deploy_complete_api()
+        sc.software_sync()
+        return result
+
+    @expose(method='DELETE', template='json')
+    def delete(self):
+        reload_release_data()
+
+        result = sc.software_deploy_delete_api()
         sc.software_sync()
         return result
 

@@ -152,3 +152,15 @@ def do_complete(cc, args):
     utils.display_info(resp)
 
     return utils.check_rc(resp, data)
+
+
+def do_delete(cc, args):
+    """Delete the software deployment"""
+    resp, data = cc.deploy.delete(args)
+
+    if args.debug:
+        utils.print_result_debug(resp, data)
+
+    utils.display_info(resp)
+
+    return utils.check_rc(resp, data)

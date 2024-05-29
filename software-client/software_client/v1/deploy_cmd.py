@@ -19,6 +19,7 @@ DEPLOY_COMMAND_MODULES = [
 #     - host
 #     - activate
 #     - complete
+#     - delete
 # non root/sudo users can run:
 #     - host-list
 #     - show

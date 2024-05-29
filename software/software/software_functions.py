@@ -1435,3 +1435,42 @@ def mount_remote_directory(remote_dir, local_dir):
             subprocess.check_call(["/bin/umount", local_dir])
         except subprocess.CalledProcessError as e:
             LOG.error("Error unmounting %s: %s" % (local_dir, str(e)))
+
+
+def clean_up_deployment_data(major_release):
+    """
+    Clean up all data generated during deployment.
+
+    :param major_release: Major release to be deleted.
+    """
+    # Delete the data inside /opt/platform/<folder>/<major_release>
+    for folder in constants.DEPLOY_CLEANUP_FOLDERS_NAME:
+        path = os.path.join(constants.PLATFORM_PATH, folder, major_release, "")
+        shutil.rmtree(path, ignore_errors=True)
+    # TODO(lbonatti): These folders should be revisited on software deploy abort/rollback
+    #                 to check additional folders that might be needed to delete.
+    upgrade_folders = [
+        os.path.join(constants.POSTGRES_PATH, constants.UPGRADE),
+        os.path.join(constants.POSTGRES_PATH, major_release),
+        os.path.join(constants.RABBIT_PATH, major_release),
+        os.path.join(constants.ETCD_PATH, major_release),
+    ]
+    for folder in upgrade_folders:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def run_deploy_clean_up_script(release):
+    """
+    Runs the deploy-cleanup script for the given release.
+
+    :param release: Release to be cleaned.
+    """
+    cmd_path = utils.get_software_deploy_script(release, constants.DEPLOY_CLEANUP_SCRIPT)
+    if (os.path.exists(f"{constants.STAGING_DIR}/{constants.OSTREE_REPO}") and
+            os.path.exists(constants.ROOT_DIR)):
+        try:
+            subprocess.check_output([cmd_path, f"{constants.STAGING_DIR}/{constants.OSTREE_REPO}",
+                                     constants.ROOT_DIR, "all"], stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Error running deploy-cleanup script: %s" % str(e))
+            raise

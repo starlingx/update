@@ -82,6 +82,15 @@ class DeployManager(base.Manager):
 
         return self._create(path, body={})
 
+    def delete(self, args):
+        # Ignore interrupts during this function
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+        # Issue deploy delete request
+        path = "/v1/deploy"
+
+        return self._delete(path)
+
     def host_list(self):
         path = '/v1/deploy_host'
         return self._list(path, "")
