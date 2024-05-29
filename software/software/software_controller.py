@@ -2495,7 +2495,7 @@ class PatchController(PatchService):
                     LOG.exception("Failure during commit consistency check for %s.", release_id)
 
                 try:
-                    apt_utils.run_install(feed_repo, packages)
+                    apt_utils.run_install(feed_repo, release.sw_release, packages)
                 except APTOSTreeCommandFail:
                     LOG.exception("Failed to intall Debian package.")
                     raise APTOSTreeCommandFail(msg)
