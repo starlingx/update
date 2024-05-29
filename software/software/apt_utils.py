@@ -14,11 +14,12 @@ from software.exceptions import APTOSTreeCommandFail
 LOG = logging.getLogger('main_logger')
 
 
-def package_upload(feed_dir, package):
+def package_upload(feed_dir, sw_release, package):
     """
     Upload a Debian package to an apt repository.
 
     :param feed_dir: apt package feed directory
+    :param sw_release: Uploading patch release version (MM.mm.pp)
     :param package: Debian package
     """
     try:
@@ -29,6 +30,7 @@ def package_upload(feed_dir, package):
             ["apt-ostree", "repo", "add",
              "--feed", str(feed_dir),
              "--release", constants.DEBIAN_RELEASE,
+             "--component", sw_release,
              package],
             check=True,
             capture_output=True)
@@ -40,12 +42,13 @@ def package_upload(feed_dir, package):
         raise APTOSTreeCommandFail(msg)
 
 
-def package_remove(feed_dir, packages):
+def package_remove(feed_dir, sw_release, packages):
     """
     Remove a list of Debian packages from the
     apt repository.
 
     :param feed_dir: apt package feed directory
+    :param sw_release: Patch release version (MM.mm.pp)
     :param package: Debian package
     """
     try:
@@ -57,6 +60,7 @@ def package_remove(feed_dir, packages):
                 ["apt-ostree", "repo", "remove",
                  "--feed", str(feed_dir),
                  "--release", constants.DEBIAN_RELEASE,
+                 "--component", sw_release,
                  package],
                 check=True,
                 capture_output=True)

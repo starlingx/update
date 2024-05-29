@@ -939,11 +939,11 @@ class PatchFile(object):
 
         patch_id = thispatch.parse_metadata_string(text)
 
-        patch_sw_version = utils.get_major_release_version(
-            thispatch.metadata[patch_id]["sw_version"])
-        abs_ostree_tar_dir = package_dir[patch_sw_version]
+        sw_release = thispatch.metadata[patch_id]["sw_version"] # MM.mm.pp
+        sw_version = utils.get_major_release_version(sw_release) # MM.mm
+        abs_ostree_tar_dir = package_dir[sw_version]
         ostree_tar_filename = "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id)
-        package_repo_dir = "%s/rel-%s" % (constants.PACKAGE_FEED_DIR, patch_sw_version)
+        package_repo_dir = "%s/rel-%s" % (constants.PACKAGE_FEED_DIR, sw_version)
 
         # Create a temporary working directory
         tmpdir = tempfile.mkdtemp(prefix="deployment_")
@@ -957,10 +957,11 @@ class PatchFile(object):
             deb_dir = os.scandir(tmpdir)
             for deb in deb_dir:
                 apt_utils.package_upload(package_repo_dir,
+                                         sw_release,
                                          os.path.join(tmpdir, deb.name))
         except tarfile.TarError:
             msg = "Failed to extract the ostree tarball for %s" \
-                  % patch_sw_version
+                  % sw_version
             LOG.exception(msg)
             raise OSTreeTarFail(msg)
         except OSError as e:
