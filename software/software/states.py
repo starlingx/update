@@ -11,14 +11,17 @@ import os
 from software.constants import SOFTWARE_STORAGE_DIR
 
 
+# TODO(lbonatti) Remove this diagram once it is mapped in the documentation
 # software release life cycle
-# (fresh install) -> deployed -> (upgrade to next version and deploy complete) -> unavailable -> (deleted)
+# (fresh install) -> deployed -> (upgrade to next version and deploy complete) -> unavailable -> (delete)
 #                      ^
 #                      |---------------------------------------------------------
 #                                                                               ^
 #                                                                               |
 # (upload) -> available ->(deploy start) -> deploying -> (deploy complete) -> deployed
-#               \---> (deleted)
+#               \---> (delete)
+#
+# =================================================================================================
 #
 # deploy life cycle
 # (deploy-start)
@@ -27,9 +30,14 @@ from software.constants import SOFTWARE_STORAGE_DIR
 # deploy-start
 #     |
 #     V
-# start-done -> deploy-host -> deploy-active -> deploy-active-done -> deploy-complete -> (delete)
-#     \              \            \
-#      \--------------\------------\----> (deploy abort) -> deploy-abort --> deplete-abort-done -> (delete)
+# start-done -> deploy-host -> deploy-activate -> deploy-activate-done -> deploy-complete -> (delete)
+#     \              \            \                  \                      \
+#      \-> (delete)   \-> (deploy abort) -> deploy-host-rollback -> deploy-host-done -> (delete)
+#                                   \------------------\----------------------\-> (deploy abort) -> deploy-activate-rollback -\
+#                                                       ^                                                                      \
+#                                                        \----------------------------------------------------------------------\
+#
+# =================================================================================================
 #
 # deploy host life cycle
 #                      /----(deploy abort/reverse deploy)---
@@ -102,14 +110,18 @@ class DEPLOY_STATES(Enum):
     HOST_DONE = 'host-done'
     HOST_FAILED = 'host-failed'
 
+    HOST_ROLLBACK = 'host-rollback'
+    HOST_ROLLBACK_DONE = 'host-rollback-done'
+    HOST_ROLLBACK_FAILED = 'host-rollback-failed'
+
     ACTIVATE = 'activate'
     ACTIVATE_DONE = 'activate-done'
     ACTIVATE_FAILED = 'activate-failed'
 
-    COMPLETED = 'completed'
+    ACTIVATE_ROLLBACK = 'activate-rollback'
+    ACTIVATE_ROLLBACK_FAILED = 'activate-rollback-failed'
 
-    ABORT = 'abort'
-    ABORT_DONE = 'abort-done'
+    COMPLETED = 'completed'
 
 
 # deploy host state
@@ -119,10 +131,19 @@ class DEPLOY_HOST_STATES(Enum):
     FAILED = 'failed'
     PENDING = 'pending'
 
+    ROLLBACK_DEPLOYED = 'rollback-deployed'
+    ROLLBACK_DEPLOYING = 'rollback-deploying'
+    ROLLBACK_FAILED = 'rollback-failed'
+    ROLLBACK_PENDING = 'rollback-pending'
+
 
 VALID_HOST_DEPLOY_STATE = [
     DEPLOY_HOST_STATES.DEPLOYED,
     DEPLOY_HOST_STATES.DEPLOYING,
     DEPLOY_HOST_STATES.FAILED,
     DEPLOY_HOST_STATES.PENDING,
+    DEPLOY_HOST_STATES.ROLLBACK_DEPLOYED,
+    DEPLOY_HOST_STATES.ROLLBACK_DEPLOYING,
+    DEPLOY_HOST_STATES.ROLLBACK_FAILED,
+    DEPLOY_HOST_STATES.ROLLBACK_PENDING,
 ]

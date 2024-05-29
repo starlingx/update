@@ -17,24 +17,43 @@ LOG = logging.getLogger('main_logger')
 
 deploy_state_transition = {
     None: [DEPLOY_STATES.START],  # Fake state for no deploy in progress
+
+    # deploy start
     DEPLOY_STATES.START: [DEPLOY_STATES.START_DONE, DEPLOY_STATES.START_FAILED],
-    DEPLOY_STATES.START_FAILED: [DEPLOY_STATES.ABORT],
-    DEPLOY_STATES.ABORT: [DEPLOY_STATES.ABORT_DONE],
-    DEPLOY_STATES.START_DONE: [DEPLOY_STATES.ABORT, DEPLOY_STATES.HOST],
+    DEPLOY_STATES.START_FAILED: [],  # waiting to be deleted
+    DEPLOY_STATES.START_DONE: [DEPLOY_STATES.HOST],
+
+    # deploy host
     DEPLOY_STATES.HOST: [DEPLOY_STATES.HOST,
-                         DEPLOY_STATES.ABORT,
                          DEPLOY_STATES.HOST_FAILED,
-                         DEPLOY_STATES.HOST_DONE],
-    DEPLOY_STATES.HOST_FAILED: [DEPLOY_STATES.HOST,  # deploy-host can reattempt
-                                DEPLOY_STATES.ABORT,
+                         DEPLOY_STATES.HOST_DONE,
+                         DEPLOY_STATES.HOST_ROLLBACK],
+    DEPLOY_STATES.HOST_FAILED: [DEPLOY_STATES.HOST,  # deploy host is reentrant
                                 DEPLOY_STATES.HOST_FAILED,
-                                DEPLOY_STATES.HOST_DONE],
-    DEPLOY_STATES.HOST_DONE: [DEPLOY_STATES.ABORT, DEPLOY_STATES.ACTIVATE],
+                                DEPLOY_STATES.HOST_DONE,
+                                DEPLOY_STATES.HOST_ROLLBACK],
+    DEPLOY_STATES.HOST_DONE: [DEPLOY_STATES.ACTIVATE, DEPLOY_STATES.HOST_ROLLBACK],
+
+    # deploy host rollback
+    DEPLOY_STATES.HOST_ROLLBACK: [DEPLOY_STATES.HOST_ROLLBACK,
+                                  DEPLOY_STATES.HOST_ROLLBACK_FAILED,
+                                  DEPLOY_STATES.HOST_ROLLBACK_DONE],
+    DEPLOY_STATES.HOST_ROLLBACK_FAILED: [DEPLOY_STATES.HOST_ROLLBACK,  # deploy host rollback is reentrant
+                                         DEPLOY_STATES.HOST_ROLLBACK_DONE],
+    DEPLOY_STATES.HOST_ROLLBACK_DONE: [],  # waiting to be deleted
+
+    # deploy activate
     DEPLOY_STATES.ACTIVATE: [DEPLOY_STATES.ACTIVATE_DONE, DEPLOY_STATES.ACTIVATE_FAILED],
-    DEPLOY_STATES.ACTIVATE_DONE: [DEPLOY_STATES.ABORT, DEPLOY_STATES.COMPLETED],  # abort after deploy-activated?
-    DEPLOY_STATES.ACTIVATE_FAILED: [DEPLOY_STATES.ACTIVATE, DEPLOY_STATES.ABORT],
-    DEPLOY_STATES.ABORT_DONE: [],  # waiting for being deleted
-    DEPLOY_STATES.COMPLETED: [None]
+    DEPLOY_STATES.ACTIVATE_FAILED: [DEPLOY_STATES.ACTIVATE,  # deploy activate is reentrant
+                                    DEPLOY_STATES.ACTIVATE_ROLLBACK],
+    DEPLOY_STATES.ACTIVATE_DONE: [DEPLOY_STATES.COMPLETED, DEPLOY_STATES.ACTIVATE_ROLLBACK],
+
+    # deploy activate rollback
+    DEPLOY_STATES.ACTIVATE_ROLLBACK: [DEPLOY_STATES.HOST_ROLLBACK, DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED],
+    DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED: [DEPLOY_STATES.ACTIVATE_ROLLBACK],  # deploy host rollback is reentrant
+
+    # deploy complete
+    DEPLOY_STATES.COMPLETED: [DEPLOY_STATES.ACTIVATE_ROLLBACK]
 }
 
 
@@ -84,7 +103,7 @@ class DeployState(object):
                 DEPLOY_HOST_STATES.DEPLOYING.value in all_states:
             deploy_state.deploy_host()
         elif all_states == [DEPLOY_HOST_STATES.DEPLOYED.value]:
-            deploy_state.deploy_host_completed()
+            deploy_state.deploy_host_done()
 
     def __init__(self):
         self._from_release = None
@@ -109,14 +128,14 @@ class DeployState(object):
             if self.check_transition(target_state):
                 # None means not existing or deleting
                 if target_state is not None:
-                    db_api.update_deploy(target_state)
+                    db_api.update_deploy(state=target_state)
             else:
                 # TODO(bqian) check the current state, and provide guidence on what is
                 # the possible next operation
                 if target_state is None:
                     msg = "Deployment can not deleted in current state."
                 else:
-                    msg = "Host can not transform to %s from current state" % target_state.value()
+                    msg = "Host can not transform to %s from current state" % target_state.value
                 raise InvalidOperation(msg)
         finally:
             db_api.end_update()
@@ -148,14 +167,20 @@ class DeployState(object):
         self.transform(DEPLOY_STATES.HOST)
 
     def abort(self):
-        self.transform(DEPLOY_STATES.ABORT)
-
-    def deploy_host_completed(self):
-        # depends on the deploy state, the deploy can be transformed
-        # to HOST_DONE (from DEPLOY_HOST) or ABORT_DONE (ABORT)
+        # depends on the deploy state, if pre-activate then go to
+        # host rollback, if post-activate then go to activate rollback
         state = DeployState.get_deploy_state()
-        if state == DEPLOY_STATES.ABORT:
-            self.transform(DEPLOY_STATES.ABORT_DONE)
+        if state in [DEPLOY_STATES.ACTIVATE_DONE, DEPLOY_STATES.ACTIVATE_FAILED, DEPLOY_STATES.COMPLETED]:
+            self.transform(DEPLOY_STATES.ACTIVATE_ROLLBACK)
+        else:
+            self.transform(DEPLOY_STATES.HOST_ROLLBACK)
+
+    def deploy_host_done(self):
+        # depends on the deploy state, the deploy can be transformed
+        # to HOST_DONE (from DEPLOY_HOST) or HOST_ROLLBACK_DONE (ABORT)
+        state = DeployState.get_deploy_state()
+        if state == DEPLOY_STATES.HOST_ROLLBACK:
+            self.transform(DEPLOY_STATES.HOST_ROLLBACK_DONE)
         else:
             self.transform(DEPLOY_STATES.HOST_DONE)
 
@@ -165,14 +190,29 @@ class DeployState(object):
     def activate(self):
         self.transform(DEPLOY_STATES.ACTIVATE)
 
-    def activate_completed(self):
+    def activate_done(self):
         self.transform(DEPLOY_STATES.ACTIVATE_DONE)
 
     def activate_failed(self):
         self.transform(DEPLOY_STATES.ACTIVATE_FAILED)
 
+    def activate_rollback(self):
+        self.transform(DEPLOY_STATES.ACTIVATE_ROLLBACK)
+
+    def activate_rollback_failed(self):
+        self.transform(DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED)
+
     def completed(self):
         self.transform(DEPLOY_STATES.COMPLETED)
+
+    def deploy_host_rollback(self):
+        self.transform(DEPLOY_STATES.HOST_ROLLBACK)
+
+    def deploy_host_rollback_done(self):
+        self.transform(DEPLOY_STATES.HOST_ROLLBACK_DONE)
+
+    def deploy_host_rollback_failed(self):
+        self.transform(DEPLOY_STATES.HOST_ROLLBACK_FAILED)
 
 
 def require_deploy_state(require_states, prompt):

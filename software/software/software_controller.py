@@ -2329,7 +2329,7 @@ class PatchController(PatchService):
         state_event = {
             DEPLOY_STATES.START_DONE: deploy_state.start_done,
             DEPLOY_STATES.START_FAILED: deploy_state.start_failed,
-            DEPLOY_STATES.ACTIVATE_DONE: deploy_state.activate_completed,
+            DEPLOY_STATES.ACTIVATE_DONE: deploy_state.activate_done,
             DEPLOY_STATES.ACTIVATE_FAILED: deploy_state.activate_failed
         }
         if new_state in state_event:
@@ -2690,10 +2690,10 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-    @require_deploy_state([DEPLOY_STATES.ABORT_DONE, DEPLOY_STATES.COMPLETED, DEPLOY_STATES.START_DONE,
+    @require_deploy_state([DEPLOY_STATES.HOST_ROLLBACK_DONE, DEPLOY_STATES.COMPLETED, DEPLOY_STATES.START_DONE,
                            DEPLOY_STATES.START_FAILED],
                           "Deploy must be in the following states to be able to delete: %s, %s, %s, %s" % (
-                           DEPLOY_STATES.ABORT_DONE.value, DEPLOY_STATES.COMPLETED.value,
+                           DEPLOY_STATES.HOST_ROLLBACK_DONE.value, DEPLOY_STATES.COMPLETED.value,
                            DEPLOY_STATES.START_DONE.value, DEPLOY_STATES.START_FAILED.value))
     def software_deploy_delete_api(self) -> dict:
         """
@@ -2721,7 +2721,7 @@ class PatchController(PatchService):
                 release = self.release_collection.get_release_by_id(from_release_deployment)
                 is_major_release = ReleaseState(release_ids=[release.id]).is_major_release_deployment()
 
-        elif DEPLOY_STATES.ABORT_DONE == deploy_state_instance.get_deploy_state():
+        elif DEPLOY_STATES.HOST_ROLLBACK_DONE == deploy_state_instance.get_deploy_state():
             major_release = utils.get_major_release_version(to_release)
             try:
                 is_major_release = ReleaseState().is_major_release_deployment()
@@ -2805,7 +2805,7 @@ class PatchController(PatchService):
         deploy_state = DeployState.get_instance()
         deploy_state.activate()
         # patching release activate operations go here
-        deploy_state.activate_completed()
+        deploy_state.activate_done()
         return True
 
     def _activate_major_release(self, deploy):
