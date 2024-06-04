@@ -5,6 +5,5 @@ lib/systemd/system/sw-patch-controller-daemon.service
 usr/sbin/sw-patch
 usr/sbin/sw-patch-controller-daemon
 usr/sbin/sw-patch-controller-daemon-restart
-usr/sbin/upgrade-start-pkg-extract
 usr/share/bash-completion/completions/sw-patch
 usr/share/starlingx/pmon.d/sw-patch-controller-daemon.conf
