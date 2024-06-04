@@ -2707,27 +2707,32 @@ class PatchController(PatchService):
         deploy = self.db_api_instance.get_current_deploy()
         to_release = deploy.get("to_release")
         from_release = deploy.get("from_release")
-        to_release_deployment = constants.RELEASE_GA_NAME % to_release
-        from_release_deployment = constants.RELEASE_GA_NAME % from_release
+
         deploy_state_instance = DeployState.get_instance()
         is_major_release = False
 
         if DEPLOY_STATES.COMPLETED == deploy_state_instance.get_deploy_state():
+            deploying_release_state = ReleaseState(release_state=states.DEPLOYING)
+            is_major_release = deploying_release_state.is_major_release_deployment()
+
             major_release = utils.get_major_release_version(from_release)
-            # Try except in case there is no deploy in the class i.e. after unlock in RR deployment.
-            try:
-                is_major_release = ReleaseState().is_major_release_deployment()
-            except AttributeError:
-                release = self.release_collection.get_release_by_id(from_release_deployment)
-                is_major_release = ReleaseState(release_ids=[release.id]).is_major_release_deployment()
+            # In case of a major release deployment set all the releases related to from_release to unavailable
+            if is_major_release:
+                unavailable_releases = []
+                for release in self.release_collection.iterate_releases():
+                    if release.sw_version == major_release:
+                        unavailable_releases.append(release.id)
+                ReleaseState(release_ids=unavailable_releases).replaced()
+
+            # Set deploying releases to deployed state.
+            deploying_release_state.deploy_completed()
 
         elif DEPLOY_STATES.HOST_ROLLBACK_DONE == deploy_state_instance.get_deploy_state():
-            major_release = utils.get_major_release_version(to_release)
-            try:
-                is_major_release = ReleaseState().is_major_release_deployment()
-            except AttributeError:
-                release = self.release_collection.get_release_by_id(to_release_deployment)
-                is_major_release = ReleaseState(release_ids=[release.id]).is_major_release_deployment()
+            major_release = utils.get_major_release_version(from_release)
+            release_state = ReleaseState(release_state=states.DEPLOYING)
+            is_major_release = release_state.is_major_release_deployment()
+
+            release_state.available()
 
         elif deploy_state_instance.get_deploy_state() in [DEPLOY_STATES.START_DONE, DEPLOY_STATES.START_FAILED]:
             hosts_states = []
@@ -2739,11 +2744,8 @@ class PatchController(PatchService):
                                            f"or in {DEPLOY_HOST_STATES.DEPLOYING.value} process")
 
             major_release = utils.get_major_release_version(to_release)
-            try:
-                is_major_release = ReleaseState().is_major_release_deployment()
-            except AttributeError:
-                release = self.release_collection.get_release_by_id(to_release_deployment)
-                is_major_release = ReleaseState(release_ids=[release.id]).is_major_release_deployment()
+            release_state = ReleaseState(release_state=states.DEPLOYING)
+            is_major_release = release_state.is_major_release_deployment()
 
             if is_major_release:
                 try:
@@ -2752,6 +2754,8 @@ class PatchController(PatchService):
                     msg_error = "Failed to delete deploy"
                     LOG.error("%s: %s" % (msg_error, e))
                     raise SoftwareServiceError(msg_error)
+
+            release_state.available()
 
         if is_major_release:
             clean_up_deployment_data(major_release)
