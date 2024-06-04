@@ -363,7 +363,7 @@ class HTTPClient(httplib2.Http):
         if 'content_type' in kwargs:
             kargs['headers']['Content-Type'] = kwargs['content_type']
             kargs['headers']['Accept'] = kwargs['content_type']
-        else:
+        elif 'Content-Type' not in kargs['headers']:
             kargs['headers']['Content-Type'] = self.content_type
             kargs['headers']['Accept'] = self.content_type
 
