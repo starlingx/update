@@ -73,8 +73,6 @@ override_dh_install:
 		${DEBIAN_DESTDIR}/etc/goenabled.d/patch_check_goenabled.sh
 	install -m 444 bin/patching.logrotate \
 		${DEBIAN_DESTDIR}/etc/logrotate.d/patching
-	install -m 500 bin/upgrade-start-pkg-extract \
-		${DEBIAN_DESTDIR}/usr/sbin/upgrade-start-pkg-extract
 	dh_install
 
 override_dh_python3:

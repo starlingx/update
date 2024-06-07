@@ -105,8 +105,6 @@ install -m 555 ${RPM_BUILD_DIR}/%{name}-%{version}/bin/patch_check_goenabled.sh 
 install -m 444 ${RPM_BUILD_DIR}/%{name}-%{version}/bin/patching.logrotate \
     %{buildroot}%{_sysconfdir}/logrotate.d/patching
 
-install -m 500 ${RPM_BUILD_DIR}/%{name}-%{version}/bin/upgrade-start-pkg-extract \
-    %{buildroot}%{_sbindir}/upgrade-start-pkg-extract
 
 %clean
 rm -rf $RPM_BUILD_ROOT
