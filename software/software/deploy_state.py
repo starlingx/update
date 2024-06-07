@@ -116,7 +116,7 @@ class DeployState(object):
                 if target_state is None:
                     msg = "Deployment can not deleted in current state."
                 else:
-                    msg = "Host can not transform to %s from current state" % target_state.value()
+                    msg = "Host can not transform to %s from current state" % target_state.value
                 raise InvalidOperation(msg)
         finally:
             db_api.end_update()
