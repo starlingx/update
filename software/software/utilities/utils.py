@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2023 Wind River Systems, Inc.
+# Copyright (c) 2024 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -29,25 +29,36 @@ KUBERNETES_ADMIN_CONF_FILE = "admin.conf"
 PLATFORM_LOG = '/var/log/platform.log'
 ERROR_FILE = '/tmp/upgrade_fail_msg'
 
+SOFTWARE_LOG_FILE = "/var/log/software.log"
+
 # well-known default domain name
 DEFAULT_DOMAIN_NAME = 'Default'
 
-# Migration script actions
+# Upgrade script actions
 ACTION_START = "start"
 ACTION_MIGRATE = "migrate"
 ACTION_ACTIVATE = "activate"
+ACTION_ACTIVATE_ROLLBACK = "activate-rollback"
 
+def configure_logging():
+    log_format = ('%(asctime)s: ' + __name__ + '[%(process)s]: '
+                                               '%(filename)s(%(lineno)s): %(levelname)s: %(message)s')
+    log_datefmt = "%FT%T"
+    logging.basicConfig(filename=SOFTWARE_LOG_FILE, format=log_format, level=logging.INFO, datefmt=log_datefmt)
 
 def execute_migration_scripts(from_release, to_release, action, port=None,
                               migration_script_dir="/etc/upgrade.d"):
-    """Execute migration scripts with an action:
+    """Execute upgrade scripts with an action:
           start: Prepare for upgrade on release N side. Called during
                  "system upgrade-start".
           migrate: Perform data migration on release N+1 side. Called while
                    system data migration is taking place.
+          activate: Activates the deployment. Called during "software deploy activate".
+          activate-rollback: Rolls back the activate deployment. Called during
+                   "software deploy activate".
     """
 
-    LOG.info("Executing migration scripts with from_release: %s, "
+    LOG.info("Executing upgrade scripts with from_release: %s, "
              "to_release: %s, action: %s" % (from_release, to_release, action))
 
     # Get a sorted list of all the migration scripts
@@ -62,17 +73,17 @@ def execute_migration_scripts(from_release, to_release, action, port=None,
     try:
         files.sort(key=lambda x: int(x.split("-")[0]))
     except Exception:
-        LOG.exception("Migration script sequence validation failed, invalid "
+        LOG.exception("Upgrade script sequence validation failed, invalid "
                       "file name format")
         raise
 
-    MSG_SCRIPT_FAILURE = "Migration script %s failed with returncode %d" \
+    MSG_SCRIPT_FAILURE = "Upgrade script %s failed with returncode %d" \
                          "Script output:\n%s"
     # Execute each migration script
     for f in files:
         migration_script = os.path.join(migration_script_dir, f)
         try:
-            LOG.info("Executing migration script %s" % migration_script)
+            LOG.info("Executing upgrade script %s" % migration_script)
             cmdline = [migration_script, from_release, to_release, action]
             if port is not None:
                 cmdline.append(port)

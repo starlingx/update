@@ -747,7 +747,7 @@ class SWMessageDeployStateChanged(messages.PatchMessage):
         self.valid = True
         self.agent = None
 
-        valid_agents = ['deploy-start', 'deploy-activate']
+        valid_agents = ['deploy-start', 'deploy-activate', 'deploy-activate-rollback']
         if 'agent' in data:
             self.agent = data['agent']
         else:
@@ -763,7 +763,9 @@ class SWMessageDeployStateChanged(messages.PatchMessage):
             DEPLOY_STATES.START_DONE.value: DEPLOY_STATES.START_DONE,
             DEPLOY_STATES.START_FAILED.value: DEPLOY_STATES.START_FAILED,
             DEPLOY_STATES.ACTIVATE_FAILED.value: DEPLOY_STATES.ACTIVATE_FAILED,
-            DEPLOY_STATES.ACTIVATE_DONE.value: DEPLOY_STATES.ACTIVATE_DONE
+            DEPLOY_STATES.ACTIVATE_DONE.value: DEPLOY_STATES.ACTIVATE_DONE,
+            DEPLOY_STATES.ACTIVATE_ROLLBACK_DONE.value: DEPLOY_STATES.ACTIVATE_ROLLBACK_DONE,
+            DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED.value: DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED
         }
         if 'deploy-state' in data and data['deploy-state']:
             deploy_state = data['deploy-state']
@@ -2391,7 +2393,9 @@ class PatchController(PatchService):
             DEPLOY_STATES.START_DONE: deploy_state.start_done,
             DEPLOY_STATES.START_FAILED: deploy_state.start_failed,
             DEPLOY_STATES.ACTIVATE_DONE: deploy_state.activate_done,
-            DEPLOY_STATES.ACTIVATE_FAILED: deploy_state.activate_failed
+            DEPLOY_STATES.ACTIVATE_FAILED: deploy_state.activate_failed,
+            DEPLOY_STATES.ACTIVATE_ROLLBACK_DONE: deploy_state.activate_rollback_done,
+            DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED: deploy_state.activate_rollback_failed
         }
         if new_state in state_event:
             state_event[new_state]()
@@ -2996,6 +3000,61 @@ class PatchController(PatchService):
             msg_info = "Deploy activate has started"
         except Exception:
             deploy_state.activate_failed()
+            raise
+
+        return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+    def _activate_rollback_major_release(self, deploy):
+        cmd_path = "/usr/bin/software-deploy-activate-rollback"
+        from_release = utils.get_major_release_version(deploy.get("from_release"))
+        to_release = utils.get_major_release_version(deploy.get("to_release"))
+
+        upgrade_activate_rollback_cmd = [cmd_path, from_release, to_release]
+
+        try:
+            LOG.info("starting subprocess %s" % ' '.join(upgrade_activate_rollback_cmd))
+            subprocess.Popen(' '.join(upgrade_activate_rollback_cmd), start_new_session=True, shell=True)
+            LOG.info("subprocess started")
+        except subprocess.SubprocessError as e:
+            LOG.error("Failed to start command: %s. Error %s" % (' '.join(upgrade_activate_rollback_cmd), e))
+            raise
+
+    def _activate_rollback_patching_release(self):
+        deploy_state = DeployState.get_instance()
+        # patching release activate-rollback operations go here
+        deploy_state.activate_rollback_done()
+
+    def _activate_rollback(self):
+        deploy = self.db_api_instance.get_current_deploy()
+        if not deploy:
+            msg = "Deployment is missing unexpectedly"
+            raise InvalidOperation(msg)
+
+        deploying = ReleaseState(release_state=states.DEPLOYING)
+        if deploying.is_major_release_deployment():
+            self._activate_rollback_major_release(deploy)
+        else:
+            self._activate_rollback_patching_release()
+
+    @require_deploy_state([DEPLOY_STATES.ACTIVATE_ROLLBACK_PENDING, DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED],
+                          "Activate-rollback deployment only when current deployment state is {require_states}")
+    def software_deploy_activate_rollback_api(self) -> dict:
+        """
+        Rolls back activates the deployment associated with the release
+        :return: dict of info, warning and error messages
+        """
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
+
+        deploy_state = DeployState.get_instance()
+        deploy_state.activate_rollback()
+
+        try:
+            self._activate_rollback()
+            msg_info = "Deploy activate-rollback has started"
+        except Exception:
+            deploy_state.activate_rollback_failed()
             raise
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)

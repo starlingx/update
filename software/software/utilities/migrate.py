@@ -18,6 +18,7 @@ import subprocess
 import yaml
 
 from software.utilities import constants
+from software.utilities.utils import configure_logging
 import software.utilities.utils as utils
 
 
@@ -44,10 +45,6 @@ DB_BARBICAN_CONNECTION_FORMAT = "postgresql://%s:%s@127.0.0.1:%s/%s"
 
 # Configure logging
 LOG = logging.getLogger(__name__)
-log_format = ('%(asctime)s: ' + __name__ + '[%(process)s]: '
-              '%(filename)s(%(lineno)s): %(levelname)s: %(message)s')
-log_datefmt = "%FT%T"
-logging.basicConfig(filename="/var/log/software.log", format=log_format, level=logging.INFO, datefmt=log_datefmt)
 
 
 def migrate_keyring_data(from_release, to_release):
@@ -792,7 +789,7 @@ def upgrade_controller(from_release, to_release, target_port):
 
 def migrate():
     # this is the entry point to start data migration
-
+    configure_logging()
     parser = argparse.ArgumentParser(add_help=False)
 
     parser.add_argument("from_release",
