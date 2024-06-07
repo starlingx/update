@@ -65,9 +65,16 @@ def package_remove(feed_dir, sw_release, packages):
                 check=True,
                 capture_output=True)
     except subprocess.CalledProcessError as e:
+        error = e.stderr.decode("utf-8")
+
+        if "--component is not know" in error:
+            msg =  "Component %s not found, there is no package to delete" % sw_release
+            LOG.info(msg)
+            return
+
         msg = "Failed to remove package."
         info_msg = "\"apt-ostree repo remove\" error: return code %s , Output: %s" \
-                   % (e.returncode, e.stderr.decode("utf-8"))
+                   % (e.returncode, error)
         LOG.error(info_msg)
         raise APTOSTreeCommandFail(msg)
 
