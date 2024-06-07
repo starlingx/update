@@ -91,7 +91,7 @@ class HealthCheck(object):
         """
         success = True
         releases = self._config.get("releases", "")
-        deployed_releases  = []
+        deployed_releases = []
         for release in json.loads(releases):
             if release['state'] == STATE_DEPLOYED:
                 deployed_releases.append(release)
@@ -290,7 +290,7 @@ def parse_config(args=None):
                         action="store_true")
     parser.add_argument("--releases",
                         help="Releases",
-                        default="")
+                        default="[]")
 
     # if args was not passed will use sys.argv by default
     parsed_args = parser.parse_args(args)
