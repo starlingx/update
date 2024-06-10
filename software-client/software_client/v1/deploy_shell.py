@@ -131,6 +131,18 @@ def do_host(cc, args):
     return utils.check_rc(resp, data)
 
 
+def do_abort(cc, args):
+    """Abort the software deployment"""
+    resp, data = cc.deploy.abort(args)
+
+    if args.debug:
+        utils.print_result_debug(resp, data)
+
+    utils.display_info(resp)
+
+    return utils.check_rc(resp, data)
+
+
 def do_activate(cc, args):
     """Activate the software deployment"""
     resp, data = cc.deploy.activate(args)

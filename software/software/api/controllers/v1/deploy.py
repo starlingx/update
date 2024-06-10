@@ -19,6 +19,7 @@ LOG = logging.getLogger('main_logger')
 
 class DeployController(RestController):
     _custom_actions = {
+        'abort': ['POST'],
         'activate': ['POST'],
         'precheck': ['POST'],
         'start': ['POST'],
@@ -26,6 +27,14 @@ class DeployController(RestController):
         'delete': ['DELETE'],
         'software_upgrade': ['GET'],
     }
+
+    @expose(method='POST', template='json')
+    def abort(self):
+        reload_release_data()
+
+        result = sc.software_deploy_abort_api()
+        sc.software_sync()
+        return result
 
     @expose(method='POST', template='json')
     def activate(self):

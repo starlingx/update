@@ -166,7 +166,7 @@ class DeployState(object):
     def deploy_host(self):
         self.transform(DEPLOY_STATES.HOST)
 
-    def abort(self):
+    def abort(self, feed_repo, commit_id):
         # depends on the deploy state, if pre-activate then go to
         # host rollback, if post-activate then go to activate rollback
         state = DeployState.get_deploy_state()
@@ -174,6 +174,9 @@ class DeployState(object):
             self.transform(DEPLOY_STATES.ACTIVATE_ROLLBACK)
         else:
             self.transform(DEPLOY_STATES.HOST_ROLLBACK)
+
+        db_api_instance = get_instance()
+        db_api_instance.reverse_deploy(feed_repo, commit_id)
 
     def deploy_host_done(self):
         # depends on the deploy state, the deploy can be transformed

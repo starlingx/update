@@ -27,6 +27,7 @@ from wsgiref import simple_server
 from fm_api import fm_api
 from fm_api import constants as fm_constants
 
+
 from oslo_config import cfg as oslo_cfg
 
 import software.apt_utils as apt_utils
@@ -84,6 +85,7 @@ from software.release_verify import verify_files
 import software.config as cfg
 import software.utils as utils
 from software.sysinv_utils import get_k8s_ver
+from software.sysinv_utils import get_sw_version_from_host
 from software.sysinv_utils import is_system_controller
 
 from software.db.api import get_instance
@@ -2013,7 +2015,6 @@ class PatchController(PatchService):
             results["error"] += errormsg
             return results
 
-
         for patch_id in commit_list:
             # Fetch file paths that need to be cleaned up to
             # free patch storage disk space
@@ -2844,6 +2845,73 @@ class PatchController(PatchService):
             for invalid_host in invalid_hosts:
                 msg += "%s: %s\n" % (invalid_host["hostname"], invalid_host["state"])
             raise InvalidOperation(msg)
+
+    @require_deploy_state([DEPLOY_STATES.ACTIVATE, DEPLOY_STATES.ACTIVATE_DONE, DEPLOY_STATES.ACTIVATE_FAILED,
+                          DEPLOY_STATES.COMPLETED, DEPLOY_STATES.HOST, DEPLOY_STATES.HOST_DONE,
+                          DEPLOY_STATES.HOST_FAILED],
+                          "Deploy must be in the following states to be able to abort: %s, %s, %s, %s, %s, %s, %s" %
+                          (DEPLOY_STATES.ACTIVATE.value, DEPLOY_STATES.ACTIVATE_DONE.value,
+                           DEPLOY_STATES.ACTIVATE_FAILED.value, DEPLOY_STATES.COMPLETED.value, DEPLOY_STATES.HOST.value,
+                           DEPLOY_STATES.HOST_DONE.value, DEPLOY_STATES.HOST_FAILED.value))
+    def software_deploy_abort_api(self) -> dict:
+        """
+        Aborts the deployment associated with the release
+        :return: dict of info, warning and error messages
+        """
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
+
+        deploy = self.db_api_instance.get_current_deploy()
+        to_release = deploy.get("to_release")
+        to_release_deployment = constants.RELEASE_GA_NAME % to_release
+
+        try:
+            is_major_release = ReleaseState(release_state=states.DEPLOYING).is_major_release_deployment()
+        except AttributeError:
+            release = self.release_collection.get_release_by_id(to_release_deployment)
+            is_major_release = ReleaseState(release_ids=[release.id]).is_major_release_deployment()
+        if not is_major_release:
+            raise SoftwareServiceError("Abort operation is only supported for major releases.")
+
+        major_to_release = utils.get_major_release_version(to_release)
+        feed_repo = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, major_to_release)
+        deploy_release = self._release_basic_checks(to_release_deployment)
+        commit_id = deploy_release.commit_id
+
+        # TODO(lbonatti): remove this condition when commit-id is built into GA metadata.
+        if commit_id is None:
+            commit_id = ostree_utils.get_feed_latest_commit(deploy_release.sw_version)
+
+        # Update the deployment
+        deploy_state = DeployState.get_instance()
+        deploy_state.abort(feed_repo, commit_id)
+
+        # Update the host deployment
+        deploy_host = self.db_api_instance.get_deploy_host()
+        for host in deploy_host:
+            hostname = host.get("hostname")
+            state = DEPLOY_HOST_STATES(host.get("state"))
+            deploy_host_state = DeployHostState(hostname)
+
+            # If deploy host is failed check which sw_version is running to set the correct state.
+            if state == DEPLOY_HOST_STATES.FAILED:
+                sw_version = get_sw_version_from_host(hostname)
+
+                # TODO(lbonatti): Check against from_release once sw_version field on i_host table is populate with .pp
+                if major_to_release == sw_version:
+                    deploy_host_state.rollback_deployed()
+                else:
+                    deploy_host_state.rollback_pending()
+            # Moves deployed state to rollback-pending, pending to rollback-deployed and deploying remains the same
+            elif state == DEPLOY_HOST_STATES.DEPLOYED:
+                deploy_host_state.rollback_pending()
+
+            elif state == DEPLOY_HOST_STATES.PENDING:
+                deploy_host_state.rollback_deployed()
+
+        msg_info += "Deployment has been aborted\n"
+        return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     @require_deploy_state([DEPLOY_STATES.HOST_DONE, DEPLOY_STATES.ACTIVATE_FAILED],
                           "Activate deployment only when current deployment state is {require_states}")

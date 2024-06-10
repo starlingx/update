@@ -62,7 +62,24 @@ class SoftwareAPI:
     def update_deploy(self, state: DEPLOY_STATES):
         self.begin_update()
         try:
-            self.deploy_handler.update(state)
+            self.deploy_handler.update(new_state=state)
+        finally:
+            self.end_update()
+
+    def reverse_deploy(self, feed_repo, commit_id):
+        """
+        Reverse the deployment order, update the commit_id and feed_repo
+
+        :param feed_repo: ostree repo feed path.
+        :param commit_id: commit-id to deploy.
+        """
+        self.begin_update()
+        try:
+            deploy = self.get_current_deploy()
+            to_release = deploy["to_release"]
+            from_release = deploy["from_release"]
+            self.deploy_handler.update(from_release=to_release, to_release=from_release, feed_repo=feed_repo,
+                                       commit_id=commit_id)
         finally:
             self.end_update()
 
