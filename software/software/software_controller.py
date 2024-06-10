@@ -2799,11 +2799,10 @@ class PatchController(PatchService):
         if deploying.is_major_release_deployment():
             return self._activate_major_release(deploy)
         else:
-            return self.activate_patching_release()
+            return self._activate_patching_release()
 
-    def activate_patching_release(self):
+    def _activate_patching_release(self):
         deploy_state = DeployState.get_instance()
-        deploy_state.activate()
         # patching release activate operations go here
         deploy_state.activate_done()
         return True
