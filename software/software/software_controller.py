@@ -2388,7 +2388,7 @@ class PatchController(PatchService):
                                ret["error"]
                 return ret
             elif not ret["system_healthy"]:
-                ret["info"] = "The following issues have been detected, which prevent " \
+                ret["error"] = "The following issues have been detected, which prevent " \
                               "deploying %s\n" % deployment + ret["info"] + \
                               "Please fix above issues then retry the deploy.\n"
                 return ret
