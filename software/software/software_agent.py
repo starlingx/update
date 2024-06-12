@@ -520,6 +520,16 @@ class PatchAgent(PatchService):
 
             return False
 
+        # if commit-id is provided, check if it is already deployed
+        if commit_id:
+            active_commit_id = ostree_utils.get_sysroot_latest_commit()
+            if commit_id == active_commit_id:
+                LOG.info("The provided commit-id is already deployed. Skipping install.")
+                self.patch_failed = False
+                clearflag(patch_failed_file)
+                self.state = constants.PATCH_AGENT_STATE_IDLE
+                return True
+
         self.state = constants.PATCH_AGENT_STATE_INSTALLING
         setflag(patch_installing_file)
 
