@@ -2165,7 +2165,7 @@ class PatchController(PatchService):
         return release
 
     def _deploy_precheck(self, release_version: str, force: bool = False,
-                         region_name: str = "RegionOne", patch: bool = False) -> dict:
+                         region_name: str = None, patch: bool = False) -> dict:
         """
         Verify if system satisfy the requisites to upgrade to a specified deployment.
         :param release_version: full release name, e.g. starlingx-MM.mm.pp
@@ -2179,6 +2179,8 @@ class PatchController(PatchService):
         msg_warning = ""
         msg_error = ""
 
+        if region_name is None:
+            region_name = utils.get_local_region_name()
         precheck_script = utils.get_precheck_script(release_version)
 
         if not os.path.isfile(precheck_script) and patch:
@@ -2269,9 +2271,6 @@ class PatchController(PatchService):
         """
 
         release = self._release_basic_checks(deployment)
-        if region_name is None:
-            region_name = utils.get_local_region_name()
-
         release_version = release.sw_release
 
         # Check all fields (MM.mm.pp) of release_version to set patch flag
