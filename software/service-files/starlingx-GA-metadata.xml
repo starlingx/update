@@ -12,6 +12,12 @@
   <reboot_required>Y</reboot_required>
   <apply_active_release_only/>
   <contents>
+    <ostree>
+      <base>
+        <commit>xxxBASECOMMITxxx</commit>
+        <checksum>xxxBASECHECKSUMxxx</checksum>
+      </base>
+    </ostree>
   </contents>
   <requires>
   </requires>
