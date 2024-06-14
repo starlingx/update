@@ -51,6 +51,7 @@ run_install_software_scripts_cmd = "/usr/sbin/run-software-scripts"
 pa = None
 
 http_port_real = http_port
+http_hostname = '127.0.0.1'
 
 
 def setflag(fname):
@@ -80,7 +81,7 @@ def pull_install_scripts_from_controller():
                                           "-acv",
                                           "--delete",
                                           "--exclude", "tmp",
-                                          "rsync://controller/repo/software-scripts/",
+                                          "rsync://%s/repo/software-scripts/" % http_hostname,
                                           "%s/" % insvc_software_scripts],
                                          stderr=subprocess.STDOUT)
         LOG.info("Synced restart scripts from controller: %s", output)
@@ -93,7 +94,7 @@ def pull_install_scripts_from_controller():
 
 
 def check_install_uuid():
-    controller_install_uuid_url = "http://controller:%s/feed/rel-%s/install_uuid" % (http_port_real, SW_VERSION)
+    controller_install_uuid_url = "http://%s:%s/feed/rel-%s/install_uuid" % (http_hostname, http_port_real, SW_VERSION)
     try:
         req = requests.get(controller_install_uuid_url)
         if req.status_code != 200:
@@ -419,7 +420,10 @@ class PatchAgent(PatchService):
         # Loopback interface does not support multicast messaging, therefore
         # revert to using unicast messaging when configured against the
         # loopback device
-        if cfg.get_mgmt_iface() == constants.LOOPBACK_INTERFACE_NAME:
+        if self.pre_bootstrap:
+            self.mcast_addr = None
+            self.controller_address = utils.gethostbyname(constants.PREBOOTSTRAP_HOSTNAME)
+        elif cfg.get_mgmt_iface() == constants.LOOPBACK_INTERFACE_NAME:
             self.mcast_addr = None
             self.controller_address = cfg.get_mgmt_ip()
         else:
@@ -427,7 +431,12 @@ class PatchAgent(PatchService):
             self.controller_address = cfg.controller_mcast_group
 
     def setup_tcp_socket(self):
-        address_family = utils.get_management_family()
+        hostname = None
+        if self.pre_bootstrap:
+            hostname = constants.PREBOOTSTRAP_HOSTNAME
+        address_family = utils.get_management_family(hostname)
+        if self.listener is not None:
+            self.listener.close()
         self.listener = socket.socket(address_family, socket.SOCK_STREAM)
         self.listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.listener.bind(('', self.port))
@@ -732,7 +741,28 @@ class PatchAgent(PatchService):
                 # Query failed. Reset the op counter
                 self.patch_op_counter = 0
 
+    def handle_bootstrap(self, connections):
+        # If bootstrap is completed re-initialize sockets
+        self.pre_bootstrap = False
+        self.setup_socket()
+        while self.sock_out is None:
+            time.sleep(30)
+            self.setup_socket()
+        self.setup_tcp_socket()
+        hello_ack = PatchMessageHelloAgentAck()
+        hello_ack.send(self.sock_out)
+
+        for s in connections:
+            connections.remove(s)
+            s.close()
+
     def run(self):
+        # Check if bootstrap stage is completed
+        global http_hostname
+        if self.pre_bootstrap and cfg.get_mgmt_ip():
+            self.pre_bootstrap = False
+            http_hostname = constants.CONTROLLER_FLOATING_HOSTNAME
+
         self.setup_socket()
 
         while self.sock_out is None:
@@ -758,6 +788,11 @@ class PatchAgent(PatchService):
         remaining = 30
 
         while True:
+            if self.pre_bootstrap and cfg.get_mgmt_ip():
+                self.handle_bootstrap(connections)
+                http_hostname = constants.CONTROLLER_FLOATING_HOSTNAME
+                first_hello = True
+
             inputs = [self.sock_in, self.listener] + connections
             outputs = []
 

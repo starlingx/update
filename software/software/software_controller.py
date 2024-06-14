@@ -31,6 +31,7 @@ from oslo_config import cfg as oslo_cfg
 
 import software.apt_utils as apt_utils
 import software.ostree_utils as ostree_utils
+import software.software_functions as sf
 from software.api import app
 from software.authapi import app as auth_app
 from software.states import DEPLOY_STATES
@@ -257,6 +258,8 @@ class PatchMessageHello(messages.PatchMessage):
     def handle(self, sock, addr):
         global sc
         host = addr[0]
+        if sc.pre_bootstrap:
+            return
         if host == cfg.get_mgmt_ip():
             # Ignore messages from self
             return
@@ -311,6 +314,8 @@ class PatchMessageSyncReq(messages.PatchMessage):
     def handle(self, sock, addr):
         global sc
         host = addr[0]
+        if sc.pre_bootstrap:
+            return
         if host == cfg.get_mgmt_ip():
             # Ignore messages from self
             return
@@ -658,6 +663,8 @@ class PatchMessageDropHostReq(messages.PatchMessage):
     def handle(self, sock, addr):
         global sc
         host = addr[0]
+        if sc.pre_bootstrap:
+            return
         if host == cfg.get_mgmt_ip():
             # Ignore messages from self
             return
@@ -970,11 +977,13 @@ class PatchController(PatchService):
 
         system_mode = utils.get_platform_conf("system_mode")
         if system_mode == constants.SYSTEM_MODE_SIMPLEX:
-            self.standby_controller = "controller-0"
+            self.standby_controller = constants.CONTROLLER_0_HOSTNAME
         elif system_mode == constants.SYSTEM_MODE_DUPLEX:
-            self.standby_controller = "controller-0" \
-                if self.hostname == "controller-1" \
-                else "controller-1"
+            self.standby_controller = constants.CONTROLLER_0_HOSTNAME \
+                if self.hostname == constants.CONTROLLER_1_HOSTNAME \
+                else constants.CONTROLLER_1_HOSTNAME
+        if self.pre_bootstrap:
+            self.standby_controller = self.hostname
 
         DeployHostState.register_event_listener(DeployState.host_deploy_updated)
         DeployState.register_event_listener(ReleaseState.deploy_updated)
@@ -993,7 +1002,12 @@ class PatchController(PatchService):
         # Loopback interface does not support multicast messaging, therefore
         # revert to using unicast messaging when configured against the
         # loopback device
-        if cfg.get_mgmt_iface() == constants.LOOPBACK_INTERFACE_NAME:
+        if self.pre_bootstrap:
+            mgmt_ip = utils.gethostbyname(constants.PREBOOTSTRAP_HOSTNAME)
+            self.mcast_addr = None
+            self.controller_address = mgmt_ip
+            self.agent_address = mgmt_ip
+        elif cfg.get_mgmt_iface() == constants.LOOPBACK_INTERFACE_NAME:
             mgmt_ip = cfg.get_mgmt_ip()
             self.mcast_addr = None
             self.controller_address = mgmt_ip
@@ -1044,6 +1058,9 @@ class PatchController(PatchService):
         self.sync_from_nbr(host)
 
     def sync_from_nbr(self, host):
+        if self.pre_bootstrap:
+            return True
+
         # Sync the software repo
         host_url = utils.ip_to_url(host)
         try:
@@ -1992,7 +2009,10 @@ class PatchController(PatchService):
         self.socket_lock.release()
 
         # Now we wait, up to two mins. future enhancement: Wait on a condition
-        my_ip = cfg.get_mgmt_ip()
+        if self.pre_bootstrap:
+            my_ip = utils.gethostbyname(constants.PREBOOTSTRAP_HOSTNAME)
+        else:
+            my_ip = cfg.get_mgmt_ip()
         sync_rc = False
         max_time = time.time() + 120
         while time.time() < max_time:
@@ -2371,6 +2391,13 @@ class PatchController(PatchService):
                         "Try delete and re-upload the release.\n"
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
+        if self.pre_bootstrap and not force:
+            # Deploy precheck may not be supported in prebootstrap environment if
+            # script access any of services like sysinv, keystone, etc.
+            msg_warning = "Pre-bootstrap environment may not support deploy precheck.\n" \
+                          "Use --force option to execute deploy precheck script.\n"
+            return dict(info=msg_info, warning=msg_warning, error=msg_error, system_healthy=True)
+
         # parse local config file to pass parameters to precheck script
         try:
             cp = configparser.ConfigParser()
@@ -2522,7 +2549,7 @@ class PatchController(PatchService):
         tag.text = text
         return tag
 
-    @require_deploy_state([None],
+    @require_deploy_state([None, DEPLOY_STATES.COMPLETED],
                           "There is already a deployment is in progress ({state}). "
                           "Please complete the current deployment.")
     def software_deploy_start_api(self, deployment: str, force: bool, **kwargs) -> dict:
@@ -2568,7 +2595,7 @@ class PatchController(PatchService):
                 return ret
 
             if self._deploy_upgrade_start(to_release, commit_id):
-                collect_current_load_for_hosts()
+                collect_current_load_for_hosts(deploy_sw_version)
                 create_deploy_hosts()
 
                 release_state = ReleaseState(release_ids=[deploy_release.id])
@@ -2616,7 +2643,7 @@ class PatchController(PatchService):
         # operation is "remove" with order [R4, R3]
         if operation == "apply":
 
-            collect_current_load_for_hosts()
+            collect_current_load_for_hosts(deploy_sw_version)
             create_deploy_hosts()
 
             # reverse = True is used for apply operation
@@ -2672,7 +2699,7 @@ class PatchController(PatchService):
                 # TODO(bqian) get the list of undeployed required release ids
                 # i.e, when deploying 24.03.3, which requires 24.03.2 and 24.03.1, all
                 # 3 release ids should be passed into to create new ReleaseState
-                collect_current_load_for_hosts()
+                collect_current_load_for_hosts(deploy_sw_version)
                 release_state = ReleaseState(release_ids=[release.id])
                 release_state.start_deploy()
 
@@ -2729,7 +2756,7 @@ class PatchController(PatchService):
                     self.interim_state[release_id] = list(self.hosts)
 
         elif operation == "remove":
-            collect_current_load_for_hosts()
+            collect_current_load_for_hosts(deploy_sw_version)
             create_deploy_hosts()
             deployment_list = self.release_apply_remove_order(deployment, running_release.sw_version)
             msg = "Deploy start order for remove operation: %s" % ",".join(deployment_list)
@@ -2832,7 +2859,7 @@ class PatchController(PatchService):
                 # TODO(bqian) get the list of undeployed required release ids
                 # i.e, when deploying 24.03.3, which requires 24.03.2 and 24.03.1, all
                 # 3 release ids should be passed into to create new ReleaseState
-                collect_current_load_for_hosts()
+                collect_current_load_for_hosts(deploy_sw_version)
                 release_state = ReleaseState(release_ids=[release.id])
                 release_state.start_remove()
                 deploy_state = DeployState.get_instance()
@@ -3189,11 +3216,12 @@ class PatchController(PatchService):
         for release in self.release_collection.iterate_releases():
             if to_release == release.sw_release:
                 release_id = release.id
-        deploy_host_validations(
-            hostname,
-            is_major_release=self.release_collection.get_release_by_id(release_id).is_ga_release,
-            rollback=rollback
-        )
+        if not self.pre_bootstrap:
+            deploy_host_validations(
+                hostname,
+                is_major_release=self.release_collection.get_release_by_id(release_id).is_ga_release,
+                rollback=rollback
+            )
         deploy_state = DeployState.get_instance()
         deploy_host_state = DeployHostState(hostname)
         if rollback:
@@ -3761,6 +3789,16 @@ class PatchControllerMainThread(threading.Thread):
         global sc
         global thread_death
 
+        # TODO(jvazhapp) Fix following temporary workaround
+        # for eventlet issue resulting in error message:
+        # 'Resolver configuration could not be read or
+        # specified no nameservers eventlet fix version'
+        with open('/etc/resolv.conf', 'a+') as f:
+            f.seek(0)
+            data = f.read()
+            if "nameserver" not in data:
+                f.writelines("nameserver 8.8.8.8")
+
         # Send periodic messages to the agents
         # We only can use one inverval
         SEND_MSG_INTERVAL_IN_SECONDS = 30.0
@@ -3769,6 +3807,20 @@ class PatchControllerMainThread(threading.Thread):
                                        constants.CONTROLLER)
 
         try:
+            if sc.pre_bootstrap and cfg.get_mgmt_ip():
+                sc.pre_bootstrap = False
+                sf.pre_bootstrap_stage = False
+                system_mode = utils.get_platform_conf("system_mode")
+                if system_mode == constants.SYSTEM_MODE_SIMPLEX:
+                    sc.standby_controller = constants.CONTROLLER_0_HOSTNAME
+                elif system_mode == constants.SYSTEM_MODE_DUPLEX:
+                    sc.standby_controller = constants.CONTROLLER_0_HOSTNAME \
+                        if sc.hostname == constants.CONTROLLER_1_HOSTNAME \
+                        else constants.CONTROLLER_1_HOSTNAME
+
+            alarm_instance_id = "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST,
+                                           sc.standby_controller)
+
             # Update the out of sync alarm cache when the thread starts
             out_of_sync_alarm_fault = sc.fm_api.get_fault(
                 fm_constants.FM_ALARM_ID_SW_UPGRADE_DEPLOY_STATE_OUT_OF_SYNC, alarm_instance_id)
@@ -3816,6 +3868,41 @@ class PatchControllerMainThread(threading.Thread):
                     keep_running = False
                     os.remove(insvc_patch_restart_controller)
                     return
+
+                # If bootstrap is completed re-initialize sockets
+                if sc.pre_bootstrap and cfg.get_mgmt_ip():
+                    sc.pre_bootstrap = False
+                    sf.pre_bootstrap_stage = False
+
+                    sock_in = sc.setup_socket()
+                    while sock_in is None:
+                        time.sleep(30)
+                        sock_in = sc.setup_socket()
+
+                    sc.socket_lock.acquire()
+
+                    hello = PatchMessageHello()
+                    hello.send(sc.sock_out)
+
+                    hello_agent = PatchMessageHelloAgent()
+                    hello_agent.send(sc.sock_out)
+
+                    sc.socket_lock.release()
+                    for s in agent_query_conns.copy():
+                        agent_query_conns.remove(s)
+                        s.shutdown(socket.SHUT_RDWR)
+                        s.close()
+                    system_mode = utils.get_platform_conf("system_mode")
+                    if system_mode == constants.SYSTEM_MODE_SIMPLEX:
+                        sc.standby_controller = constants.CONTROLLER_0_HOSTNAME
+                    elif system_mode == constants.SYSTEM_MODE_DUPLEX:
+                        sc.standby_controller = constants.CONTROLLER_0_HOSTNAME \
+                            if sc.hostname == constants.CONTROLLER_1_HOSTNAME \
+                            else constants.CONTROLLER_1_HOSTNAME
+
+                alarm_instance_id = "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST,
+                                            sc.standby_controller)
+
 
                 inputs = [sc.sock_in] + agent_query_conns
                 outputs = []
@@ -3978,12 +4065,14 @@ class PatchControllerMainThread(threading.Thread):
                         SEND_MSG_INTERVAL_IN_SECONDS)
 
                     # Only send the deploy state update from the active controller
-                    if is_deployment_in_progress() and utils.is_active_controller():
+                    if is_deployment_in_progress() and (utils.is_active_controller() or
+                                                        sc.pre_bootstrap):
                         try:
                             sc.socket_lock.acquire()
                             deploy_state_update = SoftwareMessageDeployStateUpdate()
                             deploy_state_update.send(sc.sock_out)
-                            sc.handle_deploy_state_sync(alarm_instance_id)
+                            if not sc.pre_bootstrap:
+                                sc.handle_deploy_state_sync(alarm_instance_id)
                         except Exception as e:
                             LOG.exception("Failed to send deploy state update. Error: %s", str(e))
                         finally:

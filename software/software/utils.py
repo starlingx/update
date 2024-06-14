@@ -150,9 +150,11 @@ def gethostbyname(hostname):
         return None
 
 
-def get_management_version():
+def get_management_version(hostname=None):
     """Determine whether management is IPv4 or IPv6 """
-    controller_ip_string = gethostbyname(constants.CONTROLLER_FLOATING_HOSTNAME)
+    if not hostname:
+        hostname = constants.CONTROLLER_FLOATING_HOSTNAME
+    controller_ip_string = gethostbyname(hostname)
     if controller_ip_string:
         controller_ip_address = IPAddress(controller_ip_string)
         return controller_ip_address.version
@@ -160,8 +162,8 @@ def get_management_version():
         return constants.ADDRESS_VERSION_IPV4
 
 
-def get_management_family():
-    ip_version = get_management_version()
+def get_management_family(hostname=None):
+    ip_version = get_management_version(hostname)
     if ip_version == constants.ADDRESS_VERSION_IPV6:
         return socket.AF_INET6
     else:

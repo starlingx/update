@@ -9,6 +9,7 @@ from software import states
 from software.exceptions import ReleaseNotFound
 from software.release_data import get_SWReleaseCollection
 from software.release_data import reload_release_data
+from software.states import DEPLOY_STATES
 
 
 LOG = logging.getLogger('main_logger')
@@ -40,7 +41,7 @@ class ReleaseState(object):
 
     @staticmethod
     def deploy_updated(target_state):
-        if target_state is None:  # completed
+        if target_state in [DEPLOY_STATES.COMPLETED]:
             deploying = ReleaseState(release_state=states.DEPLOYING)
 
             if deploying.is_major_release_deployment():

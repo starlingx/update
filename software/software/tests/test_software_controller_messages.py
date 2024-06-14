@@ -51,6 +51,7 @@ class FakeSoftwareController(object):
         # mock the software data
         self.base_pkgdata = mock.Mock()
         self.software_data = mock.Mock()
+        self.pre_bootstrap = False
 
     def check_patch_states(self):
         pass
