@@ -219,28 +219,32 @@ class SoftwareMessageDeployStateUpdate(messages.PatchMessage):
         messages.PatchMessage.encode(self)
 
     def handle(self, sock, addr):
-        global pa
-        filesystem_data = utils.get_software_filesystem_data()
-        synced_filesystem_data = utils.get_synced_software_filesystem_data()
+        # sync should only be handled between controller nodes
+        result = messages.MSG_ACK_SUCCESS
+        nodetype = utils.get_platform_conf("nodetype")
+        if nodetype == constants.CONTROLLER:
+            global pa
+            filesystem_data = utils.get_software_filesystem_data()
+            synced_filesystem_data = utils.get_synced_software_filesystem_data()
 
-        actual_state = {"deploy_host": filesystem_data.get("deploy_host", {}),
-                        "deploy": filesystem_data.get("deploy", {})}
+            actual_state = {"deploy_host": filesystem_data.get("deploy_host", {}),
+                            "deploy": filesystem_data.get("deploy", {})}
 
-        synced_state = {"deploy_host": synced_filesystem_data.get("deploy_host", {}),
-                        "deploy": synced_filesystem_data.get("deploy", {})}
+            synced_state = {"deploy_host": synced_filesystem_data.get("deploy_host", {}),
+                            "deploy": synced_filesystem_data.get("deploy", {})}
 
-        peer_state = {"deploy_host": self.data.get("deploy_state").get("deploy_host", {}),
-                      "deploy": self.data.get("deploy_state").get("deploy", {})}
+            peer_state = {"deploy_host": self.data.get("deploy_state").get("deploy_host", {}),
+                          "deploy": self.data.get("deploy_state").get("deploy", {})}
 
-        result = "diverged"
-        if actual_state == peer_state:
-            result = messages.MSG_ACK_SUCCESS
-        elif actual_state == synced_state:
-            result = messages.MSG_ACK_SUCCESS
+            result = "diverged"
+            if actual_state == peer_state:
+                result = messages.MSG_ACK_SUCCESS
+            elif actual_state == synced_state:
+                result = messages.MSG_ACK_SUCCESS
 
-        if result == messages.MSG_ACK_SUCCESS:
-            utils.save_to_json_file(constants.SOFTWARE_JSON_FILE, peer_state)
-            utils.save_to_json_file(constants.SYNCED_SOFTWARE_JSON_FILE, peer_state)
+            if result == messages.MSG_ACK_SUCCESS:
+                utils.save_to_json_file(constants.SOFTWARE_JSON_FILE, peer_state)
+                utils.save_to_json_file(constants.SYNCED_SOFTWARE_JSON_FILE, peer_state)
 
         resp = SoftwareMessageDeployStateUpdateAck()
         resp.send(sock, result)
