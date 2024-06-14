@@ -107,17 +107,26 @@ class ReconfigureKernelHook(BaseHook):
             personalities = "%s,%s" % (constants.CONTROLLER, constants.WORKER)
             puppet_path = os.path.join(constants.tsc.PLATFORM_PATH, "puppet",
                                        self._major_release, "hieradata")
-            if not os.path.isdir(puppet_path):
-                remote_dir = "controller-platform-nfs:" + constants.tsc.PLATFORM_PATH
-                local_dir = os.path.join(constants.tsc.VOLATILE_PATH, "platform")
-                LOG.info("Not running in active controller, mounting %s into %s" % (remote_dir,
-                                                                                    local_dir))
-                with mount_remote_directory(remote_dir, local_dir):
-                    puppet_path = os.path.join(local_dir, "puppet",
-                                               self._major_release, "hieradata")
-                    ReconfigureKernelHook.apply_manifest(manifest_file, puppet_path,
-                                                         personalities=personalities)
-            else:
+            if os.path.isdir(puppet_path):
+                ReconfigureKernelHook.apply_manifest(manifest_file, puppet_path,
+                                                     personalities=personalities)
+                return
+
+            # if not running on active controller then must remote mount hieradata
+            remote_dir = "controller-platform-nfs:" + constants.tsc.PLATFORM_PATH
+            local_dir = os.path.join(constants.tsc.VOLATILE_PATH, "platform")
+            LOG.info("Not running in active controller, mounting %s into %s" % (remote_dir,
+                                                                                local_dir))
+            with mount_remote_directory(remote_dir, local_dir):
+                # try to use the TO release puppet hieradata if available for the host,
+                # and if not available then use the FROM hieradata path, since the kernel
+                # manifest does not rely on any specific host hieradata information
+                puppet_path = os.path.join(local_dir, "puppet/%s/hieradata")
+                host_hieradata = os.path.join(puppet_path, "%s.yaml" % socket.gethostname())
+                if os.path.isfile(host_hieradata % self._major_release):
+                    puppet_path = puppet_path % self._major_release
+                else:
+                    puppet_path = puppet_path % constants.SW_VERSION
                 ReconfigureKernelHook.apply_manifest(manifest_file, puppet_path,
                                                      personalities=personalities)
         except Exception as e:
