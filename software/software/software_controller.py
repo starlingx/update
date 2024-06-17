@@ -1540,6 +1540,29 @@ class PatchController(PatchService):
 
         return release_order
 
+    def _rollback_last_commit(self, deploy_state, release_version):
+        metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[deploy_state]
+        metadata_path = "%s/starlingx-%s-metadata.xml" % (metadata_dir, release_version)
+
+        tree = ET.parse(metadata_path)
+        root = tree.getroot()
+        previous_commit_element = root.find(".//previous_commit")
+        if previous_commit_element is not None:
+            # Remove ostree commit (pactch removal)
+            previous_commit = previous_commit_element.text
+            LOG.info("Rollback to previous commit %s" % previous_commit)
+
+            major_release = utils.get_major_release_version(release_version)
+            feed_ostree_dir = "%s/rel-%s/ostree_repo" % \
+                (constants.FEED_OSTREE_BASE_DIR, major_release)
+
+            try:
+                apt_utils.run_rollback(feed_ostree_dir, previous_commit)
+            except APTOSTreeCommandFail:
+                msg = "Failure when rolling back commit %s" % previous_commit
+                LOG.exception(msg)
+                raise APTOSTreeCommandFail(msg)
+
     def software_release_delete_api(self, release_ids):
         """
         Delete release(s)
@@ -1618,6 +1641,7 @@ class PatchController(PatchService):
             metadata_file = "%s-metadata.xml" % release_id
             delete_feed = False
             to_release_iso_dir = os.path.join(constants.FEED_OSTREE_BASE_DIR, ("rel-%s" % release_sw_version))
+
             if os.path.isdir(to_release_iso_dir):
                 # check if the release being deleted is related to this feed
                 if os.path.isfile("%s/upgrades/%s" % (to_release_iso_dir, metadata_file)):
@@ -1636,9 +1660,11 @@ class PatchController(PatchService):
             # TODO(lbonatti): treat the upcoming versioning changes
             PatchFile.delete_versioned_directory(release.sw_release)
 
+            deploystate = release.state
+            self._rollback_last_commit(deploystate, release.sw_release)
+
             try:
                 # Delete the metadata
-                deploystate = release.state
                 metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[deploystate]
                 os.remove("%s/%s" % (metadata_dir, metadata_file))
             except OSError:
@@ -2752,6 +2778,9 @@ class PatchController(PatchService):
                     msg_error = "Failed to delete deploy"
                     LOG.error("%s: %s" % (msg_error, e))
                     raise SoftwareServiceError(msg_error)
+            else:
+                LOG.info("Delete ostree commit")
+                self._rollback_last_commit(DEPLOY_HOST_STATES.DEPLOYING.value, to_release)
 
         if is_major_release:
             clean_up_deployment_data(major_release)

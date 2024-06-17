@@ -106,3 +106,28 @@ def run_install(repo_dir, sw_release, packages):
             % (e.returncode, e.stderr.decode("utf-8"))
         LOG.error(info_msg)
         raise APTOSTreeCommandFail(msg)
+
+
+def run_rollback(repo_dir, commit):
+    """
+    Run apt-ostree rollback.
+
+    :param repo_dir: the path to the ostree repo
+    :param commit: the commit to rollback to
+    """
+    try:
+        LOG.info("Running apt-ostree rollback")
+
+        subprocess.run(
+            ["apt-ostree", "compose", "rollback",
+             "--repo", repo_dir,
+             "--branch", "starlingx",
+             commit],
+            check=True,
+            capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to rollback commit."
+        info_msg = "\"apt-ostree compose rollback\" error: return code %s , Output: %s" \
+            % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.error(info_msg)
+        raise APTOSTreeCommandFail(msg)
