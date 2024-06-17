@@ -131,6 +131,25 @@ def do_host(cc, args):
     return utils.check_rc(resp, data)
 
 
+@utils.arg('host',
+           help="Name of the host that the deploy is triggered")
+@utils.arg('-f',
+           '--force',
+           action='store_true',
+           required=False,
+           help="Force deploy host")
+def do_host_rollback(cc, args):
+    """Deploy prestaged software deployment to the host"""
+    resp, data = cc.deploy.host_rollback(args)
+
+    if args.debug:
+        utils.print_result_debug(resp, data)
+
+    utils.display_info(resp)
+
+    return utils.check_rc(resp, data)
+
+
 def do_abort(cc, args):
     """Abort the software deployment"""
     resp, data = cc.deploy.abort(args)

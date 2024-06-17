@@ -27,7 +27,6 @@ from wsgiref import simple_server
 from fm_api import fm_api
 from fm_api import constants as fm_constants
 
-
 from oslo_config import cfg as oslo_cfg
 
 import software.apt_utils as apt_utils
@@ -2719,8 +2718,8 @@ class PatchController(PatchService):
     @require_deploy_state([DEPLOY_STATES.HOST_ROLLBACK_DONE, DEPLOY_STATES.COMPLETED, DEPLOY_STATES.START_DONE,
                            DEPLOY_STATES.START_FAILED],
                           "Deploy must be in the following states to be able to delete: %s, %s, %s, %s" % (
-                           DEPLOY_STATES.HOST_ROLLBACK_DONE.value, DEPLOY_STATES.COMPLETED.value,
-                           DEPLOY_STATES.START_DONE.value, DEPLOY_STATES.START_FAILED.value))
+                          DEPLOY_STATES.HOST_ROLLBACK_DONE.value, DEPLOY_STATES.COMPLETED.value,
+                          DEPLOY_STATES.START_DONE.value, DEPLOY_STATES.START_FAILED.value))
     def software_deploy_delete_api(self) -> dict:
         """
         Delete deployment and the data generated during the deploy.
@@ -2978,12 +2977,15 @@ class PatchController(PatchService):
             # Retrieve deploy state from db in list format
             return self.db_api_instance.get_deploy_all()
 
-    @require_deploy_state([DEPLOY_STATES.START_DONE, DEPLOY_STATES.HOST, DEPLOY_STATES.HOST_FAILED],
-                          "Current deployment ({state}) is not ready to deploy host")
-    def software_deploy_host_api(self, hostname, force, async_req=False):
+    def _deploy_host(self, hostname, force, async_req=False, rollback=False):
         msg_info = ""
         msg_warning = ""
         msg_error = ""
+
+        # TODO(heitormatsui) add host-rollback capability
+        if rollback:
+            msg_info += "Host rollback not implemented yet.\n"
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         deploy_host = self.db_api_instance.get_deploy_host_by_hostname(hostname)
         if deploy_host is None:
@@ -3104,6 +3106,16 @@ class PatchController(PatchService):
             LOG.error("Error in host-install: %s", msg)
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+    @require_deploy_state([DEPLOY_STATES.START_DONE, DEPLOY_STATES.HOST, DEPLOY_STATES.HOST_FAILED],
+                          "Current deployment ({state}) is not ready to deploy host")
+    def software_deploy_host_api(self, hostname, force, async_req=False):
+        return self._deploy_host(hostname, force, async_req)
+
+    @require_deploy_state([DEPLOY_STATES.HOST_ROLLBACK, DEPLOY_STATES.HOST_ROLLBACK_FAILED],
+                          "Current deployment ({state}) is not ready to rollback host")
+    def software_deploy_host_rollback_api(self, hostname, force, async_req=False):
+        return self._deploy_host(hostname, force, async_req, rollback=True)
 
     def drop_host(self, host_ip, sync_nbr=True):
         msg_info = ""
@@ -3780,11 +3792,11 @@ def main():
     software_conf = constants.SOFTWARE_CONFIG_FILE_LOCAL
 
     pkg_feed = ('"http://controller:8080/updates/debian/rel-%s/ %s updates"'
-               % (constants.STARLINGX_RELEASE, constants.DEBIAN_RELEASE))
+                % (constants.STARLINGX_RELEASE, constants.DEBIAN_RELEASE))
 
     config = configparser.ConfigParser()
     config.read(software_conf)
-    config.set("runtime", "package_feed",pkg_feed)
+    config.set("runtime", "package_feed", pkg_feed)
     with open(software_conf, "w+") as configfile:
         config.write(configfile)
 
