@@ -106,7 +106,7 @@ def run_install(repo_dir, sw_release, packages):
              "--branch", "starlingx",
              "--feed", cfg.package_feed,
              "--component", sw_release,
-             "--packages",packages],
+             "--packages", packages],
             start_new_session=True)
         LOG.info("%s subprocess started" % cmd_path)
     except subprocess.SubprocessError as e:

@@ -571,7 +571,14 @@ class PatchAgent(PatchService):
                                                        {"major_release": major_release})
 
             # run deploy host pre-hooks for major release
-            hook_manager.run_pre_hooks()
+            try:
+                hook_manager.run_pre_hooks()
+            except Exception as e:
+                LOG.exception("Failure running pre-hooks: %s" % str(e))
+                self.patch_failed = True
+                setflag(patch_failed_file)
+                self.state = constants.PATCH_AGENT_STATE_INSTALL_FAILED
+                return False
 
             # add remote
             nodetype = utils.get_platform_conf("nodetype")
@@ -682,7 +689,14 @@ class PatchAgent(PatchService):
 
             # run deploy host post-hooks for major release
             if major_release:
-                hook_manager.run_post_hooks()
+                try:
+                    hook_manager.run_post_hooks()
+                except Exception as e:
+                    self.patch_failed = True
+                    setflag(patch_failed_file)
+                    self.state = constants.PATCH_AGENT_STATE_INSTALL_FAILED
+                    LOG.exception("Failure running post-hooks: %s" % str(e))
+                    return False
         else:
             # Update the patch_failed flag
             self.patch_failed = True

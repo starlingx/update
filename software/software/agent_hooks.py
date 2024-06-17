@@ -5,15 +5,15 @@ SPDX-License-Identifier: Apache-2.0
 
 """
 
+import filecmp
+import glob
 import os
-import socket
+import shutil
 import subprocess
-import tempfile
-import yaml
 
+import software.constants as constants
 from software.software_functions import LOG
-from software.software_functions import mount_remote_directory
-from software import constants
+import software.utils as utils
 
 
 class BaseHook(object):
@@ -40,100 +40,77 @@ class CopyPxeFilesHook(BaseHook):
 
     def run(self):
         """Execute the hook"""
-        if self._major_release:
-            # copy to_release pxeboot files to /var/pxeboot/pxelinux.cfg.files
-            pxeboot_feed_dir = ("/var/www/pages/feed/rel-%s/pxeboot/pxelinux.cfg.files/*" %
-                                self._major_release)
-            pxeboot_dest_dir = "/var/pxeboot/pxelinux.cfg.files/"
-            cmd = "rsync -ac %s %s" % (pxeboot_feed_dir, pxeboot_dest_dir)
-            try:
-                subprocess.check_call(cmd, shell=True)
-                LOG.info(
-                    "Copied %s pxeboot files to %s." % (
-                        self._major_release, pxeboot_dest_dir))
-            except subprocess.CalledProcessError as e:
-                LOG.exception("Error copying pxeboot files from %s to %s: %s" % (
-                    pxeboot_feed_dir, pxeboot_dest_dir, str(e)))
-        else:
-            LOG.exception("Cannot copy pxeboot files, major_release value is %s" %
+        nodetype = utils.get_platform_conf("nodetype")
+        if nodetype == constants.CONTROLLER:
+            if self._major_release:
+                # copy to_release pxeboot files to /var/pxeboot/pxelinux.cfg.files
+                pxeboot_feed_dir = ("/var/www/pages/feed/rel-%s/pxeboot/pxelinux.cfg.files/*" %
+                                    self._major_release)
+                pxeboot_dest_dir = "/var/pxeboot/pxelinux.cfg.files/"
+                cmd = "rsync -ac %s %s" % (pxeboot_feed_dir, pxeboot_dest_dir)
+                try:
+                    subprocess.check_call(cmd, shell=True)
+                    LOG.info(
+                        "Copied %s pxeboot files to %s." % (
+                            self._major_release, pxeboot_dest_dir))
+                except subprocess.CalledProcessError as e:
+                    LOG.exception("Error copying pxeboot files from %s to %s: %s" % (
+                        pxeboot_feed_dir, pxeboot_dest_dir, str(e)))
+                    raise
+            else:
+                LOG.error("Cannot copy pxeboot files, major_release value is %s" %
                           self._major_release)
 
 
 class ReconfigureKernelHook(BaseHook):
     """
-    Reconfigure the kernel post deploy host command by using
-    the kernel puppet manifest to ensure the host kernel type
-    (low-latency or standard) persists after the host is unlocked
-    and reboots running N+1 release.
+    Reconfigure the kernel post deploy host command by updating the
+    /boot/1/kernel.env file, to ensure the host kernel type (low-latency
+    or standard) persists after the host is unlocked and reboots running
+    N+1 release.
     """
     def __init__(self, attrs):
         super().__init__()
-        self._major_release = None
-        if "major_release" in attrs:
-            self._major_release = attrs.get("major_release")
-
-    @staticmethod
-    def apply_manifest(manifest_file, puppet_path, personalities=constants.CONTROLLER):
-        """
-        Apply kernel puppet manifest
-        :param manifest_file: yaml file containing the puppet classes to be executed
-        :param puppet_path: hieradata directory location
-        :param personalities: host personalities that manifest should be applied
-        """
-        try:
-            cmd = [
-                "/usr/local/bin/puppet-manifest-apply.sh",
-                puppet_path,
-                socket.gethostname(),
-                personalities,
-                "runtime",
-                manifest_file,
-            ]
-            subprocess.check_call(cmd)
-            LOG.info("Executed kernel puppet manifest.")
-        except subprocess.CalledProcessError as e:
-            LOG.exception("Error running kernel puppet manifest: %s" % str(e))
 
     def run(self):
         """Execute the hook"""
-        # create manifest file
-        fp, manifest_file = tempfile.mkstemp(suffix=".yaml")
-        classes = {"classes": ["platform::grub::kernel_image"]}
-        with open(manifest_file, "w") as fd:
-            yaml.dump(classes, fd, default_flow_style=False)
-
         try:
-            # set host personalities and puppet hieradata path
-            personalities = "%s,%s" % (constants.CONTROLLER, constants.WORKER)
-            puppet_path = os.path.join(constants.tsc.PLATFORM_PATH, "puppet",
-                                       self._major_release, "hieradata")
-            if os.path.isdir(puppet_path):
-                ReconfigureKernelHook.apply_manifest(manifest_file, puppet_path,
-                                                     personalities=personalities)
-                return
-
-            # if not running on active controller then must remote mount hieradata
-            remote_dir = "controller-platform-nfs:" + constants.tsc.PLATFORM_PATH
-            local_dir = os.path.join(constants.tsc.VOLATILE_PATH, "platform")
-            LOG.info("Not running in active controller, mounting %s into %s" % (remote_dir,
-                                                                                local_dir))
-            with mount_remote_directory(remote_dir, local_dir):
-                # try to use the TO release puppet hieradata if available for the host,
-                # and if not available then use the FROM hieradata path, since the kernel
-                # manifest does not rely on any specific host hieradata information
-                puppet_path = os.path.join(local_dir, "puppet/%s/hieradata")
-                host_hieradata = os.path.join(puppet_path, "%s.yaml" % socket.gethostname())
-                if os.path.isfile(host_hieradata % self._major_release):
-                    puppet_path = puppet_path % self._major_release
-                else:
-                    puppet_path = puppet_path % constants.SW_VERSION
-                ReconfigureKernelHook.apply_manifest(manifest_file, puppet_path,
-                                                     personalities=personalities)
+            subfunctions = utils.get_platform_conf("subfunction")
+            # copy /boot/2/kernel.env to /boot/1/kernel.env
+            # this is to preserve args (ie: apparmor)
+            # if the files are identical, do nothing
+            if not filecmp.cmp("/boot/1/kernel.env",
+                               "/boot/2/kernel.env",
+                               shallow=False):
+                shutil.copy2("/boot/2/kernel.env",
+                             "/boot/1/kernel.env")
+            # Determine the appropriate kernel for this env
+            desired_kernel = None
+            for kernel in glob.glob(os.path.join("/boot/1", "vmlinuz*-amd64")):
+                kernel_entry = os.path.basename(kernel)
+                # If we are running in lowlatency mode, we want the rt-amd64 kernel
+                if 'lowlatency' in subfunctions and 'rt-amd64' in kernel_entry:
+                    desired_kernel = kernel_entry
+                    break
+                # If we are not running lowlatency we want the entry that does NOT contain rt-amd64
+                if 'lowlatency' not in subfunctions and 'rt-amd64' not in kernel_entry:
+                    desired_kernel = kernel_entry
+                    break
+            if desired_kernel is None:  # This should never happen
+                LOG.warning("Unable to find a valid kernel under /boot/1")
+            else:
+                # Explicitly update /boot/1/kernel.env using the
+                # /usr/local/bin/puppet-update-grub-env.py utility
+                LOG.info("Updating /boot/1/kernel.env to:%s", desired_kernel)
+                cmd = "python /usr/local/bin/puppet-update-grub-env.py --set-kernel %s" % desired_kernel
+                subprocess.run(cmd, shell=True, check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            msg = ("Failed to run puppet-update-grub-env.py: rc=%s, output=%s"
+                   % (e.returncode, e.stderr.decode("utf-8")))
+            LOG.exception(msg)
         except Exception as e:
-            LOG.exception("Error running reconfigure kernel hook: %s" % str(e))
-        finally:
-            os.close(fp)
-            os.remove(manifest_file)
+            msg = "Failed to manually update /boot/1/kernel.env. Err=%s" % str(e)
+            LOG.exception(msg)
 
 
 # pre and post keywords

@@ -1605,7 +1605,7 @@ class PatchController(PatchService):
 
                 if number_of_commits == 1:
                     tags_to_remove.append(constants.COMMIT)
-                else: # commit1, commit2, commit3 ...
+                else:  # commit1, commit2, commit3 ...
                     for num in range(1, number_of_commits + 1):
                         tags_to_remove.append(f"{constants.COMMIT}{num}")
 
@@ -2636,7 +2636,6 @@ class PatchController(PatchService):
 
                 with self.hosts_lock:
                     self.interim_state[release_id] = list(self.hosts)
-
 
         elif operation == "remove":
             collect_current_load_for_hosts()
