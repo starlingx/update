@@ -16,7 +16,7 @@ LOG = logging.getLogger('main_logger')
 # valid release state transition below will still be changed as
 # development continue
 release_state_transition = {
-    states.AVAILABLE: [states.DEPLOYING],
+    states.AVAILABLE: [states.DEPLOYING, states.UNAVAILABLE],
     states.DEPLOYING: [states.DEPLOYED, states.AVAILABLE],
     states.DEPLOYED: [states.REMOVING, states.UNAVAILABLE, states.COMMITTED],
     states.REMOVING: [states.AVAILABLE],
@@ -72,6 +72,9 @@ class ReleaseState(object):
             if release.is_ga_release:
                 return True
         return False
+
+    def available(self):
+        self.transform(states.AVAILABLE)
 
     def start_deploy(self):
         self.transform(states.DEPLOYING)
