@@ -86,6 +86,7 @@ import software.utils as utils
 from software.sysinv_utils import get_k8s_ver
 from software.sysinv_utils import get_sw_version_from_host
 from software.sysinv_utils import is_system_controller
+from software.sysinv_utils import update_host_sw_version
 
 from software.db.api import get_instance
 
@@ -569,7 +570,13 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
     def handle(self, sock, addr):
         LOG.info("Handling install resp from %s", addr[0])
         global sc
-        # LOG.info("Handling hello ack")
+
+        dbapi = get_instance()
+        deploy = dbapi.get_deploy_all()
+        if len(deploy) == 0:
+            LOG.info("No deploy in progress. ignore install resp from %s", addr[0])
+            return
+        deploy = deploy[0]
 
         sc.hosts_lock.acquire()
         try:
@@ -591,7 +598,22 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
 
         deploy_host_state = DeployHostState(hostname)
         if self.status:
+            deploying = ReleaseState(release_state=states.DEPLOYING)
+            if deploying.is_major_release_deployment():
+                # For major release deployment, update sysinv ihost.sw_version
+                # so that right manifest can be generated.
+                sw_version = utils.get_major_release_version(deploy.get("to_release"))
+                msg = f"Update {hostname} to {sw_version}"
+                LOG.info(msg)
+                try:
+                    update_host_sw_version(hostname, sw_version)
+                except Exception:
+                    # Failed a step, fail the host deploy for reattempt
+                    deploy_host_state.deploy_failed()
+                    return
+
             deploy_host_state.deployed()
+
             if self.reboot_required:
                 sc.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_SUCCESS_RR,
                                          fm_constants.FM_ALARM_STATE_SET,

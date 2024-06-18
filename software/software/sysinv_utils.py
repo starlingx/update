@@ -90,3 +90,16 @@ def get_sw_version_from_host(hostname):
         if host.hostname == hostname:
             return host.sw_version
     return None
+
+
+def update_host_sw_version(hostname, sw_version):
+    token, endpoint = utils.get_endpoints_token()
+    sysinv_client = get_sysinv_client(token=token, endpoint=endpoint)
+
+    patch = [{'op': 'replace', 'path': '/sw_version', 'value': sw_version}]
+    try:
+        # TODO(bqian) should enhance below simple REST API call to guaranteed delivery
+        sysinv_client.ihost.update(hostname, patch)
+    except Exception:
+        LOG.exception("Failed to update %s sw_version %s" % (hostname, sw_version))
+        raise
