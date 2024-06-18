@@ -41,6 +41,25 @@ mount_points=(
     "${PLATFORM_CONF_PATH}:${TMP_PATH}/${PLATFORM_CONF_PATH}"
 )
 
+# for upgrade from 22.12 only
+# begin
+source /etc/build.info
+if [ ${SW_VERSION} == '22.12' ]; then
+    mount_points=(
+        "${DEV_PATH}:${OSTREE_DEPLOYMENT_BRANCH}/${DEV_PATH}"
+        "${PLATFORM_PATH}:${OSTREE_DEPLOYMENT_BRANCH}/${PLATFORM_PATH}"
+        "${RABBIT_PATH}:${OSTREE_DEPLOYMENT_BRANCH}/${RABBIT_PATH}"
+        "${POSTGRES_PATH}:${OSTREE_DEPLOYMENT_BRANCH}/${POSTGRES_PATH}"
+        "/usr/local/kubernetes/current/stage1:${OSTREE_DEPLOYMENT_BRANCH}/${KUBERNETES_PATH}/stage1"
+        "/usr/local/kubernetes/current/stage2:${OSTREE_DEPLOYMENT_BRANCH}/${KUBERNETES_PATH}/stage2"
+        "${PROC_PATH}:${OSTREE_DEPLOYMENT_BRANCH}/${PROC_PATH}"
+        "${LOG_PATH}:${OSTREE_DEPLOYMENT_BRANCH}/${LOG_PATH}"
+        "${OSTREE_DEPLOYMENT_BRANCH}/${USR_PATH}/${ETC_PATH}:${OSTREE_DEPLOYMENT_BRANCH}/${ETC_PATH}"
+        "${PLATFORM_CONF_PATH}:${TMP_PATH}/${PLATFORM_CONF_PATH}"
+    )
+fi
+# end
+
 handle_error() {
     local exit_code="$1"
     local error_message="$2"
