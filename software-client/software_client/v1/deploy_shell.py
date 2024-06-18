@@ -34,6 +34,7 @@ def do_show(cc, args):
                                 "To Release": "to_release",
                                 "RR": "reboot_required",
                                 "State": "state"}
+            utils.format_data(data, header="state", format_func=lambda x: f"deploy-{x}")
             utils.display_result_list(header_data_list, data)
     else:
         utils.display_info(resp)
