@@ -2542,11 +2542,21 @@ class PatchController(PatchService):
                 except OSTreeCommandFail:
                     LOG.exception("Failure during commit consistency check for %s.", release_id)
 
-                try:
-                    apt_utils.run_install(feed_repo, release.sw_release, packages)
-                except APTOSTreeCommandFail:
-                    LOG.exception("Failed to intall Debian package.")
-                    raise APTOSTreeCommandFail(msg)
+                # TODO(bqian) get the list of undeployed required release ids
+                # i.e, when deploying 24.03.3, which requires 24.03.2 and 24.03.1, all
+                # 3 release ids should be passed into to create new ReleaseState
+                collect_current_load_for_hosts()
+                create_deploy_hosts()
+                release_state = ReleaseState(release_ids=[release.id])
+                release_state.start_deploy()
+
+                # Setting deploy state to start, so that it can transition to start-done or start-failed
+                deploy_state = DeployState.get_instance()
+                to_release = deploy_release.sw_release
+                deploy_state.start(running_release, to_release, feed_repo, commit_id, deploy_release.reboot_required)
+
+                # Install debian package through apt-ostree
+                apt_utils.run_install(feed_repo, release.sw_release, packages)
 
                 # Update the feed ostree summary
                 ostree_utils.update_repo_summary_file(feed_repo)
@@ -2587,26 +2597,11 @@ class PatchController(PatchService):
                     msg = "service is running in incorrect state. No registered host"
                     raise InternalError(msg)
 
-                # TODO(bqian) get the list of undeployed required release ids
-                # i.e, when deploying 24.03.3, which requires 24.03.2 and 24.03.1, all
-                # 3 release ids should be passed into to create new ReleaseState
-                collect_current_load_for_hosts()
-                create_deploy_hosts()
-                release_state = ReleaseState(release_ids=[release.id])
-                release_state.start_deploy()
-                deploy_state = DeployState.get_instance()
-                to_release = deploy_release.sw_release
-                deploy_state.start(running_release, to_release, feed_repo, commit_id, deploy_release.reboot_required)
                 self._update_state_to_peer()
 
                 with self.hosts_lock:
                     self.interim_state[release_id] = list(self.hosts)
 
-                # There is no defined behavior for deploy start for patching releases, so
-                # move the deploy state to start-done
-                deploy_state = DeployState.get_instance()
-                deploy_state.start_done()
-                self._update_state_to_peer()
 
         elif operation == "remove":
             collect_current_load_for_hosts()
