@@ -181,22 +181,26 @@ def pull_ostree_from_remote(remote=None):
     else:
         ref = "%s:%s" % (remote, constants.OSTREE_REF)
         cmd += " --mirror"
-        ref_cmd = "ostree refs --create=%s %s" % (ref, constants.OSTREE_REF)
+        ref_cmd = "ostree refs --force --create=%s %s" % (ref, constants.OSTREE_REF)
 
     try:
         subprocess.run(cmd % ref, shell=True, check=True, capture_output=True)
     except subprocess.CalledProcessError as e:
         msg = "Failed to pull from %s remote into sysroot ostree" % ref
-        info_msg = "OSTree Pull Error: return code: %s , Output: %s" \
-                   % (e.returncode, e.stderr.decode("utf-8"))
-        LOG.info(info_msg)
+        err_msg = "OSTree Pull Error: return code: %s, Output: %s" \
+                  % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.exception(err_msg)
         raise OSTreeCommandFail(msg)
 
     if ref_cmd:
         try:
-            subprocess.run(ref_cmd, shell=True, check=True)
-        except subprocess.CalledProcessError:
+            subprocess.run(ref_cmd, shell=True, check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
             msg = "Failed to create ref %s for remote %s" % (ref, remote)
+            err_msg = "OSTree Ref Error: return code: %s, Output: %s" \
+                      % (e.returncode, e.stderr.decode("utf-8"))
+            LOG.exception(err_msg)
+            raise OSTreeCommandFail(msg)
 
 
 def delete_ostree_repo_commit(commit, repo_path):
@@ -533,6 +537,7 @@ def add_ostree_remote(major_release, nodetype):
     Add a new ostree remote from a major release feed
     :param major_release: major release corresponding to the new remote
     :param nodetype: type of the node where the software agent is running
+    :return: the name of the created remote or None if error
     """
     rel_name = "rel-%s" % major_release
     if nodetype == "controller":
@@ -541,13 +546,21 @@ def add_ostree_remote(major_release, nodetype):
     else:
         feed_ostree_url = "http://%s:8080/feed/%s/ostree_repo/" % (
             constants.CONTROLLER_FLOATING_HOSTNAME, rel_name)
-    cmd = ["ostree", "remote", "add", "--no-gpg-verify",
-           "--if-not-exists", rel_name, feed_ostree_url, constants.OSTREE_REF]
     try:
+        # delete the remote if existent and add: this is needed due
+        # to an odd behavior/bug from ostree, that does not update
+        # sysroot commit-id correctly when using an existing remote
+        cmd = ["ostree", "remote", "delete", "--if-exists", rel_name]
+        subprocess.check_call(cmd)
+        cmd = ["ostree", "remote", "add", "--no-gpg-verify",
+               rel_name, feed_ostree_url, constants.OSTREE_REF]
         subprocess.check_call(cmd)
     except subprocess.CalledProcessError as e:
         LOG.exception("Error adding %s ostree remote: %s" % (major_release, str(e)))
-        raise
+        return None
+
+    # pull from ostree remote
+    pull_ostree_from_remote(rel_name)
     return rel_name
 
 
@@ -570,16 +583,15 @@ def check_commit_id(remote, commit_id):
     :param commit_id: commit_id sent by the controller to the agent
     :return: boolean indicating if commit_id matches with remote commit_id
     """
-    commit_id_match = False
-    cmd = "ostree remote summary %s | grep 'Latest Commit' -A1" % remote
+    # pull remote commit metadata, if not already pulled
+    pull_ostree_from_remote(remote)
+
+    # get remote commit id
+    cmd = ["ostree", "rev-parse", "%s:%s" % (remote, constants.OSTREE_REF)]
+    remote_commit_id = None
     try:
-        # output should be similar to:
-        # Latest Commit (<n> bytes):
-        #       <ostree_commit_id>
-        output = subprocess.check_output(cmd, shell=True, text=True,
-                                         stderr=subprocess.STDOUT).strip()
-        remote_commit_id = output.split("\n")[1].strip()
-        commit_id_match = commit_id == remote_commit_id
+        remote_commit_id = subprocess.check_output(cmd, text=True).strip()
     except subprocess.CalledProcessError as e:
-        LOG.exception("Error getting remote commit_id: %s: %s" % (str(e), e.stdout))
-    return commit_id_match
+        LOG.exception("Error parsing commit metadata: %s" % str(e))
+
+    return remote_commit_id == commit_id

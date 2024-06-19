@@ -70,7 +70,7 @@ def package_remove(feed_dir, sw_release, packages):
         error = e.stderr.decode("utf-8")
 
         if "--component is not know" in error:
-            msg =  "Component %s not found, there is no package to delete" % sw_release
+            msg = "Component %s not found, there is no package to delete" % sw_release
             LOG.info(msg)
             return
 

@@ -135,15 +135,9 @@ def compare_release_version(sw_release_version_1, sw_release_version_2):
         return None
     else:
         try:
-            separator = '.'
-            separated_string_1 = sw_release_version_1.split(separator)
-            separated_string_2 = sw_release_version_2.split(separator)
-            if len(separated_string_1) != len(separated_string_2):
-                return None
-            for index, val in enumerate(separated_string_1):
-                if int(val) > int(separated_string_2[index]):
-                    return True
-            return False
+            rv1 = version.Version(sw_release_version_1)
+            rv2 = version.Version(sw_release_version_2)
+            return rv1 > rv2
         except Exception:
             return None
 

@@ -596,6 +596,10 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
         finally:
             sc.hosts_lock.release()
 
+        state = DeployState.get_deploy_state()
+        rollback = False
+        if state and "host-rollback" in state.value:
+            rollback = True
         deploy_host_state = DeployHostState(hostname)
         if self.status:
             deploying = ReleaseState(release_state=states.DEPLOYING)
@@ -609,17 +613,26 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
                     update_host_sw_version(hostname, sw_version)
                 except Exception:
                     # Failed a step, fail the host deploy for reattempt
-                    deploy_host_state.deploy_failed()
+                    if rollback:
+                        deploy_host_state.rollback_failed()
+                    else:
+                        deploy_host_state.deploy_failed()
                     return
 
-            deploy_host_state.deployed()
+            if rollback:
+                deploy_host_state.rollback_deployed()
+            else:
+                deploy_host_state.deployed()
 
             if self.reboot_required:
                 sc.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_SUCCESS_RR,
                                          fm_constants.FM_ALARM_STATE_SET,
                                          "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, hostname))
         else:
-            deploy_host_state.deploy_failed()
+            if rollback:
+                deploy_host_state.rollback_failed()
+            else:
+                deploy_host_state.deploy_failed()
             sc.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_FAILURE,
                                      fm_constants.FM_ALARM_STATE_SET,
                                      "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, hostname))
@@ -2436,8 +2449,8 @@ class PatchController(PatchService):
                 return ret
             elif not ret["system_healthy"]:
                 ret["error"] = "The following issues have been detected, which prevent " \
-                              "deploying %s\n" % deployment + ret["info"] + \
-                              "Please fix above issues then retry the deploy.\n"
+                               "deploying %s\n" % deployment + ret["info"] + \
+                               "Please fix above issues then retry the deploy.\n"
                 return ret
 
             if self._deploy_upgrade_start(to_release, commit_id):
@@ -3000,25 +3013,29 @@ class PatchController(PatchService):
         msg_warning = ""
         msg_error = ""
 
-        # TODO(heitormatsui) add host-rollback capability
-        if rollback:
-            msg_info += "Host rollback not implemented yet.\n"
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
         deploy_host = self.db_api_instance.get_deploy_host_by_hostname(hostname)
         if deploy_host is None:
             raise HostNotFound(hostname)
         deploy = self.db_api_instance.get_deploy_all()[0]
         to_release = deploy.get("to_release")
+        commit_id = deploy.get("commit_id")
         release_id = None
         for release in self.release_collection.iterate_releases():
             if to_release == release.sw_release:
                 release_id = release.id
-        deploy_host_validations(hostname, self.release_collection.get_release_by_id(release_id).is_ga_release)
+        deploy_host_validations(
+            hostname,
+            is_major_release=self.release_collection.get_release_by_id(release_id).is_ga_release,
+            rollback=rollback
+        )
         deploy_state = DeployState.get_instance()
         deploy_host_state = DeployHostState(hostname)
-        deploy_state.deploy_host()
-        deploy_host_state.deploy_started()
+        if rollback:
+            deploy_state.deploy_host_rollback()
+            deploy_host_state.rollback_started()
+        else:
+            deploy_state.deploy_host()
+            deploy_host_state.deploy_started()
 
         # if in a 'deploy host' reentrant scenario, i.e. retrying after
         # a failure, then clear the failure alarm before retrying
@@ -3042,11 +3059,9 @@ class PatchController(PatchService):
         # Check if there is a major release deployment in progress
         # and set agent request parameters accordingly
         major_release = None
-        commit_id = None
         if self.check_upgrade_in_progress():
             upgrade_release = self.get_software_upgrade()
             major_release = upgrade_release["to_release"]
-            commit_id = ostree_utils.get_feed_latest_commit(major_release)
             force = False
             async_req = False
             msg = "Running major release deployment, major_release=%s, force=%s, async_req=%s, commit_id=%s" % (

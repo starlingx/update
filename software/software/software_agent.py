@@ -544,14 +544,21 @@ class PatchAgent(PatchService):
             hello_ack = PatchMessageHelloAgentAck()
             hello_ack.send(self.sock_out)
 
-        # TODO(heitormatsui): create hook manager for other scenarios,
-        #  e.g. major release downgrade during abort/rollback
-        hook_manager = agent_hooks.HookManager(agent_hooks.MAJOR_RELEASE_UPGRADE,
-                                               {"major_release": major_release})
         remote = None
         ref = None
+        hook_manager = None
         if major_release:
             LOG.info("Major release deployment for %s with commit %s" % (major_release, commit_id))
+
+            # check if received version is greater (upgrade) or not (rollback)
+            if utils.compare_release_version(major_release, SW_VERSION):
+                LOG.info("Upgrading from %s to %s" % (SW_VERSION, major_release))
+                hook_manager = agent_hooks.HookManager(agent_hooks.MAJOR_RELEASE_UPGRADE,
+                                                       {"major_release": major_release})
+            else:
+                LOG.info("Rolling back from %s to %s" % (SW_VERSION, major_release))
+                hook_manager = agent_hooks.HookManager(agent_hooks.MAJOR_RELEASE_ROLLBACK,
+                                                       {"major_release": major_release})
 
             # run deploy host pre-hooks for major release
             hook_manager.run_pre_hooks()
@@ -559,6 +566,10 @@ class PatchAgent(PatchService):
             # add remote
             nodetype = utils.get_platform_conf("nodetype")
             remote = ostree_utils.add_ostree_remote(major_release, nodetype)
+            if not remote:
+                LOG.exception("Unable to continue major release deployment as "
+                              "there was an error adding the remote.")
+                return False
             LOG.info("OSTree remote added: %s" % remote)
 
             # check if remote commit_id matches with the one sent by the controller

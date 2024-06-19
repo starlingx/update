@@ -1347,7 +1347,7 @@ def set_host_target_load(hostname, major_release):
         raise
 
 
-def deploy_host_validations(hostname, is_major_release: bool):
+def deploy_host_validations(hostname, is_major_release: bool, rollback: bool = False):
     """
     Check the conditions below:
     If system mode is duplex, check if provided hostname satisfy the right deployment order.
@@ -1358,6 +1358,7 @@ def deploy_host_validations(hostname, is_major_release: bool):
 
     :param hostname: Hostname of the host to be deployed
     :param is_major_release: Bool field indicating if is major release
+    :param rollback: Indicates if validating for a rollback operation
     """
     _, system_mode = get_system_info()
     simplex = (system_mode == constants.SYSTEM_MODE_SIMPLEX)
@@ -1366,15 +1367,15 @@ def deploy_host_validations(hostname, is_major_release: bool):
     if simplex:
         LOG.info("System mode is simplex. Skipping deploy order validation...")
     else:
-        validate_host_deploy_order(hostname, is_major_release)
-    # If the deployment is not RR the host does not need to be locked and online.
+        validate_host_deploy_order(hostname, is_major_release=is_major_release, rollback=rollback)
+    # If the deployment is not RR the host does not need to be locked and online
     if deploy.get(constants.REBOOT_REQUIRED):
         if not is_host_locked_and_online(hostname):
             msg = f"Host {hostname} must be {constants.ADMIN_LOCKED}."
             raise SoftwareServiceError(error=msg)
 
 
-def validate_host_deploy_order(hostname, is_major_release: bool):
+def validate_host_deploy_order(hostname, is_major_release: bool, rollback: bool = False):
     """
     Check if the host to be deployed satisfy the major release deployment right
     order of controller-1 -> controller-0 -> storages -> computes
@@ -1398,8 +1399,13 @@ def validate_host_deploy_order(hostname, is_major_release: bool):
     ordered_storage_list = sorted(storage_list, key=lambda x: int(x.split("-")[1]))
     ordered_list = controllers_list + ordered_storage_list + workers_list
 
+    # in a rollback scenario the deploy order should be inverted
+    if is_major_release and rollback:
+        ordered_list.reverse()
+
     for host in db_api_instance.get_deploy_host():
-        if host.get("state") == states.DEPLOY_HOST_STATES.DEPLOYED.value:
+        if host.get("state") in [states.DEPLOY_HOST_STATES.DEPLOYED.value,
+                                 states.DEPLOY_HOST_STATES.ROLLBACK_DEPLOYED.value]:
             ordered_list.remove(host.get("hostname"))
     if not ordered_list:
         raise SoftwareServiceError(error="All hosts are already in deployed state.")
