@@ -269,15 +269,9 @@ class DeployHandler(Deploy):
 
         try:
             data = get_software_filesystem_data()
-            deploy_data = data.get("deploy", [])
-            if not deploy_data:
-                deploy_data = {
-                    "deploy": []
-                }
-                deploy_data["deploy"].append(new_deploy)
-                data.update(deploy_data)
-            else:
-                deploy_data.append(new_deploy)
+            deploy_list = data.get("deploy", [])
+            deploy_list.append(new_deploy)
+            data["deploy"] = deploy_list
             save_to_json_file(constants.SOFTWARE_JSON_FILE, data)
         except Exception as e:
             LOG.exception(e)
@@ -373,15 +367,9 @@ class DeployHostHandler(DeployHosts):
         }
 
         data = get_software_filesystem_data()
-        deploy_data = data.get("deploy_host", [])
-        if not deploy_data:
-            deploy_data = {
-                "deploy_host": []
-            }
-            deploy_data["deploy_host"].append(new_deploy_host)
-            data.update(deploy_data)
-        else:
-            deploy_data.append(new_deploy_host)
+        deploy_list = data.get("deploy_host", [])
+        deploy_list.append(new_deploy_host)
+        data["deploy_host"] = deploy_list
         save_to_json_file(constants.SOFTWARE_JSON_FILE, data)
 
     def query(self, hostname):

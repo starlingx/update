@@ -2585,7 +2585,6 @@ class PatchController(PatchService):
                 # i.e, when deploying 24.03.3, which requires 24.03.2 and 24.03.1, all
                 # 3 release ids should be passed into to create new ReleaseState
                 collect_current_load_for_hosts()
-                create_deploy_hosts()
                 release_state = ReleaseState(release_ids=[release.id])
                 release_state.start_deploy()
 
@@ -2746,7 +2745,6 @@ class PatchController(PatchService):
                 # i.e, when deploying 24.03.3, which requires 24.03.2 and 24.03.1, all
                 # 3 release ids should be passed into to create new ReleaseState
                 collect_current_load_for_hosts()
-                create_deploy_hosts()
                 release_state = ReleaseState(release_ids=[release.id])
                 release_state.start_remove()
                 deploy_state = DeployState.get_instance()
