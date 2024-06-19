@@ -157,6 +157,18 @@ def _display_error(status_code, text):
         print(HTTP_ERRORS[status_code])
 
 
+def format_data(data, header, format_func):
+    """
+    Format data applying a formatting function to all values under specified header
+    :param data: list of dict with the data
+    :param header: string with the header of the data that must be formatted
+    :param format_func: function to be applied to change the value
+    """
+    for d in data:
+        if header in d:
+            d[header] = format_func(d[header])
+
+
 def display_info(resp):
     '''
     This function displays basic REST API return, w/ info json object:
