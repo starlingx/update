@@ -213,18 +213,6 @@ class PatchAlarmDaemon(object):
                 else:
                     logging.info("Updating patch-host-install-failure alarm")
 
-                fault = fm_api.Fault(alarm_id=fm_constants.FM_ALARM_ID_PATCH_HOST_INSTALL_FAILED,
-                                     alarm_type=fm_constants.FM_ALARM_TYPE_5,
-                                     alarm_state=fm_constants.FM_ALARM_STATE_SET,
-                                     entity_type_id=fm_constants.FM_ENTITY_TYPE_HOST,
-                                     entity_instance_id=entity_instance_id,
-                                     severity=fm_constants.FM_ALARM_SEVERITY_MAJOR,
-                                     reason_text=reason_text,
-                                     probable_cause=fm_constants.ALARM_PROBABLE_CAUSE_65,
-                                     proposed_repair_action='Undo patching operation',
-                                     service_affecting=False)
-                self.fm_api.set_fault(fault)
-
         elif patch_failed_alarm is not None:
             logging.info("Clearing patch-host-install-failure alarm")
             self.fm_api.clear_fault(fm_constants.FM_ALARM_ID_PATCH_HOST_INSTALL_FAILED,
