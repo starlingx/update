@@ -96,6 +96,7 @@ from software import states
 
 from tsconfig.tsconfig import INITIAL_CONFIG_COMPLETE_FLAG
 from tsconfig.tsconfig import INITIAL_CONTROLLER_CONFIG_COMPLETE
+from tsconfig.tsconfig import VOLATILE_CONTROLLER_CONFIG_COMPLETE
 import xml.etree.ElementTree as ET
 
 
@@ -3544,8 +3545,11 @@ class PatchControllerAuthApiThread(threading.Thread):
             host = utils.get_versioned_address_all()
         try:
             # Can only launch authenticated server post-config
-            while not os.path.exists('/etc/platform/.initial_config_complete'):
+            while not os.path.exists(VOLATILE_CONTROLLER_CONFIG_COMPLETE):
+                LOG.info("Authorized API: Waiting for controller config complete.")
                 time.sleep(5)
+
+            LOG.info("Authorized API: Initializing")
 
             # In order to support IPv6, server_class.address_family must be
             # set to the correct address family.  Because the unauthenticated
