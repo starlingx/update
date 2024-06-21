@@ -1580,7 +1580,7 @@ class PatchController(PatchService):
 
         tree = ET.parse(metadata_path)
         root = tree.getroot()
-        previous_commit_element = root.find(".//previous_commit")
+        previous_commit_element = root.find(f".//{constants.PREVIOUS_COMMIT}")
         if previous_commit_element is not None:
             # Remove ostree commit (pactch removal)
             previous_commit = previous_commit_element.text
@@ -1596,6 +1596,29 @@ class PatchController(PatchService):
                 msg = "Failure when rolling back commit %s" % previous_commit
                 LOG.exception(msg)
                 raise APTOSTreeCommandFail(msg)
+
+            # Nullify commit-id from metadata
+            number_of_commits_tag = root.find(f".//{constants.NUMBER_OF_COMMITS}")
+
+            if number_of_commits_tag is not None:
+                number_of_commits = int(number_of_commits_tag.text)
+                tags_to_remove = [constants.NUMBER_OF_COMMITS, constants.PREVIOUS_COMMIT]
+
+                if number_of_commits == 1:
+                    tags_to_remove.append(constants.COMMIT)
+                else: # commit1, commit2, commit3 ...
+                    for num in range(1, number_of_commits + 1):
+                        tags_to_remove.append(f"{constants.COMMIT}{num}")
+
+                for tag in tags_to_remove:
+                    element = root.find(f".//{tag}")
+                    if element is not None:
+                        root.remove(element)
+
+                ET.indent(tree, '  ')
+                with open(metadata_path, "wb") as outfile:
+                    tree = ET.tostring(root)
+                    outfile.write(tree)
 
     def software_release_delete_api(self, release_ids):
         """
@@ -2587,9 +2610,9 @@ class PatchController(PatchService):
                     root = tree.getroot()
 
                     # ostree = ET.SubElement(root, "ostree")
-                    self.add_text_tag_to_xml(root, "number_of_commits", "1")
-                    self.add_text_tag_to_xml(root, "previous_commit", latest_commit)
-                    self.add_text_tag_to_xml(root, "commit", self.latest_feed_commit)
+                    self.add_text_tag_to_xml(root, constants.NUMBER_OF_COMMITS, "1")
+                    self.add_text_tag_to_xml(root, constants.PREVIOUS_COMMIT, latest_commit)
+                    self.add_text_tag_to_xml(root, constants.COMMIT, self.latest_feed_commit)
 
                     ET.indent(tree, '  ')
                     with open(metadata_file, "wb") as outfile:

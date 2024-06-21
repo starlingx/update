@@ -150,3 +150,8 @@ SOFTWARE_ALARMS = {
         "service_affecting": True,
     }
 }
+
+# metadata tags
+NUMBER_OF_COMMITS = "number_of_commits"
+PREVIOUS_COMMIT = "previous_commit"
+COMMIT = "commit"
