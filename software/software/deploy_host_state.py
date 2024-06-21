@@ -57,6 +57,7 @@ class DeployHostState(object):
         try:
             if self.check_transition(target_state):
                 db_api.update_deploy_host(self._hostname, target_state)
+                LOG.info("Deploy host state for host %s updated to: %s" % (self._hostname, target_state.value))
                 for callback in DeployHostState._callbacks:
                     callback(self._hostname, target_state)
             else:

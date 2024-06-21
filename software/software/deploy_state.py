@@ -139,6 +139,7 @@ class DeployState(object):
                 # None means not existing or deleting
                 if target_state is not None:
                     db_api.update_deploy(state=target_state)
+                    LOG.info("Deploy state updated to: %s" % target_state.value)
             else:
                 # TODO(bqian) check the current state, and provide guidence on what is
                 # the possible next operation
