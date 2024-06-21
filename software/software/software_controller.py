@@ -84,7 +84,6 @@ from software.release_verify import verify_files
 import software.config as cfg
 import software.utils as utils
 from software.sysinv_utils import get_k8s_ver
-from software.sysinv_utils import get_sw_version_from_host
 from software.sysinv_utils import is_system_controller
 from software.sysinv_utils import update_host_sw_version
 
@@ -2948,7 +2947,9 @@ class PatchController(PatchService):
         msg_error = ""
 
         deploy = self.db_api_instance.get_current_deploy()
+        from_release = deploy.get("from_release")
         to_release = deploy.get("to_release")
+        from_release_deployment = constants.RELEASE_GA_NAME % from_release
         to_release_deployment = constants.RELEASE_GA_NAME % to_release
 
         try:
@@ -2959,9 +2960,9 @@ class PatchController(PatchService):
         if not is_major_release:
             raise SoftwareServiceError("Abort operation is only supported for major releases.")
 
-        major_to_release = utils.get_major_release_version(to_release)
-        feed_repo = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, major_to_release)
-        deploy_release = self._release_basic_checks(to_release_deployment)
+        major_from_release = utils.get_major_release_version(from_release)
+        feed_repo = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, major_from_release)
+        deploy_release = self._release_basic_checks(from_release_deployment)
         commit_id = deploy_release.commit_id
 
         # TODO(lbonatti): remove this condition when commit-id is built into GA metadata.
@@ -2979,21 +2980,11 @@ class PatchController(PatchService):
             state = DEPLOY_HOST_STATES(host.get("state"))
             deploy_host_state = DeployHostState(hostname)
 
-            # If deploy host is failed check which sw_version is running to set the correct state.
-            if state == DEPLOY_HOST_STATES.FAILED:
-                sw_version = get_sw_version_from_host(hostname)
-
-                # TODO(lbonatti): Check against from_release once sw_version field on i_host table is populate with .pp
-                if major_to_release == sw_version:
-                    deploy_host_state.rollback_deployed()
-                else:
-                    deploy_host_state.rollback_pending()
-            # Moves deployed state to rollback-pending, pending to rollback-deployed and deploying remains the same
-            elif state == DEPLOY_HOST_STATES.DEPLOYED:
-                deploy_host_state.rollback_pending()
-
-            elif state == DEPLOY_HOST_STATES.PENDING:
+            # Moves pending -> rollback-deployed and other states -> rollback-pending
+            if state == DEPLOY_HOST_STATES.PENDING:
                 deploy_host_state.rollback_deployed()
+            else:
+                deploy_host_state.rollback_pending()
 
         msg_info += "Deployment has been aborted\n"
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
