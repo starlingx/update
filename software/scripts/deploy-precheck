@@ -109,7 +109,18 @@ class HealthCheck(object):
         force = self._config.get("force", False)
         health_ok = success = True
 
-        output = self._sysinv_client.health.get_kube_upgrade(relaxed=force)
+        alarm_ignore_list = ["900.201"]
+        api_cmd = self._sysinv_endpoint + "/health/kube-upgrade"
+
+        if force:
+            api_cmd += '/relaxed'
+
+        if alarm_ignore_list:
+            api_cmd += f'?alarm_ignore_list={alarm_ignore_list}'
+
+        method = 'GET'
+        output = upgrade_utils.call_api(self._sysinv_token, method, api_cmd)
+
         if HealthCheck.FAIL_MSG in output:
             success = False
         health_ok = health_ok and success
