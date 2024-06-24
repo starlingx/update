@@ -56,6 +56,7 @@ def do_host_list(cc, args):
             header_data_list = {"Host": "hostname", "From Release": "software_release",
                                 "To Release": "target_release", "RR": "reboot_required",
                                 "State": "host_state"}
+            utils.format_data(data, header="host_state", format_func=lambda x: f"deploy-host-{x}")
             utils.display_result_list(header_data_list, data)
     else:
         utils.display_info(resp)
