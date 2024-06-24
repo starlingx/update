@@ -179,3 +179,8 @@ class FileSystemError(SoftwareError):
     Likely fixable by a root user.
     """
     pass
+
+
+class HostIpNotFound(SoftwareError):
+    """Host IP not found"""
+    pass

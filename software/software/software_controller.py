@@ -52,6 +52,7 @@ from software.exceptions import ReleaseValidationFailure
 from software.exceptions import ReleaseIsoDeleteFailure
 from software.exceptions import SoftwareServiceError
 from software.exceptions import InvalidOperation
+from software.exceptions import HostIpNotFound
 from software.release_data import reload_release_data
 from software.release_data import get_SWReleaseCollection
 from software.software_functions import collect_current_load_for_hosts
@@ -3179,6 +3180,19 @@ class PatchController(PatchService):
         msg_warning = ""
         msg_error = ""
 
+        try:
+            ip = socket.gethostbyname(hostname)
+        except socket.gaierror:
+            msg_error += "Host %s not found\n" % hostname
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # NOTE(bqian) Get IP address to fulfill the need of patching structure.
+        # need to review the design
+        # ensure ip is in table as in some cases the host is aged out from the hosts table
+        if ip not in self.hosts:
+            msg_warning += "Host %s ip %s not found\n" % (hostname, ip)
+            raise HostIpNotFound(hostname)
+
         deploy_host = self.db_api_instance.get_deploy_host_by_hostname(hostname)
         if deploy_host is None:
             raise HostNotFound(hostname)
@@ -3210,10 +3224,8 @@ class PatchController(PatchService):
                                    fm_constants.FM_ALARM_STATE_CLEAR,
                                    entity_instance_id)
 
-        # NOTE(bqian) Get IP address to fulfill the need of patching structure.
-        # need to review the design
-        ip = socket.getaddrinfo(hostname, 0)[0][4][0]
-        msg = "Running software deploy host for %s (%s), force=%s, async_req=%s" % (hostname, ip, force, async_req)
+        msg = "Running software deploy host for %s (%s), force=%s, async_req=%s" % (
+            hostname, ip, force, async_req)
         LOG.info(msg)
         audit_log_info(msg)
 
@@ -3269,6 +3281,8 @@ class PatchController(PatchService):
             if ip not in self.hosts:
                 # The host aged out while we were waiting
                 self.hosts_lock.release()
+                deploy_state.deploy_host_failed()
+                deploy_host_state.deploy_failed()
                 msg = "Agent expired while waiting: %s" % ip
                 msg_error += msg + "\n"
                 LOG.error("Error in host-install: %s", msg)
@@ -3287,10 +3301,14 @@ class PatchController(PatchService):
                         self.hosts[ip].install_reject_reason)
                     msg_error += msg + "\n"
                     LOG.error("Error in host-install: %s", msg)
+                    deploy_state.deploy_host_failed()
+                    deploy_host_state.deploy_failed()
                 else:
                     msg = "Host installation failed on %s." % self.hosts[ip].hostname
                     msg_error += msg + "\n"
                     LOG.error("Error in host-install: %s", msg)
+                    deploy_state.deploy_host_failed()
+                    deploy_host_state.deploy_failed()
 
                 self.hosts_lock.release()
                 break
@@ -3303,6 +3321,8 @@ class PatchController(PatchService):
             msg = "Timeout occurred while waiting response from %s." % ip
             msg_error += msg + "\n"
             LOG.error("Error in host-install: %s", msg)
+            deploy_state.deploy_host_failed()
+            deploy_host_state.deploy_failed()
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
