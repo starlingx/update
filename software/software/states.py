@@ -119,7 +119,9 @@ class DEPLOY_STATES(Enum):
     ACTIVATE_FAILED = 'activate-failed'
 
     ACTIVATE_ROLLBACK = 'activate-rollback'
+    ACTIVATE_ROLLBACK_DONE = 'activate-rollback-done'
     ACTIVATE_ROLLBACK_FAILED = 'activate-rollback-failed'
+    ACTIVATE_ROLLBACK_PENDING = 'activate-rollback-pending'
 
     COMPLETED = 'completed'
 

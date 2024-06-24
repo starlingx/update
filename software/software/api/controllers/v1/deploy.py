@@ -22,6 +22,7 @@ class DeployController(RestController):
     _custom_actions = {
         'abort': ['POST'],
         'activate': ['POST'],
+        'activate_rollback': ['POST'],
         'precheck': ['POST'],
         'start': ['POST'],
         'complete': ['POST'],
@@ -42,6 +43,14 @@ class DeployController(RestController):
         reload_release_data()
 
         result = sc.software_deploy_activate_api()
+        sc.software_sync()
+        return result
+
+    @expose(method='POST', template='json')
+    def activate_rollback(self):
+        reload_release_data()
+
+        result = sc.software_deploy_activate_rollback_api()
         sc.software_sync()
         return result
 

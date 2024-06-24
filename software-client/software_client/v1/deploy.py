@@ -94,6 +94,15 @@ class DeployManager(base.Manager):
 
         return self._create(path, body={})
 
+    def activate_rollback(self, args):
+        # Ignore interrupts during this function
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+        # Issue deploy_start request
+        path = "/v1/deploy/activate_rollback"
+
+        return self._create(path, body={})
+
     def complete(self, args):
         # Ignore interrupts during this function
         signal.signal(signal.SIGINT, signal.SIG_IGN)

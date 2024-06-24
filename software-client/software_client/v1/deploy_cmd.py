@@ -19,6 +19,7 @@ DEPLOY_COMMAND_MODULES = [
 #     - host
 #     - abort
 #     - activate
+#     - activate-rollback
 #     - complete
 #     - delete
 # non root/sudo users can run:
