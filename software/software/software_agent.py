@@ -325,6 +325,61 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
         resp.send(sock)
 
 
+class SoftwareMessageDeployDeleteCleanupReq(messages.PatchMessage):
+    def __init__(self):
+        messages.PatchMessage.__init__(self, messages.PATCHMSG_DEPLOY_DELETE_CLEANUP_REQ)
+        self.major_release = None
+
+    def decode(self, data):
+        messages.PatchMessage.encode(self)
+        if "major_release" in data:
+            self.major_release = data["major_release"]
+
+    def handle(self, sock, addr):
+        LOG.info("Handling deploy delete cleanup request, major_release=%s" % self.major_release)
+        success_cleanup = ostree_utils.delete_temporary_refs_and_remotes()
+        nodetype = utils.get_platform_conf("nodetype")
+        success_update = ostree_utils.add_ostree_remote(self.major_release, nodetype,
+                                                        replace_default_remote=True)
+        if success_cleanup:
+            LOG.info("Success cleaning temporary refs/remotes.")
+        else:
+            LOG.error("Failure cleaning temporary refs/remotes. "
+                      "Please do the cleanup manually.")
+
+        if success_update:
+            LOG.info("Success updating default remote.")
+        else:
+            LOG.error("Failure updating default remote. "
+                      "Please update '%s' remote manually." % constants.OSTREE_REMOTE)
+
+        success = success_cleanup and success_update
+        resp = SoftwareMessageDeployDeleteCleanupResp()
+        resp.success = success
+        resp.send(sock, addr)
+
+    def send(self, sock):  # pylint: disable=unused-argument
+        LOG.error("Should not get here")
+
+
+class SoftwareMessageDeployDeleteCleanupResp(messages.PatchMessage):
+    def __init__(self):
+        messages.PatchMessage.__init__(self, messages.PATCHMSG_DEPLOY_DELETE_CLEANUP_RESP)
+        self.success = None
+
+    def encode(self):
+        messages.PatchMessage.encode(self)
+        self.message["success"] = self.success
+
+    def handle(self, sock, addr):
+        LOG.error("Should not get here")
+
+    def send(self, sock, addr):
+        self.encode()
+        message = json.dumps(self.message)
+        sock.sendto(str.encode(message), (addr[0], cfg.controller_port))
+
+
 class PatchAgent(PatchService):
     def __init__(self):
         PatchService.__init__(self)
@@ -784,6 +839,8 @@ class PatchAgent(PatchService):
                         msg = PatchMessageSendLatestFeedCommit()
                     elif msgdata['msgtype'] == messages.PATCHMSG_AGENT_INSTALL_REQ:
                         msg = PatchMessageAgentInstallReq()
+                    elif msgdata['msgtype'] == messages.PATCHMSG_DEPLOY_DELETE_CLEANUP_REQ:
+                        msg = SoftwareMessageDeployDeleteCleanupReq()
 
                 if msg is None:
                     msg = messages.PatchMessage()

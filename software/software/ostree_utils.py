@@ -532,14 +532,19 @@ def write_to_feed_ostree(patch_name, patch_sw_version):
         raise OSTreeCommandFail(msg)
 
 
-def add_ostree_remote(major_release, nodetype):
+def add_ostree_remote(major_release, nodetype, replace_default_remote=False):
     """
     Add a new ostree remote from a major release feed
     :param major_release: major release corresponding to the new remote
     :param nodetype: type of the node where the software agent is running
+    :param replace_default_remote: indicate if default remote should be replaced instead,
+        should be used at the end of a successful major release deployment point the default
+        remote to the new major release feed
     :return: the name of the created remote or None if error
     """
-    rel_name = "rel-%s" % major_release
+    remote_name = rel_name = "%s-%s" % (constants.RELEASE_PREFIX, major_release)
+    if replace_default_remote:
+        remote_name = constants.OSTREE_REMOTE
     if nodetype == "controller":
         feed_ostree_url = "file://%s/%s/ostree_repo/" % (
             constants.FEED_OSTREE_BASE_DIR, rel_name)
@@ -550,18 +555,18 @@ def add_ostree_remote(major_release, nodetype):
         # delete the remote if existent and add: this is needed due
         # to an odd behavior/bug from ostree, that does not update
         # sysroot commit-id correctly when using an existing remote
-        cmd = ["ostree", "remote", "delete", "--if-exists", rel_name]
+        cmd = ["ostree", "remote", "delete", "--if-exists", remote_name]
         subprocess.check_call(cmd)
         cmd = ["ostree", "remote", "add", "--no-gpg-verify",
-               rel_name, feed_ostree_url, constants.OSTREE_REF]
+               remote_name, feed_ostree_url, constants.OSTREE_REF]
         subprocess.check_call(cmd)
     except subprocess.CalledProcessError as e:
         LOG.exception("Error adding %s ostree remote: %s" % (major_release, str(e)))
         return None
 
     # pull from ostree remote
-    pull_ostree_from_remote(rel_name)
-    return rel_name
+    pull_ostree_from_remote(remote_name)
+    return remote_name
 
 
 def delete_ostree_remote(remote):
@@ -574,6 +579,21 @@ def delete_ostree_remote(remote):
         subprocess.check_call(cmd)
     except subprocess.CalledProcessError as e:
         LOG.exception("Error deleting %s ostree remote: %s" % (remote, str(e)))
+        raise
+
+
+def delete_ostree_ref(ref):
+    """
+    Delete an ostree ref
+    :param ref: ref name to be deleted
+    """
+    # if ref doesn't exist the command doesn't return error
+    cmd = ["ostree", "refs", "--delete", ref]
+    try:
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError as e:
+        LOG.exception("Error deleting %s ostree ref: %s" % (ref, str(e)))
+        raise
 
 
 def check_commit_id(remote, commit_id):
@@ -595,3 +615,45 @@ def check_commit_id(remote, commit_id):
         LOG.exception("Error parsing commit metadata: %s" % str(e))
 
     return remote_commit_id == commit_id
+
+
+def delete_temporary_refs_and_remotes():
+    """Delete temporary refs and remotes created during major release deploym"""
+    success = True
+    refs = ""
+    cmd = ["ostree", "refs"]
+    try:
+        refs = subprocess.check_output(cmd, text=True)
+    except subprocess.CalledProcessError as e:
+        LOG.exception("Failed listing refs: %s" % str(e))
+        success = False
+
+    remotes = ""
+    cmd = ["ostree", "remote", "list"]
+    try:
+        remotes = subprocess.check_output(cmd, text=True)
+    except subprocess.CalledProcessError as e:
+        LOG.exception("Failed listing remotes: %s" % str(e))
+        success = False
+
+    for ref in refs.split("\n"):
+        if constants.RELEASE_PREFIX in ref:
+            try:
+                delete_ostree_ref(ref)
+                LOG.info("Deleted temporary ref %s." % ref)
+            except Exception as e:
+                LOG.exception("Failed to delete ref %s: %s" % (ref, str(e)))
+                success = False
+
+    for remote in remotes.split("\n"):
+        if constants.RELEASE_PREFIX in remote:
+            try:
+                delete_ostree_remote(remote)
+                LOG.info("Deleted temporary remote %s." % remote)
+            except Exception as e:
+                LOG.exception("Failed to delete remote %s: %s" % (remote, str(e)))
+                success = False
+
+    if not success:
+        LOG.error("Failure deleting temporary refs and remotes, please cleanup manually.")
+    return success

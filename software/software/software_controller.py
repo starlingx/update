@@ -859,6 +859,56 @@ class SWMessageDeployStateChanged(messages.PatchMessage):
         sock.sendto(str.encode(message), (sc.controller_address, cfg.controller_port))
 
 
+class SoftwareMessageDeployDeleteCleanupReq(messages.PatchMessage):
+    def __init__(self):
+        messages.PatchMessage.__init__(self, messages.PATCHMSG_DEPLOY_DELETE_CLEANUP_REQ)
+        self.ip = None
+        self.major_release = None
+
+    def encode(self):
+        messages.PatchMessage.encode(self)
+        self.message["major_release"] = self.major_release
+
+    def handle(self, sock, addr):
+        LOG.error("Should not get here")
+
+    def send(self, sock):
+        global sc
+        LOG.info("Sending deploy delete cleanup request to all nodes.")
+        self.encode()
+        message = json.dumps(self.message)
+        sock.sendto(str.encode(message), (sc.agent_address, cfg.agent_port))
+
+
+class SoftwareMessageDeployDeleteCleanupResp(messages.PatchMessage):
+    def __init__(self):
+        messages.PatchMessage.__init__(self, messages.PATCHMSG_DEPLOY_DELETE_CLEANUP_RESP)
+        self.success = None
+
+    def decode(self, data):
+        messages.PatchMessage.decode(self, data)
+        if 'success' in data:
+            self.success = data['success']
+
+    def encode(self):
+        # Nothing to add, so just call the super class
+        messages.PatchMessage.encode(self)
+
+    def handle(self, sock, addr):
+        ip = addr[0]
+        LOG.info("Handling deploy delete cleanup resp from %s", ip)
+        global sc
+        if self.success:
+            LOG.info("Host %s sucessfully executed deploy delete "
+                     "cleanup tasks." % sc.hosts[ip].hostname)
+            return
+        LOG.error("Host %s failed executing deploy delete "
+                  "cleanup tasks." % sc.hosts[ip].hostname)
+
+    def send(self, sock):  # pylint: disable=unused-argument
+        LOG.error("Should not get here")
+
+
 class PatchController(PatchService):
     def __init__(self):
         PatchService.__init__(self)
@@ -2844,6 +2894,14 @@ class PatchController(PatchService):
             # Set deploying releases to deployed state.
             deploying_release_state.deploy_completed()
 
+            # Send message to agents cleanup their ostree environment
+            cleanup_req = SoftwareMessageDeployDeleteCleanupReq()
+            cleanup_req.major_release = utils.get_major_release_version(to_release)
+            cleanup_req.encode()
+            self.socket_lock.acquire()
+            cleanup_req.send(self.sock_out)
+            self.socket_lock.release()
+
         elif DEPLOY_STATES.HOST_ROLLBACK_DONE == deploy_state_instance.get_deploy_state():
             major_release = utils.get_major_release_version(from_release)
             release_state = ReleaseState(release_state=states.DEPLOYING)
@@ -3844,6 +3902,8 @@ class PatchControllerMainThread(threading.Thread):
                             msg = SoftwareMessageDeployStateUpdateAck()
                         elif msgdata['msgtype'] == messages.PATCHMSG_DEPLOY_STATE_CHANGED:
                             msg = SWMessageDeployStateChanged()
+                        elif msgdata['msgtype'] == messages.PATCHMSG_DEPLOY_DELETE_CLEANUP_RESP:
+                            msg = SoftwareMessageDeployDeleteCleanupResp()
 
                     if msg is None:
                         msg = messages.PatchMessage()
