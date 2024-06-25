@@ -15,13 +15,14 @@ fi
 
 declare DIR="${PATCH_SCRIPTDIR}/${1}"
 declare SCRIPTS=$(find $DIR -type f -executable | sort)
-declare -i NUM_SCRIPTS=$(echo "$SCRIPTS" | wc -l)
 
-if [ $NUM_SCRIPTS -eq 0 ]
+if [ ${#SCRIPTS} -eq 0 ]
 then
-    loginfo "No in-service patch scripts found."
+    loginfo "No in-service patch scripts found at the directory ${DIR}"
     exit 0
 fi
+
+declare -i NUM_SCRIPTS=$(echo "$SCRIPTS" | wc -l)
 
 loginfo "Running $NUM_SCRIPTS in-service patch scripts"
 
