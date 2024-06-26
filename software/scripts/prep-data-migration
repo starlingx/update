@@ -151,13 +151,20 @@ class DataMigration(object):
 
     def export_etcd(self):
         """
-        Create symlink to etcd directory
+        Copy etcd from N to N+1 in /opt/etcd/
         """
         etcd_to_dir = os.path.join(ETCD_PATH, self.to_release)
         etcd_from_dir = os.path.join(ETCD_PATH, self.from_release)
-        if not os.path.islink(etcd_to_dir) and not os.path.exists(etcd_to_dir):
-            os.symlink(etcd_from_dir, etcd_to_dir)
-        LOG.info("Creating symlink %s to %s completed", etcd_to_dir, etcd_from_dir)
+
+        shutil.rmtree(etcd_to_dir, ignore_errors=True)
+
+        try:
+            shutil.copytree(etcd_from_dir, etcd_to_dir)
+            LOG.info("Copied etcd from %s to %s completed", etcd_from_dir, etcd_to_dir)
+        except Exception as e:
+            LOG.exception("Failed to copy etcd from %s to %s. Error: %s.",
+                          etcd_from_dir, etcd_to_dir, e.output)
+            raise
 
     def copy_kubernetes_conf(self):
         """
