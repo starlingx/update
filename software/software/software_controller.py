@@ -679,6 +679,11 @@ class PatchMessageDropHostReq(messages.PatchMessage):
 class SoftwareMessageDeployStateUpdate(messages.PatchMessage):
     def __init__(self):
         messages.PatchMessage.__init__(self, messages.PATCHMSG_DEPLOY_STATE_UPDATE)
+        self.data = None
+
+    def decode(self, data):
+        messages.PatchMessage.decode(self, data)
+        self.data = data
 
     def encode(self):
         global sc
@@ -688,14 +693,37 @@ class SoftwareMessageDeployStateUpdate(messages.PatchMessage):
                          "deploy": filesystem_data.get("deploy", {})}
         self.message["deploy_state"] = deploys_state
 
-    def handle(self, sock, addr):  # pylint: disable=unused-argument
-        LOG.error("Should not get here")
+    def handle(self, sock, addr):
+        filesystem_data = utils.get_software_filesystem_data()
+        synced_filesystem_data = utils.get_synced_software_filesystem_data()
+
+        actual_state = {"deploy_host": filesystem_data.get("deploy_host", {}),
+                        "deploy": filesystem_data.get("deploy", {})}
+
+        synced_state = {"deploy_host": synced_filesystem_data.get("deploy_host", {}),
+                        "deploy": synced_filesystem_data.get("deploy", {})}
+
+        peer_state = {"deploy_host": self.data.get("deploy_state").get("deploy_host", {}),
+                      "deploy": self.data.get("deploy_state").get("deploy", {})}
+
+        result = "diverged"
+        if actual_state == peer_state:
+            result = messages.MSG_ACK_SUCCESS
+        elif actual_state == synced_state:
+            result = messages.MSG_ACK_SUCCESS
+
+        if result == messages.MSG_ACK_SUCCESS:
+            utils.save_to_json_file(constants.SOFTWARE_JSON_FILE, peer_state)
+            utils.save_to_json_file(constants.SYNCED_SOFTWARE_JSON_FILE, peer_state)
+
+        resp = SoftwareMessageDeployStateUpdateAck()
+        resp.send(sock, result)
 
     def send(self, sock):
         global sc
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(str.encode(message), (sc.agent_address, cfg.agent_port))
+        sock.sendto(str.encode(message), (sc.controller_address, cfg.controller_port))
 
 
 class SoftwareMessageDeployStateUpdateAck(messages.PatchMessage):
@@ -707,17 +735,26 @@ class SoftwareMessageDeployStateUpdateAck(messages.PatchMessage):
         messages.PatchMessage.decode(self, data)
         self.peer_state_data = data
 
-    def encode(self):
-        # Nothing to add, so just call the super class
+    def encode(self, result):  # pylint: disable=arguments-differ
         messages.PatchMessage.encode(self)
+        synced_data = utils.get_synced_software_filesystem_data()
+        self.message["result"] = result
+        self.message["deploy_state"] = synced_data
 
     def handle(self, sock, addr):
         global sc
         if self.peer_state_data["result"] == messages.MSG_ACK_SUCCESS:
             LOG.debug("Peer controller is synced with value: %s",
                       self.peer_state_data["deploy_state"])
+            utils.save_to_json_file(constants.SYNCED_SOFTWARE_JSON_FILE,
+                                    self.peer_state_data["deploy_state"])
         else:
             LOG.error("Peer controller deploy state has diverged.")
+
+    def send(self, sock, result):
+        self.encode(result)
+        message = json.dumps(self.message)
+        sock.sendto(str.encode(message), (sc.controller_address, cfg.controller_port))
 
 
 class SWMessageDeployStateChanged(messages.PatchMessage):
@@ -3673,7 +3710,7 @@ class PatchControllerMainThread(threading.Thread):
         SEND_MSG_INTERVAL_IN_SECONDS = 30.0
 
         alarm_instance_id = "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST,
-                                       sc.standby_controller)
+                                       constants.CONTROLLER)
 
         try:
             # Update the out of sync alarm cache when the thread starts
@@ -3803,6 +3840,8 @@ class PatchControllerMainThread(threading.Thread):
                             msg = PatchMessageAgentInstallResp()
                         elif msgdata['msgtype'] == messages.PATCHMSG_DROP_HOST_REQ:
                             msg = PatchMessageDropHostReq()
+                        elif msgdata['msgtype'] == messages.PATCHMSG_DEPLOY_STATE_UPDATE:
+                            msg = SoftwareMessageDeployStateUpdate()
                         elif msgdata['msgtype'] == messages.PATCHMSG_DEPLOY_STATE_UPDATE_ACK:
                             msg = SoftwareMessageDeployStateUpdateAck()
                         elif msgdata['msgtype'] == messages.PATCHMSG_DEPLOY_STATE_CHANGED:

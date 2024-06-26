@@ -40,11 +40,13 @@ ACTION_MIGRATE = "migrate"
 ACTION_ACTIVATE = "activate"
 ACTION_ACTIVATE_ROLLBACK = "activate-rollback"
 
+
 def configure_logging():
     log_format = ('%(asctime)s: ' + __name__ + '[%(process)s]: '
                                                '%(filename)s(%(lineno)s): %(levelname)s: %(message)s')
     log_datefmt = "%FT%T"
     logging.basicConfig(filename=SOFTWARE_LOG_FILE, format=log_format, level=logging.INFO, datefmt=log_datefmt)
+
 
 def execute_migration_scripts(from_release, to_release, action, port=None,
                               migration_script_dir="/etc/upgrade.d"):
