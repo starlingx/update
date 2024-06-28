@@ -6,9 +6,11 @@
 # This is an utility module used by standalone USM upgrade scripts
 # that runs on the FROM-side context but using TO-side code base
 #
+import json
 import logging
 import os
 import re
+import requests
 import sys
 
 from keystoneauth1 import exceptions
@@ -73,6 +75,34 @@ def get_sysinv_client(token, endpoint):
         raise ImportError(msg)
     except Exception as e:
         msg = "Failed to get sysinv client. Error: %s" % str(e)
+        raise Exception(msg)
+
+def call_api(token_id, method, api_cmd, api_cmd_headers=None,
+             api_cmd_payload=None, timeout_in_secs=40):
+
+    headers = {"Accept": "application/json"}
+    if token_id:
+        headers["X-Auth-Token"] = token_id
+
+    if api_cmd_headers:
+        headers.update(api_cmd_headers)
+    if api_cmd_payload:
+        api_cmd_payload = json.loads(api_cmd_payload)
+    try:
+        response = requests.request(
+            method, api_cmd, headers=headers, json=api_cmd_payload,
+            timeout=timeout_in_secs
+        )
+        response.raise_for_status()
+        # Check if the content type starts with 'application/json'
+        content_type = response.headers.get('content-type', '')
+        if content_type.startswith('application/json'):
+            return response.json()
+        else:
+            return response.text
+
+    except requests.HTTPError as e:
+        msg = "Error response=%s" % str(e)
         raise Exception(msg)
 
 
