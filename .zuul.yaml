@@ -115,6 +115,7 @@
     files:
       - patch-alarm/patch-alarm/*
     vars:
+      bindep_profile: pylint
       tox_envlist: pylint
       tox_extra_args: -c patch-alarm/patch-alarm/tox.ini
 
@@ -128,6 +129,7 @@
     files:
       - patch-alarm/patch-alarm/*
     vars:
+      bindep_profile: python3
       python_version: 3.9
       tox_envlist: py39
       tox_extra_args: -c patch-alarm/patch-alarm/tox.ini
