@@ -21,8 +21,9 @@ import traceback
 import webob
 
 import software.constants as constants
-from software.exceptions import StateValidationFailure
+from software.exceptions import SoftwareError
 from software.exceptions import SoftwareServiceError
+from software.exceptions import StateValidationFailure
 from tsconfig.tsconfig import PLATFORM_CONF_FILE
 
 
@@ -40,7 +41,7 @@ class ExceptionHook(hooks.PecanHook):
     def on_error(self, state, e):
         trace = traceback.format_exc()
         signature = self._get_stacktrace_signature(trace)
-        status = 500
+        status = 406
 
         if isinstance(e, SoftwareServiceError):
             # Only the exceptions that are pre-categorized as "expected" that
@@ -52,12 +53,17 @@ class ExceptionHook(hooks.PecanHook):
             LOG.exception(e)
 
             data = dict(info=e.info, warning=e.warning, error=e.error)
+        elif isinstance(e, SoftwareError):
+            # SoftwareError exceptions will come in this block
+            LOG.exception(e)
+            data = dict(info="", warning="", error=str(e))
         elif isinstance(e, webob.exc.HTTPClientError):
             LOG.warning("%s. Signature [%s]" % (str(e), signature))
             raise e
         else:
             # with an exception that is not pre-categorized as "expected", it is a
             # bug. Or not properly categorizing the exception itself is a bug.
+            status = 500
             err_msg = "Internal error occurred. Error signature [%s]" % signature
             LOG.exception(e)
             data = dict(info="", warning="", error=err_msg)

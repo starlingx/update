@@ -187,8 +187,8 @@ def display_info(resp):
     status_code = resp.status_code
     text = resp.text
 
-    if status_code == 500:
-        # all 500 error comes with basic info json object
+    if status_code == 406:
+        # all 406 error comes with basic info json object
         _display_info(text)
     elif status_code in HTTP_ERRORS:
         _display_error(status_code, text)
@@ -316,8 +316,7 @@ def print_software_op_result(resp, data):
     elif resp.status_code == 500:
         print("An internal error has occurred. Please check /var/log/software.log for details")
     else:
-        # print("Error: %s has occurred. %s" % (resp.status_code, resp.reason))
-        print("Error: %s has occurred." % (resp.status_code))
+        print("Error: %s has occurred. Please check /var/log/software.log for details" % (resp.status_code))
 
 
 def print_result_debug(req, data):

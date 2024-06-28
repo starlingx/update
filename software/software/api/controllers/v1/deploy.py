@@ -76,6 +76,8 @@ class DeployController(RestController):
         reload_release_data()
 
         result = sc.software_deploy_precheck_api(release, _force, region_name)
+        if result and 'error' in result and result["error"] != "":
+            response.status = 406
         return result
 
     @expose(method='POST', template='json')
