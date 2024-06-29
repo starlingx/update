@@ -164,6 +164,18 @@ def migrate_helm_config(from_release, to_release):
         raise
 
 
+def migrate_dnsmasq_config(to_release):
+    """Migrates dnsmasq configuration. """
+
+    LOG.info("Migrating dnsmasq config")
+
+    # Create dnsmasq.addn_conf file if not present in to_release
+    conf_file = os.path.join(constants.PLATFORM_PATH, "config",
+                             to_release, "dnsmasq.addn_conf")
+    if not os.path.exists(conf_file):
+        open(conf_file, 'a').close()
+
+
 def migrate_sysinv_data(from_release, to_release, port):
     """Migrates sysinv data. """
 
@@ -701,6 +713,10 @@ def upgrade_controller(from_release, to_release, target_port):
     # Migrate helm config
     print("Migrating helm configuration...")
     migrate_helm_config(from_release, to_release)
+
+    # Migrate dnsmasq config
+    print("Migrating dnsmasq configuration...")
+    migrate_dnsmasq_config(to_release)
 
     # Migrate sysinv data.
     print("Migrating sysinv configuration...")
