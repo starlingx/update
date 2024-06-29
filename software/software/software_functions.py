@@ -887,11 +887,11 @@ class PatchFile(object):
             if thispatch.metadata[patch_id].get("pre_install"):
                 pre_install_script_name = thispatch.metadata[patch_id]["pre_install"]
                 shutil.move(os.path.join(tmpdir, pre_install_script_name),
-                            "%s/%s" % (root_scripts_dir, pre_install_script_name))
+                            "%s/%s_%s" % (root_scripts_dir, patch_id, pre_install_script_name))
             if thispatch.metadata[patch_id].get("post_install"):
                 post_install_script_name = thispatch.metadata[patch_id]["post_install"]
                 shutil.move(os.path.join(tmpdir, post_install_script_name),
-                            "%s/%s" % (root_scripts_dir, post_install_script_name))
+                            "%s/%s_%s" % (root_scripts_dir, patch_id, post_install_script_name))
 
         except tarfile.TarError as te:
             msg = "Extract software failed %s" % str(te)
