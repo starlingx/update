@@ -1257,7 +1257,7 @@ def collect_current_load_for_hosts():
         else:
             data = {}
         data.update(load_data)
-        utils.save_to_json_file(constants.SOFTWARE_JSON_FILE, load_data)
+        utils.save_to_json_file(constants.SOFTWARE_JSON_FILE, data)
         LOG.info("Collect current load for hosts successfully.")
     except Exception as err:
         LOG.error("Error in collect current load for hosts: %s", err)
