@@ -388,6 +388,21 @@ def get_first_controller(target_port):
         return constants.CONTROLLER_1_HOSTNAME
 
 
+def get_hostname_mgmt_ip(hostname, target_port):
+    """Get mgmt-ip for given hostname"""
+    conn = psycopg2.connect("dbname=sysinv user=postgres port=%s" % target_port)
+    cur = conn.cursor()
+    cur.execute(f"select address from addresses where name='{hostname}-mgmt';")
+    row = cur.fetchone()
+
+    if row is None:
+        msg = f"Failed to get {hostname} mgmt-ip"
+        LOG.error(msg)
+        raise psycopg2.ProgrammingError(msg)
+
+    return row[0]
+
+
 def get_shared_services(target_port):
     """Get the list of shared services from the sysinv database"""
 
@@ -688,6 +703,19 @@ def get_connection_string(db_credentials, port, database):
         return DB_CONNECTION_FORMAT % (username, password, port, database)
 
 
+def create_mgmt_ip_hieradata(hostname, target_port):
+    """Create host hieradata <hostname_mgmt-ip>.yaml for backward compatibility with stx-8"""
+    try:
+        mgmt_ip = get_hostname_mgmt_ip(hostname, target_port)
+        hostname_yaml = os.path.join(constants.HIERADATA_PERMDIR, f"{hostname}.yaml")
+        mgmt_ip_yaml = os.path.join(constants.HIERADATA_PERMDIR, f"{mgmt_ip}.yaml")
+        shutil.copy(hostname_yaml, mgmt_ip_yaml)
+        LOG.info("Created host hieradata %s" % mgmt_ip_yaml)
+    except Exception as e:
+        LOG.error("Failure creating mgmt-ip hieradata for host %s: %s" % (hostname, str(e)))
+        raise
+
+
 def upgrade_controller(from_release, to_release, target_port):
     """Executed on controller-0, under chroot N+1 deployment and N runtime. """
 
@@ -782,6 +810,12 @@ def upgrade_controller(from_release, to_release, target_port):
         LOG.exception(e)
         LOG.info("Failed to update hiera configuration")
         raise
+
+    # Clone the created host hieradata with the name <hostname_mgmt-ip>.yaml
+    # TODO(heitormatsui): remove when upgrade from stx-8 deprecates
+    if from_release == "22.12":
+        LOG.info("Generating mgmt-ip config for %s" % first_controller)
+        create_mgmt_ip_hieradata(first_controller, target_port)
 
     # Stop postgres server
     LOG.info("Shutting down PostgreSQL...")
