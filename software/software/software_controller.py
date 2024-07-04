@@ -2550,6 +2550,51 @@ class PatchController(PatchService):
         tag.text = text
         return tag
 
+    def _after_apt_run_install(self, metadata_file, previous_commit, feed_repo):
+        LOG.info("Running after deploy start 'run install'")
+
+        # Update the feed ostree summary
+        ostree_utils.update_repo_summary_file(feed_repo)
+
+        self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
+        tree = ET.parse(metadata_file)
+        root = tree.getroot()
+
+        # ostree = ET.SubElement(root, "ostree")
+        self.add_text_tag_to_xml(root, constants.NUMBER_OF_COMMITS, "1")
+        self.add_text_tag_to_xml(root, constants.PREVIOUS_COMMIT, previous_commit)
+        self.add_text_tag_to_xml(root, constants.COMMIT, self.latest_feed_commit)
+
+        ET.indent(tree, '  ')
+        with open(metadata_file, "wb") as outfile:
+            tree = ET.tostring(root)
+            outfile.write(tree)
+
+        LOG.info("Latest feed commit: %s added to metadata file" % self.latest_feed_commit)
+
+        # move the deploy state to start-done
+        deploy_state = DeployState.get_instance()
+        deploy_state.start_done()
+        self._update_state_to_peer()
+
+    def wait_deploy_patch_then_run(self, proc, metadata_file, previous_commit, feed_repo):
+        def monitor():
+            p = proc.wait()
+            if p != 0:
+                deploy_state = DeployState.get_instance()
+                deploy_state.start_failed()
+
+                _, stderr = proc.communicate()
+                msg = "Failed to install packages."
+                info_msg = "\"apt-ostree compose install\" error: return code %s , Output: %s" \
+                    % (p, stderr.decode("utf-8"))
+                LOG.error(info_msg)
+                raise APTOSTreeCommandFail(msg)
+
+            self._after_apt_run_install(metadata_file, previous_commit, feed_repo)
+        thread = threading.Thread(target=monitor)
+        thread.start()
+
     @require_deploy_state([None],
                           "There is already a deployment is in progress ({state}). "
                           "Please complete the current deployment.")
@@ -2710,39 +2755,18 @@ class PatchController(PatchService):
                 deploy_state.start(running_release, to_release, feed_repo, commit_id, deploy_release.reboot_required)
 
                 # Install debian package through apt-ostree
-                apt_utils.run_install(feed_repo, release.sw_release, packages)
-
-                # Update the feed ostree summary
-                ostree_utils.update_repo_summary_file(feed_repo)
+                deploy_patch_process = apt_utils.run_install(feed_repo, release.sw_release, packages)
 
                 # Get the latest commit after performing "apt-ostree install".
                 self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
 
-                try:
-                    # Move the release metadata to deploying dir
-                    deploystate = release.state
-                    metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[deploystate]
+                deploystate = release.state
+                metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[deploystate]
+                metadata_file = "%s/%s-metadata.xml" % (metadata_dir, release_id)
 
-                    metadata_file = "%s/%s-metadata.xml" % (metadata_dir, release_id)
-                    tree = ET.parse(metadata_file)
-                    root = tree.getroot()
-
-                    # ostree = ET.SubElement(root, "ostree")
-                    self.add_text_tag_to_xml(root, constants.NUMBER_OF_COMMITS, "1")
-                    self.add_text_tag_to_xml(root, constants.PREVIOUS_COMMIT, latest_commit)
-                    self.add_text_tag_to_xml(root, constants.COMMIT, self.latest_feed_commit)
-
-                    ET.indent(tree, '  ')
-                    with open(metadata_file, "wb") as outfile:
-                        tree = ET.tostring(root)
-                        outfile.write(tree)
-
-                    LOG.info("Latest feed commit: %s added to metadata file" % self.latest_feed_commit)
-                    msg_info += "%s is now in the repo\n" % release_id
-                except shutil.Error:
-                    msg = "Failed to move the metadata for %s" % release_id
-                    LOG.exception(msg)
-                    raise MetadataFail(msg)
+                msg_info += "%s is now starting, await for the states: " \
+                            "[deploy-start-done | deploy-start-failed] in " \
+                            "'software deploy show'\n" % release_id
 
                 reload_release_data()
                 # NOTE(bqian) Below check an exception raise should be revisit, if applicable,
@@ -2755,6 +2779,9 @@ class PatchController(PatchService):
 
                 with self.hosts_lock:
                     self.interim_state[release_id] = list(self.hosts)
+
+                self.wait_deploy_patch_then_run(deploy_patch_process, metadata_file,
+                                                latest_commit, feed_repo)
 
         elif operation == "remove":
             collect_current_load_for_hosts(deploy_sw_version)

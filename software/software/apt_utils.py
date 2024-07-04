@@ -5,13 +5,11 @@ SPDX-License-Identifier: Apache-2.0
 
 """
 import logging
-import os
 import subprocess
 
 from software import constants
 import software.config as cfg
 from software.exceptions import APTOSTreeCommandFail
-from software.exceptions import SoftwareServiceError
 
 LOG = logging.getLogger('main_logger')
 
@@ -93,26 +91,24 @@ def run_install(repo_dir, sw_release, packages):
 
     packages = " ".join(packages)
 
-    cmd_path = "/usr/sbin/software-deploy/software-deploy-patch"
-    if not os.path.isfile(cmd_path):
-        msg = "software-deploy-patch script was not found"
-        LOG.error(msg)
-        raise SoftwareServiceError(msg)
-
     try:
-        subprocess.Popen(
-            ["python", cmd_path,
+        proc = subprocess.Popen(
+            ["apt-ostree", "compose", "install",
              "--repo", repo_dir,
              "--branch", "starlingx",
              "--feed", cfg.package_feed,
              "--component", sw_release,
-             "--packages", packages],
-            start_new_session=True)
-        LOG.info("%s subprocess started" % cmd_path)
-    except subprocess.SubprocessError as e:
+             packages],
+             start_new_session=True,
+            stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError as e:
         msg = "Failed to install packages."
-        LOG.error("Failed to start command: %s. Error %s" % (cmd_path, e))
+        info_msg = "\"apt-ostree compose install\" error: return code %s , Output: %s" \
+            % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.error(info_msg)
         raise APTOSTreeCommandFail(msg)
+
+    return proc
 
 
 def run_rollback(repo_dir, commit):
