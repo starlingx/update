@@ -68,6 +68,7 @@ auditLOG = logging.getLogger('audit_logger')
 audit_log_msg_prefix = 'User: sysadmin/admin Action: '
 
 detached_signature_file = "signature.v2"
+pre_bootstrap_stage = True
 
 
 def handle_exception(exc_type, exc_value, exc_traceback):
@@ -1230,8 +1231,11 @@ def create_deploy_hosts():
     db_api_instance = get_instance()
     db_api_instance.begin_update()
     try:
-        for ihost in get_ihost_list():
-            db_api_instance.create_deploy_host(ihost.hostname)
+        if pre_bootstrap_stage:
+            db_api_instance.create_deploy_host(constants.PREBOOTSTRAP_HOSTNAME)
+        else:
+            for ihost in get_ihost_list():
+                db_api_instance.create_deploy_host(ihost.hostname)
         LOG.info("Deploy-hosts entities created successfully.")
     except Exception as err:
         LOG.exception("Error in deploy-hosts entities creation")
@@ -1240,18 +1244,24 @@ def create_deploy_hosts():
         db_api_instance.end_update()
 
 
-def collect_current_load_for_hosts():
+def collect_current_load_for_hosts(local_load):
     load_data = {
         "current_loads": []
     }
     try:
-        for ihost in get_ihost_list():
-            software_load = ihost.software_load
-            hostname = ihost.hostname
+        if pre_bootstrap_stage:
             load_data["current_loads"].append({
-                "hostname": hostname,
-                "running_release": software_load
+                "hostname": constants.PREBOOTSTRAP_HOSTNAME,
+                "running_release": local_load
             })
+        else:
+            for ihost in get_ihost_list():
+                software_load = ihost.software_load
+                hostname = ihost.hostname
+                load_data["current_loads"].append({
+                    "hostname": hostname,
+                    "running_release": software_load
+                })
         if os.path.exists(constants.SOFTWARE_JSON_FILE):
             data = utils.load_from_json_file(constants.SOFTWARE_JSON_FILE)
         else:

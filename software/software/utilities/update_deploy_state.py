@@ -48,6 +48,9 @@ def update_deploy_state(agent, deploy_state=None, host=None, host_state=None, ti
     """
 
     server_addr = "controller"
+    # Use localhost for prebootstrap case
+    if not cfg.get_mgmt_ip():
+        server_addr = "localhost"
     cfg.read_config()
     server_port = cfg.controller_port
 

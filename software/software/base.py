@@ -25,6 +25,7 @@ class PatchService(object):
         self.port = None
         self.mcast_addr = None
         self.socket_lock = None
+        self.pre_bootstrap = True
 
     def update_config(self):
         # Implemented in subclass
@@ -123,12 +124,57 @@ class PatchService(object):
 
         return self.sock_in
 
+    def setup_socket_pre_bootstrap(self):
+        controller_ip_string = utils.gethostbyname(constants.PREBOOTSTRAP_HOSTNAME)
+        self.update_config()
+        cfg.package_feed = cfg.package_feed.replace(constants.CONTROLLER_FLOATING_HOSTNAME,
+                                                    "127.0.0.1")
+
+        # Close sockets, if necessary
+        for s in [self.sock_out, self.sock_in]:
+            if s is not None:
+                s.close()
+
+        if utils.get_management_version(hostname=constants.PREBOOTSTRAP_HOSTNAME
+                                        ) == constants.ADDRESS_VERSION_IPV6:
+            self.sock_out = socket.socket(socket.AF_INET6,
+                                        socket.SOCK_DGRAM)
+            self.sock_in = socket.socket(socket.AF_INET6,
+                                        socket.SOCK_DGRAM)
+
+            self.sock_out.setblocking(0)
+            self.sock_in.setblocking(0)
+
+            self.sock_out.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.sock_in.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+            self.sock_out.bind((controller_ip_string, 0))
+            self.sock_in.bind(('', self.port))
+        else:
+            self.sock_out = socket.socket(socket.AF_INET,
+                                        socket.SOCK_DGRAM)
+            self.sock_in = socket.socket(socket.AF_INET,
+                                        socket.SOCK_DGRAM)
+
+            self.sock_out.setblocking(0)
+            self.sock_in.setblocking(0)
+
+            self.sock_out.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.sock_in.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+            self.sock_in.bind(('', self.port))
+
+        return self.sock_in
+
+
     def setup_socket(self):
         self.socket_lock_acquire()
 
         try:
             sock_in = None
-            if utils.get_management_version() == constants.ADDRESS_VERSION_IPV6:
+            if self.pre_bootstrap:
+                sock_in = self.setup_socket_pre_bootstrap()
+            elif utils.get_management_version() == constants.ADDRESS_VERSION_IPV6:
                 sock_in = self.setup_socket_ipv6()
             else:
                 sock_in = self.setup_socket_ipv4()
