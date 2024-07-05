@@ -1192,7 +1192,7 @@ def get_sw_version(metadata_files):
             rel_ver = sw_ver
 
     if rel_ver == unset_ver:
-        err_msg = "Invalid metadata. Cannot identify the sw_version."
+        err_msg = "sw_version value not found or invalid in the metadata file"
         raise SoftwareServiceError(err_msg)
 
     return rel_ver
