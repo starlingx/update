@@ -2550,7 +2550,7 @@ class PatchController(PatchService):
         tag.text = text
         return tag
 
-    @require_deploy_state([None, DEPLOY_STATES.COMPLETED],
+    @require_deploy_state([None],
                           "There is already a deployment is in progress ({state}). "
                           "Please complete the current deployment.")
     def software_deploy_start_api(self, deployment: str, force: bool, **kwargs) -> dict:
