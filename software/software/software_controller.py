@@ -1393,8 +1393,7 @@ class PatchController(PatchService):
                 msg = "Software %s:%s signature validation failed" % (iso, sig)
                 raise ReleaseValidationFailure(error=msg)
 
-            LOG.info("iso and signature files upload completed."
-                     "Importing iso is in progress")
+            LOG.info("iso and signature files upload completed.")
 
             iso_file = upgrade_files.get(constants.ISO_EXTENSION)
 
@@ -1760,17 +1759,17 @@ class PatchController(PatchService):
                     release_list.append(rel_id)
 
         err_msg = ""
-        if len(not_founds) > 0:
+        if not_founds:
             list_str = ','.join(not_founds)
-            err_msg = f"Releases {list_str} can not be found\n"
+            err_msg = f"Release{'' if len(not_founds) == 1 else 's'} {list_str} can not be found\n"
 
-        if len(cannot_del) > 0:
+        if cannot_del:
             list_str = ','.join(cannot_del)
-            err_msg = err_msg + f"Releases {list_str} are not ready to delete\n"
+            err_msg += f"Release{'' if len(cannot_del) == 1 else 's'} {list_str} not ready to delete\n"
 
-        if len(used_by_subcloud) > 0:
+        if used_by_subcloud:
             list_str = ','.join(used_by_subcloud)
-            err_msg = err_msg + f"Releases {list_str} are still used by subcloud(s)"
+            err_msg += f"Release{'' if len(used_by_subcloud) == 1 else 's'} {list_str} still used by subcloud(s)"
 
         if len(err_msg) > 0:
             raise SoftwareServiceError(error=err_msg)
