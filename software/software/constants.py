@@ -129,6 +129,7 @@ WORKER = 'worker'
 
 AVAILABILITY_ONLINE = 'online'
 ADMIN_LOCKED = 'locked'
+ADMIN_UNLOCKED = 'unlocked'
 
 SOFTWARE_ALARMS = {
     fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_SUCCESS_RR: {
