@@ -3235,7 +3235,7 @@ class PatchController(PatchService):
         msg_error = ""
 
         try:
-            ip = socket.gethostbyname(hostname)
+            ip = utils.gethostbyname(hostname)
         except socket.gaierror:
             msg_error += "Host %s not found\n" % hostname
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
