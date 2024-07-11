@@ -84,6 +84,4 @@ override_dh_install:
 		${ROOT}/usr/sbin/software-deploy/deploy-cleanup
 	install -m 755 scripts/shell-utils \
 		${ROOT}/usr/sbin/software-deploy/shell-utils
-	install -m 755 scripts/software-deploy-patch \
-		${ROOT}/usr/sbin/software-deploy/software-deploy-patch
 	dh_install
