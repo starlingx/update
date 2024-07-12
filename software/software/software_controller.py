@@ -976,16 +976,6 @@ class PatchController(PatchService):
         else:
             self.write_state_file()
 
-        system_mode = utils.get_platform_conf("system_mode")
-        if system_mode == constants.SYSTEM_MODE_SIMPLEX:
-            self.standby_controller = constants.CONTROLLER_0_HOSTNAME
-        elif system_mode == constants.SYSTEM_MODE_DUPLEX:
-            self.standby_controller = constants.CONTROLLER_0_HOSTNAME \
-                if self.hostname == constants.CONTROLLER_1_HOSTNAME \
-                else constants.CONTROLLER_1_HOSTNAME
-        if self.pre_bootstrap:
-            self.standby_controller = self.hostname
-
         DeployHostState.register_event_listener(DeployState.host_deploy_updated)
         DeployState.register_event_listener(ReleaseState.deploy_updated)
 
@@ -2994,6 +2984,7 @@ class PatchController(PatchService):
         msg_info += "Deploy deleted with success"
         self.db_api_instance.delete_deploy_host_all()
         self.db_api_instance.delete_deploy()
+        self._update_state_to_peer()
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     def _deploy_complete(self):
@@ -3581,7 +3572,12 @@ class PatchController(PatchService):
                 alarm_id, alarm_state, str(e)
             ))
 
-    def handle_deploy_state_sync(self, alarm_instance_id):
+    def get_out_of_sync_alarm(self):
+        """Get the out-of-sync alarm instance from fm_api"""
+        return self.fm_api.get_fault(fm_constants.FM_ALARM_ID_SW_UPGRADE_DEPLOY_STATE_OUT_OF_SYNC,
+                                     constants.ALARM_INSTANCE_ID_OUT_OF_SYNC)
+
+    def handle_deploy_state_sync(self):
         """
         Handle the deploy state sync.
         If deploy state is in sync, clear the alarm.
@@ -3594,45 +3590,29 @@ class PatchController(PatchService):
             return
 
         try:
-            out_of_sync_alarm_fault = sc.fm_api.get_fault(
-                fm_constants.FM_ALARM_ID_SW_UPGRADE_DEPLOY_STATE_OUT_OF_SYNC, alarm_instance_id)
-
             LOG.info("software.json in sync: %s", is_in_sync)
+            out_of_sync_alarm_fault = self.get_out_of_sync_alarm()
 
             if out_of_sync_alarm_fault and is_in_sync:
                 # There was an out of sync alarm raised, but local software.json is in sync,
                 # we clear the alarm
-                LOG.info("Clearing alarm: %s ", out_of_sync_alarm_fault.alarm_id)
-                self.fm_api.clear_fault(
-                    fm_constants.FM_ALARM_ID_SW_UPGRADE_DEPLOY_STATE_OUT_OF_SYNC,
-                    alarm_instance_id)
-
+                self.manage_software_alarm(
+                    alarm_id=fm_constants.FM_ALARM_ID_SW_UPGRADE_DEPLOY_STATE_OUT_OF_SYNC,
+                    alarm_state=fm_constants.FM_ALARM_STATE_CLEAR,
+                    entity_instance_id=constants.ALARM_INSTANCE_ID_OUT_OF_SYNC
+                )
                 # Deploy in sync state is changed, update the cache
                 self.usm_alarm[constants.LAST_IN_SYNC] = is_in_sync
-
             elif (not out_of_sync_alarm_fault) and (not is_in_sync):
                 # There was no out of sync alarm raised, but local software.json is not in sync,
                 # we raise the alarm
-                LOG.info("Raising alarm: %s ",
-                         fm_constants.FM_ALARM_ID_SW_UPGRADE_DEPLOY_STATE_OUT_OF_SYNC)
-                out_of_sync_fault = fm_api.Fault(
+                self.manage_software_alarm(
                     alarm_id=fm_constants.FM_ALARM_ID_SW_UPGRADE_DEPLOY_STATE_OUT_OF_SYNC,
                     alarm_state=fm_constants.FM_ALARM_STATE_SET,
-                    entity_type_id=fm_constants.FM_ENTITY_TYPE_HOST,
-                    entity_instance_id=alarm_instance_id,
-                    severity=fm_constants.FM_ALARM_SEVERITY_MAJOR,
-                    reason_text="Software deployment data is out of sync",
-                    alarm_type=fm_constants.FM_ALARM_TYPE_11,
-                    probable_cause=fm_constants.ALARM_PROBABLE_CAUSE_65,
-                    proposed_repair_action="Wait for deployment to complete",
-                    service_affecting=False
+                    entity_instance_id=constants.ALARM_INSTANCE_ID_OUT_OF_SYNC
                 )
-
-                self.fm_api.set_fault(out_of_sync_fault)
-
                 # Deploy in sync state is changed, update the cache
                 self.usm_alarm[constants.LAST_IN_SYNC] = is_in_sync
-
             else:
                 # Shouldn't come to here
                 LOG.error("Unexpected case in handling deploy state sync. ")
@@ -3849,27 +3829,13 @@ class PatchControllerMainThread(threading.Thread):
         # We only can use one inverval
         SEND_MSG_INTERVAL_IN_SECONDS = 30.0
 
-        alarm_instance_id = "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST,
-                                       constants.CONTROLLER)
-
         try:
             if sc.pre_bootstrap and cfg.get_mgmt_ip():
                 sc.pre_bootstrap = False
                 sf.pre_bootstrap_stage = False
-                system_mode = utils.get_platform_conf("system_mode")
-                if system_mode == constants.SYSTEM_MODE_SIMPLEX:
-                    sc.standby_controller = constants.CONTROLLER_0_HOSTNAME
-                elif system_mode == constants.SYSTEM_MODE_DUPLEX:
-                    sc.standby_controller = constants.CONTROLLER_0_HOSTNAME \
-                        if sc.hostname == constants.CONTROLLER_1_HOSTNAME \
-                        else constants.CONTROLLER_1_HOSTNAME
-
-            alarm_instance_id = "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST,
-                                           sc.standby_controller)
 
             # Update the out of sync alarm cache when the thread starts
-            out_of_sync_alarm_fault = sc.fm_api.get_fault(
-                fm_constants.FM_ALARM_ID_SW_UPGRADE_DEPLOY_STATE_OUT_OF_SYNC, alarm_instance_id)
+            out_of_sync_alarm_fault = sc.get_out_of_sync_alarm()
             sc.usm_alarm[constants.LAST_IN_SYNC] = not out_of_sync_alarm_fault
 
             sock_in = sc.setup_socket()
@@ -3938,17 +3904,6 @@ class PatchControllerMainThread(threading.Thread):
                         agent_query_conns.remove(s)
                         s.shutdown(socket.SHUT_RDWR)
                         s.close()
-                    system_mode = utils.get_platform_conf("system_mode")
-                    if system_mode == constants.SYSTEM_MODE_SIMPLEX:
-                        sc.standby_controller = constants.CONTROLLER_0_HOSTNAME
-                    elif system_mode == constants.SYSTEM_MODE_DUPLEX:
-                        sc.standby_controller = constants.CONTROLLER_0_HOSTNAME \
-                            if sc.hostname == constants.CONTROLLER_1_HOSTNAME \
-                            else constants.CONTROLLER_1_HOSTNAME
-
-                alarm_instance_id = "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST,
-                                            sc.standby_controller)
-
 
                 inputs = [sc.sock_in] + agent_query_conns
                 outputs = []
@@ -4110,15 +4065,18 @@ class PatchControllerMainThread(threading.Thread):
                     deploy_state_update_remaining = int(
                         SEND_MSG_INTERVAL_IN_SECONDS)
 
+                    # Get out-of-sync alarm to request peer sync even if no deployment in progress
+                    out_of_sync_alarm_fault = sc.get_out_of_sync_alarm()
+
                     # Only send the deploy state update from the active controller
-                    if is_deployment_in_progress() and (utils.is_active_controller() or
-                                                        sc.pre_bootstrap):
+                    if ((out_of_sync_alarm_fault or is_deployment_in_progress()) and
+                            (utils.is_active_controller() or sc.pre_bootstrap)):
                         try:
                             sc.socket_lock.acquire()
                             deploy_state_update = SoftwareMessageDeployStateUpdate()
                             deploy_state_update.send(sc.sock_out)
                             if not sc.pre_bootstrap:
-                                sc.handle_deploy_state_sync(alarm_instance_id)
+                                sc.handle_deploy_state_sync()
                         except Exception as e:
                             LOG.exception("Failed to send deploy state update. Error: %s", str(e))
                         finally:
