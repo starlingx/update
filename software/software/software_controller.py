@@ -2576,6 +2576,9 @@ class PatchController(PatchService):
         deploy_state.start_done()
         self._update_state_to_peer()
 
+        self.send_latest_feed_commit_to_agent()
+        self.software_sync()
+
     def wait_deploy_patch_then_run(self, proc, metadata_file, previous_commit, feed_repo):
         def monitor():
             p = proc.wait()
