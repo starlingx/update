@@ -154,6 +154,10 @@ SOFTWARE_ALARMS = {
 }
 
 # metadata tags
-NUMBER_OF_COMMITS = "number_of_commits"
-PREVIOUS_COMMIT = "previous_commit"
-COMMIT = "commit"
+CONTENTS_TAG = "contents"
+OSTREE_TAG = "ostree"
+NUMBER_OF_COMMITS_TAG = "number_of_commits"
+BASE_TAG = "base"
+COMMIT_TAG = "commit"
+CHECKSUM_TAG = "checksum"
+COMMIT1_TAG = "commit1"
