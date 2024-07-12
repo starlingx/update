@@ -382,9 +382,10 @@ class PatchMessageHelloAgent(messages.PatchMessage):
         global sc
         self.encode()
         message = json.dumps(self.message)
-        local_hostname = utils.ip_to_versioned_localhost(cfg.agent_mcast_group)
         sock.sendto(str.encode(message), (sc.agent_address, cfg.agent_port))
-        sock.sendto(str.encode(message), (local_hostname, cfg.agent_port))
+        if not sc.pre_bootstrap:
+            local_hostname = utils.ip_to_versioned_localhost(cfg.agent_mcast_group)
+            sock.sendto(str.encode(message), (local_hostname, cfg.agent_port))
 
 
 class PatchMessageSendLatestFeedCommit(messages.PatchMessage):
@@ -403,9 +404,10 @@ class PatchMessageSendLatestFeedCommit(messages.PatchMessage):
         global sc
         self.encode()
         message = json.dumps(self.message)
-        local_hostname = utils.ip_to_versioned_localhost(cfg.agent_mcast_group)
         sock.sendto(str.encode(message), (sc.agent_address, cfg.agent_port))
-        sock.sendto(str.encode(message), (local_hostname, cfg.agent_port))
+        if not sc.pre_bootstrap:
+            local_hostname = utils.ip_to_versioned_localhost(cfg.agent_mcast_group)
+            sock.sendto(str.encode(message), (local_hostname, cfg.agent_port))
 
 
 class PatchMessageHelloAgentAck(messages.PatchMessage):
