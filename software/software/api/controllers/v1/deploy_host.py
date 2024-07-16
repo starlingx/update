@@ -50,7 +50,7 @@ class DeployHostController(RestController):
         return result
 
     @expose(method='POST', template='json')
-    def install_local(self):
+    def install_local(self, delete):
         reload_release_data()
-        result = sc.software_install_local_api()
+        result = sc.software_install_local_api(delete)
         return result

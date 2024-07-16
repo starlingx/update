@@ -31,9 +31,9 @@ from oslo_config import cfg as oslo_cfg
 
 import software.apt_utils as apt_utils
 import software.ostree_utils as ostree_utils
-import software.software_functions as sf
 from software.api import app
 from software.authapi import app as auth_app
+from software.constants import INSTALL_LOCAL_FLAG
 from software.states import DEPLOY_STATES
 from software.states import DEPLOY_HOST_STATES
 from software.base import PatchService
@@ -96,7 +96,6 @@ import software.constants as constants
 from software import states
 
 from tsconfig.tsconfig import INITIAL_CONFIG_COMPLETE_FLAG
-from tsconfig.tsconfig import INITIAL_CONTROLLER_CONFIG_COMPLETE
 from tsconfig.tsconfig import VOLATILE_CONTROLLER_CONFIG_COMPLETE
 import xml.etree.ElementTree as ET
 
@@ -259,8 +258,6 @@ class PatchMessageHello(messages.PatchMessage):
     def handle(self, sock, addr):
         global sc
         host = addr[0]
-        if sc.pre_bootstrap:
-            return
         if host == cfg.get_mgmt_ip():
             # Ignore messages from self
             return
@@ -274,6 +271,8 @@ class PatchMessageHello(messages.PatchMessage):
 
     def send(self, sock):
         global sc
+        if sc.install_local:
+            return
         self.encode()
         message = json.dumps(self.message)
         sock.sendto(str.encode(message), (sc.controller_address, cfg.controller_port))
@@ -315,8 +314,6 @@ class PatchMessageSyncReq(messages.PatchMessage):
     def handle(self, sock, addr):
         global sc
         host = addr[0]
-        if sc.pre_bootstrap:
-            return
         if host == cfg.get_mgmt_ip():
             # Ignore messages from self
             return
@@ -383,7 +380,7 @@ class PatchMessageHelloAgent(messages.PatchMessage):
         self.encode()
         message = json.dumps(self.message)
         sock.sendto(str.encode(message), (sc.agent_address, cfg.agent_port))
-        if not sc.pre_bootstrap:
+        if not sc.install_local:
             local_hostname = utils.ip_to_versioned_localhost(cfg.agent_mcast_group)
             sock.sendto(str.encode(message), (local_hostname, cfg.agent_port))
 
@@ -405,7 +402,7 @@ class PatchMessageSendLatestFeedCommit(messages.PatchMessage):
         self.encode()
         message = json.dumps(self.message)
         sock.sendto(str.encode(message), (sc.agent_address, cfg.agent_port))
-        if not sc.pre_bootstrap:
+        if not sc.install_local:
             local_hostname = utils.ip_to_versioned_localhost(cfg.agent_mcast_group)
             sock.sendto(str.encode(message), (local_hostname, cfg.agent_port))
 
@@ -666,8 +663,6 @@ class PatchMessageDropHostReq(messages.PatchMessage):
     def handle(self, sock, addr):
         global sc
         host = addr[0]
-        if sc.pre_bootstrap:
-            return
         if host == cfg.get_mgmt_ip():
             # Ignore messages from self
             return
@@ -681,6 +676,8 @@ class PatchMessageDropHostReq(messages.PatchMessage):
 
     def send(self, sock):
         global sc
+        if sc.install_local:
+            return
         self.encode()
         message = json.dumps(self.message)
         sock.sendto(str.encode(message), (sc.controller_address, cfg.controller_port))
@@ -1051,9 +1048,6 @@ class PatchController(PatchService):
         self.sync_from_nbr(host)
 
     def sync_from_nbr(self, host):
-        if self.pre_bootstrap:
-            return True
-
         # Sync the software repo
         host_url = utils.ip_to_url(host)
         try:
@@ -1273,70 +1267,44 @@ class PatchController(PatchService):
                     LOG.exception(msg)
                     raise SoftwareFail(msg)
 
-    def software_install_local_api(self):
+    def software_install_local_api(self, delete):
         """
-        Trigger patch installation prior to configuration
+        Enable patch installation to local controller
         :return: dict of info, warning and error messages
         """
         msg_info = ""
         msg_warning = ""
         msg_error = ""
 
-        # Check to see if initial configuration has completed
-        if os.path.isfile(INITIAL_CONTROLLER_CONFIG_COMPLETE):
-            # Disallow the install
-            msg = "This command can only be used before initial system configuration."
-            LOG.exception(msg)
-            raise SoftwareServiceError(error=msg)
+        dbapi = get_instance()
+        deploy = dbapi.get_deploy_all()
+        if len(deploy) > 0:
+            msg_info += "Software Deploy operation is in progress.\n"
+            msg_info += "Please finish current deploy before modifying install local mode.\n"
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-        update_hosts_file = False
+        if os.path.isfile(INSTALL_LOCAL_FLAG) and delete:
+            # Remove install local flag if enabled
+            if os.path.isfile(INSTALL_LOCAL_FLAG):
+                try:
+                    os.remove(INSTALL_LOCAL_FLAG)
+                except Exception:
+                    LOG.exception("Failed to clear %s flag", INSTALL_LOCAL_FLAG)
+            msg = "Software deployment in local installation mode is stopped"
+            msg_info += f"{msg}.\n"
+            LOG.info(msg)
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-        # Check to see if the controller hostname is already known.
-        if not utils.gethostbyname(constants.CONTROLLER_FLOATING_HOSTNAME):
-            update_hosts_file = True
-
-        # To allow software installation to occur before configuration, we need
-        # to alias controller to localhost
-        # There is a HOSTALIASES feature that would be preferred here, but it
-        # unfortunately requires dnsmasq to be running, which it is not at this point.
-
-        if update_hosts_file:
-            # Make a backup of /etc/hosts
-            try:
-                shutil.copy2(ETC_HOSTS_FILE_PATH, ETC_HOSTS_BACKUP_FILE_PATH)
-            except Exception:
-                msg = f"Error occurred while copying {ETC_HOSTS_FILE_PATH}."
-                LOG.exception(msg)
-                raise SoftwareFail(msg)
-
-        # Update /etc/hosts
-        with open(ETC_HOSTS_FILE_PATH, 'a') as f:
-            f.write("127.0.0.1 controller\n")
-
-        # Run the software install
-        try:
-            # Use the restart option of the sw-patch init script, which will
-            # install patches but won't automatically reboot if the RR flag is set
-            subprocess.check_output(['/etc/init.d/sw-patch', 'restart'])
-        except subprocess.CalledProcessError:
-            msg = "Failed to install patches."
-            LOG.exception(msg)
-            raise SoftwareFail(msg)
-
-        if update_hosts_file:
-            # Restore /etc/hosts
-            os.rename(ETC_HOSTS_BACKUP_FILE_PATH, ETC_HOSTS_FILE_PATH)
-
-        for release in self.release_collection.iterate_releases():
-            if release.state == states.DEPLOYING:
-                release.update_state(states.DEPLOYED)
-            elif release.state == states.REMOVING:
-                release.update_state(states.AVAILABLE)
-
-        msg_info += "Software installation is complete.\n"
-        msg_info += "Please reboot before continuing with configuration."
-
-        return dict(info=msg_info, warning=msg_warning, error=msg_error)
+        elif not delete and not os.path.isfile(INSTALL_LOCAL_FLAG):
+            open(INSTALL_LOCAL_FLAG, 'a').close()
+            msg = "Software deployment in local installation mode is started"
+            msg_info += f"{msg}.\n"
+            LOG.info(msg)
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+        else:
+            mode = 'disabled' if delete else 'enabled'
+            msg_info += f"Software deployment in local installation mode is already {mode}.\n"
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     def major_release_upload_check(self):
         """
@@ -1971,7 +1939,7 @@ class PatchController(PatchService):
 
         self.check_patch_states()
 
-        if self.sock_out is None:
+        if self.sock_out is None or self.install_local:
             return True
 
         # Send the sync requests
@@ -1987,10 +1955,7 @@ class PatchController(PatchService):
         self.socket_lock.release()
 
         # Now we wait, up to two mins. future enhancement: Wait on a condition
-        if self.pre_bootstrap:
-            my_ip = utils.gethostbyname(constants.PREBOOTSTRAP_HOSTNAME)
-        else:
-            my_ip = cfg.get_mgmt_ip()
+        my_ip = cfg.get_mgmt_ip()
         sync_rc = False
         max_time = time.time() + 120
         while time.time() < max_time:
@@ -2610,6 +2575,16 @@ class PatchController(PatchService):
 
         feed_repo = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, deploy_sw_version)
         commit_id = deploy_release.commit_id
+        # Set hostname in case of local install
+        hostname = None
+        if self.pre_bootstrap:
+            hostname = constants.PREBOOTSTRAP_HOSTNAME
+        elif self.install_local:
+            hostname = socket.gethostname()
+            valid_hostnames = [constants.CONTROLLER_0_HOSTNAME, constants.CONTROLLER_1_HOSTNAME]
+            if hostname not in valid_hostnames:
+                LOG.warning("Using unknown hostname for local install: %s", hostname)
+
         patch_release = True
         if utils.is_upgrade_deploy(SW_VERSION, deploy_release.sw_release):
             # TODO(bqian) remove default latest commit when a commit-id is built into GA metadata
@@ -2678,8 +2653,8 @@ class PatchController(PatchService):
         # operation is "remove" with order [R4, R3]
         if operation == "apply":
 
-            collect_current_load_for_hosts(deploy_sw_version)
-            create_deploy_hosts()
+            collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
+            create_deploy_hosts(hostname=hostname)
 
             # reverse = True is used for apply operation
             deployment_list = self.release_apply_remove_order(deployment, running_release.sw_release, reverse=True)
@@ -2734,7 +2709,7 @@ class PatchController(PatchService):
                 # TODO(bqian) get the list of undeployed required release ids
                 # i.e, when deploying 24.03.3, which requires 24.03.2 and 24.03.1, all
                 # 3 release ids should be passed into to create new ReleaseState
-                collect_current_load_for_hosts(deploy_sw_version)
+                collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
                 release_state = ReleaseState(release_ids=[release.id])
                 release_state.start_deploy()
 
@@ -2773,8 +2748,8 @@ class PatchController(PatchService):
                                                 latest_commit, feed_repo)
 
         elif operation == "remove":
-            collect_current_load_for_hosts(deploy_sw_version)
-            create_deploy_hosts()
+            collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
+            create_deploy_hosts(hostname=hostname)
             deployment_list = self.release_apply_remove_order(deployment, running_release.sw_version)
             msg = "Deploy start order for remove operation: %s" % ",".join(deployment_list)
             LOG.info(msg)
@@ -2876,7 +2851,7 @@ class PatchController(PatchService):
                 # TODO(bqian) get the list of undeployed required release ids
                 # i.e, when deploying 24.03.3, which requires 24.03.2 and 24.03.1, all
                 # 3 release ids should be passed into to create new ReleaseState
-                collect_current_load_for_hosts(deploy_sw_version)
+                collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
                 release_state = ReleaseState(release_ids=[release.id])
                 release_state.start_remove()
                 deploy_state = DeployState.get_instance()
@@ -2979,6 +2954,17 @@ class PatchController(PatchService):
                 self._rollback_last_commit(to_delete_release)
 
             release_state.available()
+
+        if os.path.isfile(INSTALL_LOCAL_FLAG):
+            # Remove install local flag if enabled
+            if os.path.isfile(INSTALL_LOCAL_FLAG):
+                try:
+                    os.remove(INSTALL_LOCAL_FLAG)
+                except Exception:
+                    msg_error = "Failed to clear install-local mode flag"
+                    LOG.error(msg_error)
+                    raise SoftwareServiceError(msg_error)
+                LOG.info("Software deployment in local installation mode is stopped")
 
         if is_major_release:
             clean_up_deployment_data(major_release)
@@ -3248,7 +3234,7 @@ class PatchController(PatchService):
         for release in self.release_collection.iterate_releases():
             if to_release == release.sw_release:
                 release_id = release.id
-        if not self.pre_bootstrap:
+        if not self.install_local:
             deploy_host_validations(
                 hostname,
                 is_major_release=self.release_collection.get_release_by_id(release_id).is_ga_release,
@@ -3833,7 +3819,11 @@ class PatchControllerMainThread(threading.Thread):
         try:
             if sc.pre_bootstrap and cfg.get_mgmt_ip():
                 sc.pre_bootstrap = False
-                sf.pre_bootstrap_stage = False
+
+            if sc.pre_bootstrap or os.path.isfile(INSTALL_LOCAL_FLAG):
+                sc.install_local = True
+            else:
+                sc.install_local = False
 
             # Update the out of sync alarm cache when the thread starts
             out_of_sync_alarm_fault = sc.get_out_of_sync_alarm()
@@ -3885,7 +3875,6 @@ class PatchControllerMainThread(threading.Thread):
                 # If bootstrap is completed re-initialize sockets
                 if sc.pre_bootstrap and cfg.get_mgmt_ip():
                     sc.pre_bootstrap = False
-                    sf.pre_bootstrap_stage = False
 
                     sock_in = sc.setup_socket()
                     while sock_in is None:
@@ -3905,6 +3894,12 @@ class PatchControllerMainThread(threading.Thread):
                         agent_query_conns.remove(s)
                         s.shutdown(socket.SHUT_RDWR)
                         s.close()
+
+                local_mode = sc.pre_bootstrap or os.path.isfile(INSTALL_LOCAL_FLAG)
+                if local_mode and not sc.install_local:
+                    sc.install_local = True
+                elif not local_mode and sc.install_local:
+                    sc.install_local = False
 
                 inputs = [sc.sock_in] + agent_query_conns
                 outputs = []

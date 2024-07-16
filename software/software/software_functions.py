@@ -68,7 +68,6 @@ auditLOG = logging.getLogger('audit_logger')
 audit_log_msg_prefix = 'User: sysadmin/admin Action: '
 
 detached_signature_file = "signature.v2"
-pre_bootstrap_stage = True
 
 
 def handle_exception(exc_type, exc_value, exc_traceback):
@@ -1223,7 +1222,7 @@ def read_upgrade_support_versions(mounted_dir):
     return to_release, supported_from_releases
 
 
-def create_deploy_hosts():
+def create_deploy_hosts(hostname=None):
     """
     Create deploy-hosts entities based on hostnames
     from sysinv.
@@ -1231,8 +1230,9 @@ def create_deploy_hosts():
     db_api_instance = get_instance()
     db_api_instance.begin_update()
     try:
-        if pre_bootstrap_stage:
-            db_api_instance.create_deploy_host(constants.PREBOOTSTRAP_HOSTNAME)
+        # If hostname is passed (Eg. in case of install local) use that.
+        if hostname:
+            db_api_instance.create_deploy_host(hostname)
         else:
             for ihost in get_ihost_list():
                 db_api_instance.create_deploy_host(ihost.hostname)
@@ -1244,14 +1244,15 @@ def create_deploy_hosts():
         db_api_instance.end_update()
 
 
-def collect_current_load_for_hosts(local_load):
+def collect_current_load_for_hosts(local_load, hostname=None):
     load_data = {
         "current_loads": []
     }
     try:
-        if pre_bootstrap_stage:
+        # If hostname is passed (Eg. in case of install local) use that.
+        if hostname:
             load_data["current_loads"].append({
-                "hostname": constants.PREBOOTSTRAP_HOSTNAME,
+                "hostname": hostname,
                 "running_release": local_load
             })
         else:

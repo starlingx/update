@@ -172,3 +172,6 @@ BASE_TAG = "base"
 COMMIT_TAG = "commit"
 CHECKSUM_TAG = "checksum"
 COMMIT1_TAG = "commit1"
+
+# install local flag
+INSTALL_LOCAL_FLAG = "/opt/software/.install_local"
