@@ -118,6 +118,8 @@ WORKER_DATETIME_FORMAT = "%Y%m%dT%H%M%S%f"
 UNKNOWN_SOFTWARE_VERSION = "0.0.0"
 
 LAST_IN_SYNC = "last_in_sync"
+ALARM_INSTANCE_ID_OUT_OF_SYNC = "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST,
+                                           CONTROLLER_FLOATING_HOSTNAME)
 
 SYSTEM_MODE_SIMPLEX = "simplex"
 SYSTEM_MODE_DUPLEX = "duplex"
@@ -131,6 +133,15 @@ AVAILABILITY_ONLINE = 'online'
 ADMIN_LOCKED = 'locked'
 
 SOFTWARE_ALARMS = {
+    fm_constants.FM_ALARM_ID_SW_UPGRADE_DEPLOY_STATE_OUT_OF_SYNC: {
+        "entity_type_id": fm_constants.FM_ENTITY_TYPE_HOST,
+        "severity": fm_constants.FM_ALARM_SEVERITY_MAJOR,
+        "reason_text": "Software deployment data is out of sync",
+        "alarm_type": fm_constants.FM_ALARM_TYPE_11,
+        "probable_cause": fm_constants.ALARM_PROBABLE_CAUSE_65,
+        "proposed_repair_action": "Wait for deployment to complete",
+        "service_affecting": False,
+    },
     fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_SUCCESS_RR: {
         "entity_type_id": fm_constants.FM_ENTITY_TYPE_HOST,
         "severity": fm_constants.FM_ALARM_SEVERITY_WARNING,
