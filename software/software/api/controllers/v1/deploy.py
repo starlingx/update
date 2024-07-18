@@ -93,9 +93,6 @@ class DeployController(RestController):
         if result and 'error' in result and result["error"] != "":
             response.status = 406
 
-        sc.send_latest_feed_commit_to_agent()
-        sc.software_sync()
-
         return result
 
     @expose(method='GET', template='json')
