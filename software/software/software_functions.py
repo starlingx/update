@@ -1491,3 +1491,25 @@ def run_deploy_clean_up_script(release):
         except subprocess.CalledProcessError as e:
             LOG.exception("Error running deploy-cleanup script: %s" % str(e))
             raise
+
+
+def copy_pxeboot_update_file(to_major_release, rollback=False):
+    """
+    Copies pxeboot-update-<to-release>.sh to /etc/ if needed
+    :param to_major_release: MM.mm (e.g. 24.09)
+    :param rollback: indicates if running in a rollback scenario
+    """
+    filename = "pxeboot-update-%s.sh" % to_major_release
+    dst_file = "/etc/%s" % filename
+    if not os.path.isfile(dst_file):
+        # on rollback, copy the script from the rollback ostree commit
+        if rollback:
+            src_file = "/ostree/2/usr/etc/%s" % filename
+        else:
+            src_file = constants.FEED_DIR + "/rel-%s/upgrades/%s" % (to_major_release, filename)
+        try:
+            shutil.copy(src_file, dst_file)
+            LOG.info("Copied %s to %s" % (src_file, dst_file))
+        except Exception as e:
+            LOG.exception("Error copying %s file: %s" % (filename, str(e)))
+            raise

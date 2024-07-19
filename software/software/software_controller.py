@@ -57,6 +57,7 @@ from software.exceptions import HostIpNotFound
 from software.release_data import reload_release_data
 from software.release_data import get_SWReleaseCollection
 from software.software_functions import collect_current_load_for_hosts
+from software.software_functions import copy_pxeboot_update_file
 from software.software_functions import create_deploy_hosts
 from software.software_functions import deploy_host_validations
 from software.software_functions import parse_release_metadata
@@ -3297,6 +3298,7 @@ class PatchController(PatchService):
             msg_info += msg + "\n"
             LOG.info(msg)
             set_host_target_load(hostname, major_release)
+            copy_pxeboot_update_file(major_release, rollback=rollback)
 
         self.hosts_lock.acquire()
         self.hosts[ip].install_pending = True
