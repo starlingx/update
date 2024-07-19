@@ -59,10 +59,12 @@ class SoftwareAPI:
         finally:
             self.end_update()
 
-    def update_deploy(self, state: DEPLOY_STATES):
+    def update_deploy(self, from_release=None, to_release=None, feed_repo=None, commit_id=None,
+               reboot_required: bool = None, state: DEPLOY_STATES = None):
         self.begin_update()
         try:
-            self.deploy_handler.update(new_state=state)
+            self.deploy_handler.update(
+                from_release, to_release, feed_repo, commit_id, reboot_required, state)
         finally:
             self.end_update()
 
