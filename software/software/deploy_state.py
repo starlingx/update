@@ -100,22 +100,21 @@ class DeployState(object):
                 all_states.append(deploy_host['state'])
 
         LOG.info("Host deploy state %s" % str(all_states))
-        if current_state in [DEPLOY_STATES.HOST, DEPLOY_STATES.HOST_FAILED]:
-            if DEPLOY_HOST_STATES.FAILED.value in all_states:
+        if current_state in [DEPLOY_STATES.HOST, DEPLOY_STATES.HOST_FAILED,
+                             DEPLOY_STATES.HOST_ROLLBACK, DEPLOY_STATES.HOST_ROLLBACK_FAILED]:
+            if any(state in all_states for state in
+                   [DEPLOY_HOST_STATES.FAILED.value,
+                    DEPLOY_HOST_STATES.ROLLBACK_FAILED.value]):
                 deploy_state.deploy_host_failed()
-            elif DEPLOY_HOST_STATES.PENDING.value in all_states or \
-                    DEPLOY_HOST_STATES.DEPLOYING.value in all_states:
+            elif any(state in all_states for state in
+                     [DEPLOY_HOST_STATES.PENDING.value,
+                      DEPLOY_HOST_STATES.DEPLOYING.value,
+                      DEPLOY_HOST_STATES.ROLLBACK_PENDING.value,
+                      DEPLOY_HOST_STATES.ROLLBACK_DEPLOYING.value]):
                 deploy_state.deploy_host()
-            elif all_states == [DEPLOY_HOST_STATES.DEPLOYED.value]:
+            elif (all_states == [DEPLOY_HOST_STATES.DEPLOYED.value] or
+                  all_states == [DEPLOY_HOST_STATES.ROLLBACK_DEPLOYED.value]):
                 deploy_state.deploy_host_done()
-        elif current_state in [DEPLOY_STATES.HOST_ROLLBACK, DEPLOY_STATES.HOST_ROLLBACK_FAILED]:
-            if DEPLOY_HOST_STATES.ROLLBACK_FAILED in all_states:
-                deploy_state.deploy_host_rollback_failed()
-            elif DEPLOY_HOST_STATES.ROLLBACK_PENDING in all_states or \
-                    DEPLOY_HOST_STATES.ROLLBACK_DEPLOYING in all_states:
-                deploy_state.deploy_host_rollback()
-            elif all_states == [DEPLOY_HOST_STATES.ROLLBACK_DEPLOYED.value]:
-                deploy_state.deploy_host_rollback_done()
 
     def __init__(self):
         self._from_release = None
@@ -179,7 +178,12 @@ class DeployState(object):
         self.transform(DEPLOY_STATES.START_DONE)
 
     def deploy_host(self):
-        self.transform(DEPLOY_STATES.HOST)
+        state = DeployState.get_deploy_state()
+        if state in [DEPLOY_STATES.ACTIVATE_ROLLBACK_DONE, DEPLOY_STATES.HOST_ROLLBACK,
+                     DEPLOY_STATES.HOST_ROLLBACK_FAILED]:
+            self.transform(DEPLOY_STATES.HOST_ROLLBACK)
+        else:
+            self.transform(DEPLOY_STATES.HOST)
 
     def abort(self, feed_repo, commit_id):
         # depends on the deploy state, if pre-activate then go to
@@ -203,7 +207,11 @@ class DeployState(object):
             self.transform(DEPLOY_STATES.HOST_DONE)
 
     def deploy_host_failed(self):
-        self.transform(DEPLOY_STATES.HOST_FAILED)
+        state = DeployState.get_deploy_state()
+        if state == DEPLOY_STATES.HOST_ROLLBACK:
+            self.transform(DEPLOY_STATES.HOST_ROLLBACK_FAILED)
+        else:
+            self.transform(DEPLOY_STATES.HOST_FAILED)
 
     def activate(self):
         self.transform(DEPLOY_STATES.ACTIVATE)
@@ -225,15 +233,6 @@ class DeployState(object):
 
     def completed(self):
         self.transform(DEPLOY_STATES.COMPLETED)
-
-    def deploy_host_rollback(self):
-        self.transform(DEPLOY_STATES.HOST_ROLLBACK)
-
-    def deploy_host_rollback_done(self):
-        self.transform(DEPLOY_STATES.HOST_ROLLBACK_DONE)
-
-    def deploy_host_rollback_failed(self):
-        self.transform(DEPLOY_STATES.HOST_ROLLBACK_FAILED)
 
 
 def require_deploy_state(require_states, prompt):
