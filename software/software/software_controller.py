@@ -1233,9 +1233,9 @@ class PatchController(PatchService):
         pre_install_path = None
         post_install_path = None
         if pre_install:
-            pre_install_path = "%s/%s" % (root_scripts_dir, pre_install)
+            pre_install_path = "%s/%s_%s" % (root_scripts_dir, patch_id, pre_install)
         if post_install:
-            post_install_path = "%s/%s" % (root_scripts_dir, post_install)
+            post_install_path = "%s/%s_%s" % (root_scripts_dir, patch_id, post_install)
         try:
             # Delete the install scripts
             if pre_install_path:
@@ -2207,8 +2207,8 @@ class PatchController(PatchService):
             post_install_filename = self.release_data.metadata[patch_id].get("post_install")
 
             if pre_install_filename:
-                pre_install_script_path = "%s/%s" % (root_scripts_dir, pre_install_filename)
-                post_install_script_path = "%s/%s" % (root_scripts_dir, post_install_filename)
+                pre_install_script_path = "%s/%s_%s" % (root_scripts_dir, patch_id, pre_install_filename)
+                post_install_script_path = "%s/%s_%s" % (root_scripts_dir, patch_id, post_install_filename)
                 if os.path.exists(pre_install_script_path):
                     cleanup_files.add(pre_install_script_path)
                 if os.path.exists(post_install_script_path):
@@ -2287,7 +2287,7 @@ class PatchController(PatchService):
                     break
         return rc
 
-    def copy_install_scripts(self):
+    def copy_install_scripts(self, patch_id):
         applying_states = [states.DEPLOYING, states.REMOVING]
         for release in self.release_collection.iterate_releases():
             pre_install = release.pre_install
@@ -2296,29 +2296,31 @@ class PatchController(PatchService):
             if release.state in applying_states:
                 try:
                     for i, file in enumerate(file for file in (pre_install, post_install) if file):
-                        script_path = "%s/%s" % (root_scripts_dir, file)
+                        full_name_file = "%s_%s" % (patch_id, file)
+                        script_path = "%s/%s" % (root_scripts_dir, full_name_file)
                         dest_path = constants.PATCH_SCRIPTS_STAGING_DIR + "/" + folder[i]
-                        dest_script_file = "%s/%s" % (dest_path, file)
+                        dest_script_file = "%s/%s" % (dest_path, full_name_file)
                         if not os.path.exists(dest_path):
                             os.makedirs(dest_path, 0o700)
                         shutil.copyfile(script_path, dest_script_file)
                         os.chmod(dest_script_file, 0o700)
-                        msg = "Creating install script %s for %s" % (file, release.id)
+                        msg = "Creating install script %s for %s" % (full_name_file, release.id)
                         LOG.info(msg)
                 except shutil.Error:
-                    msg = "Failed to copy the install script %s for %s" % (file, release.id)
+                    msg = "Failed to copy the install script %s for %s" % (full_name_file, release.id)
                     LOG.exception(msg)
                     raise SoftwareError(msg)
             else:
                 try:
                     for i, file in enumerate(file for file in (pre_install, post_install) if file):
-                        script_path = "%s/%s/%s" % (constants.PATCH_SCRIPTS_STAGING_DIR, folder[i], file)
+                        full_name_file = "%s_%s" % (patch_id, file)
+                        script_path = "%s/%s/%s" % (constants.PATCH_SCRIPTS_STAGING_DIR, folder[i], full_name_file)
                         if os.path.exists(script_path):
                             os.remove(script_path)
-                        msg = "Removing install script %s for %s" % (file, release.id)
+                        msg = "Removing install script %s for %s" % (full_name_file, release.id)
                         LOG.info(msg)
                 except shutil.Error:
-                    msg = "Failed to delete the install script %s for %s" % (file, release.id)
+                    msg = "Failed to delete the install script %s for %s" % (full_name_file, release.id)
                     LOG.exception(msg)
 
     def _update_state_to_peer(self):
@@ -3282,7 +3284,7 @@ class PatchController(PatchService):
         if self.allow_insvc_patching:
             LOG.info("Allowing in-service patching")
             force = True
-            self.copy_install_scripts()
+            self.copy_install_scripts(release_id)
 
         # Check if there is a major release deployment in progress
         # and set agent request parameters accordingly
