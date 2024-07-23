@@ -1672,51 +1672,38 @@ class PatchController(PatchService):
 
         return release_order
 
-    def _rollback_last_commit(self, deploy_state, release_version):
-        metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[deploy_state]
-        metadata_path = "%s/starlingx-%s-metadata.xml" % (metadata_dir, release_version)
+    def _rollback_last_commit(self, release):
+        base_commit_id = release.base_commit_id
+        if base_commit_id is None:
+            LOG.warning("Unable to find the base commit id in metadata")
+            return
 
+        LOG.info("Rollback to base commit %s" % base_commit_id)
+
+        try:
+            feed_ostree_dir = "%s/rel-%s/ostree_repo" % \
+                (constants.FEED_OSTREE_BASE_DIR, release.sw_version)
+
+            apt_utils.run_rollback(feed_ostree_dir, base_commit_id)
+        except APTOSTreeCommandFail:
+            msg = "Failure when rolling back commit %s" % base_commit_id
+            LOG.exception(msg)
+            raise APTOSTreeCommandFail(msg)
+
+        # Nullify commit-id from metadata
+        metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[release.state]
+        metadata_path = "%s/%s-metadata.xml" % (metadata_dir, release.id)
         tree = ET.parse(metadata_path)
         root = tree.getroot()
-        previous_commit_element = root.find(f".//{constants.PREVIOUS_COMMIT}")
-        if previous_commit_element is not None:
-            # Remove ostree commit (pactch removal)
-            previous_commit = previous_commit_element.text
-            LOG.info("Rollback to previous commit %s" % previous_commit)
+        contents = root.find(constants.CONTENTS_TAG)
 
-            major_release = utils.get_major_release_version(release_version)
-            feed_ostree_dir = "%s/rel-%s/ostree_repo" % \
-                (constants.FEED_OSTREE_BASE_DIR, major_release)
+        if contents is not None:
+            root.remove(contents)
 
-            try:
-                apt_utils.run_rollback(feed_ostree_dir, previous_commit)
-            except APTOSTreeCommandFail:
-                msg = "Failure when rolling back commit %s" % previous_commit
-                LOG.exception(msg)
-                raise APTOSTreeCommandFail(msg)
-
-            # Nullify commit-id from metadata
-            number_of_commits_tag = root.find(f".//{constants.NUMBER_OF_COMMITS}")
-
-            if number_of_commits_tag is not None:
-                number_of_commits = int(number_of_commits_tag.text)
-                tags_to_remove = [constants.NUMBER_OF_COMMITS, constants.PREVIOUS_COMMIT]
-
-                if number_of_commits == 1:
-                    tags_to_remove.append(constants.COMMIT)
-                else:  # commit1, commit2, commit3 ...
-                    for num in range(1, number_of_commits + 1):
-                        tags_to_remove.append(f"{constants.COMMIT}{num}")
-
-                for tag in tags_to_remove:
-                    element = root.find(f".//{tag}")
-                    if element is not None:
-                        root.remove(element)
-
-                ET.indent(tree, '  ')
-                with open(metadata_path, "wb") as outfile:
-                    tree = ET.tostring(root)
-                    outfile.write(tree)
+            ET.indent(tree, '  ')
+            with open(metadata_path, "wb") as outfile:
+                tree = ET.tostring(root)
+                outfile.write(tree)
 
     def software_release_delete_api(self, release_ids):
         """
@@ -1816,12 +1803,11 @@ class PatchController(PatchService):
             # TODO(lbonatti): treat the upcoming versioning changes
             PatchFile.delete_versioned_directory(release.sw_release)
 
-            deploystate = release.state
-            self._rollback_last_commit(deploystate, release.sw_release)
+            self._rollback_last_commit(release)
 
             try:
                 # Delete the metadata
-                metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[deploystate]
+                metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[release.state]
                 os.remove("%s/%s" % (metadata_dir, metadata_file))
             except OSError:
                 msg = "Failed to remove metadata for %s" % release_id
@@ -2550,13 +2536,20 @@ class PatchController(PatchService):
         ostree_utils.update_repo_summary_file(feed_repo)
 
         self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
+
+        # Update metadata
         tree = ET.parse(metadata_file)
         root = tree.getroot()
 
-        # ostree = ET.SubElement(root, "ostree")
-        self.add_text_tag_to_xml(root, constants.NUMBER_OF_COMMITS, "1")
-        self.add_text_tag_to_xml(root, constants.PREVIOUS_COMMIT, previous_commit)
-        self.add_text_tag_to_xml(root, constants.COMMIT, self.latest_feed_commit)
+        contents = ET.SubElement(root, constants.CONTENTS_TAG)
+        ostree = ET.SubElement(contents, constants.OSTREE_TAG)
+        self.add_text_tag_to_xml(ostree, constants.NUMBER_OF_COMMITS_TAG, "1")
+        base = ET.SubElement(ostree, constants.BASE_TAG)
+        self.add_text_tag_to_xml(base, constants.COMMIT_TAG, previous_commit)
+        self.add_text_tag_to_xml(base, constants.CHECKSUM_TAG, "")
+        commit1 = ET.SubElement(ostree, constants.COMMIT1_TAG)
+        self.add_text_tag_to_xml(commit1, constants.COMMIT_TAG, self.latest_feed_commit)
+        self.add_text_tag_to_xml(commit1, constants.CHECKSUM_TAG, "")
 
         ET.indent(tree, '  ')
         with open(metadata_file, "wb") as outfile:
@@ -2869,7 +2862,7 @@ class PatchController(PatchService):
                     LOG.exception("Failure while removing release %s.", release_id)
                 try:
                     # Move the metadata to the deleted dir
-                    self.release_collection.update_state([release_id], states.REMOVING_DIR)
+                    self.release_collection.update_state([release_id], states.REMOVING)
                     msg_info += "%s has been removed from the repo\n" % release_id
                 except shutil.Error:
                     msg = "Failed to move the metadata for %s" % release_id
@@ -2982,7 +2975,8 @@ class PatchController(PatchService):
                     raise SoftwareServiceError(msg_error)
             else:
                 LOG.info("Delete ostree commit")
-                self._rollback_last_commit(DEPLOY_HOST_STATES.DEPLOYING.value, to_release)
+                to_delete_release = self.release_collection.get_release_by_id(from_release)
+                self._rollback_last_commit(to_delete_release)
 
             release_state.available()
 
