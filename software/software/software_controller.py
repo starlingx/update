@@ -2560,7 +2560,7 @@ class PatchController(PatchService):
 
         # move the deploy state to start-done
         deploy_state = DeployState.get_instance()
-        deploy_state.start_done()
+        deploy_state.start_done(self.latest_feed_commit)
         self._update_state_to_peer()
 
         self.send_latest_feed_commit_to_agent()
@@ -2896,7 +2896,7 @@ class PatchController(PatchService):
                 # There is no defined behavior for deploy start for patching releases, so
                 # move the deploy state to start-done
                 deploy_state = DeployState.get_instance()
-                deploy_state.start_done()
+                deploy_state.start_done(self.latest_feed_commit)
                 self._update_state_to_peer()
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)

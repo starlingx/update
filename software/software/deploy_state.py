@@ -173,7 +173,9 @@ class DeployState(object):
     def start_failed(self):
         self.transform(DEPLOY_STATES.START_FAILED)
 
-    def start_done(self):
+    def start_done(self, commit_id):
+        db_api_instance = get_instance()
+        db_api_instance.update_deploy(commit_id=commit_id)
         self.transform(DEPLOY_STATES.START_DONE)
 
     def deploy_host(self):
