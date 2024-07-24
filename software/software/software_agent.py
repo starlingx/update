@@ -34,6 +34,8 @@ from tsconfig.tsconfig import SW_VERSION
 pidfile_path = "/var/run/software_agent.pid"
 agent_running_after_reboot_flag = \
     "/var/run/software_agent_running_after_reboot"
+run_postinstallscript_after_reboot_flag = \
+    "/var/run/run_postinstallscript_after_reboot_flag"
 node_is_patched_file = "/var/run/node_is_patched"
 node_is_software_updated_rr_file = "/var/run/node_is_software_updated_rr"
 patch_installing_file = "/var/run/patch_installing"
@@ -91,6 +93,17 @@ def pull_install_scripts_from_controller():
         else:
             LOG.exception("Failed to sync restart scripts from controller")
             raise
+
+
+def run_post_install_script():
+    LOG.info("Running post-install patch-scripts")
+
+    try:
+        subprocess.check_output([run_install_software_scripts_cmd, "postinstall"],
+                                stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as e:
+        LOG.exception("Failed to execute post-install scripts.")
+        LOG.error("Command output: %s", e.output)
 
 
 def check_install_uuid():
@@ -653,6 +666,7 @@ class PatchAgent(PatchService):
 
                 if os.path.exists(node_is_software_updated_rr_file):
                     LOG.info("Reboot is required. Skipping patch-scripts")
+                    setflag(run_postinstallscript_after_reboot_flag)
                 elif disallow_insvc_patch:
                     LOG.info("Disallowing patch-scripts. Treating as reboot-required")
                     setflag(node_is_software_updated_rr_file)
@@ -924,6 +938,10 @@ def main():
     else:
         setflag(agent_running_after_reboot_flag)
         delete_older_deployments_flag = True
+
+    if os.path.exists(run_postinstallscript_after_reboot_flag):
+        run_post_install_script()
+        clearflag(run_postinstallscript_after_reboot_flag)
 
     if len(sys.argv) <= 1:
         pa.run()
