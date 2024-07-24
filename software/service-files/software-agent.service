@@ -10,6 +10,8 @@ ExecStart=/etc/init.d/software-agent start
 ExecStop=/etc/init.d/software-agent stop
 ExecReload=/etc/init.d/software-agent restart
 PIDFile=/var/run/software-agent.pid
+# process recovery is handled by pmon
+Restart=no
 
 [Install]
 WantedBy=multi-user.target

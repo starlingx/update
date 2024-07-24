@@ -2,9 +2,9 @@
 export DH_VERBOSE = 1
 export PYBUILD_NAME = software
 export PBR_VERSION=1.0.0
-PMONDIR := ${ROOT}/usr/share/starlingx/pmon.d
 
 ROOT := $(CURDIR)/debian/tmp
+PMONDIR := ${ROOT}/usr/share/starlingx/pmon.d
 export PLATFORM_RELEASE="$(shell grep SW_VERSION /usr/include/build_info.h | cut -d ' ' -f 3)"
 export METADATA_FILE="starlingx-${PLATFORM_RELEASE}.0-metadata.xml"
 

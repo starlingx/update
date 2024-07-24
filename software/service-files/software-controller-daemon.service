@@ -10,6 +10,8 @@ ExecStart=/etc/init.d/software-controller-daemon start
 ExecStop=/etc/init.d/software-controller-daemon stop
 ExecReload=/etc/init.d/software-controller-daemon restart
 PIDFile=/var/run/software-controller-daemon.pid
+# process recovery is handled by pmon
+Restart=no
 
 [Install]
 WantedBy=multi-user.target
