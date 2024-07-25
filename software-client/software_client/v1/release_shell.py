@@ -80,12 +80,15 @@ def do_commit_patch(cc, args):
     return cc.release.commit_patch(args)
 
 
+@utils.arg('--delete',
+           required=False,
+           action='store_true',
+           help='Delete patch install/remove on the localhost mode')
 def do_install_local(cc, args):
-    """Trigger patch install/remove on the local host.
-        This command can only be used for patch installation
-        prior to initial configuration.
+    """Set patch install/remove on the local host.
+        This command can only be used for patch installation.
     """
-    resp, data = cc.release.install_local()
+    resp, data = cc.release.install_local(args.delete)
     if args.debug:
         utils.print_result_debug(resp, data)
 

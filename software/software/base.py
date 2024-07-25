@@ -26,6 +26,7 @@ class PatchService(object):
         self.mcast_addr = None
         self.socket_lock = None
         self.pre_bootstrap = True
+        self.install_local = True
 
     def update_config(self):
         # Implemented in subclass

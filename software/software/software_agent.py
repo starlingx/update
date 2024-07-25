@@ -53,7 +53,6 @@ run_install_software_scripts_cmd = "/usr/sbin/run-software-scripts"
 pa = None
 
 http_port_real = http_port
-http_hostname = '127.0.0.1'
 
 
 def setflag(fname):
@@ -72,18 +71,21 @@ def clearflag(fname):
             LOG.exception("Failed to clear %s flag", fname)
 
 
-def pull_install_scripts_from_controller():
+def pull_install_scripts_from_controller(install_local=False):
     # If the rsync fails, it raises an exception to
     # the caller "handle_install()" and fails the
     # host-install request for this host.
     # The restart_scripts are optional, so if the files
     # are not present, it should not raise any exception
+    host = constants.CONTROLLER
+    if install_local:
+        host = '127.0.0.1'
     try:
         output = subprocess.check_output(["rsync",
                                           "-acv",
                                           "--delete",
                                           "--exclude", "tmp",
-                                          "rsync://%s/repo/software-scripts/" % http_hostname,
+                                          "rsync://%s/repo/software-scripts/" % host,
                                           "%s/" % insvc_software_scripts],
                                          stderr=subprocess.STDOUT)
         LOG.info("Synced restart scripts from controller: %s", output)
@@ -107,7 +109,9 @@ def run_post_install_script():
 
 
 def check_install_uuid():
-    controller_install_uuid_url = "http://%s:%s/feed/rel-%s/install_uuid" % (http_hostname, http_port_real, SW_VERSION)
+    controller_install_uuid_url = "http://%s:%s/feed/rel-%s/install_uuid" % (constants.CONTROLLER,
+                                                                             http_port_real,
+                                                                             SW_VERSION)
     try:
         req = requests.get(controller_install_uuid_url)
         if req.status_code != 200:
@@ -303,7 +307,8 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
                 resp.reject_reason = 'Node must be locked.'
                 resp.send(sock, addr)
                 return
-        resp.status = pa.handle_install(major_release=self.major_release, commit_id=self.commit_id)
+        resp.status = pa.handle_install(major_release=self.major_release,
+                                        commit_id=self.commit_id)
         resp.send(sock, addr)
 
     def send(self, sock):  # pylint: disable=unused-argument
@@ -457,7 +462,7 @@ class PatchAgent(PatchService):
 
     def query(self, major_release=None):
         """Check current patch state """
-        if not check_install_uuid():
+        if not self.install_local and not check_install_uuid():
             LOG.info("Failed install_uuid check. Skipping query")
             return False
 
@@ -517,7 +522,7 @@ class PatchAgent(PatchService):
 
         # Check the INSTALL_UUID first. If it doesn't match the active
         # controller, we don't want to install patches.
-        if not check_install_uuid():
+        if not self.install_local and not check_install_uuid():
             LOG.error("Failed install_uuid check. Skipping install")
 
             self.patch_failed = True
@@ -626,7 +631,7 @@ class PatchAgent(PatchService):
                 os.path.exists(mount_pending_file):
             try:
                 LOG.info("Running pre-install patch-scripts")
-                pull_install_scripts_from_controller()
+                pull_install_scripts_from_controller(install_local=self.install_local)
                 subprocess.check_output([run_install_software_scripts_cmd, "preinstall"],
                                         stderr=subprocess.STDOUT)
 
@@ -764,6 +769,7 @@ class PatchAgent(PatchService):
     def handle_bootstrap(self, connections):
         # If bootstrap is completed re-initialize sockets
         self.pre_bootstrap = False
+        self.install_local = False
         self.setup_socket()
         while self.sock_out is None:
             time.sleep(30)
@@ -778,10 +784,13 @@ class PatchAgent(PatchService):
 
     def run(self):
         # Check if bootstrap stage is completed
-        global http_hostname
         if self.pre_bootstrap and cfg.get_mgmt_ip():
             self.pre_bootstrap = False
-            http_hostname = constants.CONTROLLER_FLOATING_HOSTNAME
+
+        if self.pre_bootstrap or os.path.isfile(constants.INSTALL_LOCAL_FLAG):
+            self.install_local = True
+        else:
+            self.install_local = False
 
         self.setup_socket()
 
@@ -810,8 +819,12 @@ class PatchAgent(PatchService):
         while True:
             if self.pre_bootstrap and cfg.get_mgmt_ip():
                 self.handle_bootstrap(connections)
-                http_hostname = constants.CONTROLLER_FLOATING_HOSTNAME
                 first_hello = True
+
+            if os.path.isfile(constants.INSTALL_LOCAL_FLAG) or self.pre_bootstrap:
+                self.install_local = True
+            else:
+                self.install_local = False
 
             inputs = [self.sock_in, self.listener] + connections
             outputs = []
@@ -932,7 +945,13 @@ def main():
     cfg.read_config()
 
     pa = PatchAgent()
+    if os.path.isfile(constants.INSTALL_LOCAL_FLAG):
+        pa.install_local = True
+    else:
+        pa.install_local = False
+
     pa.query()
+
     if os.path.exists(agent_running_after_reboot_flag):
         delete_older_deployments_flag = False
     else:
@@ -946,7 +965,7 @@ def main():
     if len(sys.argv) <= 1:
         pa.run()
     elif sys.argv[1] == "--install":
-        if not check_install_uuid():
+        if not pa.install_local and not check_install_uuid():
             # In certain cases, the lighttpd server could still be running using
             # its default port 80, as opposed to the port configured in platform.conf
             global http_port_real

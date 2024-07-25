@@ -258,12 +258,14 @@ class ReleaseManager(base.Manager):
             utils.print_software_op_result(req)
         return
 
-    def install_local(self):
+    def install_local(self, delete):
         # Ignore interrupts during this function
         signal.signal(signal.SIGINT, signal.SIG_IGN)
+        body = {}
+        body["delete"] = delete
 
-        path = "/v1/deploy/install_local"
-        return self._post(path)
+        path = "/v1/deploy_host/install_local"
+        return self._post(path, body=body)
 
     def release_delete(self, release_id):
         release_ids = "/".join(release_id)
