@@ -1055,6 +1055,7 @@ class PatchController(PatchService):
                                               "-acv",
                                               "--delete",
                                               "--exclude", "tmp",
+                                              "--exclude", "software.json",
                                               "rsync://%s/software/" % host_url,
                                               "%s/" % constants.SOFTWARE_STORAGE_DIR],
                                              stderr=subprocess.STDOUT)
