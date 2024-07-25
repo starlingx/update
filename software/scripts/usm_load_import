@@ -19,6 +19,7 @@ import glob
 import logging as LOG
 import os
 import shutil
+import subprocess
 import sys
 
 import upgrade_utils
@@ -29,6 +30,8 @@ RELEASE_GA_NAME = "starlingx-%s"
 SOFTWARE_STORAGE_DIR = "/opt/software"
 TMP_DIR = "/tmp"
 VAR_PXEBOOT_DIR = "/var/pxeboot"
+FEED_REMOTE = "starlingx"
+FEED_BRANCH = "starlingx"
 
 
 #TODO(bqian) move the function to shareable utils.
@@ -79,6 +82,17 @@ def load_import(from_release, to_release, iso_mount_dir):
             elif os.path.isdir(src_abs_path):
                 shutil.copytree(src_abs_path, os.path.join(to_feed_dir, content))
                 LOG.info("Copied %s to %s", src_abs_path, to_feed_dir)
+
+        # Create 'starlingx' remote on the feed ostree_repo
+        cmd = ["ostree", "remote", "add", "--repo=%s/ostree_repo/" % to_feed_dir,
+               FEED_REMOTE, "http://controller:8080/feed/rel-%s/ostree_repo/" % to_major_rel,
+               FEED_BRANCH]
+        try:
+            subprocess.check_call(cmd)
+            LOG.info("Created feed remote '%s'" % FEED_REMOTE)
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Feed remote '%s' creation failed. Error: %s" % (FEED_REMOTE, str(e)))
+            raise
 
         # Copy install_uuid to /var/www/pages/feed/rel-<release>
         from_feed_dir = os.path.join(FEED_OSTREE_BASE_DIR, ("rel-%s" % from_major_rel))
