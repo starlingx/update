@@ -89,6 +89,7 @@ import software.utils as utils
 from software.sysinv_utils import get_k8s_ver
 from software.sysinv_utils import is_system_controller
 from software.sysinv_utils import update_host_sw_version
+from software.sysinv_utils import are_all_hosts_unlocked_and_online
 
 from software.db.api import get_instance
 
@@ -2977,6 +2978,10 @@ class PatchController(PatchService):
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     def _deploy_complete(self):
+        if not are_all_hosts_unlocked_and_online():
+            msg = f"Hosts must be {constants.ADMIN_UNLOCKED} and {constants.AVAILABILITY_ONLINE}."
+            raise SoftwareServiceError(error=msg)
+
         is_all_hosts_in_deployed_state = all(host_state.get("state") == DEPLOY_HOST_STATES.DEPLOYED.value
                                              for host_state in self.db_api_instance.get_deploy_host())
         if not is_all_hosts_in_deployed_state:
@@ -3041,6 +3046,9 @@ class PatchController(PatchService):
         return True
 
     def _check_pre_activate(self):
+        if not are_all_hosts_unlocked_and_online():
+            msg = f"Hosts must be {constants.ADMIN_UNLOCKED} and {constants.AVAILABILITY_ONLINE}."
+            raise SoftwareServiceError(error=msg)
         # check current deployment, deploy to all hosts have completed,
         # the deploy state is host-done, or
         # activate-failed' as reattempt from a previous failed activate

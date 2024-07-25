@@ -131,6 +131,7 @@ WORKER = 'worker'
 
 AVAILABILITY_ONLINE = 'online'
 ADMIN_LOCKED = 'locked'
+ADMIN_UNLOCKED = 'unlocked'
 
 SOFTWARE_ALARMS = {
     fm_constants.FM_ALARM_ID_SW_UPGRADE_DEPLOY_STATE_OUT_OF_SYNC: {
