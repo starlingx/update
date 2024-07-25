@@ -40,11 +40,16 @@ class DeployHostState(object):
     def __init__(self, hostname):
         self._hostname = hostname
 
-    def check_transition(self, target_state: DEPLOY_HOST_STATES):
+    def get_deploy_host_state(self):
         db_api = get_instance()
         deploy_host = db_api.get_deploy_host_by_hostname(self._hostname)
         if deploy_host is not None:
-            cur_state = DEPLOY_HOST_STATES(deploy_host['state'])
+            return DEPLOY_HOST_STATES(deploy_host['state'])
+        return None
+
+    def check_transition(self, target_state: DEPLOY_HOST_STATES):
+        cur_state = self.get_deploy_host_state()
+        if cur_state:
             if target_state in deploy_host_state_transition[cur_state]:
                 return True
         else:
@@ -67,22 +72,29 @@ class DeployHostState(object):
             db_api.end_update()
 
     def deploy_started(self):
-        self.transform(DEPLOY_HOST_STATES.DEPLOYING)
+        state = self.get_deploy_host_state()
+        if state in [DEPLOY_HOST_STATES.PENDING, DEPLOY_HOST_STATES.FAILED]:
+            self.transform(DEPLOY_HOST_STATES.DEPLOYING)
+        else:
+            self.transform(DEPLOY_HOST_STATES.ROLLBACK_DEPLOYING)
 
     def deployed(self):
-        self.transform(DEPLOY_HOST_STATES.DEPLOYED)
+        state = self.get_deploy_host_state()
+        if state == DEPLOY_HOST_STATES.DEPLOYING:
+            self.transform(DEPLOY_HOST_STATES.DEPLOYED)
+        else:
+            self.transform(DEPLOY_HOST_STATES.ROLLBACK_DEPLOYED)
 
     def deploy_failed(self):
-        self.transform(DEPLOY_HOST_STATES.FAILED)
+        state = self.get_deploy_host_state()
+        if state == DEPLOY_HOST_STATES.DEPLOYING:
+            self.transform(DEPLOY_HOST_STATES.FAILED)
+        else:
+            self.transform(DEPLOY_HOST_STATES.ROLLBACK_FAILED)
 
-    def rollback_pending(self):
-        self.transform(DEPLOY_HOST_STATES.ROLLBACK_PENDING)
-
-    def rollback_deployed(self):
-        self.transform(DEPLOY_HOST_STATES.ROLLBACK_DEPLOYED)
-
-    def rollback_failed(self):
-        self.transform(DEPLOY_HOST_STATES.ROLLBACK_FAILED)
-
-    def rollback_started(self):
-        self.transform(DEPLOY_HOST_STATES.ROLLBACK_DEPLOYING)
+    def abort(self):
+        state = self.get_deploy_host_state()
+        if state == DEPLOY_HOST_STATES.PENDING:
+            self.transform(DEPLOY_HOST_STATES.ROLLBACK_DEPLOYED)
+        else:
+            self.transform(DEPLOY_HOST_STATES.ROLLBACK_PENDING)

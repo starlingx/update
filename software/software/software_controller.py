@@ -603,10 +603,6 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
         finally:
             sc.hosts_lock.release()
 
-        state = DeployState.get_deploy_state()
-        rollback = False
-        if state and "host-rollback" in state.value:
-            rollback = True
         deploy_host_state = DeployHostState(hostname)
         if self.status:
             deploying = ReleaseState(release_state=states.DEPLOYING)
@@ -620,26 +616,16 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
                     update_host_sw_version(hostname, sw_version)
                 except Exception:
                     # Failed a step, fail the host deploy for reattempt
-                    if rollback:
-                        deploy_host_state.rollback_failed()
-                    else:
-                        deploy_host_state.deploy_failed()
+                    deploy_host_state.deploy_failed()
                     return
 
-            if rollback:
-                deploy_host_state.rollback_deployed()
-            else:
-                deploy_host_state.deployed()
-
+            deploy_host_state.deployed()
             if self.reboot_required:
                 sc.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_SUCCESS_RR,
                                          fm_constants.FM_ALARM_STATE_SET,
                                          "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, hostname))
         else:
-            if rollback:
-                deploy_host_state.rollback_failed()
-            else:
-                deploy_host_state.deploy_failed()
+            deploy_host_state.deploy_failed()
             sc.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_FAILURE,
                                      fm_constants.FM_ALARM_STATE_SET,
                                      "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, hostname))
@@ -2916,14 +2902,6 @@ class PatchController(PatchService):
             # Set deploying releases to deployed state.
             deploying_release_state.deploy_completed()
 
-            # Send message to agents cleanup their ostree environment
-            cleanup_req = SoftwareMessageDeployDeleteCleanupReq()
-            cleanup_req.major_release = utils.get_major_release_version(to_release)
-            cleanup_req.encode()
-            self.socket_lock.acquire()
-            cleanup_req.send(self.sock_out)
-            self.socket_lock.release()
-
         elif DEPLOY_STATES.HOST_ROLLBACK_DONE == deploy_state_instance.get_deploy_state():
             major_release = utils.get_major_release_version(from_release)
             release_state = ReleaseState(release_state=states.DEPLOYING)
@@ -2971,6 +2949,15 @@ class PatchController(PatchService):
 
         if is_major_release:
             clean_up_deployment_data(major_release)
+
+            # Send message to agents cleanup their ostree environment
+            cleanup_req = SoftwareMessageDeployDeleteCleanupReq()
+            cleanup_req.major_release = utils.get_major_release_version(to_release)
+            cleanup_req.encode()
+            self.socket_lock.acquire()
+            cleanup_req.send(self.sock_out)
+            self.socket_lock.release()
+
         msg_info += "Deploy deleted with success"
         self.db_api_instance.delete_deploy_host_all()
         self.db_api_instance.delete_deploy()
@@ -3116,14 +3103,8 @@ class PatchController(PatchService):
         deploy_host = self.db_api_instance.get_deploy_host()
         for host in deploy_host:
             hostname = host.get("hostname")
-            state = DEPLOY_HOST_STATES(host.get("state"))
             deploy_host_state = DeployHostState(hostname)
-
-            # Moves pending -> rollback-deployed and other states -> rollback-pending
-            if state == DEPLOY_HOST_STATES.PENDING:
-                deploy_host_state.rollback_deployed()
-            else:
-                deploy_host_state.rollback_pending()
+            deploy_host_state.abort()
 
         msg_info += "Deployment has been aborted\n"
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
@@ -3252,12 +3233,8 @@ class PatchController(PatchService):
             )
         deploy_state = DeployState.get_instance()
         deploy_host_state = DeployHostState(hostname)
-        if rollback:
-            deploy_state.deploy_host_rollback()
-            deploy_host_state.rollback_started()
-        else:
-            deploy_state.deploy_host()
-            deploy_host_state.deploy_started()
+        deploy_state.deploy_host()
+        deploy_host_state.deploy_started()
 
         # if in a 'deploy host' reentrant scenario, i.e. retrying after
         # a failure, then clear the failure alarm before retrying
@@ -3317,6 +3294,7 @@ class PatchController(PatchService):
         # Now we wait, up to ten mins. future enhancement: Wait on a condition
         resp_rx = False
         max_time = time.time() + 600
+        success = True
         # NOTE(bqian) loop below blocks REST API service (slow thread)
         # Consider remove.
         while time.time() < max_time:
@@ -3324,8 +3302,7 @@ class PatchController(PatchService):
             if ip not in self.hosts:
                 # The host aged out while we were waiting
                 self.hosts_lock.release()
-                deploy_state.deploy_host_failed()
-                deploy_host_state.deploy_failed()
+                success = False
                 msg = "Agent expired while waiting: %s" % ip
                 msg_error += msg + "\n"
                 LOG.error("Error in host-install: %s", msg)
@@ -3344,14 +3321,12 @@ class PatchController(PatchService):
                         self.hosts[ip].install_reject_reason)
                     msg_error += msg + "\n"
                     LOG.error("Error in host-install: %s", msg)
-                    deploy_state.deploy_host_failed()
-                    deploy_host_state.deploy_failed()
+                    success = False
                 else:
                     msg = "Host installation failed on %s." % self.hosts[ip].hostname
                     msg_error += msg + "\n"
                     LOG.error("Error in host-install: %s", msg)
-                    deploy_state.deploy_host_failed()
-                    deploy_host_state.deploy_failed()
+                    success = False
 
                 self.hosts_lock.release()
                 break
@@ -3364,7 +3339,9 @@ class PatchController(PatchService):
             msg = "Timeout occurred while waiting response from %s." % ip
             msg_error += msg + "\n"
             LOG.error("Error in host-install: %s", msg)
-            deploy_state.deploy_host_failed()
+            success = False
+
+        if not success:
             deploy_host_state.deploy_failed()
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
@@ -3374,7 +3351,8 @@ class PatchController(PatchService):
     def software_deploy_host_api(self, hostname, force, async_req=False):
         return self._deploy_host(hostname, force, async_req)
 
-    @require_deploy_state([DEPLOY_STATES.HOST_ROLLBACK, DEPLOY_STATES.HOST_ROLLBACK_FAILED],
+    @require_deploy_state([DEPLOY_STATES.ACTIVATE_ROLLBACK_DONE,
+                           DEPLOY_STATES.HOST_ROLLBACK, DEPLOY_STATES.HOST_ROLLBACK_FAILED],
                           "Current deployment ({state}) is not ready to rollback host")
     def software_deploy_host_rollback_api(self, hostname, force, async_req=False):
         return self._deploy_host(hostname, force, async_req, rollback=True)
