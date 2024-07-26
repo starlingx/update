@@ -130,6 +130,7 @@ STORAGE = 'storage'
 WORKER = 'worker'
 
 AVAILABILITY_ONLINE = 'online'
+AVAILABILITY_AVAILABLE = 'available'
 ADMIN_LOCKED = 'locked'
 ADMIN_UNLOCKED = 'unlocked'
 
