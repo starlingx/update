@@ -1401,11 +1401,11 @@ class PatchController(PatchService):
             release_meta_info = {
                 os.path.basename(upgrade_files[constants.ISO_EXTENSION]): {
                     "id": all_release_meta_info.get("id"),
-                    "sw_version": all_release_meta_info.get("sw_version"),
+                    "sw_release": all_release_meta_info.get("sw_version"),
                 },
                 os.path.basename(upgrade_files[constants.SIG_EXTENSION]): {
                     "id": None,
-                    "sw_version": None,
+                    "sw_release": None,
                 }
             }
         except Exception:

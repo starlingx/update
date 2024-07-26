@@ -76,7 +76,7 @@ class TestSoftwareController(unittest.TestCase):
 
         self.assertEqual(mock_run.call_args[0][0], ["%s/rel-%s/bin/%s" % (
             constants.SOFTWARE_STORAGE_DIR,
-            release_meta_info["test.iso"]["sw_version"],
+            release_meta_info["test.iso"]["sw_release"],
             "usm_load_import"),
             "--from-release=1.0.0", "--to-release=2.0.0", "--iso-dir=/test/iso"])
         mock_unmount_iso_load.assert_called_once_with('/test/iso')
@@ -89,8 +89,8 @@ class TestSoftwareController(unittest.TestCase):
         self.assertEqual(error, '')
         self.assertEqual(
             release_meta_info,
-            {"test.iso": {"id": 1, "sw_version": "2.0.0"},
-             "test.sig": {"id": None, "sw_version": None}})
+            {"test.iso": {"id": 1, "sw_release": "2.0.0"},
+             "test.sig": {"id": None, "sw_release": None}})
 
     @patch('software.software_controller.PatchController.__init__', return_value=None)
     @patch('software.software_controller.verify_files')

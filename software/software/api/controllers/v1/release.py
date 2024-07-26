@@ -59,7 +59,10 @@ class ReleaseController(RestController):
 
         # --local option only sends a list of file names
         if (request.content_type == "text/plain"):
-            local_files = list(json.loads(request.body))
+            body = request.body
+            if isinstance(body, bytes):
+                body = body.decode('utf-8')
+            local_files = list(json.loads(body))
             is_local = True
         else:
             request_data = list(request.POST.items())
@@ -96,7 +99,9 @@ class ReleaseController(RestController):
     @expose(method='DELETE', template='json')
     def delete(self, *args):
         reload_release_data()
-        result = sc.software_release_delete_api(list(args))
+        ids = list(args)
+        ids = [id for id in ids if id]
+        result = sc.software_release_delete_api(ids)
         sc.software_sync()
         return result
 

@@ -65,7 +65,7 @@ class ExceptionHook(hooks.PecanHook):
             # bug. Or not properly categorizing the exception itself is a bug.
             status = 500
             err_msg = "Internal error occurred. Error signature [%s]" % signature
-            LOG.exception(e)
+            LOG.exception(err_msg)
             data = dict(info="", warning="", error=err_msg)
         return webob.Response(json.dumps(data), status=status)
 
