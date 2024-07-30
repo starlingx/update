@@ -1,0 +1,12 @@
+[Unit]
+Description=Unified Software Management Initialize Service
+Before=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/etc/init.d/usm-initialize start
+
+[Install]
+WantedBy=multi-user.target
+

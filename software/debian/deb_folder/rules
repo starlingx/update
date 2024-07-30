@@ -38,6 +38,8 @@ override_dh_install:
 		${ROOT}/etc/init.d/software
 	install -m 500 service-files/software-controller-init.sh \
 		${ROOT}/etc/init.d/software-controller
+	install -m 500 service-files/usm-initialize-init.sh \
+		${ROOT}/etc/init.d/usm-initialize
 	install -m 600 service-files/software.conf \
 		${ROOT}/etc/software/software.conf
 	install -m 644 service-files/policy.json \

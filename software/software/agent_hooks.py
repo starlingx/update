@@ -4,7 +4,6 @@ Copyright (c) 2024 Wind River Systems, Inc.
 SPDX-License-Identifier: Apache-2.0
 
 """
-
 import filecmp
 import glob
 import os
@@ -23,6 +22,66 @@ class BaseHook(object):
 
     def run(self):
         pass
+
+
+class UsmInitHook(BaseHook):
+    def run(self):
+        cmd = "systemctl enable usm-initialize.service"
+        try:
+            subprocess.check_call(cmd, shell=True)
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Error enabling usm-initialize.service: %s" % str(e))
+            raise
+        LOG.info("Enabled usm-initialize.service on next reboot")
+
+
+class EnableNewServicesHook(BaseHook):
+    SYSTEM_PRESET_DIR = "/etc/systemd/system-preset"
+    DEPLOYED_OSTREE_DIR = "/ostree/1"
+    SYSTEMD_LIB_DIR = "/lib/systemd/system"
+    SYSTEMD_ETC_DIR = "%s/etc/systemd/system/multi-user.target.wants" % DEPLOYED_OSTREE_DIR
+
+    def find_new_services(self):
+        # get preset name
+        system_preset = None
+        presets = os.listdir(self.SYSTEM_PRESET_DIR)
+        for preset in presets:
+            if preset.startswith("10-"):
+                system_preset = os.readlink("%s/%s" % (self.SYSTEM_PRESET_DIR, preset))
+        if not system_preset:
+            raise FileNotFoundError("System preset not found.")
+
+        # read from-release preset
+        with open(system_preset, "r") as fp:
+            from_preset = fp.readlines()
+            from_services = [line.strip().split(" ")[1] for line in from_preset
+                             if line.startswith("enable")]
+        # read to-release preset
+        with open("%s/%s" % (self.DEPLOYED_OSTREE_DIR, system_preset), "r") as fp:
+            to_preset = fp.readlines()
+            to_services = [line.strip().split(" ")[1] for line in to_preset
+                           if line.startswith("enable")]
+
+        # compare to find new services
+        # output will come as "+ <service>" for new service in to-release
+        new_services = list(set(to_services) - set(from_services))
+        LOG.info("New services found: %s" % ", ".join(new_services))
+        return new_services
+
+    def enable_new_services(self, services):
+        for service in services:
+            src = "%s/%s" % (self.SYSTEMD_LIB_DIR, service)
+            dst = "%s/%s" % (self.SYSTEMD_ETC_DIR, service)
+            try:
+                os.symlink(src, dst)
+                LOG.info("Enabled %s" % service)
+            except subprocess.CalledProcessError as e:
+                LOG.exception("Error enabling %s: %s" % (service, str(e)))
+                raise
+
+    def run(self):
+        new_services = self.find_new_services()
+        self.enable_new_services(new_services)
 
 
 class CopyPxeFilesHook(BaseHook):
@@ -134,14 +193,20 @@ MAJOR_RELEASE_ROLLBACK = "major_release_rollback"
 # agent hooks mapping per action
 AGENT_HOOKS = {
     MAJOR_RELEASE_UPGRADE: {
-        PRE: [CreateUSMUpgradeInProgressFlag],
+        PRE: [
+            CreateUSMUpgradeInProgressFlag,
+            UsmInitHook,
+        ],
         POST: [
             CopyPxeFilesHook,
             ReconfigureKernelHook,
+            EnableNewServicesHook,
         ],
     },
     MAJOR_RELEASE_ROLLBACK: {
-        PRE: [],
+        PRE: [
+            UsmInitHook,
+        ],
         POST: [
             ReconfigureKernelHook,
         ],
