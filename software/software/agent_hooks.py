@@ -113,6 +113,16 @@ class ReconfigureKernelHook(BaseHook):
             LOG.exception(msg)
 
 
+class CreateUSMUpgradeInProgressFlag(BaseHook):
+    def __init__(self, attrs):
+        super().__init__(attrs)
+
+    def run(self):
+        flag_file = constants.USM_UPGRADE_IN_PROGRESS_FLAG
+        with open(flag_file, "w") as _:
+            LOG.info("Created %s flag" % flag_file)
+
+
 # pre and post keywords
 PRE = "pre"
 POST = "post"
@@ -124,7 +134,7 @@ MAJOR_RELEASE_ROLLBACK = "major_release_rollback"
 # agent hooks mapping per action
 AGENT_HOOKS = {
     MAJOR_RELEASE_UPGRADE: {
-        PRE: [],
+        PRE: [CreateUSMUpgradeInProgressFlag],
         POST: [
             CopyPxeFilesHook,
             ReconfigureKernelHook,

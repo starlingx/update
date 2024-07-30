@@ -1476,6 +1476,17 @@ def clean_up_deployment_data(major_release):
     for folder in upgrade_folders:
         shutil.rmtree(folder, ignore_errors=True)
 
+    upgrade_flags = [
+        constants.USM_UPGRADE_IN_PROGRESS_FLAG,
+        constants.UPGRADE_DO_NOT_USE_FQDN_FLAG,
+    ]
+    for flag in upgrade_flags:
+        try:
+            os.remove(flag)
+            LOG.info("Flag %s removed.")
+        except FileNotFoundError:
+            LOG.warning("Flag %s not found. Skipping...")
+
 
 def run_deploy_clean_up_script(release):
     """
