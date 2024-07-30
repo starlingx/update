@@ -545,12 +545,6 @@ class PatchAgent(PatchService):
                 clearflag(patch_failed_file)
                 self.state = constants.PATCH_AGENT_STATE_IDLE
                 return True
-            elif not self.changes:
-                LOG.error("Changes in feed repo were not notified to PatchAgent")
-                self.patch_failed = True
-                setflag(patch_failed_file)
-                self.state = constants.PATCH_AGENT_STATE_IDLE
-                return False
 
         self.state = constants.PATCH_AGENT_STATE_INSTALLING
         setflag(patch_installing_file)
