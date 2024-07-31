@@ -2483,59 +2483,130 @@ class PatchController(PatchService):
         tag.text = text
         return tag
 
-    def _after_apt_run_install(self, metadata_file, previous_commit, feed_repo):
-        LOG.info("Running after deploy start 'run install'")
+    def is_deployment_list_reboot_required(self, deployment_list):
+        """Check if any deploy in deployment list is reboot required"""
+        for release_id in deployment_list:
+            release = self.release_collection.get_release_by_id(release_id)
+            if release.reboot_required:
+                return True
+        return False
 
-        # Update the feed ostree summary
-        ostree_utils.update_repo_summary_file(feed_repo)
+    def install_releases_thread(self, deployment_list, feed_repo):
+        """
+        In a separated thread.
+        Install the debian packages, create the commit and update the metadata.
+        """
+        def run():
+            LOG.info("Installing releases on repo: %s" % feed_repo)
 
-        self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
+            running_release = self.release_collection.running_release
+            to_deploy_release_id = deployment_list[-1]
+            to_deploy_release = self.release_collection.get_release_by_id(to_deploy_release_id)
+            reboot_required = self.is_deployment_list_reboot_required(deployment_list)
 
-        # Update metadata
-        tree = ET.parse(metadata_file)
-        root = tree.getroot()
+            collect_current_load_for_hosts(to_deploy_release.sw_version)
+            release_state = ReleaseState(release_ids=deployment_list)
+            release_state.start_deploy()
 
-        contents = ET.SubElement(root, constants.CONTENTS_TAG)
-        ostree = ET.SubElement(contents, constants.OSTREE_TAG)
-        self.add_text_tag_to_xml(ostree, constants.NUMBER_OF_COMMITS_TAG, "1")
-        base = ET.SubElement(ostree, constants.BASE_TAG)
-        self.add_text_tag_to_xml(base, constants.COMMIT_TAG, previous_commit)
-        self.add_text_tag_to_xml(base, constants.CHECKSUM_TAG, "")
-        commit1 = ET.SubElement(ostree, constants.COMMIT1_TAG)
-        self.add_text_tag_to_xml(commit1, constants.COMMIT_TAG, self.latest_feed_commit)
-        self.add_text_tag_to_xml(commit1, constants.CHECKSUM_TAG, "")
+            # Setting deploy state to start, so that it can transition to start-done or start-failed
+            deploy_state = DeployState.get_instance()
+            to_release = to_deploy_release.sw_release
+            deploy_state.start(running_release, to_release, feed_repo, None, reboot_required)
 
-        ET.indent(tree, '  ')
-        with open(metadata_file, "wb") as outfile:
-            tree = ET.tostring(root)
-            outfile.write(tree)
+            try:
+                for release_id in deployment_list:
+                    msg = "Starting deployment for: %s" % release_id
+                    LOG.info(msg)
+                    audit_log_info(msg)
 
-        LOG.info("Latest feed commit: %s added to metadata file" % self.latest_feed_commit)
+                    deploy_release = self._release_basic_checks(release_id)
 
-        # move the deploy state to start-done
-        deploy_state = DeployState.get_instance()
-        deploy_state.start_done(self.latest_feed_commit)
-        self._update_state_to_peer()
+                    packages = [pkg.split("_")[0] for pkg in deploy_release.packages]
+                    if packages is None:
+                        msg = "Unable to determine packages to install"
+                        LOG.error(msg)
+                        raise MetadataFail(msg)
 
-        self.send_latest_feed_commit_to_agent()
-        self.software_sync()
+                    latest_commit = ""
+                    try:
+                        latest_commit = ostree_utils.get_feed_latest_commit(running_release.sw_version)
+                        LOG.info("Latest commit: %s" % latest_commit)
+                    except OSTreeCommandFail:
+                        LOG.exception("Failure during commit consistency check for %s.", release_id)
 
-    def wait_deploy_patch_then_run(self, proc, metadata_file, previous_commit, feed_repo):
-        def monitor():
-            p = proc.wait()
-            if p != 0:
+                    # Install debian package through apt-ostree
+                    try:
+                        apt_utils.run_install(feed_repo, deploy_release.sw_release, packages)
+                    except APTOSTreeCommandFail:
+                        msg = "Failed to install Debian packages."
+                        LOG.exception(msg)
+                        raise APTOSTreeCommandFail(msg)
+
+                    # Get the latest commit after performing "apt-ostree install".
+                    self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
+
+                    deploystate = deploy_release.state
+                    metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[deploystate]
+                    metadata_file = "%s/%s-metadata.xml" % (metadata_dir, release_id)
+
+                    reload_release_data()
+                    # NOTE(bqian) Below check an exception raise should be revisit, if applicable,
+                    # should be applied to the begining of all requests.
+                    if len(self.hosts) == 0:
+                        msg = "service is running in incorrect state. No registered host"
+                        raise InternalError(msg)
+
+                    self._update_state_to_peer()
+
+                    with self.hosts_lock:
+                        self.interim_state[release_id] = list(self.hosts)
+
+                    # Update the feed ostree summary
+                    ostree_utils.update_repo_summary_file(feed_repo)
+
+                    self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
+
+                    # Update metadata
+                    tree = ET.parse(metadata_file)
+                    root = tree.getroot()
+
+                    contents = ET.SubElement(root, constants.CONTENTS_TAG)
+                    ostree = ET.SubElement(contents, constants.OSTREE_TAG)
+                    self.add_text_tag_to_xml(ostree, constants.NUMBER_OF_COMMITS_TAG, "1")
+                    base = ET.SubElement(ostree, constants.BASE_TAG)
+                    self.add_text_tag_to_xml(base, constants.COMMIT_TAG, latest_commit)
+                    self.add_text_tag_to_xml(base, constants.CHECKSUM_TAG, "")
+                    commit1 = ET.SubElement(ostree, constants.COMMIT1_TAG)
+                    self.add_text_tag_to_xml(commit1, constants.COMMIT_TAG, self.latest_feed_commit)
+                    self.add_text_tag_to_xml(commit1, constants.CHECKSUM_TAG, "")
+
+                    ET.indent(tree, '  ')
+                    with open(metadata_file, "wb") as outfile:
+                        tree = ET.tostring(root)
+                        outfile.write(tree)
+
+                    LOG.info("Latest feed commit: %s added to metadata file" % self.latest_feed_commit)
+
+                # move the deploy state to start-done
+                deploy_state = DeployState.get_instance()
+                deploy_state.start_done(self.latest_feed_commit)
+                self._update_state_to_peer()
+
+                LOG.info("Finished releases %s deploy start" % deployment_list)
+
+                self.send_latest_feed_commit_to_agent()
+                self.software_sync()
+            except Exception as e:
+                msg = "Deploy start applying failed: %s" % e
+                LOG.exception(msg)
+                audit_log_info(msg)
+
+                # set state to failed
                 deploy_state = DeployState.get_instance()
                 deploy_state.start_failed()
+                self._update_state_to_peer()
 
-                _, stderr = proc.communicate()
-                msg = "Failed to install packages."
-                info_msg = "\"apt-ostree compose install\" error: return code %s , Output: %s" \
-                    % (p, stderr.decode("utf-8"))
-                LOG.error(info_msg)
-                raise APTOSTreeCommandFail(msg)
-
-            self._after_apt_run_install(metadata_file, previous_commit, feed_repo)
-        thread = threading.Thread(target=monitor)
+        thread = threading.Thread(target=run)
         thread.start()
 
     @require_deploy_state([None],
@@ -2670,71 +2741,11 @@ class PatchController(PatchService):
                 self.run_semantic_check(constants.SEMANTIC_PREAPPLY, deployment_list)
 
             # Start applying the releases
-            for release_id in deployment_list:
-                release = self.release_collection.get_release_by_id(release_id)
-                msg = "Starting deployment for: %s" % release_id
-                LOG.info(msg)
-                audit_log_info(msg)
+            self.install_releases_thread(deployment_list, feed_repo)
 
-                packages = [pkg.split("_")[0] for pkg in release.packages]
-                if packages is None:
-                    msg = "Unable to determine packages to install"
-                    LOG.error(msg)
-                    raise MetadataFail(msg)
-
-                if release.state not in (states.AVAILABLE, states.COMMITTED):
-                    msg = "%s is already being deployed" % release_id
-                    LOG.info(msg)
-                    msg_info += msg + "\n"
-                    continue
-
-                latest_commit = ""
-                try:
-                    latest_commit = ostree_utils.get_feed_latest_commit(running_release.sw_version)
-                    LOG.info("Latest commit: %s" % latest_commit)
-                except OSTreeCommandFail:
-                    LOG.exception("Failure during commit consistency check for %s.", release_id)
-
-                # TODO(bqian) get the list of undeployed required release ids
-                # i.e, when deploying 24.03.3, which requires 24.03.2 and 24.03.1, all
-                # 3 release ids should be passed into to create new ReleaseState
-                collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
-                release_state = ReleaseState(release_ids=[release.id])
-                release_state.start_deploy()
-
-                # Setting deploy state to start, so that it can transition to start-done or start-failed
-                deploy_state = DeployState.get_instance()
-                to_release = deploy_release.sw_release
-                deploy_state.start(running_release, to_release, feed_repo, commit_id, deploy_release.reboot_required)
-
-                # Install debian package through apt-ostree
-                deploy_patch_process = apt_utils.run_install(feed_repo, release.sw_release, packages)
-
-                # Get the latest commit after performing "apt-ostree install".
-                self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
-
-                deploystate = release.state
-                metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[deploystate]
-                metadata_file = "%s/%s-metadata.xml" % (metadata_dir, release_id)
-
-                msg_info += "%s is now starting, await for the states: " \
+            msg_info += "%s is now starting, await for the states: " \
                             "[deploy-start-done | deploy-start-failed] in " \
-                            "'software deploy show'\n" % release_id
-
-                reload_release_data()
-                # NOTE(bqian) Below check an exception raise should be revisit, if applicable,
-                # should be applied to the begining of all requests.
-                if len(self.hosts) == 0:
-                    msg = "service is running in incorrect state. No registered host"
-                    raise InternalError(msg)
-
-                self._update_state_to_peer()
-
-                with self.hosts_lock:
-                    self.interim_state[release_id] = list(self.hosts)
-
-                self.wait_deploy_patch_then_run(deploy_patch_process, metadata_file,
-                                                latest_commit, feed_repo)
+                            "'software deploy show'\n" % deployment_list
 
         elif operation == "remove":
             collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
@@ -2793,74 +2804,88 @@ class PatchController(PatchService):
             if kwargs.get("skip-semantic") != "yes":
                 self.run_semantic_check(constants.SEMANTIC_PREREMOVE, deployment_list)
 
-            for release_id in deployment_list:
-                release = self.release_collection.get_release_by_id(release_id)
-                msg = "Removing release: %s" % release_id
-                LOG.info(msg)
-                audit_log_info(msg)
+            collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
+            release_state = ReleaseState(release_ids=deployment_list)
+            release_state.start_remove()
 
-                if release.state == states.AVAILABLE:
-                    msg = "The deployment for %s has not been created" % release_id
+            reboot_required = self.is_deployment_list_reboot_required(deployment_list)
+
+            deploy_state = DeployState.get_instance()
+            to_release = deploy_release.sw_release
+            deploy_state.start(running_release, to_release, feed_repo, commit_id, reboot_required)
+            self._update_state_to_peer()
+
+            try:
+                for release_id in deployment_list:
+                    release = self.release_collection.get_release_by_id(release_id)
+                    msg = "Removing release: %s" % release_id
                     LOG.info(msg)
-                    msg_info += msg + "\n"
-                    continue
+                    audit_log_info(msg)
 
-                major_release_sw_version = release.sw_version
-                # this is an ostree patch
-                # Base commit is fetched from the patch metadata.
-                base_commit = release.base_commit_id
-                feed_repo = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, major_release_sw_version)
-                try:
-                    # Reset the ostree HEAD
-                    ostree_utils.reset_ostree_repo_head(base_commit, feed_repo)
+                    if release.state == states.AVAILABLE:
+                        msg = "The deployment for %s has not been created" % release_id
+                        LOG.info(msg)
+                        msg_info += msg + "\n"
+                        continue
 
-                    # Delete all commits that belong to this release
-                    # NOTE(bqian) there should be just one commit per release.
-                    commit_to_delete = release.commit_id
-                    ostree_utils.delete_ostree_repo_commit(commit_to_delete, feed_repo)
+                    major_release_sw_version = release.sw_version
+                    # this is an ostree patch
+                    # Base commit is fetched from the patch metadata.
+                    base_commit = release.base_commit_id
+                    feed_repo = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, major_release_sw_version)
+                    try:
+                        # Reset the ostree HEAD
+                        ostree_utils.reset_ostree_repo_head(base_commit, feed_repo)
 
-                    # Update the feed ostree summary
-                    ostree_utils.update_repo_summary_file(feed_repo)
+                        # Delete all commits that belong to this release
+                        # NOTE(bqian) there should be just one commit per release.
+                        commit_to_delete = release.commit_id
+                        ostree_utils.delete_ostree_repo_commit(commit_to_delete, feed_repo)
 
-                except OSTreeCommandFail:
-                    LOG.exception("Failure while removing release %s.", release_id)
-                try:
-                    # Move the metadata to the deleted dir
-                    self.release_collection.update_state([release_id], states.REMOVING)
-                    msg_info += "%s has been removed from the repo\n" % release_id
-                except shutil.Error:
-                    msg = "Failed to move the metadata for %s" % release_id
-                    LOG.Error(msg)
-                    raise MetadataFail(msg)
+                        # Update the feed ostree summary
+                        ostree_utils.update_repo_summary_file(feed_repo)
 
-                if len(self.hosts) == 0:
-                    msg = "service is running in incorrect state. No registered host"
-                    raise InternalError(msg)
+                    except OSTreeCommandFail:
+                        LOG.exception("Failure while removing release %s.", release_id)
+                    try:
+                        # Move the metadata to the deleted dir
+                        self.release_collection.update_state([release_id], states.REMOVING)
+                        msg_info += "%s has been removed from the repo\n" % release_id
+                    except shutil.Error:
+                        msg = "Failed to move the metadata for %s" % release_id
+                        LOG.Error(msg)
+                        raise MetadataFail(msg)
 
-                # TODO(bqian) get the list of undeployed required release ids
-                # i.e, when deploying 24.03.3, which requires 24.03.2 and 24.03.1, all
-                # 3 release ids should be passed into to create new ReleaseState
-                collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
-                release_state = ReleaseState(release_ids=[release.id])
-                release_state.start_remove()
-                deploy_state = DeployState.get_instance()
-                to_release = deploy_release.sw_release
-                deploy_state.start(running_release, to_release, feed_repo, commit_id, deploy_release.reboot_required)
-                self._update_state_to_peer()
+                    if len(self.hosts) == 0:
+                        msg = "service is running in incorrect state. No registered host"
+                        raise InternalError(msg)
 
-                # only update lastest_feed_commit if it is an ostree patch
-                if release.base_commit_id is not None:
-                    # Base Commit in this release's metadata.xml file represents the latest commit
-                    # after this release has been removed from the feed repo
-                    self.latest_feed_commit = release.base_commit_id
+                    # only update lastest_feed_commit if it is an ostree patch
+                    if release.base_commit_id is not None:
+                        # Base Commit in this release's metadata.xml file represents the latest commit
+                        # after this release has been removed from the feed repo
+                        self.latest_feed_commit = release.base_commit_id
 
-                with self.hosts_lock:
-                    self.interim_state[release_id] = list(self.hosts)
+                    with self.hosts_lock:
+                        self.interim_state[release_id] = list(self.hosts)
 
                 # There is no defined behavior for deploy start for patching releases, so
                 # move the deploy state to start-done
                 deploy_state = DeployState.get_instance()
                 deploy_state.start_done(self.latest_feed_commit)
+                self._update_state_to_peer()
+
+                self.send_latest_feed_commit_to_agent()
+                self.software_sync()
+            except Exception as e:
+                msg_error = "Deploy start removing failed"
+                msg = "%s: %s" % (msg_error, e)
+                LOG.exception(msg)
+                audit_log_info(msg)
+
+                # set state to failed
+                deploy_state = DeployState.get_instance()
+                deploy_state.start_failed()
                 self._update_state_to_peer()
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)

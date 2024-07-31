@@ -92,23 +92,21 @@ def run_install(repo_dir, sw_release, packages):
     packages = " ".join(packages)
 
     try:
-        proc = subprocess.Popen(
+        subprocess.run(
             ["apt-ostree", "compose", "install",
              "--repo", repo_dir,
              "--branch", "starlingx",
              "--feed", cfg.package_feed,
              "--component", sw_release,
              packages],
-             start_new_session=True,
-            stderr=subprocess.PIPE)
+            check=True,
+            capture_output=True)
     except subprocess.CalledProcessError as e:
         msg = "Failed to install packages."
         info_msg = "\"apt-ostree compose install\" error: return code %s , Output: %s" \
             % (e.returncode, e.stderr.decode("utf-8"))
         LOG.error(info_msg)
         raise APTOSTreeCommandFail(msg)
-
-    return proc
 
 
 def run_rollback(repo_dir, commit):
