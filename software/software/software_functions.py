@@ -1483,9 +1483,9 @@ def clean_up_deployment_data(major_release):
     for flag in upgrade_flags:
         try:
             os.remove(flag)
-            LOG.info("Flag %s removed.")
+            LOG.info("Flag %s removed." % flag)
         except FileNotFoundError:
-            LOG.warning("Flag %s not found. Skipping...")
+            LOG.warning("Flag %s not found. Skipping..." % flag)
 
 
 def run_deploy_clean_up_script(release):
