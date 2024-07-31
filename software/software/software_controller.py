@@ -1148,51 +1148,46 @@ class PatchController(PatchService):
 
     def get_release_dependency_list(self, release_id):
         """
-        Returns a list of software releases that are required by this
-        release.
-        Example: If R3 requires R2 and R2 requires R1,
-                 then this patch will return ['R2', 'R1'] for
-                 input param patch_id='R3'
-        :param release: The software release version
+        Returns a list of software releases that are required by this release.
+        Example: If R5 requires R4 and R1, R4 requires R3 and R1, R3 requires R1
+                 then for input param release_id='R5', it will return ['R4', 'R1', 'R3']
+        :param release: The software release ID
         """
 
-        # TODO(bqian): this algorithm will fail if dependency is not sequential.
-        # i.e, if R5 requires R4 and R1, R4 requires R3 and R1, R3 requires R1
-        # this relation will bring R1 before R3.
-        # change below is not fixing the algorithm, it converts directly using
-        # release_data to release_collection wrapper class.
-        release = self.release_collection.get_release_by_id(release_id)
-        if release is None:
-            error = f"Not all required releases are uploaded, missing {release_id}"
-            raise SoftwareServiceError(error=error)
+        def get_dependencies(release_id, visited):
+            release = self.release_collection.get_release_by_id(release_id)
+            if release is None:
+                error = f"Not all required releases are uploaded, missing {release_id}"
+                raise SoftwareServiceError(error=error)
 
-        release_dependency_list = []
-        for req_release in release.requires_release_ids:
-            release_dependency_list.append(req_release)
-            release_dependency_list = release_dependency_list + \
-                self.get_release_dependency_list(req_release)
-        return release_dependency_list
+            dependencies = []
+            for req_release in release.requires_release_ids:
+                if req_release not in visited:
+                    visited.add(req_release)
+                    dependencies.append(req_release)
+                    dependencies.extend(get_dependencies(req_release, visited))
+            return dependencies
+
+        return get_dependencies(release_id, set())
 
     def get_release_required_by_list(self, release_id):
         """
-        Returns a list of software releases that require this
-        release.
+        Returns a list of software releases that require this release.
         Example: If R3 requires R2 and R2 requires R1,
-                 then this method will return ['R3', 'R2'] for
-                 input param patch_id='R1'
+                 then for input param release_id='R1', it will return ['R3', 'R2']
         :param release_id: The software release id
         """
-        release_required_by_list = []
-        # NOTE(bqian) not sure why the check is needed. release_id is always
-        # from the release_data collection.
-        if self.release_collection.get_release_by_id(release_id):
-            for req_release in self.release_collection.iterate_releases():
-                if release_id in req_release.requires_release_ids:
-                    release_required_by_list.append(req_release.id)
-                    release_required_by_list = release_required_by_list + \
-                        self.get_release_required_by_list(req_release.id)
 
-        return release_required_by_list
+        def get_required_by(release_id, visited):
+            required_by_list = []
+            for req_release in self.release_collection.iterate_releases():
+                if release_id in req_release.requires_release_ids and req_release.id not in visited:
+                    visited.add(req_release.id)
+                    required_by_list.append(req_release.id)
+                    required_by_list.extend(get_required_by(req_release.id, visited))
+            return required_by_list
+
+        return get_required_by(release_id, set())
 
     def get_ostree_tar_filename(self, patch_sw_version, patch_id):
         '''
@@ -1596,38 +1591,52 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error, upload_info=upload_info)
 
-    def release_apply_remove_order(self, release_id, running_sw_version, reverse=False):
+    def release_apply_order(self, release_id, running_release_sw_version):
+        """
+        Determines the order of releases for applying.
+        :param release_id: The appliyng release id
+        :param running_release_sw_version: The running release major version
+        :return: List of releases in the order for applying
+        """
 
-        # If R4 requires R3, R3 requires R2 and R2 requires R1,
-        # then release_order = ['R4', 'R3', 'R2', 'R1']
+        release_dependencies = self.get_release_dependency_list(release_id)
+        release_dependencies.append(release_id)
 
-        if reverse:
-            release_order = [release_id] + self.get_release_dependency_list(release_id)
-            # If release_order = ['R4', 'R3', 'R2', 'R1']
-            # and running_sw_version is the sw_version for R2
-            # After the operation below, release_order = ['R4', 'R3']
-            for i, rel in enumerate(release_order):
-                release = self.release_collection.get_release_by_id(rel)
-                if release.sw_release == running_sw_version:
-                    val = i - len(release_order) + 1
-                    while val >= 0:
-                        release_order.pop()
-                        val = val - 1
-                    break
+        deployed_releases_id = []
+        for rel in self.release_collection.iterate_releases():
+            if rel.state == states.DEPLOYED:
+                deployed_releases_id.append(rel.id)
 
-        else:
-            release_order = [release_id] + self.get_release_required_by_list(release_id)
-        # reverse = True is for apply operation
-        # In this case, the release_order = ['R3', 'R4']
-        # reverse = False is for remove operation
-        # In this case, the release_order = ['R3']
-        if reverse:
-            release_order.reverse()
-        else:
-            # Note(bqian) this pop is questionable, specified release would not be removed?
-            release_order.pop(0)
+        # filter release_dependencies to include only releases
+        # that matches the major running release version
+        # and remove all releases already deployed
+        to_apply_releases = [
+            rel_id for rel_id in release_dependencies
+            if f"-{running_release_sw_version}." in rel_id and rel_id not in deployed_releases_id
+        ]
 
-        return release_order
+        to_apply_releases.sort()
+        return to_apply_releases
+
+    def release_remove_order(self, release_id, running_release_sw_version):
+        """
+        Determines the order of releases for removing.
+        :param release_id: The removing release id
+        :param running_release_sw_version: The running release major version
+        :return: List of releases in the order for removing
+        """
+
+        # if removing release is not from the major running version, cannot remove it
+        if f"-{running_release_sw_version}." not in release_id:
+            return []
+
+        to_remove_releases = self.get_release_required_by_list(release_id)
+        # The specified release will not be removed
+        if release_id in to_remove_releases:
+            to_remove_releases.remove(release_id)
+
+        to_remove_releases.sort(reverse=True)
+        return to_remove_releases
 
     def _rollback_last_commit(self, release):
         base_commit_id = release.base_commit_id
@@ -2680,13 +2689,7 @@ class PatchController(PatchService):
 
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-        # todo(chuck) Remove once to determine how we are associating a patch
-        # with a release.
-        # release in release metadata.xml file represents the latest commit
-        # for release_id in sorted(list(self.release_data.metadata)):
-        #    if SW_VERSION == self.release_data.contents[release_id]["release"]:
-        #        running_sw_version = self.release_data.metadata[release_id]["sw_version"]
-        #        LOG.info("Running software version: %s", running_sw_version)
+        # Patch operation: 'deploy release' major version equals 'running release' major version (MM.mm)
 
         # TODO(bqian) update references of sw_release (string) to SWRelease object
 
@@ -2716,8 +2719,7 @@ class PatchController(PatchService):
             collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
             create_deploy_hosts(hostname=hostname)
 
-            # reverse = True is used for apply operation
-            deployment_list = self.release_apply_remove_order(deployment, running_release.sw_release, reverse=True)
+            deployment_list = self.release_apply_order(deployment, running_release.sw_version)
 
             msg = "Deploy start order for apply operation: %s" % ",".join(deployment_list)
             LOG.info(msg)
@@ -2750,7 +2752,8 @@ class PatchController(PatchService):
         elif operation == "remove":
             collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
             create_deploy_hosts(hostname=hostname)
-            deployment_list = self.release_apply_remove_order(deployment, running_release.sw_version)
+            deployment_list = self.release_remove_order(deployment, running_release.sw_version)
+
             msg = "Deploy start order for remove operation: %s" % ",".join(deployment_list)
             LOG.info(msg)
             audit_log_info(msg)
@@ -2955,9 +2958,10 @@ class PatchController(PatchService):
                     LOG.error("%s: %s" % (msg_error, e))
                     raise SoftwareServiceError(msg_error)
             else:
-                LOG.info("Delete ostree commit")
-                to_delete_release = self.release_collection.get_release_by_id(from_release)
-                self._rollback_last_commit(to_delete_release)
+                for release in self.release_collection.iterate_releases():
+                    if release.sw_release == to_release:
+                        LOG.info("Delete ostree commit")
+                        self._rollback_last_commit(release)
 
             release_state.available()
 
