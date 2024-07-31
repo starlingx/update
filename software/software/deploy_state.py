@@ -45,7 +45,7 @@ deploy_state_transition = {
     # deploy activate
     DEPLOY_STATES.ACTIVATE: [DEPLOY_STATES.ACTIVATE_DONE, DEPLOY_STATES.ACTIVATE_FAILED],
     DEPLOY_STATES.ACTIVATE_FAILED: [DEPLOY_STATES.ACTIVATE,  # deploy activate is reentrant
-                                    DEPLOY_STATES.ACTIVATE_ROLLBACK],
+                                    DEPLOY_STATES.ACTIVATE_ROLLBACK_PENDING],
     DEPLOY_STATES.ACTIVATE_DONE: [DEPLOY_STATES.COMPLETED, DEPLOY_STATES.ACTIVATE_ROLLBACK_PENDING],
 
     # deploy activate rollback
