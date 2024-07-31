@@ -175,5 +175,7 @@ COMMIT_TAG = "commit"
 CHECKSUM_TAG = "checksum"
 COMMIT1_TAG = "commit1"
 
-# install local flag
+# flags
 INSTALL_LOCAL_FLAG = "/opt/software/.install_local"
+USM_UPGRADE_IN_PROGRESS_FLAG = os.path.join(tsc.PLATFORM_CONF_PATH, ".usm_upgrade_in_progress")
+UPGRADE_DO_NOT_USE_FQDN_FLAG = os.path.join(tsc.PLATFORM_CONF_PATH, ".upgrade_do_not_use_fqdn")
