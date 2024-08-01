@@ -371,10 +371,6 @@ class SoftwareClientShell(object):
             rc = 1
             exit(rc)
 
-        endpoint_type = 'public'
-        if dc_request:
-            endpoint_type = 'internal'
-
         # Identify authentication mode [token, keystone, local_root]
         if args.software_url and args.os_auth_token:
             auth_mode = TOKEN
@@ -390,7 +386,6 @@ class SoftwareClientShell(object):
                              'software commands as root (sudo)')
             raise exc.CommandError(exception_msg)
 
-        args.os_endpoint_type = endpoint_type
         client = sclient.get_client(api_version, auth_mode, **(args.__dict__))
 
         try:

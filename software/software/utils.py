@@ -420,7 +420,7 @@ def get_endpoints_token(config=None, service_type="platform"):
         token, endpoint = get_auth_token_and_endpoint(user=user,
                                                       service_type=service_type,
                                                       region_name=region_name,
-                                                      interface='public')
+                                                      interface='internal')
         return token, endpoint
     except Exception as e:
         LOG.error("Failed to get '%s' endpoint. Error: %s", service_type, str(e))
