@@ -5,6 +5,7 @@
 #
 
 import os
+import re
 import signal
 import sys
 import textwrap
@@ -267,7 +268,45 @@ class ReleaseManager(base.Manager):
         path = "/v1/deploy_host/install_local"
         return self._post(path, body=body)
 
-    def release_delete(self, release_id):
-        release_ids = "/".join(release_id)
+    def release_delete(self, release_id_list, delete_all):
+        if delete_all:
+            if len(release_id_list) != 1:
+                print("--all require only one release ID")
+                return 1
+
+            pattern = r"^([a-zA-Z]+)-(\d{2}\.\d{2})$"
+            match = re.match(pattern, release_id_list[0])
+            if not match:
+                print("The release ID must have the pattern: component-MM.mm")
+                return 1
+
+            component = match.group(1)
+            sw_version = match.group(2)
+
+            # Get a list of all patches from sw_version (MM.mm)
+            url = "/v1/release?show=patch&release=%s" % sw_version
+            resp, body = self._list(url, "")
+
+            patch_list = []
+            if resp.status_code == 200:
+                data = body
+            else:
+                print("Could not fetch the releases from %s-%s version" % (component, sw_version))
+                return 1
+
+            # filter patches by component
+            for release in data:
+                if release["component"] == component:
+                    patch_list.append(release["release_id"])
+
+            if len(patch_list) == 0:
+                print("There are no %s-%s releases to delete." % (component, sw_version))
+                return 0
+
+            # pass all releases, software will check if can be deleted
+            release_ids = "/".join(patch_list)
+        else:
+            release_ids = "/".join(release_id_list)
+
         path = '/v1/release/%s' % release_ids
         return self._delete(path)

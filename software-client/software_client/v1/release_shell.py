@@ -213,12 +213,18 @@ def do_upload_dir(cc, args):
     return utils.check_rc(resp, data)
 
 
+# --all is an optional argument
+@utils.arg('--all',
+           action='store_true',
+           required=False,
+           help='Delete all patches and major releases related '
+                'to the given major release ID')
 @utils.arg('release',
            nargs="+",  # accepts a list
            help='Release ID to delete')
 def do_delete(cc, args):
     """Delete the software release"""
-    resp, data = cc.release.release_delete(args.release)
+    resp, data = cc.release.release_delete(args.release, args.all)
     if args.debug:
         utils.print_result_debug(resp, data)
 
