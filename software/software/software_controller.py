@@ -2420,7 +2420,15 @@ class PatchController(PatchService):
         # TODO(jvazhapp): fix patch flag for prepatched iso scenario
         patch = (not utils.is_upgrade_deploy(SW_VERSION, release_version) and
                  version.Version(release_version).micro != 0)
-        return self._deploy_precheck(release_version, force, region_name, patch)
+        ret = self._deploy_precheck(release_version, force, region_name, patch)
+        if ret:
+            if ret.get("system_healthy") is None:
+                ret["error"] = "Fail to perform deploy precheck. Internal error has occurred.\n" + \
+                                ret.get("error")
+            elif not ret.get("system_healthy"):
+                ret["error"] = "The following issues have been detected, which prevent " \
+                                "deploying %s\n" % deployment + ret.get("info")
+        return ret
 
     def _deploy_upgrade_start(self, to_release, commit_id):
         LOG.info("start deploy upgrade to %s from %s" % (to_release, SW_VERSION))
