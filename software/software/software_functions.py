@@ -352,7 +352,8 @@ class ReleaseData(object):
                     "post_install",
                     "warnings",
                     "apply_active_release_only",
-                    "commit"]:
+                    "commit",
+                    "component"]:
             value = root.findtext(key)
             if value is not None:
                 self.metadata[release_id][key] = value
