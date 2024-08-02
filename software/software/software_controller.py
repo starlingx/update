@@ -3104,8 +3104,8 @@ class PatchController(PatchService):
         deploy = self.db_api_instance.get_current_deploy()
         from_release = deploy.get("from_release")
         to_release = deploy.get("to_release")
-        from_release_deployment = constants.RELEASE_GA_NAME % from_release
-        to_release_deployment = constants.RELEASE_GA_NAME % to_release
+        from_release_deployment = self.release_collection.get_release_id_by_sw_release(from_release)
+        to_release_deployment = self.release_collection.get_release_id_by_sw_release(to_release)
 
         try:
             is_major_release = ReleaseState(release_state=states.DEPLOYING).is_major_release_deployment()
@@ -3121,7 +3121,7 @@ class PatchController(PatchService):
         commit_id = deploy_release.commit_id
 
         # TODO(lbonatti): remove this condition when commit-id is built into GA metadata.
-        if commit_id is None:
+        if commit_id in [constants.COMMIT_DEFAULT_VALUE, None]:
             commit_id = ostree_utils.get_feed_latest_commit(deploy_release.sw_version)
 
         # Update the deployment
