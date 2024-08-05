@@ -61,6 +61,7 @@ def is_host_locked_and_online(host):
             return True
     return False
 
+
 def are_all_hosts_unlocked_and_online():
     for ihost in get_ihost_list():
         if ihost.administrative != constants.ADMIN_UNLOCKED or ihost.availability != constants.AVAILABILITY_AVAILABLE:
