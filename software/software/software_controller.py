@@ -2529,6 +2529,13 @@ class PatchController(PatchService):
                     audit_log_info(msg)
 
                     deploy_release = self._release_basic_checks(release_id)
+                    all_commits = ostree_utils.get_all_feed_commits(running_release.sw_version)
+                    if deploy_release.commit_id in all_commits:
+                        # This case is for node with prestaged data where ostree
+                        # commits have been pulled from system controller
+                        LOG.info("Commit %s already exists in feed repo for release %s"
+                                %(deploy_release.commit_id, release_id))
+                        continue
 
                     packages = [pkg.split("_")[0] for pkg in deploy_release.packages]
                     if packages is None:
@@ -2536,13 +2543,8 @@ class PatchController(PatchService):
                         LOG.error(msg)
                         raise MetadataFail(msg)
 
-                    latest_commit = ""
-                    try:
-                        latest_commit = ostree_utils.get_feed_latest_commit(running_release.sw_version)
-                        LOG.info("Latest commit: %s" % latest_commit)
-                    except OSTreeCommandFail:
-                        LOG.exception("Failure during commit consistency check for %s.", release_id)
-
+                    #commit consistency check
+                    latest_commit = all_commits[0]
                     # Install debian package through apt-ostree
                     try:
                         apt_utils.run_install(feed_repo, deploy_release.sw_release, packages)
@@ -2570,9 +2572,6 @@ class PatchController(PatchService):
                     with self.hosts_lock:
                         self.interim_state[release_id] = list(self.hosts)
 
-                    # Update the feed ostree summary
-                    ostree_utils.update_repo_summary_file(feed_repo)
-
                     self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
 
                     # Update metadata
@@ -2595,6 +2594,10 @@ class PatchController(PatchService):
                         outfile.write(tree)
 
                     LOG.info("Latest feed commit: %s added to metadata file" % self.latest_feed_commit)
+
+                # Update the feed ostree summary
+                ostree_utils.update_repo_summary_file(feed_repo)
+                self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
 
                 # move the deploy state to start-done
                 deploy_state = DeployState.get_instance()
