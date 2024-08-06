@@ -3259,16 +3259,11 @@ class PatchController(PatchService):
         if deploy_host is None:
             raise HostNotFound(hostname)
         deploy = self.db_api_instance.get_deploy_all()[0]
-        to_release = deploy.get("to_release")
         commit_id = deploy.get("commit_id")
-        release_id = None
-        for release in self.release_collection.iterate_releases():
-            if to_release == release.sw_release:
-                release_id = release.id
         if not self.install_local:
             deploy_host_validations(
                 hostname,
-                is_major_release=self.release_collection.get_release_by_id(release_id).is_ga_release,
+                is_major_release=self.check_upgrade_in_progress(),
                 rollback=rollback
             )
         deploy_state = DeployState.get_instance()
