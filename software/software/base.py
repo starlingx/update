@@ -139,9 +139,9 @@ class PatchService(object):
         if utils.get_management_version(hostname=constants.PREBOOTSTRAP_HOSTNAME
                                         ) == constants.ADDRESS_VERSION_IPV6:
             self.sock_out = socket.socket(socket.AF_INET6,
-                                        socket.SOCK_DGRAM)
+                                          socket.SOCK_DGRAM)
             self.sock_in = socket.socket(socket.AF_INET6,
-                                        socket.SOCK_DGRAM)
+                                         socket.SOCK_DGRAM)
 
             self.sock_out.setblocking(0)
             self.sock_in.setblocking(0)
@@ -153,9 +153,9 @@ class PatchService(object):
             self.sock_in.bind(('', self.port))
         else:
             self.sock_out = socket.socket(socket.AF_INET,
-                                        socket.SOCK_DGRAM)
+                                          socket.SOCK_DGRAM)
             self.sock_in = socket.socket(socket.AF_INET,
-                                        socket.SOCK_DGRAM)
+                                         socket.SOCK_DGRAM)
 
             self.sock_out.setblocking(0)
             self.sock_in.setblocking(0)
@@ -166,7 +166,6 @@ class PatchService(object):
             self.sock_in.bind(('', self.port))
 
         return self.sock_in
-
 
     def setup_socket(self):
         self.socket_lock_acquire()

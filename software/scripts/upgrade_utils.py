@@ -77,6 +77,7 @@ def get_sysinv_client(token, endpoint):
         msg = "Failed to get sysinv client. Error: %s" % str(e)
         raise Exception(msg)
 
+
 def call_api(token_id, method, api_cmd, api_cmd_headers=None,
              api_cmd_payload=None, timeout_in_secs=40):
 

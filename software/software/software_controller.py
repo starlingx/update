@@ -2754,8 +2754,8 @@ class PatchController(PatchService):
             self.install_releases_thread(deployment_list, feed_repo)
 
             msg_info += "%s is now starting, await for the states: " \
-                            "[deploy-start-done | deploy-start-failed] in " \
-                            "'software deploy show'\n" % deployment_list
+                        "[deploy-start-done | deploy-start-failed] in " \
+                        "'software deploy show'\n" % deployment_list
 
         elif operation == "remove":
             collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
