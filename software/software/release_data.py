@@ -296,6 +296,14 @@ class SWReleaseCollection(object):
                 return sw_release
         return None
 
+    def get_release_id_by_sw_release(self, sw_release):
+        sorted_list = sorted(self._sw_releases)
+        for rel_id in sorted_list:
+            rel_data = self._sw_releases[rel_id]
+            if rel_data.sw_release == sw_release:
+                return rel_data.id
+        return None
+
     def iterate_releases_by_state(self, state):
         '''return iteration of releases matching specified state.
         sorted by id in ascending order
