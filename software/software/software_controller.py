@@ -2416,11 +2416,9 @@ class PatchController(PatchService):
         release = self._release_basic_checks(deployment)
         release_version = release.sw_release
 
-        # Check all fields (MM.mm.pp) of release_version to set patch flag
-        # TODO(jvazhapp): fix patch flag for prepatched iso scenario
-        patch = (not utils.is_upgrade_deploy(SW_VERSION, release_version) and
-                 version.Version(release_version).micro != 0)
-        ret = self._deploy_precheck(release_version, force, region_name, patch)
+        # Check fields (MM.mm) of release_version to set patch flag
+        is_patch = (not utils.is_upgrade_deploy(SW_VERSION, release_version))
+        ret = self._deploy_precheck(release_version, force, region_name, is_patch)
         if ret:
             if ret.get("system_healthy") is None:
                 ret["error"] = "Fail to perform deploy precheck. Internal error has occurred.\n" + \
