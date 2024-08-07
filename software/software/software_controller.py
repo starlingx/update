@@ -2236,7 +2236,7 @@ class PatchController(PatchService):
                     break
         return rc
 
-    def copy_install_scripts(self, patch_id):
+    def copy_install_scripts(self):
         applying_states = [states.DEPLOYING, states.REMOVING]
         for release in self.release_collection.iterate_releases():
             pre_install = release.pre_install
@@ -2245,7 +2245,7 @@ class PatchController(PatchService):
             if release.state in applying_states:
                 try:
                     for i, file in enumerate(file for file in (pre_install, post_install) if file):
-                        full_name_file = "%s_%s" % (patch_id, file)
+                        full_name_file = "%s_%s" % (release.id, file)
                         script_path = "%s/%s" % (root_scripts_dir, full_name_file)
                         dest_path = constants.PATCH_SCRIPTS_STAGING_DIR + "/" + folder[i]
                         dest_script_file = "%s/%s" % (dest_path, full_name_file)
@@ -2262,7 +2262,7 @@ class PatchController(PatchService):
             else:
                 try:
                     for i, file in enumerate(file for file in (pre_install, post_install) if file):
-                        full_name_file = "%s_%s" % (patch_id, file)
+                        full_name_file = "%s_%s" % (release.id, file)
                         script_path = "%s/%s/%s" % (constants.PATCH_SCRIPTS_STAGING_DIR, folder[i], full_name_file)
                         if os.path.exists(script_path):
                             os.remove(script_path)
@@ -3288,7 +3288,7 @@ class PatchController(PatchService):
         if self.allow_insvc_patching:
             LOG.info("Allowing in-service patching")
             force = True
-            self.copy_install_scripts(release_id)
+            self.copy_install_scripts()
 
         # Check if there is a major release deployment in progress
         # and set agent request parameters accordingly
