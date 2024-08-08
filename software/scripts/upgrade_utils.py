@@ -48,7 +48,7 @@ def get_token_endpoint(config, service_type="platform"):
         token = sess.get_token()
         endpoint = sess.get_endpoint(service_type=service_type,
                                      region_name=config["region_name"],
-                                     interface="public")
+                                     interface='internal')
     except exceptions.http.Unauthorized:
         raise Exception("Failed to authenticate to Keystone. Request unauthorized")
     except Exception as e:
