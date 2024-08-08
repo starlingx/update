@@ -183,6 +183,18 @@ class CreateUSMUpgradeInProgressFlag(BaseHook):
             LOG.info("Created %s flag" % flag_file)
 
 
+class RemoveKubernetesConfigSymlinkHook(BaseHook):
+    K8S_ENCRYPTION_PROVIDER_FILE = "/etc/kubernetes/encryption-provider.yaml"
+
+    def run(self):
+        try:
+            os.unlink(self.K8S_ENCRYPTION_PROVIDER_FILE)
+            LOG.info("%s symlink removed" % self.K8S_ENCRYPTION_PROVIDER_FILE)
+        except Exception as e:
+            LOG.exception("Failed to remove symlink: %s" % str(e))
+            raise
+
+
 class RemoveCephMonHook(BaseHook):
     """
     Remove additional ceph-mon added for each controller
@@ -232,6 +244,7 @@ AGENT_HOOKS = {
     },
     MAJOR_RELEASE_ROLLBACK: {
         PRE: [
+            RemoveKubernetesConfigSymlinkHook,
             UsmInitHook,
         ],
         POST: [
