@@ -965,6 +965,7 @@ class PatchController(PatchService):
 
         DeployHostState.register_event_listener(DeployState.host_deploy_updated)
         DeployState.register_event_listener(ReleaseState.deploy_updated)
+        DeployState.register_event_listener(self.create_clean_up_deployment_alarm)
 
     @property
     def release_collection(self):
@@ -2993,6 +2994,10 @@ class PatchController(PatchService):
             cleanup_req.send(self.sock_out)
             self.socket_lock.release()
 
+            self.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_CLEANUP_DEPLOYMENT_DATA,
+                                       fm_constants.FM_ALARM_STATE_CLEAR,
+                                       "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, constants.CONTROLLER_FLOATING_HOSTNAME))
+
         msg_info += "Deploy deleted with success"
         self.db_api_instance.delete_deploy_host_all()
         self.db_api_instance.delete_deploy()
@@ -3551,7 +3556,7 @@ class PatchController(PatchService):
         func(*args, **kwargs)
         self._update_state_to_peer()
 
-    def manage_software_alarm(self, alarm_id, alarm_state, entity_instance_id):
+    def manage_software_alarm(self, alarm_id, alarm_state, entity_instance_id, **kwargs):
         try:
             if alarm_id not in constants.SOFTWARE_ALARMS:
                 raise Exception("Unknown software alarm '%s'." % alarm_id)
@@ -3564,6 +3569,12 @@ class PatchController(PatchService):
 
             # if not clear alarm scenario, create the alarm
             alarm_data = constants.SOFTWARE_ALARMS.get(alarm_id)
+            # update the alarm_data if it is present in kwargs
+            if kwargs:
+                for data in alarm_data:
+                    if data in kwargs.keys():
+                        alarm_data[data] = kwargs[data]
+
             alarm = fm_api.Fault(
                 alarm_id=alarm_id,
                 alarm_state=alarm_state,
@@ -3587,6 +3598,28 @@ class PatchController(PatchService):
         """Get the out-of-sync alarm instance from fm_api"""
         return self.fm_api.get_fault(fm_constants.FM_ALARM_ID_SW_UPGRADE_DEPLOY_STATE_OUT_OF_SYNC,
                                      constants.ALARM_INSTANCE_ID_OUT_OF_SYNC)
+
+    def create_clean_up_deployment_alarm(self, target_state):
+        """
+        Creates the 900.022 alarm to warn the user to clean up the deployment data remaining for the specified release
+        version.
+
+        """
+        if target_state in [DEPLOY_STATES.COMPLETED, DEPLOY_STATES.HOST_ROLLBACK_DONE]:
+            deploy = self.db_api_instance.get_current_deploy()
+            deploy_state = deploy.get('state')
+            release_version = deploy.get('from_release')
+            reason_text = constants.SOFTWARE_ALARMS[fm_constants.FM_ALARM_ID_USM_CLEANUP_DEPLOYMENT_DATA]["reason_text"]
+
+            # Only creates if actual state is COMPLETED or HOST_ROLLBACK_DONE
+            if deploy_state in [DEPLOY_STATES.COMPLETED.value, DEPLOY_STATES.HOST_ROLLBACK_DONE.value]:
+                new_reason_text = reason_text % (deploy_state, release_version)
+            else:
+                return
+            self.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_CLEANUP_DEPLOYMENT_DATA,
+                                       fm_constants.FM_ALARM_STATE_SET,
+                                       "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, constants.CONTROLLER_FLOATING_HOSTNAME),
+                                       reason_text=new_reason_text)
 
     def handle_deploy_state_sync(self):
         """
