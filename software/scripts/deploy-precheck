@@ -39,6 +39,7 @@ SUPPORTED_K8S_VERSIONS = [
 
 RC_SUCCESS = 0
 RC_UNHEALTHY = 3
+STATE_AVAILABLE = 'available'
 STATE_DEPLOYED = 'deployed'
 
 class HealthCheck(object):
@@ -84,26 +85,29 @@ class HealthCheck(object):
 
     # TODO(heitormatsui): implement patch precheck targeted against USM
     #  and implement patch precheck for subcloud
-    def _check_deployed_state(self, required_patches):
+    def _check_required_patches_state(self, required_patches, patch_health_check=False):
         """
-        Checks if every patch in a list is in 'deployed' state
+        Check if the required patches are in 'deployed' state, if patch_health_check is
+        True, the required_patches can be in 'available' state as well.
         :param required_patches: list of patches to be checked
+        :param patch_health_check: boolean if is a patch or upgrage health check
         :return: boolean indicating success/failure and list of patches
-                 that are not in the 'deployed' state
+                 that are not in the 'deployed' or 'available' state
         """
         success = True
         releases = self._config.get("releases", "")
-        deployed_releases = []
+        releases_in_allowed_states = []
         for release in json.loads(releases):
-            if release['state'] == STATE_DEPLOYED:
-                deployed_releases.append(release)
+            if release['state'] == STATE_DEPLOYED or \
+                (patch_health_check and release['state'] == STATE_AVAILABLE):
+                releases_in_allowed_states.append(release)
 
-        applied_patches = [release['release_id'] for release in deployed_releases]
-        missing_patch = list(set(required_patches) - set(applied_patches))
-        if missing_patch:
+        allowed_patches = [release['release_id'] for release in releases_in_allowed_states]
+        missing_patches = list(set(required_patches) - set(allowed_patches))
+        if missing_patches:
             success = False
 
-        return success, missing_patch
+        return success, missing_patches
 
     def run_general_health_check(self):
         """Run general health check using sysinv client"""
@@ -205,7 +209,7 @@ class UpgradeHealthCheck(HealthCheck):
         health_ok = health_ok and success
 
         # check if required patches are deployed
-        success, missing_patches = self._check_deployed_state(required_patches)
+        success, missing_patches = self._check_required_patches_state(required_patches)
         output += 'Required patches are applied: [%s]\n' \
                   % (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
         if not success:
@@ -315,11 +319,11 @@ class PatchHealthCheck(HealthCheck):
 
         # check required patches for target release
         required_patches = self._get_required_patches()
-        success, missing_patches = self._check_deployed_state(required_patches)
-        output += 'Required patches are applied: [%s]\n' \
+        success, missing_patches = self._check_required_patches_state(required_patches, True)
+        output += 'Required patches are deployed or available: [%s]\n' \
                   % (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
         if not success:
-            output += '-> Patches not applied: [%s]\n' \
+            output += '-> Patches not deployed or available: [%s]\n' \
                 % ', '.join(missing_patches)
         health_ok = health_ok and success
 
