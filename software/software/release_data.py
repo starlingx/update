@@ -159,6 +159,10 @@ class SWRelease(object):
         return self._get_by_key('reboot_required') == "Y"
 
     @property
+    def prepatched_iso(self):
+        return self._get_by_key('prepatched_iso') == "Y"
+
+    @property
     def requires_release_ids(self):
         return self._get_by_key('requires') or []
 
@@ -255,6 +259,7 @@ class SWRelease(object):
                 "install_instructions": self.install_instructions,
                 "warnings": self.warnings,
                 "reboot_required": self.reboot_required,
+                "prepatched_iso": self.prepatched_iso,
                 "requires": self.requires_release_ids[:],
                 "packages": self.packages[:]}
         return data
