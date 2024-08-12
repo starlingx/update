@@ -2923,19 +2923,25 @@ class PatchController(PatchService):
 
         if DEPLOY_STATES.COMPLETED == deploy_state_instance.get_deploy_state():
             deploying_release_state = ReleaseState(release_state=states.DEPLOYING)
-            is_major_release = deploying_release_state.is_major_release_deployment()
+            is_applying = deploying_release_state.has_release_id()
 
-            major_release = utils.get_major_release_version(from_release)
-            # In case of a major release deployment set all the releases related to from_release to unavailable
-            if is_major_release:
-                unavailable_releases = []
-                for release in self.release_collection.iterate_releases():
-                    if release.sw_version == major_release:
-                        unavailable_releases.append(release.id)
-                ReleaseState(release_ids=unavailable_releases).replaced()
+            if is_applying:
+                is_major_release = deploying_release_state.is_major_release_deployment()
 
-            # Set deploying releases to deployed state.
-            deploying_release_state.deploy_completed()
+                major_release = utils.get_major_release_version(from_release)
+                # In case of a major release deployment set all the releases related to from_release to unavailable
+                if is_major_release:
+                    unavailable_releases = []
+                    for release in self.release_collection.iterate_releases():
+                        if release.sw_version == major_release:
+                            unavailable_releases.append(release.id)
+                    ReleaseState(release_ids=unavailable_releases).replaced()
+
+                # Set deploying releases to deployed state.
+                deploying_release_state.deploy_completed()
+            else:
+                removing_release_state = ReleaseState(release_state=states.REMOVING)
+                removing_release_state.available()
 
         elif DEPLOY_STATES.HOST_ROLLBACK_DONE == deploy_state_instance.get_deploy_state():
             major_release = utils.get_major_release_version(from_release)
