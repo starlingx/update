@@ -123,6 +123,7 @@ LAST_IN_SYNC = "last_in_sync"
 ALARM_INSTANCE_ID_OUT_OF_SYNC = "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST,
                                            CONTROLLER_FLOATING_HOSTNAME)
 
+SYSTEM_TYPE_ALL_IN_ONE = "All-in-one"
 SYSTEM_MODE_SIMPLEX = "simplex"
 SYSTEM_MODE_DUPLEX = "duplex"
 
