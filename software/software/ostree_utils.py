@@ -91,6 +91,29 @@ def get_sysroot_latest_commit():
     return get_ostree_latest_commit(constants.OSTREE_REF, constants.SYSROOT_OSTREE)
 
 
+def get_all_feed_commits(patch_sw_version):
+    """
+    Query ostree feed using ostree log <ref> --repo=<path>
+    :return: All the commit ids for feed repo
+    """
+    repo_path = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR,
+                                           patch_sw_version)
+    cmd = "ostree log %s --repo=%s | grep -i commit" % (constants.OSTREE_REF, repo_path)
+    try:
+        output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        info_msg = "OSTree log Error: return code: %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.info(info_msg)
+        msg = "Failed to fetch ostree log for %s." % repo_path
+        raise OSTreeCommandFail(msg)
+    # Store the output of the above command in a string
+    output_string = output.stdout.decode('utf-8')
+    feed_commits = output_string.split("\n")
+    all_commits = [x.split()[1] for x in feed_commits if x]
+    return all_commits
+
+
 def get_latest_deployment_commit():
     """
     Get the active deployment commit ID
