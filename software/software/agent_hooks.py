@@ -8,6 +8,7 @@ import filecmp
 import glob
 import os
 import shutil
+import socket
 import subprocess
 
 import software.constants as constants
@@ -182,6 +183,32 @@ class CreateUSMUpgradeInProgressFlag(BaseHook):
             LOG.info("Created %s flag" % flag_file)
 
 
+class RemoveCephMonHook(BaseHook):
+    """
+    Remove additional ceph-mon added for each controller
+    """
+    PMON_FILE = "/ostree/1/etc/pmon.d/ceph-fixed-mon.conf"
+
+    def run(self):
+        system_type = utils.get_platform_conf("system_type")
+        system_mode = utils.get_platform_conf("system_mode")
+        nodetype = utils.get_platform_conf("nodetype")
+        hostname = socket.gethostname()
+        # additional monitors were added only for AIO-DX
+        if (system_type == constants.SYSTEM_TYPE_ALL_IN_ONE and
+                system_mode != constants.SYSTEM_MODE_SIMPLEX and
+                nodetype == constants.CONTROLLER):
+            cmd = ["ceph", "mon", "rm", hostname]
+            try:
+                subprocess.check_call(cmd)
+                LOG.info("Removed mon.%s from ceph cluster." % hostname)
+            except subprocess.CalledProcessError as e:
+                LOG.exception("Failure removing mon.%s from ceph cluster: %s" % (hostname, str(e)))
+                raise
+            os.unlink(self.PMON_FILE)
+            LOG.info("Removed %s from pmon." % self.PMON_FILE)
+
+
 # pre and post keywords
 PRE = "pre"
 POST = "post"
@@ -209,6 +236,7 @@ AGENT_HOOKS = {
         ],
         POST: [
             ReconfigureKernelHook,
+            RemoveCephMonHook,
         ],
     },
 }
