@@ -197,6 +197,28 @@ def pull_ostree_from_remote(remote=None):
     Pull from remote ostree to sysroot ostree
     """
 
+    # TODO(mmachado): remove once gpg is enabled
+    # Modify the ostree configuration to disable gpg-verify
+    try:
+        command = """
+        if grep -q 'gpg-verify=' /sysroot/ostree/repo/config;
+        then
+            sed -i '/gpg-verify=/ {
+                s/gpg-verify=true/gpg-verify=false/
+            }' /sysroot/ostree/repo/config;
+        else
+            echo 'gpg-verify=false' >> /sysroot/ostree/repo/config;
+        fi
+        """
+        subprocess.run(command, shell=True, check=True)
+
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to modify ostree config to disable GPG verification"
+        err_msg = "Command Error: return code: %s, Output: %s" \
+            % (e.returncode, e.stderr.decode("utf-8") if e.stderr else "No error message")
+        LOG.exception(err_msg)
+        raise OSTreeCommandFail(msg)
+
     cmd = "ostree pull %s --depth=-1"
     ref_cmd = ""
     if not remote:
