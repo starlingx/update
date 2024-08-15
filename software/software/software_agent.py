@@ -18,6 +18,7 @@ import time
 import software.agent_hooks as agent_hooks
 import software.ostree_utils as ostree_utils
 from software.software_functions import configure_logging
+from software.software_functions import remove_major_release_deployment_flags
 from software.software_functions import LOG
 import software.config as cfg
 from software.base import PatchService
@@ -360,6 +361,8 @@ class SoftwareMessageDeployDeleteCleanupReq(messages.PatchMessage):
         nodetype = utils.get_platform_conf("nodetype")
         success_update = ostree_utils.add_ostree_remote(self.major_release, nodetype,
                                                         replace_default_remote=True)
+        success_flags = remove_major_release_deployment_flags()
+
         if success_cleanup:
             LOG.info("Success cleaning temporary refs/remotes.")
         else:
@@ -371,6 +374,12 @@ class SoftwareMessageDeployDeleteCleanupReq(messages.PatchMessage):
         else:
             LOG.error("Failure updating default remote. "
                       "Please update '%s' remote manually." % constants.OSTREE_REMOTE)
+
+        if success_flags:
+            LOG.info("Success removing local major release deployment flags.")
+        else:
+            LOG.error("Failure removing major release deployment flags. "
+                      "Please remove them manually.")
 
         success = success_cleanup and success_update
         resp = SoftwareMessageDeployDeleteCleanupResp()
