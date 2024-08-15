@@ -19,6 +19,7 @@
 logfile="/var/log/software.log"
 INITIAL_CONFIG_COMPLETE="/etc/platform/.initial_config_complete"
 SERVICE_NAME="usm-initialize.service"
+PXELINUX_SYMLINK="/var/pxeboot/pxelinux.cfg"
 
 log() {
     echo "`date "+%FT%T.%3N"`: $0: $*" >> $logfile
@@ -72,10 +73,18 @@ disable_service() {
     fi
 }
 
+remove_pxelinux_symlink() {
+    if [[ -h $PXELINUX_SYMLINK ]]; then
+        unlink $PXELINUX_SYMLINK
+        log "Removed ${PXELINUX_SYMLINK} symlink"
+    fi
+}
+
 start() {
     set_presets
     reset_initial_config_complete
     disable_service
+    remove_pxelinux_symlink
 }
 
 case "$1" in
