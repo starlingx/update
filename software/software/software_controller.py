@@ -3009,12 +3009,15 @@ class PatchController(PatchService):
             clean_up_deployment_data(major_release)
 
             # Send message to agents cleanup their ostree environment
-            cleanup_req = SoftwareMessageDeployDeleteCleanupReq()
-            cleanup_req.major_release = utils.get_major_release_version(to_release)
-            cleanup_req.encode()
-            self.socket_lock.acquire()
-            cleanup_req.send(self.sock_out)
-            self.socket_lock.release()
+            # if the deployment has completed or rolled-back successfully
+            finished_deploy_states = [DEPLOY_STATES.COMPLETED, DEPLOY_STATES.HOST_ROLLBACK_DONE]
+            if deploy_state_instance.get_deploy_state() in finished_deploy_states:
+                cleanup_req = SoftwareMessageDeployDeleteCleanupReq()
+                cleanup_req.major_release = utils.get_major_release_version(to_release)
+                cleanup_req.encode()
+                self.socket_lock.acquire()
+                cleanup_req.send(self.sock_out)
+                self.socket_lock.release()
 
             self.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_CLEANUP_DEPLOYMENT_DATA,
                                        fm_constants.FM_ALARM_STATE_CLEAR,
