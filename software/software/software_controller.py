@@ -841,7 +841,10 @@ class SWMessageDeployStateChanged(messages.PatchMessage):
         if self.deploy_state:
             LOG.info("Received deploy state changed to %s, agent %s" %
                      (self.deploy_state, self.agent))
-            sc.deploy_state_changed(self.deploy_state)
+            try:
+                sc.deploy_state_changed(self.deploy_state)
+            except Exception as e:
+                LOG.error("Deploy state change failed: %s" % str(e))
         else:
             LOG.info("Received %s deploy host state changed to %s, agent %s" %
                      (self.hostname, self.host_state, self.agent))
