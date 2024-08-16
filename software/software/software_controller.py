@@ -2520,27 +2520,13 @@ class PatchController(PatchService):
                 return True
         return False
 
-    def install_releases_thread(self, deployment_list, feed_repo):
+    def install_releases_thread(self, deployment_list, feed_repo, running_release):
         """
         In a separated thread.
         Install the debian packages, create the commit and update the metadata.
         """
         def run():
             LOG.info("Installing releases on repo: %s" % feed_repo)
-
-            running_release = self.release_collection.running_release
-            to_deploy_release_id = deployment_list[-1]
-            to_deploy_release = self.release_collection.get_release_by_id(to_deploy_release_id)
-            reboot_required = self.is_deployment_list_reboot_required(deployment_list)
-
-            collect_current_load_for_hosts(to_deploy_release.sw_version)
-            release_state = ReleaseState(release_ids=deployment_list)
-            release_state.start_deploy()
-
-            # Setting deploy state to start, so that it can transition to start-done or start-failed
-            deploy_state = DeployState.get_instance()
-            to_release = to_deploy_release.sw_release
-            deploy_state.start(running_release, to_release, feed_repo, None, reboot_required)
 
             try:
                 for release_id in deployment_list:
@@ -2629,14 +2615,19 @@ class PatchController(PatchService):
                 self.send_latest_feed_commit_to_agent()
                 self.software_sync()
             except Exception as e:
-                msg = "Deploy start applying failed: %s" % e
+                msg = "Deploy start applying failed: %s" % str(e)
                 LOG.exception(msg)
                 audit_log_info(msg)
 
-                # set state to failed
-                deploy_state = DeployState.get_instance()
-                deploy_state.start_failed()
-                self._update_state_to_peer()
+                try:
+                    # set state to failed
+                    deploy_state = DeployState.get_instance()
+                    deploy_state.start_failed()
+                    self._update_state_to_peer()
+                except Exception as e:
+                    msg = "Unable to set deploy failed: %s" % str(e)
+                    LOG.exception(msg)
+                    audit_log_info(msg)
 
         thread = threading.Thread(target=run)
         thread.start()
@@ -2765,8 +2756,22 @@ class PatchController(PatchService):
             if kwargs.get("skip-semantic") != "yes":
                 self.run_semantic_check(constants.SEMANTIC_PREAPPLY, deployment_list)
 
+            running_release = self.release_collection.running_release
+            to_deploy_release_id = deployment_list[-1]
+            to_deploy_release = self.release_collection.get_release_by_id(to_deploy_release_id)
+            reboot_required = self.is_deployment_list_reboot_required(deployment_list)
+
+            collect_current_load_for_hosts(to_deploy_release.sw_version)
+            release_state = ReleaseState(release_ids=deployment_list)
+            release_state.start_deploy()
+
+            # Setting deploy state to start, so that it can transition to start-done or start-failed
+            deploy_state = DeployState.get_instance()
+            to_release = to_deploy_release.sw_release
+            deploy_state.start(running_release, to_release, feed_repo, None, reboot_required)
+
             # Start applying the releases
-            self.install_releases_thread(deployment_list, feed_repo)
+            self.install_releases_thread(deployment_list, feed_repo, running_release)
 
             msg_info += "%s is now starting, await for the states: " \
                         "[deploy-start-done | deploy-start-failed] in " \
