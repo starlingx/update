@@ -18,29 +18,37 @@ import software.utils as utils
 
 class BaseHook(object):
     """Base Hook object"""
+    DEPLOYED_OSTREE_DIR = "/ostree/1"
+    SYSTEMD_LIB_DIR = "/lib/systemd/system"
+    SYSTEMD_ETC_DIR = "%s/etc/systemd/system/multi-user.target.wants" % DEPLOYED_OSTREE_DIR
+
     def __init__(self, attrs=None):
         pass
 
     def run(self):
         pass
 
+    def enable_service(self, service):
+        src = "%s/%s" % (self.SYSTEMD_LIB_DIR, service)
+        dst = "%s/%s" % (self.SYSTEMD_ETC_DIR, service)
+        # Add check to enable reentrant
+        if not os.path.islink(dst):
+            try:
+                os.symlink(src, dst)
+                LOG.info("Enabled %s" % service)
+            except subprocess.CalledProcessError as e:
+                LOG.exception("Error enabling %s: %s" % (service, str(e)))
+                raise
+
 
 class UsmInitHook(BaseHook):
     def run(self):
-        cmd = "systemctl enable usm-initialize.service"
-        try:
-            subprocess.check_call(cmd, shell=True)
-        except subprocess.CalledProcessError as e:
-            LOG.exception("Error enabling usm-initialize.service: %s" % str(e))
-            raise
+        self.enable_service("usm-initialize.service")
         LOG.info("Enabled usm-initialize.service on next reboot")
 
 
 class EnableNewServicesHook(BaseHook):
     SYSTEM_PRESET_DIR = "/etc/systemd/system-preset"
-    DEPLOYED_OSTREE_DIR = "/ostree/1"
-    SYSTEMD_LIB_DIR = "/lib/systemd/system"
-    SYSTEMD_ETC_DIR = "%s/etc/systemd/system/multi-user.target.wants" % DEPLOYED_OSTREE_DIR
 
     def find_new_services(self):
         # get preset name
@@ -71,14 +79,7 @@ class EnableNewServicesHook(BaseHook):
 
     def enable_new_services(self, services):
         for service in services:
-            src = "%s/%s" % (self.SYSTEMD_LIB_DIR, service)
-            dst = "%s/%s" % (self.SYSTEMD_ETC_DIR, service)
-            try:
-                os.symlink(src, dst)
-                LOG.info("Enabled %s" % service)
-            except subprocess.CalledProcessError as e:
-                LOG.exception("Error enabling %s: %s" % (service, str(e)))
-                raise
+            self.enable_service(service)
 
     def run(self):
         new_services = self.find_new_services()
@@ -234,22 +235,26 @@ AGENT_HOOKS = {
     MAJOR_RELEASE_UPGRADE: {
         PRE: [
             CreateUSMUpgradeInProgressFlag,
-            UsmInitHook,
         ],
         POST: [
             CopyPxeFilesHook,
             ReconfigureKernelHook,
             EnableNewServicesHook,
+            # enable usm-initialize service for next reboot only
+            # if everything else is done
+            UsmInitHook,
         ],
     },
     MAJOR_RELEASE_ROLLBACK: {
         PRE: [
             RemoveKubernetesConfigSymlinkHook,
-            UsmInitHook,
         ],
         POST: [
             ReconfigureKernelHook,
             RemoveCephMonHook,
+            # enable usm-initialize service for next reboot only
+            # if everything else is done
+            UsmInitHook,
         ],
     },
 }
