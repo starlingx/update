@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023 Wind River Systems, Inc.
+Copyright (c) 2023-2024 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -69,19 +69,81 @@ def get_ostree_latest_commit(ostree_ref, repo_path):
     latest_commit = split_output_string[1]
     return latest_commit
 
+def add_gpg_verify_false():
+    # TODO(mmachado): remove once gpg is enabled
+    # Modify the ostree configuration to disable gpg-verify
+    try:
+        command = """
+        # Check if gpg-verify=false is at the end of the file and adds it if not
+        if ! tail -n 1 /sysroot/ostree/repo/config | grep -q '^gpg-verify=false$'; then
+            echo "gpg-verify=false" >> /sysroot/ostree/repo/config
+        fi
+        """
+        subprocess.run(command, shell=True, check=True)
 
-def get_feed_latest_commit(patch_sw_version):
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to modify ostree config to disable GPG verification"
+        err_msg = "Command Error: return code: %s, Output: %s" \
+            % (e.returncode, e.stderr.decode("utf-8") if e.stderr else "No error message")
+        LOG.exception(err_msg)
+        raise OSTreeCommandFail(msg)
+
+def add_aux_remote(repo_path, patch_sw_version):
+    """
+    Adds "controller-feed" auxiliary remote to non-controller nodes
+    and pulls commit metadata
+
+    :param repo_path: Path where the remote will be added
+    :param patch_sw_version: software version for the feed
+     example: 22.06
+    """
+
+    # Add before to guarantee that gpg_verify is disabled for debian remote
+    add_gpg_verify_false()
+
+    add_remote_cmd = "ostree --repo=%s remote add --set=gpg-verify=false %s " \
+                        "%s/rel-%s/ostree_repo" % (repo_path, constants.OSTREE_AUX_REMOTE,
+                        constants.FEED_OSTREE_URL, patch_sw_version)
+    subprocess.run(add_remote_cmd, shell=True, check=True, capture_output=True)
+
+    add_gpg_verify_false()
+
+    pull_cmd = "ostree --repo=%s pull %s starlingx --commit-metadata-only" % \
+                    (repo_path, constants.OSTREE_AUX_REMOTE)
+    try:
+        subprocess.run(pull_cmd, shell=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        info_msg = "OSTree log Error: return code: %s , Output: %s" \
+                % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.info(info_msg)
+        msg = "Failed to pull  %s." % constants.OSTREE_AUX_REMOTE
+        raise OSTreeCommandFail(msg)
+
+def get_feed_latest_commit(patch_sw_version, repo_path=None):
     """
     Query ostree feed using ostree log <ref> --repo=<path>
 
     :param patch_sw_version: software version for the feed
      example: 22.06
+    :param repo_path: path of the ostree repo if specified
     :return: The latest commit for the feed repo
     """
-    repo_path = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR,
-                                           patch_sw_version)
-    return get_ostree_latest_commit(constants.OSTREE_REF, repo_path)
 
+    if repo_path == constants.OSTREE_AUX_REMOTE_PATH:
+        check_remote_cmd = "ostree --repo=%s remote list | grep -w %s" % \
+                            (repo_path, constants.OSTREE_AUX_REMOTE)
+        try:
+            subprocess.run(check_remote_cmd, shell=True, check=True, capture_output=True)
+        except subprocess.CalledProcessError:
+            # If the remote does not exist, add it
+            add_aux_remote(repo_path, patch_sw_version)
+        remote_ref = "%s:%s" % (constants.OSTREE_AUX_REMOTE, constants.OSTREE_REF)
+
+        return get_ostree_latest_commit(remote_ref, repo_path)
+    else:
+        repo_path = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR,
+                                           patch_sw_version)
+        return get_ostree_latest_commit(constants.OSTREE_REF, repo_path)
 
 def get_sysroot_latest_commit():
     """
@@ -197,27 +259,8 @@ def pull_ostree_from_remote(remote=None):
     Pull from remote ostree to sysroot ostree
     """
 
-    # TODO(mmachado): remove once gpg is enabled
-    # Modify the ostree configuration to disable gpg-verify
-    try:
-        command = """
-        if grep -q 'gpg-verify=' /sysroot/ostree/repo/config;
-        then
-            sed -i '/gpg-verify=/ {
-                s/gpg-verify=true/gpg-verify=false/
-            }' /sysroot/ostree/repo/config;
-        else
-            echo 'gpg-verify=false' >> /sysroot/ostree/repo/config;
-        fi
-        """
-        subprocess.run(command, shell=True, check=True)
-
-    except subprocess.CalledProcessError as e:
-        msg = "Failed to modify ostree config to disable GPG verification"
-        err_msg = "Command Error: return code: %s, Output: %s" \
-            % (e.returncode, e.stderr.decode("utf-8") if e.stderr else "No error message")
-        LOG.exception(err_msg)
-        raise OSTreeCommandFail(msg)
+    #Make sure gpg-verify is disabled
+    add_gpg_verify_false()
 
     cmd = "ostree pull %s --depth=-1"
     ref_cmd = ""
@@ -608,6 +651,8 @@ def add_ostree_remote(major_release, nodetype, replace_default_remote=False):
     except subprocess.CalledProcessError as e:
         LOG.exception("Error adding %s ostree remote: %s" % (major_release, str(e)))
         return None
+
+    add_gpg_verify_false()
 
     # pull from ostree remote
     pull_ostree_from_remote(remote_name)
