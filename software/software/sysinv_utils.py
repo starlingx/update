@@ -71,21 +71,13 @@ def are_all_hosts_unlocked_and_online():
 
 def get_system_info():
     """Returns system type and system mode"""
-    token, endpoint = utils.get_endpoints_token()
-    sysinv_client = get_sysinv_client(token=token, endpoint=endpoint)
-    system_info = sysinv_client.isystem.list()[0]
-    return system_info.system_type, system_info.system_mode
+    system_type = utils.get_platform_conf("system_type")
+    system_mode = utils.get_platform_conf("system_mode")
+    return system_type, system_mode
 
 
 def get_dc_role():
-    try:
-        token, endpoint = utils.get_endpoints_token()
-        sysinv_client = get_sysinv_client(token=token, endpoint=endpoint)
-        system = sysinv_client.isystem.list()[0]
-        return system.distributed_cloud_role
-    except Exception as err:
-        LOG.error("Error getting DC role: %s", err)
-        raise
+    return utils.get_platform_conf("distributed_cloud_role")
 
 
 def is_system_controller():

@@ -27,6 +27,8 @@ deploy_host_state_transition = {
     DEPLOY_HOST_STATES.ROLLBACK_DEPLOYED: []
 }
 
+deploy_host_reentrant_states = [DEPLOY_HOST_STATES.ROLLBACK_FAILED, DEPLOY_HOST_STATES.FAILED]
+
 
 class DeployHostState(object):
     _callbacks = []
@@ -52,6 +54,16 @@ class DeployHostState(object):
         if cur_state:
             if target_state in deploy_host_state_transition[cur_state]:
                 return True
+
+            # Below is to tolerate reentrant of certain states, currently failed states.
+            # by doing this it can simplify the workflow code to fire deploy_failed
+            # event more than once.
+            # note that it should not retrigger transition.
+            # the workflow should ensure triggering deploy_started event to exit the
+            # failed states when deploy attempt starts.
+            if target_state == cur_state and cur_state in deploy_host_reentrant_states:
+                return True
+
         else:
             LOG.error('Host %s is not part of deployment' % self._hostname)
         return False
