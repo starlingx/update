@@ -104,7 +104,7 @@ def get_subcloud_groupby_version():
     subclouds = get_subclouds_from_dcmanager()
     grouped_subclouds = {}
     for subcloud in subclouds:
-        major_ver = utils.get_major_release_version(subcloud['software_version'])
+        major_ver = utils.get_major_release_version(subcloud['software-version'])
         if major_ver not in grouped_subclouds:
             grouped_subclouds[major_ver] = [subcloud]
         else:
