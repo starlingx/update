@@ -436,6 +436,28 @@ def checkout_latest_ostree_commit(patch_sw_version):
         os.close(fd)
 
 
+def checkout_commit_to_dir(ostree_repo, commit_id, dest_folder, sub_path=None):
+    """
+    Checkout the commit to a given directory.
+    :param ostree_repo: The path of the ostree repo.
+    :param commit_id: The id of the commit to checkout.
+    :param dest_folder: The path to the destination folder.
+    :param sub_path: The sub path to checkout.
+    """
+
+    try:
+        cmd = "ostree checkout --union --repo=%s %s %s" % (ostree_repo, commit_id, dest_folder)
+        if sub_path is not None:
+            cmd = "%s %s" % (cmd, "--subpath=%s" % sub_path)
+        subprocess.run(cmd, shell=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to checkout %s to %s." % (commit_id, dest_folder)
+        info_msg = "OSTree Checkout Error: return code: %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.info(info_msg)
+        raise OSTreeCommandFail(msg)
+
+
 def install_deb_package(package_list):
     """
     Installs deb package to a checked out commit.

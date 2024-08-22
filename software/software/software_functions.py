@@ -1198,20 +1198,24 @@ def get_sw_version(metadata_files):
     return rel_ver
 
 
-def read_upgrade_support_versions(mounted_dir):
+def read_upgrade_support_versions(mounted_dir, do_check_to_release=True):
     """
     Read upgrade metadata file to get supported upgrades
     versions
     :param mounted_dir: Mounted iso directory
+    :param do_check_to_release: True if to_release should be retrieved
     :return: to_release, supported_from_releases
     """
+    to_release = constants.UNKNOWN_SOFTWARE_VERSION
     try:
         root = ElementTree.parse(mounted_dir + "/upgrades/metadata.xml").getroot()
     except IOError:
-        raise SoftwareServiceError("Failed to read /upgrades/metadata.xml file")
+        raise SoftwareServiceError(
+            "The ISO does not contain required upgrade information in upgrades/metadata.xml")
 
-    rel_metadata_files = get_metadata_files(os.path.join(mounted_dir, "upgrades"))
-    to_release = get_sw_version(rel_metadata_files)
+    if do_check_to_release:
+        rel_metadata_files = get_metadata_files(os.path.join(mounted_dir, "upgrades"))
+        to_release = get_sw_version(rel_metadata_files)
 
     supported_from_releases = []
     supported_upgrades = root.find("supported_upgrades").findall("upgrade")

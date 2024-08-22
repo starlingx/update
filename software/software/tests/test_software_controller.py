@@ -7,7 +7,7 @@
 # This import has to be first
 from software.tests import base  # pylint: disable=unused-import # noqa: F401
 from software.software_controller import PatchController
-from software.exceptions import ReleaseValidationFailure
+from software.exceptions import UpgradeNotSupported
 import unittest
 from unittest.mock import MagicMock
 from unittest.mock import mock_open
@@ -27,116 +27,242 @@ class TestSoftwareController(unittest.TestCase):
     def tearDown(self):
         pass
 
+
     @patch('software.software_controller.PatchController.__init__', return_value=None)
-    @patch('software.software_controller.verify_files')
-    @patch('software.software_controller.mount_iso_load')
-    @patch('software.software_controller.shutil.copyfile')
-    @patch('software.software_controller.os.chmod')
-    @patch('software.software_controller.read_upgrade_support_versions')
-    @patch('software.software_controller.subprocess.run')
-    @patch('software.software_controller.shutil.copytree')
-    @patch('software.software_controller.parse_release_metadata')
-    @patch('software.software_controller.unmount_iso_load')
     @patch('software.software_controller.PatchController.major_release_upload_check')
+    @patch('software.software_controller.SW_VERSION', '1.0.0')
+    @patch('software.software_controller.PatchController._run_load_import')
     def test_process_upload_upgrade_files(self,
+                                          mock_run_load_import,
                                           mock_major_release_upload_check,
-                                          mock_unmount_iso_load,
-                                          mock_parse_release_metadata,
-                                          mock_copytree,  # pylint: disable=unused-argument
-                                          mock_run,
-                                          mock_read_upgrade_support_versions,
-                                          mock_chmod,  # pylint: disable=unused-argument
-                                          mock_copyfile,  # pylint: disable=unused-argument
-                                          mock_mount_iso_load,
-                                          mock_verify_files,
                                           mock_init):   # pylint: disable=unused-argument
         controller = PatchController()
-        controller.release_data = MagicMock()
-
-        # Mock the return values of the mocked functions
+        mock_run_load_import.return_value = "Load import successful"
         mock_major_release_upload_check.return_value = True
-        mock_verify_files.return_value = True
-        mock_mount_iso_load.return_value = '/test/iso'
-        mock_read_upgrade_support_versions.return_value = (
-            '2.0.0', [{'version': '1.0.0'}, ])
-        mock_run.return_value.returncode = 0
-        mock_run.return_value.stdout = 'Load import successful'
-        mock_parse_release_metadata.return_value = {"id": 1, "sw_version": "2.0.0"}
+        from_release = '1.0.0'
+        to_release = '2.0.0'
+        iso_mount_dir = '/test/iso'
+        upgrade_files = {
+            constants.ISO_EXTENSION: "test.iso",
+            constants.SIG_EXTENSION: "test.sig"
+        }
+        supported_from_releases = [{'version': '1.0.0'}, {'version': '1.1.0'}]
+        result = controller._process_upload_upgrade_files(  # pylint: disable=protected-access
+            from_release, to_release, iso_mount_dir, supported_from_releases, upgrade_files)
 
-        # Call the function being tested
-        with patch('software.software_controller.SW_VERSION', '1.0.0'):
-            info, warning, error, release_meta_info = controller._process_upload_upgrade_files(self.upgrade_files)   # pylint: disable=protected-access
-
-        # Verify that the expected functions were called with the expected arguments
-        mock_verify_files.assert_called_once_with([self.upgrade_files[constants.ISO_EXTENSION]],
-                                                  self.upgrade_files[constants.SIG_EXTENSION])
-        mock_mount_iso_load.assert_called_once_with(
-            self.upgrade_files[constants.ISO_EXTENSION], constants.TMP_DIR)
-        mock_read_upgrade_support_versions.assert_called_once_with('/test/iso')
-
-        self.assertEqual(mock_run.call_args[0][0], ["%s/rel-%s/bin/%s" % (
-            constants.SOFTWARE_STORAGE_DIR,
-            release_meta_info["test.iso"]["sw_release"],
-            "usm_load_import"),
-            "--from-release=1.0.0", "--to-release=2.0.0", "--iso-dir=/test/iso"])
-        mock_unmount_iso_load.assert_called_once_with('/test/iso')
-
-        # Verify that the expected messages were returned
-        self.assertEqual(
-            info,
-            'Load import successful')
-        self.assertEqual(warning, '')
-        self.assertEqual(error, '')
-        self.assertEqual(
-            release_meta_info,
-            {"test.iso": {"id": 1, "sw_release": "2.0.0"},
-             "test.sig": {"id": None, "sw_release": None}})
+        self.assertEqual(result, "Load import successful")
 
     @patch('software.software_controller.PatchController.__init__', return_value=None)
-    @patch('software.software_controller.verify_files')
-    @patch('software.software_controller.mount_iso_load')
-    @patch('software.software_controller.unmount_iso_load')
     @patch('software.software_controller.PatchController.major_release_upload_check')
-    def test_process_upload_upgrade_files_invalid_signature(self,
-                                                            mock_major_release_upload_check,
-                                                            mock_unmount_iso_load,  # pylint: disable=unused-argument
-                                                            mock_mount_iso_load,
-                                                            mock_verify_files,
-                                                            mock_init):  # pylint: disable=unused-argument
+    @patch('software.software_controller.SW_VERSION', '1.0.0')
+    def test_process_upload_upgrade_files_upgrade_not_supported(self,
+                                                                mock_major_release_upload_check,
+                                                                mock_init):   # pylint: disable=unused-argument
         controller = PatchController()
-        controller.release_data = MagicMock()
-
-        # Mock the return values of the mocked functions
-        mock_verify_files.return_value = False
-        mock_mount_iso_load.return_value = '/test/iso'
         mock_major_release_upload_check.return_value = True
-
-        # Call the function being tested
-        with patch('software.software_controller.SW_VERSION', '1.0'):
-            try:
-                controller._process_upload_upgrade_files(self.upgrade_files)  # pylint: disable=protected-access
-            except ReleaseValidationFailure as e:
-                self.assertEqual(e.error, 'Software test.iso:test.sig signature validation failed')
-
-    @patch('software.software_controller.PatchController.__init__', return_value=None)
-    @patch('software.software_controller.verify_files',
-           side_effect=ReleaseValidationFailure(error='Invalid signature file'))
-    @patch('software.software_controller.PatchController.major_release_upload_check')
-    def test_process_upload_upgrade_files_validation_error(self,
-                                                           mock_major_release_upload_check,
-                                                           mock_verify_files,
-                                                           mock_init):  # pylint: disable=unused-argument
-        controller = PatchController()
-        controller.release_data = MagicMock()
-
-        mock_verify_files.return_value = False
-        mock_major_release_upload_check.return_value = True
-
-        # Call the function being tested
+        from_release = '1.0.0'
+        to_release = '2.0.0'
+        iso_mount_dir = '/test/iso'
+        upgrade_files = {
+            constants.ISO_EXTENSION: "test.iso",
+            constants.SIG_EXTENSION: "test.sig"
+        }
+        supported_from_releases = [{'version': '1.1.0'}, {'version': '1.2.0'}]
         try:
-            controller._process_upload_upgrade_files(self.upgrade_files)  # pylint: disable=protected-access
-        except ReleaseValidationFailure as e:
-            self.assertEqual(e.error, "Invalid signature file")
+            controller._process_upload_upgrade_files(   # pylint: disable=protected-access
+                from_release, to_release, iso_mount_dir, supported_from_releases, upgrade_files)
+        except UpgradeNotSupported as e:
+            self.assertEqual(e.message, 'Current release 1.0.0 not supported to upgrade to 2.0.0')
+
+    @patch('software.software_controller.PatchController.__init__', return_value=None)
+    @patch('software.software_controller.PatchController.major_release_upload_check')
+    @patch('software.software_controller.read_upgrade_support_versions')
+    @patch('software.software_controller.SW_VERSION', '4.0.0')
+    @patch('software.software_controller.PatchController._run_load_import')
+    def test_process_inactive_upgrade_files(self,
+                                          mock_run_load_import,
+                                          mock_read_upgrade_support_versions,
+                                          mock_major_release_upload_check,
+                                          mock_init):   # pylint: disable=unused-argument
+        controller = PatchController()
+        mock_run_load_import.return_value = "Load import successful"
+        mock_major_release_upload_check.return_value = True
+        mock_read_upgrade_support_versions.return_value = (
+            None, [{'version': '3.0'}, {'version': '2.0'}])
+        from_release = None
+        to_release = '2.0.0'
+        iso_mount_dir = '/test/iso'
+        upgrade_files = {
+            constants.ISO_EXTENSION: "test.iso",
+            constants.SIG_EXTENSION: "test.sig"
+        }
+        result = controller._process_inactive_upgrade_files(  # pylint: disable=protected-access
+            from_release, to_release, iso_mount_dir, upgrade_files)
+
+        self.assertEqual(result, "Load import successful")
+
+    @patch('software.software_controller.PatchController.__init__', return_value=None)
+    @patch('software.software_controller.PatchController.major_release_upload_check')
+    @patch('software.software_controller.read_upgrade_support_versions')
+    @patch('software.software_controller.SW_VERSION', '4.0.0')
+    @patch('software.software_controller.PatchController._run_load_import')
+    def test_process_inactive_upgrade_files_upgrade_not_supported(self,
+                                                                  mock_run_load_import,
+                                                                  mock_read_upgrade_support_versions,
+                                                                  mock_major_release_upload_check,
+                                                                  mock_init):   # pylint: disable=unused-argument
+        controller = PatchController()
+        mock_run_load_import.return_value = "Load import successful"
+        mock_major_release_upload_check.return_value = True
+        mock_read_upgrade_support_versions.return_value = (
+            None, [{'version': '3.0.0'}, {'version': '2.0.0'}])
+        from_release = None
+        to_release = '1.0.0'
+        iso_mount_dir = '/test/iso'
+        upgrade_files = {
+            constants.ISO_EXTENSION: "test.iso",
+            constants.SIG_EXTENSION: "test.sig"
+        }
+        try:
+            controller._process_inactive_upgrade_files(   # pylint: disable=protected-access
+                from_release, to_release, iso_mount_dir, upgrade_files)
+        except UpgradeNotSupported as e:
+            self.assertEqual(
+                e.message, 'ISO file release version 1.0 not supported to upgrade to 4.0.0')
+
+    @patch('software.software_controller.PatchController.__init__', return_value=None)
+    @patch('software.software_controller.PatchController.get_release_meta_info')
+    @patch('software.software_controller.reload_release_data')
+    @patch('shutil.copyfile')
+    @patch('subprocess.run')
+    @patch('shutil.copytree')
+    @patch('shutil.rmtree')
+    @patch('os.path.exists')
+    def test_run_load_import_success(self,
+                                     mock_path_exists,
+                                     mock_rmtree,
+                                     mock_copytree,
+                                     mock_subprocess_run,
+                                     mock_copyfile,     # pylint: disable=unused-argument
+                                     mock_reload_release_data,      # pylint: disable=unused-argument
+                                     mock_get_release_meta_info,
+                                     mock_init):    # pylint: disable=unused-argument
+        # Setup
+        mock_path_exists.return_value = True
+        mock_subprocess_run.return_value = MagicMock(returncode=0, stdout="Load import successful")
+        mock_get_release_meta_info.return_value = {"test.iso": {"id": "123", "sw_version": "2.0.0"}}
+
+        controller = PatchController()
+        from_release = "1.0.0"
+        to_release = "2.0.0"
+        iso_mount_dir = "/mnt/iso"
+        upgrade_files = {
+            constants.ISO_EXTENSION: "test.iso",
+            constants.SIG_EXTENSION: "test.sig"
+        }
+
+        # Call the method
+        local_info, local_warning, local_error, release_meta_info = controller._run_load_import(    # pylint: disable=protected-access
+            from_release,
+            to_release,
+            iso_mount_dir,
+            upgrade_files)
+
+        # Assertions
+        self.assertEqual(local_info, "Load import successful")
+        self.assertEqual(local_warning, "")
+        self.assertEqual(local_error, "")
+        self.assertEqual(release_meta_info, {"test.iso": {"id": "123", "sw_version": "2.0.0"}})
+        mock_rmtree.assert_called_once_with("/opt/software/rel-2.0.0/bin")
+        mock_copytree.assert_called_once_with(
+            "/mnt/iso/upgrades/software-deploy", "/opt/software/rel-2.0.0/bin")
+
+    @patch('software.software_controller.PatchController.__init__', return_value=None)
+    @patch('software.software_controller.PatchController.get_release_meta_info')
+    @patch('software.software_controller.reload_release_data')
+    @patch('shutil.copyfile')
+    @patch('subprocess.run')
+    @patch('shutil.copytree')
+    @patch('shutil.rmtree')
+    @patch('os.path.exists')
+    def test_run_load_import_script_failure(self,
+                                            mock_path_exists,
+                                            mock_rmtree,
+                                            mock_copytree,
+                                            mock_subprocess_run,
+                                            mock_copyfile,     # pylint: disable=unused-argument
+                                            mock_reload_release_data,      # pylint: disable=unused-argument
+                                            mock_get_release_meta_info,
+                                            mock_init):    # pylint: disable=unused-argument
+        # Setup
+        mock_path_exists.return_value = True
+        mock_subprocess_run.return_value = MagicMock(returncode=1, stdout="Load import failed")
+        mock_get_release_meta_info.return_value = {}
+
+        controller = PatchController()
+        from_release = "1.0.0"
+        to_release = "2.0.0"
+        iso_mount_dir = "/mnt/iso"
+        upgrade_files = {
+            constants.ISO_EXTENSION: "test.iso",
+            constants.SIG_EXTENSION: "test.sig"
+        }
+
+        # Call the method
+        local_info, local_warning, local_error, release_meta_info = controller._run_load_import(    # pylint: disable=protected-access
+            from_release,
+            to_release,
+            iso_mount_dir,
+            upgrade_files)
+
+        # Assertions
+        self.assertEqual(local_info, "")
+        self.assertEqual(local_warning, "")
+        self.assertEqual(local_error, "Load import failed")
+        self.assertEqual(release_meta_info, {})
+        mock_rmtree.assert_called_once_with("/opt/software/rel-2.0.0/bin")
+        mock_copytree.assert_called_once_with(
+            "/mnt/iso/upgrades/software-deploy", "/opt/software/rel-2.0.0/bin")
+
+    @patch('software.software_controller.PatchController.__init__', return_value=None)
+    @patch('software.software_controller.PatchController.get_release_meta_info')
+    @patch('software.software_controller.reload_release_data')
+    @patch('shutil.copyfile')
+    @patch('subprocess.run')
+    @patch('shutil.copytree')
+    @patch('shutil.rmtree')
+    @patch('os.path.exists')
+    def test_run_load_import_script_exception(self,
+                                              mock_path_exists,
+                                              mock_rmtree,
+                                              mock_copytree,
+                                              mock_subprocess_run,
+                                              mock_copyfile,     # pylint: disable=unused-argument
+                                              mock_reload_release_data,      # pylint: disable=unused-argument
+                                              mock_get_release_meta_info,
+                                              mock_init):    # pylint: disable=unused-argument
+        # Setup
+        mock_path_exists.return_value = True
+        mock_subprocess_run.side_effect = Exception("Unexpected error")
+        mock_get_release_meta_info.return_value = {}
+
+        controller = PatchController()
+        from_release = "1.0.0"
+        to_release = "2.0.0"
+        iso_mount_dir = "/mnt/iso"
+        upgrade_files = {
+            constants.ISO_EXTENSION: "test.iso",
+            constants.SIG_EXTENSION: "test.sig"
+        }
+
+        # Call the method and assert exception
+        with self.assertRaises(Exception) as context:
+            controller._run_load_import(from_release, to_release, iso_mount_dir, upgrade_files) # pylint: disable=protected-access
+
+        self.assertTrue("Unexpected error" in str(context.exception))
+        mock_rmtree.assert_called_once_with("/opt/software/rel-2.0.0/bin")
+        mock_copytree.assert_called_once_with(
+            "/mnt/iso/upgrades/software-deploy", "/opt/software/rel-2.0.0/bin")
 
     @patch('software.software_controller.os.path.isfile')
     @patch('software.software_controller.json.load')

@@ -1321,53 +1321,28 @@ class PatchController(PatchService):
             if major_rel not in major_releases:
                 major_releases.append(major_rel)
 
-        if len(major_releases) >= max_major_releases:
-            msg = f"Major releases {major_releases} have already been uploaded. " + \
-                  f"Max major releases is {max_major_releases}"
+        # Only system controller can have 2 major releases (N+1 and N-1)
+        max_releases = max_major_releases + 1 if is_system_controller() else max_major_releases
+        if len(major_releases) >= max_releases:
+            msg = f"Major releases {major_releases} have already been uploaded{' in system controller' if is_system_controller() else ''}. " + \
+                f"Max major releases is {max_releases}"
             LOG.info(msg)
             raise SoftwareServiceError(error=msg)
 
-    def _process_upload_upgrade_files(self, upgrade_files):
+    def _run_load_import(self, from_release, to_release, iso_mount_dir, upgrade_files):
         """
-        Process the uploaded upgrade files
-        :param upgrade_files: dict of upgrade files
-        :return: info, warning, error messages
+        Run load and import
+        :param from_release: From release
+        :param to_release: To release
+        :param iso_mount_dir: ISO mount directory
+        :return: info, warning, error messages, dict of release metadata info
         """
         local_info = ""
         local_warning = ""
         local_error = ""
         release_meta_info = {}
 
-        # validate this major release upload
-        self.major_release_upload_check()
-
-        to_release = None
-        iso_mount_dir = None
-        all_good = True
         try:
-            iso = upgrade_files[constants.ISO_EXTENSION]
-            sig = upgrade_files[constants.SIG_EXTENSION]
-            if not verify_files([iso], sig):
-                msg = "Software %s:%s signature validation failed" % (iso, sig)
-                raise ReleaseValidationFailure(error=msg)
-
-            LOG.info("iso and signature files upload completed.")
-
-            iso_file = upgrade_files.get(constants.ISO_EXTENSION)
-
-            # Mount the iso file after signature verification
-            iso_mount_dir = mount_iso_load(iso_file, constants.TMP_DIR)
-            LOG.info("Mounted iso file %s to %s", iso_file, iso_mount_dir)
-
-            # Read the metadata from the iso file
-            to_release, supported_from_releases = read_upgrade_support_versions(iso_mount_dir)
-            LOG.info("Reading metadata from iso file %s completed", iso_file)
-            # Validate that the current release is supported to upgrade to the new release
-            supported_versions = [v.get("version") for v in supported_from_releases]
-            if SW_VERSION not in supported_versions:
-                raise UpgradeNotSupported("Current release %s not supported to upgrade to %s"
-                                          % (SW_VERSION, to_release))
-
             # Copy iso /upgrades/software-deploy/ to /opt/software/rel-<rel>/bin/
             to_release_bin_dir = os.path.join(
                 constants.SOFTWARE_STORAGE_DIR, ("rel-%s" % to_release), "bin")
@@ -1377,10 +1352,9 @@ class PatchController(PatchService):
                             constants.SOFTWARE_DEPLOY_FOLDER), to_release_bin_dir)
 
             # Run usm_load_import script
-            LOG.info("Starting load import from %s", iso_file)
             import_script = os.path.join(to_release_bin_dir, 'usm_load_import')
             load_import_cmd = [import_script,
-                               "--from-release=%s" % SW_VERSION,
+                               "--from-release=%s" % from_release,
                                "--to-release=%s" % to_release,
                                "--iso-dir=%s" % iso_mount_dir]
             LOG.info("Running load import command: %s", " ".join(load_import_cmd))
@@ -1395,7 +1369,8 @@ class PatchController(PatchService):
                 local_info += load_import_return.stdout
 
             # Copy metadata.xml to /opt/software/rel-<rel>/
-            to_file = os.path.join(constants.SOFTWARE_STORAGE_DIR, ("rel-%s" % to_release), "metadata.xml")
+            to_file = os.path.join(constants.SOFTWARE_STORAGE_DIR,
+                                   ("rel-%s" % to_release), "metadata.xml")
             metadata_file = os.path.join(iso_mount_dir, "upgrades", "metadata.xml")
             shutil.copyfile(metadata_file, to_file)
 
@@ -1404,39 +1379,153 @@ class PatchController(PatchService):
             reload_release_data()
             LOG.info("Updated release metadata for %s", to_release)
 
-            # Get release metadata
-            # NOTE(bqian) to_release is sw_version (MM.mm), the path isn't correct
-            # also prepatched iso needs to be handled.
-            # should go through the release_data to find the latest release of major release
-            # to_release
-            abs_stx_release_metadata_file = os.path.join(
-                iso_mount_dir, 'upgrades', f"{constants.RELEASE_GA_NAME % to_release}-metadata.xml")
-            all_release_meta_info = parse_release_metadata(abs_stx_release_metadata_file)
-            release_meta_info = {
-                os.path.basename(upgrade_files[constants.ISO_EXTENSION]): {
-                    "id": all_release_meta_info.get("id"),
-                    "sw_release": all_release_meta_info.get("sw_version"),
-                },
-                os.path.basename(upgrade_files[constants.SIG_EXTENSION]): {
-                    "id": None,
-                    "sw_release": None,
-                }
-            }
-        except Exception:
-            all_good = False
+            release_meta_info = self.get_release_meta_info(to_release, iso_mount_dir, upgrade_files)
+
+            return local_info, local_warning, local_error, release_meta_info
+
+        except Exception as e:
+            LOG.exception("Error occurred while running load import: %s", str(e))
             raise
-        finally:
-            # Unmount the iso file
-            if iso_mount_dir:
-                unmount_iso_load(iso_mount_dir)
-                LOG.info("Unmounted iso file %s", iso_file)
 
-            # remove upload leftover in case of failure
-            if not all_good and to_release:
-                to_release_dir = os.path.join(constants.SOFTWARE_STORAGE_DIR, "rel-%s" % to_release)
-                shutil.rmtree(to_release_dir, ignore_errors=True)
+    def get_release_meta_info(self, to_release, iso_mount_dir, upgrade_files) -> dict:
+        """
+        Get release metadata information from metadata.xml
+        :param iso_mount_dir: ISO mount directory
+        :param upgrade_files: dict of upgrade files
+        :return: dict of release metadata info
+        """
 
-        return local_info, local_warning, local_error, release_meta_info
+        # Get release metadata
+        # NOTE(bqian) to_release is sw_version (MM.mm), the path isn't correct
+        # also prepatched iso needs to be handled.
+        # should go through the release_data to find the latest release of major release
+        # to_release
+        abs_stx_release_metadata_file = os.path.join(
+            iso_mount_dir, 'upgrades', f"{constants.RELEASE_GA_NAME % to_release}-metadata.xml")
+        all_release_meta_info = parse_release_metadata(abs_stx_release_metadata_file)
+        return {
+            os.path.basename(upgrade_files[constants.ISO_EXTENSION]): {
+                "id": all_release_meta_info.get("id"),
+                "sw_release": all_release_meta_info.get("sw_version"),
+            },
+            os.path.basename(upgrade_files[constants.SIG_EXTENSION]): {
+                "id": None,
+                "sw_release": None,
+            }
+        }
+
+    def _clean_up_load_import(self, iso_mount_dir, to_release, iso_file, is_import_completed):
+        """
+        Clean up load and import
+        :param iso_mount_dir: ISO mount directory
+        :param to_release: To release
+        :param iso_file: ISO file
+        """
+        # Unmount the iso file
+        if iso_mount_dir:
+            unmount_iso_load(iso_mount_dir)
+            LOG.info("Unmounted iso file %s", iso_file)
+
+        # remove upload leftover in case of failure
+        if to_release and not is_import_completed:
+            to_release_dir = os.path.join(constants.SOFTWARE_STORAGE_DIR, "rel-%s" % to_release)
+            shutil.rmtree(to_release_dir, ignore_errors=True)
+
+    def _process_upload_upgrade_files(
+            self, from_release, to_release, iso_mount_dir, supported_from_releases, upgrade_files):
+        """
+        Process the uploaded upgrade files
+        :param from_release: From release
+        :param to_release: To release
+        :param iso_mount_dir: ISO mount directory
+        :param supported_from_releases: List of supported releases
+        :param upgrade_files: dict of upgrade files
+        :return: info, warning, error messages, dict of release metadata info
+        """
+
+        # validate this major release upload
+        self.major_release_upload_check()
+
+        try:
+            # Validate that the current release is supported to upgrade to the new release
+            supported_versions = [v.get("version") for v in supported_from_releases]
+            if SW_VERSION not in supported_versions:
+                raise UpgradeNotSupported("Current release %s not supported to upgrade to %s"
+                                          % (SW_VERSION, to_release))
+            # Run usm_load_import script
+            LOG.info("Starting load import from %s", upgrade_files[constants.ISO_EXTENSION])
+            return self._run_load_import(from_release, to_release, iso_mount_dir, upgrade_files)
+        except Exception as e:
+            LOG.exception("Error occurred while processing upload upgrade files: %s", str(e))
+            raise
+
+    def _process_inactive_upgrade_files(
+            self, from_release, to_release, iso_mount_dir, upgrade_files):
+        """
+        Process the uploaded inactive upgrade files, aka N-1 release
+        :param from_release: From release
+        :param to_release: To release
+        :param iso_mount_dir: ISO mount directory
+        :param upgrade_files: dict of upgrade files
+        :return: info, warning, error messages, dict of release metadata info
+        """
+
+        # validate this major release upload
+        self.major_release_upload_check()
+
+        to_release_maj_ver = utils.get_major_release_version(to_release)
+
+        try:
+
+            # Validate the N-1 release from the iso file is supported to upgrade to the current N release
+            _, current_upgrade_supported_versions = read_upgrade_support_versions(
+                "/usr/rootdirs/opt/",
+                do_check_to_release=False)
+            supported_versions = [v.get("version") for v in current_upgrade_supported_versions]
+
+            # to_release is N-1 release in here
+            if to_release_maj_ver not in supported_versions:
+                raise UpgradeNotSupported(
+                    "ISO file release version %s not supported to upgrade to %s" %
+                    (to_release_maj_ver, SW_VERSION))
+
+            # iso validation completed
+            LOG.info("Starting load import from %s", upgrade_files[constants.ISO_EXTENSION])
+            return self._run_load_import(from_release, to_release, iso_mount_dir, upgrade_files)
+
+        except Exception as e:
+            LOG.exception("Error occurred while processing inactive upgrade files: %s", str(e))
+            raise
+
+    def _checkout_commit_to_dc_vault_playbook_dir(self, release_version):
+        """
+        Checkout commit to dc-vault playbook dir
+        :param release_version: release version
+        :return: None
+        """
+        dc_vault_playbook_dir = f"/opt/dc-vault/playbooks/{release_version}"
+        PLAYBOOKS_PATH = "/usr/share/ansible/stx-ansible/playbooks"
+
+        os.makedirs(dc_vault_playbook_dir, exist_ok=True)
+        ostree_repo = os.path.join(constants.FEED_DIR,
+                                   "rel-%s/ostree_repo" % release_version)
+
+        try:
+            latest_commit = ostree_utils.get_feed_latest_commit(release_version)
+            LOG.info("Getting latest commit for %s: %s", release_version, latest_commit)
+        except OSTreeCommandFail as e:
+            LOG.exception("Error occurred while getting latest commit for %s: %s",
+                          release_version, str(e))
+            raise
+
+        try:
+            LOG.info("Checking out commit %s to %s", latest_commit, dc_vault_playbook_dir)
+            ostree_utils.checkout_commit_to_dir(
+                ostree_repo, latest_commit, dc_vault_playbook_dir, sub_path=PLAYBOOKS_PATH)
+        except Exception:
+            if os.path.exists(dc_vault_playbook_dir):
+                shutil.rmtree(dc_vault_playbook_dir)
+            raise
 
     def _process_upload_patch_files(self, patch_files):
         """
@@ -1587,7 +1676,52 @@ class PatchController(PatchService):
             LOG.error(msg)
             msg_error += msg + "\n"
         elif len(upgrade_files) == 2:  # Two upgrade files uploaded
-            tmp_info, tmp_warning, tmp_error, tmp_release_meta_info = self._process_upload_upgrade_files(upgrade_files)
+            tmp_info = ""
+            tmp_error = ""
+            tmp_warning = ""
+            tmp_release_meta_info = {}
+            is_import_completed = True
+
+            iso = upgrade_files[constants.ISO_EXTENSION]
+            sig = upgrade_files[constants.SIG_EXTENSION]
+
+            if not verify_files([iso], sig):
+                msg = "Software %s:%s signature validation failed" % (iso, sig)
+                raise ReleaseValidationFailure(error=msg)
+
+            LOG.info("iso and signature files upload completed.")
+
+            try:
+                # Mount the iso file after signature verification
+                iso_mount_dir = mount_iso_load(iso, constants.TMP_DIR)
+                LOG.info("Mounted iso file %s to %s", iso, iso_mount_dir)
+
+                # Read the metadata from the iso file to get to-release and supported-from-releases
+                to_release, supported_from_releases = read_upgrade_support_versions(iso_mount_dir)
+                to_release_maj_ver = utils.get_major_release_version(to_release)
+                LOG.info("Reading metadata from iso file %s completed. \nto_release: %s", iso, to_release_maj_ver)
+
+                # Same release is uploaded, return the metadata info from the iso file
+                if to_release_maj_ver == SW_VERSION:
+                    tmp_info = f"Uploaded release {to_release} is the same as current release on the controller"
+                    tmp_release_meta_info = self.get_release_meta_info(to_release, iso_mount_dir, upgrade_files)
+                elif to_release > SW_VERSION:
+                    # N + 1 release is uploaded, process it regardless
+                    tmp_info, tmp_warning, tmp_error, tmp_release_meta_info = self._process_upload_upgrade_files(
+                        SW_VERSION, to_release, iso_mount_dir, supported_from_releases, upgrade_files)
+                elif to_release < SW_VERSION and is_system_controller():
+                    # N - 1 release is uploaded, process it only if the region is system controller
+                    tmp_info, tmp_warning, tmp_error, tmp_release_meta_info = self._process_inactive_upgrade_files(
+                        None, to_release, iso_mount_dir, upgrade_files)
+                    # Checkout commit to dc-vault/playbooks directory
+                    self._checkout_commit_to_dc_vault_playbook_dir(to_release_maj_ver)
+            except Exception as e:
+                LOG.error("Error occurred while processing software release upload: %s", str(e))
+                is_import_completed = False
+                raise
+            finally:
+                self._clean_up_load_import(iso_mount_dir, to_release, iso, is_import_completed)
+
             msg_info += tmp_info
             msg_warning += tmp_warning
             msg_error += tmp_error
@@ -2163,26 +2297,27 @@ class PatchController(PatchService):
             results["error"] += errormsg
             return results
 
-        for patch_id in commit_list:
-            # Fetch file paths that need to be cleaned up to
-            # free patch storage disk space
-            pre_install_filename = self.release_data.metadata[patch_id].get("pre_install")
-            post_install_filename = self.release_data.metadata[patch_id].get("post_install")
+        # TODO(ShawnLi): Comment out for 24.09 release. This is gated to 25.03
+        # for patch_id in commit_list:
+        #     # Fetch file paths that need to be cleaned up to
+        #     # free patch storage disk space
+        #     pre_install_filename = self.release_data.metadata[patch_id].get("pre_install")
+        #     post_install_filename = self.release_data.metadata[patch_id].get("post_install")
 
-            if pre_install_filename:
-                pre_install_script_path = "%s/%s_%s" % (root_scripts_dir, patch_id, pre_install_filename)
-                post_install_script_path = "%s/%s_%s" % (root_scripts_dir, patch_id, post_install_filename)
-                if os.path.exists(pre_install_script_path):
-                    cleanup_files.add(pre_install_script_path)
-                if os.path.exists(post_install_script_path):
-                    cleanup_files.add(post_install_script_path)
+        #     if pre_install_filename:
+        #         pre_install_script_path = "%s/%s_%s" % (root_scripts_dir, patch_id, pre_install_filename)
+        #         post_install_script_path = "%s/%s_%s" % (root_scripts_dir, patch_id, post_install_filename)
+        #         if os.path.exists(pre_install_script_path):
+        #             cleanup_files.add(pre_install_script_path)
+        #         if os.path.exists(post_install_script_path):
+        #             cleanup_files.add(post_install_script_path)
 
-            patch_sw_version = utils.get_major_release_version(
-                self.release_data.metadata[patch_id]["sw_version"])
-            abs_ostree_tar_dir = package_dir[patch_sw_version]
-            software_tar_path = "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id)
-            if os.path.exists(software_tar_path):
-                cleanup_files.add(software_tar_path)
+        #     patch_sw_version = utils.get_major_release_version(
+        #         self.release_data.metadata[patch_id]["sw_version"])
+        #     abs_ostree_tar_dir = package_dir[patch_sw_version]
+        #     software_tar_path = "%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id)
+        #     if os.path.exists(software_tar_path):
+        #         cleanup_files.add(software_tar_path)
 
         # Calculate disk space
         disk_space = 0
