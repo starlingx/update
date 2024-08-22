@@ -126,6 +126,22 @@ class HealthCheck(object):
         method = 'GET'
         output = upgrade_utils.call_api(self._sysinv_token, method, api_cmd)
 
+        # check hosts are patch current
+        deploy_in_progress = self._config.get("deploy_in_progress", "{}")
+        deploy_in_progress = json.loads(deploy_in_progress)
+        if deploy_in_progress:
+            success = False
+            from_load = deploy_in_progress["from_release"]
+            to_load = deploy_in_progress["to_release"]
+            output += ('All hosts are patch current: [%s]\n') \
+                % (HealthCheck.FAIL_MSG)
+            output += ('Deployment in progress: %s to %s\n' % (from_load, to_load))
+        else:
+            success = True
+            output += ('All hosts are patch current: [%s]\n') \
+                 % (HealthCheck.SUCCESS_MSG)
+        health_ok = health_ok and success
+
         if HealthCheck.FAIL_MSG in output:
             success = False
         health_ok = health_ok and success
@@ -365,6 +381,9 @@ def parse_config(args=None):
     parser.add_argument("--releases",
                         help="Releases",
                         default="[]")
+    parser.add_argument("--deploy_in_progress",
+                        help="check hosts are patch current",
+                        default="{}")
 
     # if args was not passed will use sys.argv by default
     parsed_args = parser.parse_args(args)
