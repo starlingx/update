@@ -495,7 +495,7 @@ class PatchAgent(PatchService):
         if self.latest_feed_commit is None:
             if self.sock_out is None:
                 try:
-                    self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
+                    self.latest_feed_commit = utils.get_controller_feed_latest_commit(SW_VERSION)
                 except OSTreeCommandFail:
                     LOG.warning("Unable to query latest feed commit")
                     # latest_feed_commit will remain as None

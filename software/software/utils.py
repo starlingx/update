@@ -21,6 +21,7 @@ import traceback
 import webob
 
 import software.constants as constants
+import software.ostree_utils as ostree
 from software.exceptions import SoftwareError
 from software.exceptions import SoftwareServiceError
 from software.exceptions import StateValidationFailure
@@ -90,6 +91,14 @@ def get_major_release_version(sw_release_version):
         except Exception:
             return None
 
+def get_controller_feed_latest_commit(patch_sw_version):
+    """Gets the latest controller feed commit from any node"""
+    nodetype = get_platform_conf('nodetype')
+    if nodetype == constants.CONTROLLER:
+        return ostree.get_feed_latest_commit(patch_sw_version)
+    else:
+        repo_path = constants.OSTREE_AUX_REMOTE_PATH
+        return ostree.get_feed_latest_commit(patch_sw_version, repo_path)
 
 def get_component_and_versions(release_name):
     """

@@ -53,10 +53,13 @@ PATCH_AGENT_STATE_INSTALL_REJECTED = "install-rejected"
 REBOOT_REQUIRED = "reboot_required"
 
 FEED_OSTREE_BASE_DIR = "/var/www/pages/feed"
+FEED_OSTREE_URL = "http://controller:8080/feed"
 OSTREE_BASE_DEPLOYMENT_DIR = "/ostree/deploy/debian/deploy/"
 PACKAGE_FEED_DIR = "/var/www/pages/updates/debian"
 OSTREE_REF = "starlingx"
 OSTREE_REMOTE = "debian"
+OSTREE_AUX_REMOTE = "constroller-feed"
+OSTREE_AUX_REMOTE_PATH = "/ostree/repo"
 DEBIAN_RELEASE = "bullseye"
 STARLINGX_RELEASE = SW_VERSION
 PATCH_SCRIPTS_STAGING_DIR = "/var/www/pages/updates/software-scripts"
