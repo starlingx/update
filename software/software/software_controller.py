@@ -3067,6 +3067,10 @@ class PatchController(PatchService):
 
         :return: dict of info, warning and error messages
         """
+
+        if self.hostname != constants.CONTROLLER_0_HOSTNAME:
+            raise SoftwareServiceError("Deployment deletion can only be performed on controller-0.")
+
         msg_info = ""
         msg_warning = ""
         msg_error = ""
