@@ -65,7 +65,7 @@ def setup_from_release_load(from_release, to_feed_dir):
 
         # Create 'starlingx' remote on the feed ostree_repo
         cmd = ["ostree", "remote", "add", "--repo=%s/ostree_repo/" % to_feed_dir,
-               FEED_REMOTE, "http://controller:8080/feed/rel-%s/ostree_repo/" % to_major_rel,
+               FEED_REMOTE, "http://controller:8080/feed/rel-%s/ostree_repo/" % from_major_rel,
                FEED_BRANCH]
         try:
             subprocess.check_call(cmd)
