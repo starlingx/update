@@ -3912,8 +3912,11 @@ class PatchControllerApiThread(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
         self.wsgi = None
+        self.name = "PatchControllerApiThread"
 
     def run(self):
+        global thread_death
+
         host = "127.0.0.1"
         port = cfg.api_port
 
@@ -3938,16 +3941,18 @@ class PatchControllerApiThread(threading.Thread):
             while keep_running:
                 self.wsgi.handle_request()
 
+                if thread_death.is_set():
+                    LOG.info("%s exits as thread death is detected.", self.name)
+                    return
+
                 # Call garbage collect after wsgi request is handled,
                 # to ensure any open file handles are closed in the case
                 # of an upload.
                 gc.collect()
-        except Exception:
+        except Exception as ex:
             # Log all exceptions
-            LOG.exception("Error occurred during request processing")
-
-        global thread_death
-        thread_death.set()
+            LOG.exception("%s: error occurred during request processing: %s" % (self.name, str(ex)))
+            thread_death.set()
 
     def kill(self):
         # Must run from other thread
@@ -3961,8 +3966,10 @@ class PatchControllerAuthApiThread(threading.Thread):
         # LOG.info ("Initializing Authenticated API thread")
         self.wsgi = None
         self.port = port
+        self.name = f"PatchControllerAuthApiThread_{port}"
 
     def run(self):
+        global thread_death
         host = CONF.auth_api_bind_ip
         if host is None:
             host = utils.get_versioned_address_all()
@@ -3996,24 +4003,35 @@ class PatchControllerAuthApiThread(threading.Thread):
             while keep_running:
                 self.wsgi.handle_request()
 
+                if thread_death.is_set():
+                    LOG.info("%s exits as thread death is detected.", self.name)
+                    return
+
                 # Call garbage collect after wsgi request is handled,
                 # to ensure any open file handles are closed in the case
                 # of an upload.
                 gc.collect()
-        except Exception:
+        except Exception as ex:
             # Log all exceptions
-            LOG.exception("Authorized API failure: Error occurred during request processing")
+            LOG.exception("%s: error occurred during request processing: %s" % (self.name, str(ex)))
+            thread_death.set()
+
 
     def kill(self):
         # Must run from other thread
         if self.wsgi is not None:
             self.wsgi.shutdown()
 
+        LOG.info("%s exits as requested", self.name)
+        global thread_death
+        thread_death.set()
+
 
 class PatchControllerMainThread(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
         # LOG.info ("Initializing Main thread")
+        self.name = "PatchControllerMainThread"
 
     def run(self):
         global sc
@@ -4078,7 +4096,7 @@ class PatchControllerMainThread(threading.Thread):
             while True:
                 # Check to see if any other thread has died
                 if thread_death.is_set():
-                    LOG.info("Detected thread death. Terminating")
+                    LOG.info("%s exits as thread death is detected.", self.name)
                     return
 
                 # Check for in-service patch restart flag
@@ -4294,9 +4312,9 @@ class PatchControllerMainThread(threading.Thread):
                             LOG.exception("Failed to send deploy state update. Error: %s", str(e))
                         finally:
                             sc.socket_lock.release()
-        except Exception:
+        except Exception as ex:
             # Log all exceptions
-            LOG.exception("Error occurred during request processing")
+            LOG.exception("%s: error occurred during request processing: %s" % (self.name, str(ex)))
             thread_death.set()
 
 
