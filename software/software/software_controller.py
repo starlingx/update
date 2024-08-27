@@ -2490,6 +2490,8 @@ class PatchController(PatchService):
                           "Use --force option to execute deploy precheck script.\n"
             return dict(info=msg_info, warning=msg_warning, error=msg_error, system_healthy=True)
 
+        deploy_in_progress = self._get_software_upgrade()
+
         # parse local config file to pass parameters to precheck script
         try:
             cp = configparser.ConfigParser()
@@ -2531,7 +2533,8 @@ class PatchController(PatchService):
                "--user_domain_name=%s" % user_domain_name,
                "--project_domain_name=%s" % project_domain_name,
                "--region_name=%s" % region_name,
-               "--releases=%s" % json.dumps(releases)]
+               "--releases=%s" % json.dumps(releases),
+               "--deploy_in_progress=%s" % json.dumps(deploy_in_progress)]
         if force:
             cmd.append("--force")
         if patch:
