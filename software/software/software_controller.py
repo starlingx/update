@@ -779,7 +779,7 @@ class SWMessageDeployStateChanged(messages.PatchMessage):
         self.valid = True
         self.agent = None
 
-        valid_agents = ['deploy-start', 'deploy-activate', 'deploy-activate-rollback']
+        valid_agents = ['deploy-start', 'deploy-activate', 'deploy-activate-rollback', 'admin']
         if 'agent' in data:
             self.agent = data['agent']
         else:
@@ -797,7 +797,8 @@ class SWMessageDeployStateChanged(messages.PatchMessage):
             DEPLOY_STATES.ACTIVATE_FAILED.value: DEPLOY_STATES.ACTIVATE_FAILED,
             DEPLOY_STATES.ACTIVATE_DONE.value: DEPLOY_STATES.ACTIVATE_DONE,
             DEPLOY_STATES.ACTIVATE_ROLLBACK_DONE.value: DEPLOY_STATES.ACTIVATE_ROLLBACK_DONE,
-            DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED.value: DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED
+            DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED.value: DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED,
+            DEPLOY_STATES.HOST_FAILED.value: DEPLOY_STATES.HOST_FAILED
         }
         if 'deploy-state' in data and data['deploy-state']:
             deploy_state = data['deploy-state']
@@ -814,7 +815,7 @@ class SWMessageDeployStateChanged(messages.PatchMessage):
             self.hostname = data['hostname']
 
         if 'host-state' in data and data['host-state']:
-            host_state = data['host-state']
+            host_state = states.DEPLOY_HOST_STATES(data['host-state'])
             if host_state not in states.VALID_HOST_DEPLOY_STATE:
                 LOG.error("%s received from %s with invalid host-state %s" %
                           (messages.PATCHMSG_DEPLOY_STATE_CHANGED, self.agent, host_state))
@@ -2633,7 +2634,8 @@ class PatchController(PatchService):
             DEPLOY_STATES.ACTIVATE_DONE: deploy_state.activate_done,
             DEPLOY_STATES.ACTIVATE_FAILED: deploy_state.activate_failed,
             DEPLOY_STATES.ACTIVATE_ROLLBACK_DONE: deploy_state.activate_rollback_done,
-            DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED: deploy_state.activate_rollback_failed
+            DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED: deploy_state.activate_rollback_failed,
+            DEPLOY_STATES.HOST_FAILED: deploy_state.deploy_host_failed
         }
         if new_state in state_event:
             state_event[new_state]()
@@ -2643,7 +2645,16 @@ class PatchController(PatchService):
 
     def host_deploy_state_changed(self, hostname, host_deploy_state):
         '''Handle 'host deploy state change' event. '''
-        self.db_api_instance.update_deploy_host(hostname, host_deploy_state)
+
+        deploy_host_state = DeployHostState(hostname)
+        state_event = {
+            DEPLOY_HOST_STATES.FAILED: deploy_host_state.failed
+        }
+        if host_deploy_state in state_event:
+            state_event[host_deploy_state]()
+        else:
+            msg = f"Received invalid deploy host state update {host_deploy_state}"
+            LOG.error(msg)
 
     def add_text_tag_to_xml(self, parent, name, text):
         tag = ET.SubElement(parent, name)

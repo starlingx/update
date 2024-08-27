@@ -19,7 +19,8 @@ deploy_host_state_transition = {
     DEPLOY_HOST_STATES.DEPLOYING: [DEPLOY_HOST_STATES.DEPLOYED, DEPLOY_HOST_STATES.FAILED],
     DEPLOY_HOST_STATES.FAILED: [DEPLOY_HOST_STATES.DEPLOYING, DEPLOY_HOST_STATES.ROLLBACK_DEPLOYED,
                                 DEPLOY_HOST_STATES.ROLLBACK_PENDING, DEPLOY_HOST_STATES.FAILED],
-    DEPLOY_HOST_STATES.DEPLOYED: [DEPLOY_HOST_STATES.ROLLBACK_PENDING],
+    DEPLOY_HOST_STATES.DEPLOYED: [DEPLOY_HOST_STATES.ROLLBACK_PENDING,
+                                  DEPLOY_HOST_STATES.FAILED], # manual recovery scenario
     DEPLOY_HOST_STATES.ROLLBACK_PENDING: [DEPLOY_HOST_STATES.ROLLBACK_DEPLOYING],
     DEPLOY_HOST_STATES.ROLLBACK_DEPLOYING: [DEPLOY_HOST_STATES.ROLLBACK_DEPLOYED,
                                             DEPLOY_HOST_STATES.ROLLBACK_FAILED],
@@ -103,6 +104,10 @@ class DeployHostState(object):
             self.transform(DEPLOY_HOST_STATES.FAILED)
         else:
             self.transform(DEPLOY_HOST_STATES.ROLLBACK_FAILED)
+
+    def failed(self):
+        """Transform deploy host state to failed without rollback logic."""
+        self.transform(DEPLOY_HOST_STATES.FAILED)
 
     def abort(self):
         state = self.get_deploy_host_state()
