@@ -195,3 +195,8 @@ COMMIT1_TAG = "commit1"
 INSTALL_LOCAL_FLAG = "/opt/software/.install_local"
 USM_UPGRADE_IN_PROGRESS_FLAG = os.path.join(tsc.PLATFORM_CONF_PATH, ".usm_upgrade_in_progress")
 UPGRADE_DO_NOT_USE_FQDN_FLAG = os.path.join(tsc.PLATFORM_CONF_PATH, ".upgrade_do_not_use_fqdn")
+
+DC_VAULT_DIR = "/opt/dc-vault"
+DC_VAULT_PLAYBOOK_DIR = "%s/playbooks" % DC_VAULT_DIR
+DC_VAULT_LOADS_DIR = "%s/loads" % DC_VAULT_DIR
+PLAYBOOKS_PATH = "/usr/share/ansible/stx-ansible/playbooks"

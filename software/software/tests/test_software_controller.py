@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import MagicMock
 from unittest.mock import mock_open
 from unittest.mock import patch
+from unittest.mock import call
 from software import constants
 from software import states
 
@@ -566,3 +567,47 @@ class TestSoftwareController(unittest.TestCase):
         db_api_instance_mock.get_deploy_all.assert_called_once()
 
         self.assertIsNone(result)
+
+    @patch('software.software_controller.PatchController.__init__', return_value=None)
+    @patch('os.path.exists')
+    @patch('shutil.rmtree')
+    @patch('os.remove')
+    @patch('software.utils.find_file_by_regex')
+    def test_clean_up_inactive_load_import(self,
+                                           mock_find_file,
+                                           mock_remove,
+                                           mock_rmtree,
+                                           mock_exists,
+                                           mock_init  # pylint: disable=unused-argument
+                                           ):
+
+        controller = PatchController()
+
+        # Mock directory existence
+        mock_exists.return_value = True
+
+        # Mock file finding
+        mock_find_file.side_effect = [
+            ['component-22.12-metadata.xml'],
+            ['component_22.12_PATCH_001-metadata.xml', 'component_22.12_PATCH_002-metadata.xml']
+        ]
+
+        # Call the method
+        release_version = "22.12"
+        controller._clean_up_inactive_load_import(  # pylint: disable=protected-access
+            release_version)
+
+        # Assert directory removal calls
+        expected_dirs = [
+            f"{constants.DC_VAULT_PLAYBOOK_DIR}/{release_version}",
+            f"{constants.DC_VAULT_LOADS_DIR}/{release_version}"
+        ]
+        mock_rmtree.assert_any_call(expected_dirs[0], ignore_errors=True)
+        mock_rmtree.assert_any_call(expected_dirs[1], ignore_errors=True)
+
+        expected_remove_calls = [
+            call('/opt/software/metadata/unavailable/component-22.12-metadata.xml'),
+            call('/opt/software/metadata/committed/component_22.12_PATCH_001-metadata.xml'),
+            call('/opt/software/metadata/committed/component_22.12_PATCH_002-metadata.xml')
+        ]
+        mock_remove.assert_has_calls(expected_remove_calls)
