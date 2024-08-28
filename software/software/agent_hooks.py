@@ -188,12 +188,15 @@ class RemoveKubernetesConfigSymlinkHook(BaseHook):
     K8S_ENCRYPTION_PROVIDER_FILE = "/etc/kubernetes/encryption-provider.yaml"
 
     def run(self):
-        try:
-            os.unlink(self.K8S_ENCRYPTION_PROVIDER_FILE)
-            LOG.info("%s symlink removed" % self.K8S_ENCRYPTION_PROVIDER_FILE)
-        except Exception as e:
-            LOG.exception("Failed to remove symlink: %s" % str(e))
-            raise
+        nodetype = utils.get_platform_conf("nodetype")
+        if nodetype == constants.CONTROLLER:
+            try:
+                if os.path.exists(self.K8S_ENCRYPTION_PROVIDER_FILE):
+                    os.unlink(self.K8S_ENCRYPTION_PROVIDER_FILE)
+                    LOG.info("%s symlink removed" % self.K8S_ENCRYPTION_PROVIDER_FILE)
+            except Exception as e:
+                LOG.exception("Failed to remove symlink: %s" % str(e))
+                raise
 
 
 class RemoveCephMonHook(BaseHook):
