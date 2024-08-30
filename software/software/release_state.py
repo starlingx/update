@@ -86,6 +86,9 @@ class ReleaseState(object):
     def has_release_id(self):
         return self._release_ids is not None and len(self._release_ids) > 0
 
+    def get_release_ids(self):
+        return self._release_ids
+
     def available(self):
         self.transform(states.AVAILABLE)
 

@@ -1877,38 +1877,24 @@ class PatchController(PatchService):
         to_remove_releases.sort(reverse=True)
         return to_remove_releases
 
-    def _rollback_last_commit(self, release):
-        base_commit_id = release.base_commit_id
-        if base_commit_id is None:
-            LOG.warning("Unable to find the base commit id in metadata")
+    def reset_feed_commit(self, release):
+        commit_id = release.commit_id
+        if commit_id is None:
+            LOG.warning("Unable to find the commit id in metadata")
             return
 
-        LOG.info("Rollback to base commit %s" % base_commit_id)
+        LOG.info("Reset feed to commit %s" % commit_id)
 
         try:
             feed_ostree_dir = "%s/rel-%s/ostree_repo" % \
                 (constants.FEED_OSTREE_BASE_DIR, release.sw_version)
 
-            apt_utils.run_rollback(feed_ostree_dir, base_commit_id)
+            apt_utils.run_rollback(feed_ostree_dir, commit_id)
+            self.latest_feed_commit = commit_id
         except APTOSTreeCommandFail:
-            msg = "Failure when rolling back commit %s" % base_commit_id
+            msg = "Failure when reseting commit %s" % commit_id
             LOG.exception(msg)
             raise APTOSTreeCommandFail(msg)
-
-        # Nullify commit-id from metadata
-        metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[release.state]
-        metadata_path = "%s/%s-metadata.xml" % (metadata_dir, release.id)
-        tree = ET.parse(metadata_path)
-        root = tree.getroot()
-        contents = root.find(constants.CONTENTS_TAG)
-
-        if contents is not None:
-            root.remove(contents)
-
-            ET.indent(tree, '  ')
-            with open(metadata_path, "wb") as outfile:
-                tree = ET.tostring(root)
-                outfile.write(tree)
 
     def software_release_delete_api(self, release_ids):
         """
@@ -2012,8 +1998,6 @@ class PatchController(PatchService):
             # Delete N-1 load on system controller
             if is_system_controller():
                 self._clean_up_inactive_load_import(release_sw_version)
-
-            self._rollback_last_commit(release)
 
             try:
                 # Delete the metadata
@@ -2751,10 +2735,13 @@ class PatchController(PatchService):
             msg = f"Received invalid deploy host state update {host_deploy_state}"
             LOG.error(msg)
 
-    def add_text_tag_to_xml(self, parent, name, text):
-        tag = ET.SubElement(parent, name)
-        tag.text = text
-        return tag
+    def add_text_tag_to_xml(self, parent, tag, text):
+        '''Add text to tag. Create it if it does not exist'''
+        element = parent.find(tag)
+        if element is None:
+            element = ET.SubElement(parent, tag)
+        element.text = text
+        return element
 
     def is_deployment_list_reboot_required(self, deployment_list):
         """Check if any deploy in deployment list is reboot required"""
@@ -3257,24 +3244,34 @@ class PatchController(PatchService):
                 raise SoftwareServiceError(f"There are hosts already {DEPLOY_HOST_STATES.DEPLOYED.value} "
                                            f"or in {DEPLOY_HOST_STATES.DEPLOYING.value} process")
 
-            major_release = utils.get_major_release_version(to_release)
-            release_state = ReleaseState(release_state=states.DEPLOYING)
-            is_major_release = release_state.is_major_release_deployment()
+            deploying_release_state = ReleaseState(release_state=states.DEPLOYING)
+            is_applying = deploying_release_state.has_release_id()
 
-            if is_major_release:
-                try:
-                    run_deploy_clean_up_script(to_release)
-                except subprocess.CalledProcessError as e:
-                    msg_error = "Failed to delete deploy"
-                    LOG.error("%s: %s" % (msg_error, e))
-                    raise SoftwareServiceError(msg_error)
+            if is_applying:
+                major_release = utils.get_major_release_version(to_release)
+                is_major_release = deploying_release_state.is_major_release_deployment()
+
+                if is_major_release:
+                    try:
+                        run_deploy_clean_up_script(to_release)
+                    except subprocess.CalledProcessError as e:
+                        msg_error = "Failed to delete deploy"
+                        LOG.error("%s: %s" % (msg_error, e))
+                        raise SoftwareServiceError(msg_error)
+                else:
+                    deployment_list = deploying_release_state.get_release_ids()
+                    for release in self.release_collection.iterate_releases():
+                        if release.sw_release == from_release:
+                            self.reset_feed_commit(release)
+
+                        if release.id in deployment_list:
+                            self.remove_tags_from_metadata(release, constants.CONTENTS_TAG)
+
+                deploying_release_state.available()
             else:
-                for release in self.release_collection.iterate_releases():
-                    if release.sw_release == to_release:
-                        LOG.info("Delete ostree commit")
-                        self._rollback_last_commit(release)
-
-            release_state.available()
+                msg_error = "Delete is not supported while removing a release"
+                LOG.error(msg_error)
+                raise SoftwareServiceError(msg_error)
 
         if os.path.isfile(INSTALL_LOCAL_FLAG):
             # Remove install local flag if enabled
