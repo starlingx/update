@@ -79,6 +79,34 @@ def package_remove(feed_dir, sw_release, packages):
         raise APTOSTreeCommandFail(msg)
 
 
+def component_remove(pkg_feed_dir, component):
+    """
+    Remove the component with all packages from the
+    apt repository.
+
+    :param pkg_feed_dir: apt package feed directory
+    :param component: Component name in format MM.mm.pp
+    """
+
+    try:
+        msg = "Removing component: %s" % component
+        LOG.info(msg)
+
+        subprocess.run(
+            ["apt-ostree", "repo", "remove",
+                "--feed", str(pkg_feed_dir),
+                "--release", constants.DEBIAN_RELEASE,
+                "--component", component],
+            check=True,
+            capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to remove component."
+        info_msg = "\"apt-ostree repo remove component\" error: return code %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.error(info_msg)
+        raise APTOSTreeCommandFail(msg)
+
+
 def run_install(repo_dir, sw_release, packages):
     """
     Run Debian package upgrade.

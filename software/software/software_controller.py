@@ -1556,38 +1556,45 @@ class PatchController(PatchService):
             release_id = get_release_from_patch(patch_file, 'id')
 
             release = self.release_collection.get_release_by_id(release_id)
+            patch_id = None
+            thispatch = None
 
-            if release:
-                if release.state == states.COMMITTED:
-                    msg = "%s is committed. Metadata not updated" % release_id
-                    LOG.info(msg)
-                    local_info += msg + "\n"
-                elif release.state != states.AVAILABLE:
-                    msg = "%s is not currently in available state to be deployed." % release_id
-                    LOG.info(msg)
-                    local_info += msg + "\n"
-                else:
-                    try:
+            try:
+                if release:
+                    if release.state == states.COMMITTED:
+                        msg = "%s is committed. Metadata not updated" % release_id
+                        LOG.info(msg)
+                        local_info += msg + "\n"
+                    elif release.state != states.AVAILABLE:
+                        msg = "%s is not currently in available state to be deployed." % release_id
+                        LOG.info(msg)
+                        local_info += msg + "\n"
+                    else:
                         # todo(abailey) PatchFile / extract_patch should be renamed
-                        PatchFile.extract_patch(patch_file,
-                                                metadata_dir=states.AVAILABLE_DIR,
-                                                metadata_only=True,
-                                                existing_content=release.contents,
-                                                base_pkgdata=self.base_pkgdata)
+                        patch_id, thispatch, error_msg = PatchFile.extract_patch(
+                            patch_file,
+                            metadata_dir=states.AVAILABLE_DIR,
+                            metadata_only=True,
+                            existing_content=release.contents,
+                            base_pkgdata=self.base_pkgdata)
+
+                        if error_msg:
+                            raise ReleaseValidationFailure(error=error_msg)
+
                         PatchFile.unpack_patch(patch_file)
                         reload_release_data()
                         msg = "%s is already uploaded. Updated metadata only" % release_id
                         LOG.info(msg)
                         local_info += msg + "\n"
-                    except SoftwareFail:
-                        msg = "Failed to upload release %s" % release_id
-                        LOG.exception(msg)
-                        local_error += msg + "\n"
-            else:
-                try:
-                    PatchFile.extract_patch(patch_file,
-                                            metadata_dir=states.AVAILABLE_DIR,
-                                            base_pkgdata=self.base_pkgdata)
+                else:
+                    patch_id, thispatch, error_msg = PatchFile.extract_patch(
+                        patch_file,
+                        metadata_dir=states.AVAILABLE_DIR,
+                        base_pkgdata=self.base_pkgdata)
+
+                    if error_msg:
+                        raise ReleaseValidationFailure(error=error_msg)
+
                     PatchFile.unpack_patch(patch_file)
                     local_info += "%s is now uploaded\n" % release_id
                     reload_release_data()
@@ -1597,11 +1604,21 @@ class PatchController(PatchService):
                     if len(self.hosts) == 0:
                         msg = "service is running in incorrect state. No registered host"
                         raise InternalError(msg)
-                except SoftwareFail:
-                    msg = "Failed to upload release %s" % release_id
-                    LOG.exception(msg)
-                    local_error += msg + "\n"
-                    continue
+            except Exception as e:
+                msg = "Failed to upload release %s" % release_id
+                LOG.exception("%s: %s" % (msg, e))
+                local_error += msg + "\n"
+
+                if patch_id and thispatch:
+                    PatchFile.delete_extracted_patch(patch_id, thispatch)
+
+                    try:
+                        release_sw_version = thispatch.metadata[patch_id]["sw_version"]
+                        pkg_feed_dir = "%s/rel-%s" % (constants.PACKAGE_FEED_DIR, release_sw_version)
+                        apt_utils.component_remove(pkg_feed_dir, release_sw_version)
+                    except Exception:
+                        LOG.info("Could not delete apt-ostree component, does not exist")
+                continue
 
             release = self.release_collection.get_release_by_id(release_id)
             if release:

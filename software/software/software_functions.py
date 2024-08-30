@@ -831,7 +831,9 @@ class PatchFile(object):
         :param metadata_dir: Directory to store the metadata XML file
         :return:
         """
+        patch_id = None
         thispatch = None
+        error_msg = None
 
         abs_patch = os.path.abspath(patch)
         abs_metadata_dir = os.path.abspath(metadata_dir)
@@ -851,7 +853,8 @@ class PatchFile(object):
 
             if patch_id is None:
                 shutil.rmtree(tmpdir)
-                return None
+                msg = "Unable to extract patch ID"
+                raise ReleaseValidationFailure(error=msg)
 
             if not metadata_only and base_pkgdata is not None:
                 # Run version validation tests first
@@ -895,28 +898,59 @@ class PatchFile(object):
                             "%s/%s_%s" % (root_scripts_dir, patch_id, post_install_script_name))
 
         except tarfile.TarError as te:
-            msg = "Extract software failed %s" % str(te)
-            LOG.exception(msg)
-            raise ReleaseValidationFailure(error=msg)
+            error_msg = "Extract software failed %s" % str(te)
+            LOG.exception(error_msg)
         except KeyError as ke:
             # NOTE(bqian) assuming this is metadata missing key.
             # this try except should be narror down to protect more specific
             # routine accessing external data (metadata) only.
-            msg = "Software metadata missing required value for %s" % str(ke)
-            LOG.exception(msg)
-            raise ReleaseValidationFailure(error=msg)
-            # except OSError:
-            #     msg = "Failed during patch extraction"
-            #     LOG.exception(msg)
-            #     raise SoftwareFail(msg)
-            # except IOError:  # pylint: disable=duplicate-except
-            #     msg = "Failed during patch extraction"
-            #     LOG.exception(msg)
-            #     raise SoftwareFail(msg)
+            error_msg = "Software metadata missing required value for %s" % str(ke)
+            LOG.exception(error_msg)
+        except Exception as e:
+            error_msg = "Error while extracting patch %s" % str(e)
+            LOG.exception(error_msg)
         finally:
             shutil.rmtree(tmpdir)
 
-        return thispatch
+        return patch_id, thispatch, error_msg
+
+    @staticmethod
+    def delete_extracted_patch(patch_id, thispatch):
+        """
+        Try to delete all files from failed upload.
+        :param patch_id: ID of the patch to be deleted
+        :param thispatch: Patch release data
+        """
+
+        try:
+            abs_metadata_dir = os.path.abspath(states.AVAILABLE_DIR)
+            os.remove("%s/%s-metadata.xml" % (abs_metadata_dir, patch_id))
+        except Exception:
+            msg = "Could not delete %s metadata, does not exist" % patch_id
+            LOG.info(msg)
+
+        try:
+            patch_sw_version = utils.get_major_release_version(
+            thispatch.metadata[patch_id]["sw_version"])
+            abs_ostree_tar_dir = package_dir[patch_sw_version]
+            os.remove("%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id))
+        except Exception:
+            msg = "Could not delete %s software.tar, does not exist" % patch_id
+            LOG.info(msg)
+
+        try:
+            pre_install_script_name = thispatch.metadata[patch_id]["pre_install"]
+            os.remove("%s/%s_%s" % (root_scripts_dir, patch_id, pre_install_script_name))
+        except Exception:
+            msg = "Could not delete %s pre-install script, does not exist" % patch_id
+            LOG.info(msg)
+
+        try:
+            post_install_script_name = thispatch.metadata[patch_id]["post_install"]
+            os.remove("%s/%s_%s" % (root_scripts_dir, patch_id, post_install_script_name))
+        except Exception:
+            msg = "Could not delete %s post-install script, does not exist" % patch_id
+            LOG.info(msg)
 
     @staticmethod
     def unpack_patch(patch):
