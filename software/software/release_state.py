@@ -71,6 +71,16 @@ class ReleaseState(object):
             release = release_collection.get_release_by_id(rel_id)
             if release.is_ga_release:
                 return True
+            elif release.prepatched_iso:
+                return True
+        return False
+
+    def is_patched_major_release_deployment(self):
+        release_collection = get_SWReleaseCollection()
+        for rel_id in self._release_ids:
+            release = release_collection.get_release_by_id(rel_id)
+            if release.prepatched_iso:
+                return True
         return False
 
     def has_release_id(self):

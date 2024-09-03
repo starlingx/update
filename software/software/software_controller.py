@@ -3769,16 +3769,14 @@ class PatchController(PatchService):
 
         """
         if target_state in [DEPLOY_STATES.COMPLETED, DEPLOY_STATES.HOST_ROLLBACK_DONE]:
+            is_major_release = ReleaseState(release_state=states.DEPLOYING).is_major_release_deployment()
+            # Do not create in case of patch release.
+            if not is_major_release:
+                return
             deploy = self.db_api_instance.get_current_deploy()
-            deploy_state = deploy.get('state')
             release_version = deploy.get('from_release')
             reason_text = constants.SOFTWARE_ALARMS[fm_constants.FM_ALARM_ID_USM_CLEANUP_DEPLOYMENT_DATA]["reason_text"]
-
-            # Only creates if actual state is COMPLETED or HOST_ROLLBACK_DONE
-            if deploy_state in [DEPLOY_STATES.COMPLETED.value, DEPLOY_STATES.HOST_ROLLBACK_DONE.value]:
-                new_reason_text = reason_text % (deploy_state, release_version)
-            else:
-                return
+            new_reason_text = reason_text % (target_state.value, release_version)
             self.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_CLEANUP_DEPLOYMENT_DATA,
                                        fm_constants.FM_ALARM_STATE_SET,
                                        "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, constants.CONTROLLER_FLOATING_HOSTNAME),
