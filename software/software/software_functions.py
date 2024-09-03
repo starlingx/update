@@ -365,6 +365,13 @@ class ReleaseData(object):
         else:
             self.metadata[release_id]["reboot_required"] = "N"
 
+        # Default prepatched_iso to N
+        prepatched_iso = root.findtext("prepatched_iso")
+        if prepatched_iso is None or prepatched_iso != "Y":
+            self.metadata[release_id]["prepatched_iso"] = "N"
+        else:
+            self.metadata[release_id]["prepatched_iso"] = "Y"
+
         release_sw_version = utils.get_major_release_version(
             self.metadata[release_id]["sw_version"])
         global package_dir

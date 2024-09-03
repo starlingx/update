@@ -10,6 +10,7 @@
   <status>REL</status>
   <unremovable>Y</unremovable>
   <reboot_required>Y</reboot_required>
+  <prepatched_iso>N</prepatched_iso>
   <apply_active_release_only/>
   <contents>
     <ostree>
