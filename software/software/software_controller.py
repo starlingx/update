@@ -3423,8 +3423,19 @@ class PatchController(PatchService):
         except AttributeError:
             release = self.release_collection.get_release_by_id(to_release_deployment)
             is_major_release = ReleaseState(release_ids=[release.id]).is_major_release_deployment()
+
         if not is_major_release:
-            raise SoftwareServiceError("Abort operation is only supported for major releases.")
+            removing_release_state = ReleaseState(release_state=states.REMOVING)
+            is_removing = removing_release_state.has_release_id()
+
+            if is_removing:
+                raise SoftwareServiceError("Abort operation is not supported in patch removal")
+
+            from_deployment = self.release_collection.get_release_by_id(from_release_deployment)
+            self.reset_feed_commit(from_deployment)
+
+            self.send_latest_feed_commit_to_agent()
+            self.software_sync()
 
         major_from_release = utils.get_major_release_version(from_release)
         feed_repo = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, major_from_release)
@@ -3432,7 +3443,7 @@ class PatchController(PatchService):
         commit_id = deploy_release.commit_id
 
         # TODO(lbonatti): remove this condition when commit-id is built into GA metadata.
-        if commit_id in [constants.COMMIT_DEFAULT_VALUE, None]:
+        if is_major_release and commit_id in [constants.COMMIT_DEFAULT_VALUE, None]:
             commit_id = ostree_utils.get_feed_latest_commit(deploy_release.sw_version)
 
         # Update the deployment
@@ -3621,7 +3632,7 @@ class PatchController(PatchService):
 
         if async_req:
             # async_req install requested, so return now
-            msg = "Host installation request sent to %s." % self.hosts[ip].hostname
+            msg = "Host deployment request sent to %s." % self.hosts[ip].hostname
             msg_info += msg + "\n"
             LOG.info("host-install async_req: %s", msg)
             # TODO(bqian) update deploy state to deploy-host
@@ -3647,18 +3658,18 @@ class PatchController(PatchService):
                 # We got a response
                 resp_rx = True
                 if self.hosts[ip].install_status:
-                    msg = "Host installation was successful on %s." % self.hosts[ip].hostname
+                    msg = "Host deployment was successful on %s." % self.hosts[ip].hostname
                     msg_info += msg + "\n"
                     LOG.info("host-install: %s", msg)
                 elif self.hosts[ip].install_reject_reason:
-                    msg = "Host installation rejected by %s. %s" % (
+                    msg = "Host deployment rejected by %s. %s" % (
                         self.hosts[ip].hostname,
                         self.hosts[ip].install_reject_reason)
                     msg_error += msg + "\n"
                     LOG.error("Error in host-install: %s", msg)
                     success = False
                 else:
-                    msg = "Host installation failed on %s." % self.hosts[ip].hostname
+                    msg = "Host deployment failed on %s." % self.hosts[ip].hostname
                     msg_error += msg + "\n"
                     LOG.error("Error in host-install: %s", msg)
                     success = False
