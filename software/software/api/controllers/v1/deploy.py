@@ -28,6 +28,7 @@ class DeployController(RestController):
         'complete': ['POST'],
         'delete': ['DELETE'],
         'software_upgrade': ['GET'],
+        'software_sync': ['POST'],
     }
 
     @expose(method='POST', template='json')
@@ -106,3 +107,9 @@ class DeployController(RestController):
     @expose(method='GET', template='json')
     def software_upgrade(self):
         return sc.get_software_upgrade()
+
+    @expose(method='POST', template='json')
+    def software_sync(self):
+        reload_release_data()
+        result = sc.software_sync()
+        return {"result" : result}
