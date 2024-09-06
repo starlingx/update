@@ -4,7 +4,10 @@
 # Copyright (c) 2024 Wind River Systems, Inc.
 #
 import unittest
+from unittest.mock import patch
+import xml.etree.ElementTree as ET
 
+from software.software_functions import get_to_release_from_metadata_file, read_attributes_from_metadata_file
 from software.release_data import SWReleaseCollection
 from software.software_functions import ReleaseData
 
@@ -67,6 +70,7 @@ metadata2 = """<?xml version="1.0" ?>
   <requires/>
   <semantics/>
 </patch>"""
+
 
 expected_values = [
     {
@@ -191,3 +195,62 @@ class TestSoftwareFunction(unittest.TestCase):
                 self.assertEqual(val["pre_install"], r.pre_install)
             self.assertEqual(val["commit_id"], r.commit_id)
             self.assertEqual(val["checksum"], r.commit_checksum)
+
+    @patch('os.path.join')
+    @patch('lxml.etree.parse')
+    def test_read_attributes_valid_xml(self, mock_parse, mock_join):
+        mock_join.return_value = "/test/upgrades/metadata.xml"
+
+        # Creating a mock XML structure
+        root = ET.Element("root")
+        version_elem = ET.SubElement(root, "version")
+        version_elem.text = "1.0.0"
+
+        supported_upgrades_elem = ET.SubElement(root, "supported_upgrades")
+        upgrade_elem = ET.SubElement(supported_upgrades_elem, "upgrade")
+        version_elem = ET.SubElement(upgrade_elem, "version")
+        version_elem.text = "0.9.0"
+        required_patch_elem = ET.SubElement(upgrade_elem, "required_patch")
+        required_patch_elem.text = "patch_001"
+
+        mock_parse.return_value = root
+
+        result = read_attributes_from_metadata_file("/mocked/path")
+
+        expected_result = {
+            "to_release": "1.0.0",
+            "supported_from_releases": [
+                {
+                    "version": "0.9.0",
+                    "required_patch": "patch_001"
+                }
+            ]
+        }
+
+        self.assertEqual(result, expected_result)
+
+    @patch('software.software_functions.get_metadata_files')
+    @patch('software.software_functions.read_attributes_from_metadata_file')
+    def test_get_to_release_from_metadata_file_without_usm(self,
+                                                           mock_read_attributes,
+                                                           mock_get_metadata_files):
+        mock_get_metadata_files.return_value = []
+        mock_read_attributes.return_value = {
+            "to_release": "1.0.0",
+        }
+
+        result = get_to_release_from_metadata_file('/mnt/iso')
+
+        assert result == "1.0.0"
+
+    @patch('software.software_functions.get_metadata_files')
+    @patch('software.software_functions.get_sw_version')
+    def test_get_to_release_from_metadata_file_with_usm(self,
+                                                        mock_get_ver,
+                                                        mock_get_metadata_files):
+        mock_get_metadata_files.return_value = ["/mnt/iso/metadata.xml"]
+        mock_get_ver.return_value = "1.0.0"
+
+        result = get_to_release_from_metadata_file('/mnt/iso')
+
+        assert result == "1.0.0"

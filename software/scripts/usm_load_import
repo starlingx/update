@@ -25,6 +25,8 @@ import sys
 import upgrade_utils
 
 AVAILABLE_DIR = "/opt/software/metadata/available"
+UNAVAILABLE_DIR = "/opt/software/metadata/unavailable"
+COMMITTED_DIR = "/opt/software/metadata/committed"
 FEED_OSTREE_BASE_DIR = "/var/www/pages/feed"
 RELEASE_GA_NAME = "starlingx-%s"
 SOFTWARE_STORAGE_DIR = "/opt/software"
@@ -183,6 +185,13 @@ def load_import(from_release, to_release, iso_mount_dir):
         LOG.info("Removed %s", to_feed_dir)
         raise
 
+
+def move_metadata_file_to_available_dir(to_release, iso_mount_dir):
+    """
+    Move release metadata file to /opt/software/metadata/available
+    :param to_release: release version
+    :param iso_mount_dir: iso mount dir
+    """
     try:
         # Copy metadata.xml to /opt/software/metadata/available
         os.makedirs(AVAILABLE_DIR, exist_ok=True)
@@ -200,6 +209,56 @@ def load_import(from_release, to_release, iso_mount_dir):
     except shutil.Error:
         LOG.exception("Failed to copy the release %s metadata file to %s" %
                       (to_release, AVAILABLE_DIR))
+        raise
+
+
+def generate_metadata_file_in_unavailable_dir(to_release):
+    """
+    Generate release metadata file in /opt/software/metadata/unavailable
+    This is only for 22.12 pre USM iso load import
+    :param to_release: release version
+    """
+    try:
+        # Copy metadata.xml to /opt/software/metadata/unavailable
+        os.makedirs(UNAVAILABLE_DIR, exist_ok=True)
+        # TODO(jli14): release name should be dynamically generated based on the branch. 
+        metadata_name = f"{RELEASE_GA_NAME % to_release}-metadata.xml"
+        LOG.info("metadata name: %s", metadata_name)
+
+        # Generate metadata.xml
+        import xml.etree.ElementTree as ET
+        from xml.dom import minidom
+
+        root = ET.Element('patch')
+        id_elem = ET.SubElement(root, "id")
+        id_elem.text = RELEASE_GA_NAME % to_release
+        xml_str = ET.tostring(root, encoding='unicode')
+        pretty_xml = minidom.parseString(xml_str).toprettyxml(indent="  ")
+        pretty_xml = '\n'.join([line for line in pretty_xml.split('\n') if line.strip()])
+
+        # Write to file
+        abs_path_metadata_filename = os.path.join(UNAVAILABLE_DIR, metadata_name)
+        with open(abs_path_metadata_filename, "w") as file:
+            file.write(pretty_xml)
+
+    except Exception:
+        LOG.exception("Failed to copy the release %s metadata file to %s" %
+                      (to_release, UNAVAILABLE_DIR))
+        raise
+
+
+def copy_patch_metadata_files_to_committed(iso_mount_dir):
+    """
+    Copy patch metadata files to /opt/software/metadata/committed
+    :param iso_mount_dir: iso mount dir
+    """
+    committed_patch_dir = os.path.join(iso_mount_dir, 'patches')
+    try:
+        shutil.copytree(committed_patch_dir, COMMITTED_DIR, dirs_exist_ok=True)
+        LOG.info("Copied patch metadata file to %s", COMMITTED_DIR)
+    except shutil.Error:
+        LOG.exception("Failed to copy patch metadata file(s) to %s" %
+                      COMMITTED_DIR)
         raise
 
 
@@ -226,11 +285,26 @@ def main():
         help="The mounted iso image directory.",
     )
 
+    parser.add_argument(
+        "--is-usm-iso",
+        required=False,
+        help="True if the iso supports USM upgrade.",
+        default=True
+    )
+
     args = parser.parse_args()
 
     try:
         LOG.info("Load import from %s to %s started", args.from_release, args.to_release)
         load_import(args.from_release, args.to_release, args.iso_dir)
+
+        if args.is_usm_iso == "True":
+            move_metadata_file_to_available_dir(args.to_release, args.iso_dir)
+        else:
+            # pre USM iso needs to generate metadata file
+            generate_metadata_file_in_unavailable_dir(args.to_release)
+            copy_patch_metadata_files_to_committed(args.iso_dir)
+
     except Exception as e:
         LOG.exception(e)
         return 1
