@@ -60,6 +60,7 @@ from software.software_functions import collect_current_load_for_hosts
 from software.software_functions import copy_pxeboot_update_file
 from software.software_functions import create_deploy_hosts
 from software.software_functions import deploy_host_validations
+from software.software_functions import validate_host_deploy_order
 from software.software_functions import parse_release_metadata
 from software.software_functions import configure_logging
 from software.software_functions import mount_iso_load
@@ -3678,6 +3679,25 @@ class PatchController(PatchService):
         data = self.app_dependencies
 
         return dict(data)
+
+    def is_host_next_to_be_deployed_api(self, hostname):
+        is_major_release = ReleaseState(release_state=states.DEPLOYING).is_major_release_deployment()
+        deploy_state = DeployState.get_deploy_state()
+        # If there's no deploy in progress return False
+        if deploy_state is None:
+            return False
+        is_rollback_action = deploy_state in [DEPLOY_STATES.HOST_ROLLBACK, DEPLOY_STATES.ACTIVATE_ROLLBACK_PENDING,
+                                              DEPLOY_STATES.HOST_ROLLBACK_FAILED, DEPLOY_STATES.ACTIVATE_ROLLBACK_DONE,
+                                              DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED]
+        try:
+            validate_host_deploy_order(hostname, is_major_release, is_rollback_action)
+            return True
+        except SoftwareServiceError:
+            return False
+        except Exception as err:
+            msg_error = "Error to check deploy order"
+            LOG.exception("%s: %s" % (msg_error, err))
+            return False
 
     def deploy_host_list(self):
         deploy_hosts = self.db_api_instance.get_deploy_host()

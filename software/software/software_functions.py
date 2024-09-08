@@ -1397,10 +1397,12 @@ def validate_host_deploy_order(hostname, is_major_release: bool, rollback: bool 
     order of controller-1 -> controller-0 -> storages -> computes
     and for patch release: controllers -> storages -> computes
 
+    Case rollback param is True the controllers order will be reversed
     Case one of the validations failed raise SoftwareError exception
 
     :param hostname: Hostname of the host to be deployed.
     :param is_major_release: Bool field indicating if is major release
+    :param rollback: Bool field indicating if is related to a rollback action
     """
     db_api_instance = get_instance()
     controllers_list = [constants.CONTROLLER_1_HOSTNAME, constants.CONTROLLER_0_HOSTNAME]

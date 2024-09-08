@@ -6,6 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 """
 import logging
 from pecan import expose
+from pecan import request
 from pecan.rest import RestController
 
 from software.release_data import reload_release_data
@@ -18,6 +19,7 @@ LOG = logging.getLogger('main_logger')
 class DeployHostController(RestController):
     _custom_actions = {
         'install_local': ['POST'],
+        'next': ['GET'],
     }
 
     @expose(method='GET', template='json')
@@ -53,4 +55,11 @@ class DeployHostController(RestController):
     def install_local(self, delete):
         reload_release_data()
         result = sc.software_install_local_api(delete)
+        return result
+
+    @expose(method='GET', template='json')
+    def next(self):
+        reload_release_data()
+        hostname = request.GET.get("hostname")
+        result = sc.is_host_next_to_be_deployed_api(hostname)
         return result
