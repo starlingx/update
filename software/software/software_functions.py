@@ -1184,7 +1184,7 @@ def get_metadata_files(root_dir):
 
 def get_sw_version(metadata_files):
     # from a list of metadata files, find the latest sw_version (e.g 24.0.1)
-    unset_ver = "0.0.0"
+    unset_ver = constants.UNKNOWN_SOFTWARE_VERSION
     rel_ver = unset_ver
     for f in metadata_files:
         try:
@@ -1205,24 +1205,20 @@ def get_sw_version(metadata_files):
     return rel_ver
 
 
-def read_upgrade_support_versions(mounted_dir, do_check_to_release=True):
+def read_attributes_from_metadata_file(mounted_dir):
     """
-    Read upgrade metadata file to get supported upgrades
-    versions
+    Get attributes from upgrade metadata xml file
     :param mounted_dir: Mounted iso directory
-    :param do_check_to_release: True if to_release should be retrieved
-    :return: to_release, supported_from_releases
+    :return: a dict of attributes
     """
-    to_release = constants.UNKNOWN_SOFTWARE_VERSION
+    metadata_file = os.path.join(mounted_dir, "upgrades", "metadata.xml")
     try:
-        root = ElementTree.parse(mounted_dir + "/upgrades/metadata.xml").getroot()
+        root = ElementTree.parse(metadata_file)
     except IOError:
         raise SoftwareServiceError(
-            "The ISO does not contain required upgrade information in upgrades/metadata.xml")
+            f"The ISO does not contain required upgrade information in {metadata_file}")
 
-    if do_check_to_release:
-        rel_metadata_files = get_metadata_files(os.path.join(mounted_dir, "upgrades"))
-        to_release = get_sw_version(rel_metadata_files)
+    to_release = root.findtext("version")
 
     supported_from_releases = []
     supported_upgrades = root.find("supported_upgrades").findall("upgrade")
@@ -1231,7 +1227,41 @@ def read_upgrade_support_versions(mounted_dir, do_check_to_release=True):
             "version": upgrade.findtext("version"),
             "required_patch": upgrade.findtext("required_patch"),
         })
-    return to_release, supported_from_releases
+
+    return {
+        "to_release": to_release,
+        "supported_from_releases": supported_from_releases
+    }
+
+
+def read_upgrade_support_versions(mounted_dir):
+    """
+    Get supported upgrades
+    versions
+    :param mounted_dir: Mounted iso directory
+    :param do_check_to_release: True if to_release should be retrieved
+    :return: supported_from_releases
+    """
+    attributes_from_metadata = read_attributes_from_metadata_file(mounted_dir)
+    return attributes_from_metadata["supported_from_releases"]
+
+
+def get_to_release_from_metadata_file(mounted_dir):
+    """
+    Get to_release version
+    :param mounted_dir: Mounted iso directory
+    :return: to_release
+    """
+
+    rel_metadata_files = get_metadata_files(os.path.join(mounted_dir, "upgrades"))
+
+    if len(rel_metadata_files) == 0:  # This is pre-USM iso
+        attributes_from_metadata = read_attributes_from_metadata_file(mounted_dir)
+        to_release = attributes_from_metadata["to_release"]
+    else:
+        to_release = get_sw_version(rel_metadata_files)
+
+    return to_release
 
 
 def create_deploy_hosts(hostname=None):

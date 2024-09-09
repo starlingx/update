@@ -80,15 +80,14 @@ class TestSoftwareController(unittest.TestCase):
     @patch('software.software_controller.SW_VERSION', '4.0.0')
     @patch('software.software_controller.PatchController._run_load_import')
     def test_process_inactive_upgrade_files(self,
-                                          mock_run_load_import,
-                                          mock_read_upgrade_support_versions,
-                                          mock_major_release_upload_check,
-                                          mock_init):   # pylint: disable=unused-argument
+                                            mock_run_load_import,
+                                            mock_read_upgrade_support_versions,
+                                            mock_major_release_upload_check,
+                                            mock_init):   # pylint: disable=unused-argument
         controller = PatchController()
         mock_run_load_import.return_value = "Load import successful"
         mock_major_release_upload_check.return_value = True
-        mock_read_upgrade_support_versions.return_value = (
-            None, [{'version': '3.0'}, {'version': '2.0'}])
+        mock_read_upgrade_support_versions.return_value = [{'version': '3.0'}, {'version': '2.0'}]
         from_release = None
         to_release = '2.0.0'
         iso_mount_dir = '/test/iso'
@@ -114,8 +113,7 @@ class TestSoftwareController(unittest.TestCase):
         controller = PatchController()
         mock_run_load_import.return_value = "Load import successful"
         mock_major_release_upload_check.return_value = True
-        mock_read_upgrade_support_versions.return_value = (
-            None, [{'version': '3.0.0'}, {'version': '2.0.0'}])
+        mock_read_upgrade_support_versions.return_value =[{'version': '3.0.0'}, {'version': '2.0.0'}]
         from_release = None
         to_release = '1.0.0'
         iso_mount_dir = '/test/iso'
@@ -131,6 +129,54 @@ class TestSoftwareController(unittest.TestCase):
                 e.message, 'ISO file release version 1.0 not supported to upgrade to 4.0.0')
 
     @patch('software.software_controller.PatchController.__init__', return_value=None)
+    @patch('os.path.isfile', return_value=False)
+    @patch('os.path.join', return_value="/usr/sbin/software-deploy/usm_load_import")
+    @patch('software.software_controller.reload_release_data')
+    @patch('shutil.copyfile')
+    @patch('subprocess.run')
+    @patch('os.path.exists')
+    def test_run_load_import_success_without_usm_script(self,
+                                                        mock_path_exists,
+                                                        mock_subprocess_run,
+                                                        mock_copyfile,     # pylint: disable=unused-argument
+                                                        mock_reload_release_data,      # pylint: disable=unused-argument
+                                                        mock_join,    # pylint: disable=unused-argument
+                                                        mock_isfile,   # pylint: disable=unused-argument
+                                                        mock_init):    # pylint: disable=unused-argument
+        # Setup
+        mock_path_exists.return_value = True
+        mock_subprocess_run.return_value = MagicMock(returncode=0, stdout="Load import successful")
+
+        controller = PatchController()
+        from_release = None
+        to_release = "22.12"
+        iso_mount_dir = "/mnt/iso"
+        upgrade_files = {
+            constants.ISO_EXTENSION: "test.iso",
+            constants.SIG_EXTENSION: "test.sig"
+        }
+
+        # Call the method
+        local_info, local_warning, local_error, release_meta_info = controller._run_load_import(    # pylint: disable=protected-access
+            from_release,
+            to_release,
+            iso_mount_dir,
+            upgrade_files)
+
+        # Assertions
+        self.assertEqual(local_info, "Load import successful")
+        self.assertEqual(local_warning, "")
+        self.assertEqual(local_error, "")
+        self.assertEqual(
+            release_meta_info,
+            {
+                "test.iso": {"id": "starlingx-22.12", "sw_release": "22.12"},
+                "test.sig": {"id": None, "sw_release": None}
+            }
+        )
+
+    @patch('software.software_controller.PatchController.__init__', return_value=None)
+    @patch('os.path.isfile', return_value=True)
     @patch('software.software_controller.PatchController.get_release_meta_info')
     @patch('software.software_controller.reload_release_data')
     @patch('shutil.copyfile')
@@ -138,15 +184,16 @@ class TestSoftwareController(unittest.TestCase):
     @patch('shutil.copytree')
     @patch('shutil.rmtree')
     @patch('os.path.exists')
-    def test_run_load_import_success(self,
-                                     mock_path_exists,
-                                     mock_rmtree,
-                                     mock_copytree,
-                                     mock_subprocess_run,
-                                     mock_copyfile,     # pylint: disable=unused-argument
-                                     mock_reload_release_data,      # pylint: disable=unused-argument
-                                     mock_get_release_meta_info,
-                                     mock_init):    # pylint: disable=unused-argument
+    def test_run_load_import_success_with_usm_script(self,
+                                                     mock_path_exists,
+                                                     mock_rmtree,
+                                                     mock_copytree,
+                                                     mock_subprocess_run,
+                                                     mock_copyfile,     # pylint: disable=unused-argument
+                                                     mock_reload_release_data,      # pylint: disable=unused-argument
+                                                     mock_get_release_meta_info,
+                                                     mock_isfile,   # pylint: disable=unused-argument
+                                                     mock_init):    # pylint: disable=unused-argument
         # Setup
         mock_path_exists.return_value = True
         mock_subprocess_run.return_value = MagicMock(returncode=0, stdout="Load import successful")
@@ -177,7 +224,9 @@ class TestSoftwareController(unittest.TestCase):
         mock_copytree.assert_called_once_with(
             "/mnt/iso/upgrades/software-deploy", "/opt/software/rel-2.0.0/bin")
 
+
     @patch('software.software_controller.PatchController.__init__', return_value=None)
+    @patch('os.path.isfile', return_value=True)
     @patch('software.software_controller.PatchController.get_release_meta_info')
     @patch('software.software_controller.reload_release_data')
     @patch('shutil.copyfile')
@@ -185,15 +234,16 @@ class TestSoftwareController(unittest.TestCase):
     @patch('shutil.copytree')
     @patch('shutil.rmtree')
     @patch('os.path.exists')
-    def test_run_load_import_script_failure(self,
-                                            mock_path_exists,
-                                            mock_rmtree,
-                                            mock_copytree,
-                                            mock_subprocess_run,
-                                            mock_copyfile,     # pylint: disable=unused-argument
-                                            mock_reload_release_data,      # pylint: disable=unused-argument
-                                            mock_get_release_meta_info,
-                                            mock_init):    # pylint: disable=unused-argument
+    def test_run_load_import_script_with_usm_script_failure(self,
+                                                            mock_path_exists,
+                                                            mock_rmtree,
+                                                            mock_copytree,
+                                                            mock_subprocess_run,
+                                                            mock_copyfile,     # pylint: disable=unused-argument
+                                                            mock_reload_release_data,      # pylint: disable=unused-argument
+                                                            mock_get_release_meta_info,
+                                                            mock_isfile,    # pylint: disable=unused-argument
+                                                            mock_init):    # pylint: disable=unused-argument
         # Setup
         mock_path_exists.return_value = True
         mock_subprocess_run.return_value = MagicMock(returncode=1, stdout="Load import failed")
@@ -225,6 +275,7 @@ class TestSoftwareController(unittest.TestCase):
             "/mnt/iso/upgrades/software-deploy", "/opt/software/rel-2.0.0/bin")
 
     @patch('software.software_controller.PatchController.__init__', return_value=None)
+    @patch('os.path.isfile', return_value=True)
     @patch('software.software_controller.PatchController.get_release_meta_info')
     @patch('software.software_controller.reload_release_data')
     @patch('shutil.copyfile')
@@ -232,15 +283,16 @@ class TestSoftwareController(unittest.TestCase):
     @patch('shutil.copytree')
     @patch('shutil.rmtree')
     @patch('os.path.exists')
-    def test_run_load_import_script_exception(self,
-                                              mock_path_exists,
-                                              mock_rmtree,
-                                              mock_copytree,
-                                              mock_subprocess_run,
-                                              mock_copyfile,     # pylint: disable=unused-argument
-                                              mock_reload_release_data,      # pylint: disable=unused-argument
-                                              mock_get_release_meta_info,
-                                              mock_init):    # pylint: disable=unused-argument
+    def test_run_load_import_script_with_usm_script_exception(self,
+                                                              mock_path_exists,
+                                                              mock_rmtree,
+                                                              mock_copytree,
+                                                              mock_subprocess_run,
+                                                              mock_copyfile,     # pylint: disable=unused-argument
+                                                              mock_reload_release_data,      # pylint: disable=unused-argument
+                                                              mock_get_release_meta_info,
+                                                              mock_isfile,    # pylint: disable=unused-argument
+                                                              mock_init):    # pylint: disable=unused-argument
         # Setup
         mock_path_exists.return_value = True
         mock_subprocess_run.side_effect = Exception("Unexpected error")
