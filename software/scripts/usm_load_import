@@ -298,7 +298,7 @@ def main():
         LOG.info("Load import from %s to %s started", args.from_release, args.to_release)
         load_import(args.from_release, args.to_release, args.iso_dir)
 
-        if args.is_usm_iso == "True":
+        if args.is_usm_iso in ["True", True]:
             move_metadata_file_to_available_dir(args.to_release, args.iso_dir)
         else:
             # pre USM iso needs to generate metadata file
