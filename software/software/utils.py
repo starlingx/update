@@ -91,6 +91,7 @@ def get_major_release_version(sw_release_version):
         except Exception:
             return None
 
+
 def get_controller_feed_latest_commit(patch_sw_version):
     """Gets the latest controller feed commit from any node"""
     nodetype = get_platform_conf('nodetype')
@@ -100,6 +101,7 @@ def get_controller_feed_latest_commit(patch_sw_version):
         repo_path = constants.OSTREE_AUX_REMOTE_PATH
         return ostree.get_feed_latest_commit(patch_sw_version, repo_path)
 
+
 def get_component_and_versions(release_name):
     """
     Given a full release name (component-MM.mm.pp) or release version (MM.mm.pp), get:
@@ -108,18 +110,16 @@ def get_component_and_versions(release_name):
     - software (or major) version (MM.mm)
     - patch version (pp)
     """
-    component_separator = "-"
-    version_separator = "."
-    try:
-        component = None
-        release_version = release_name
-        if component_separator in release_name:
-            component, release_version = release_name.split(component_separator)
-        software_version = release_version.rsplit(version_separator, 1)[0]
-        patch_version = release_version.rsplit(version_separator, 1)[1]
-    except Exception:
+    pattern = re.compile(r'(([a-zA-Z]+)-)?(\d+)\.(\d+)(?:\.(\d+))?')
+    match = pattern.match(release_name)
+    if match:
+        component = match.group(2) or None
+        release_version = f"{match.group(3)}.{match.group(4)}" + (f".{match.group(5)}" if match.group(5) else ".0")
+        software_version = f"{match.group(3)}.{match.group(4)}"
+        patch_version = match.group(5) or '0'
+        return component, release_version, software_version, patch_version
+    else:
         return None, None, None, None
-    return component, release_version, software_version, patch_version
 
 
 def get_feed_path(sw_version):
