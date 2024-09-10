@@ -129,6 +129,15 @@ def load_import(from_release, to_release, iso_mount_dir):
                 shutil.copytree(src_abs_path, os.path.join(to_feed_dir, content))
                 LOG.info("Copied %s to %s", src_abs_path, to_feed_dir)
 
+        # Add min-free-space-percent to feed ostree config file
+        config_path = "%s/ostree_repo/config" % to_feed_dir
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as file:
+                content = file.read()
+            if "min-free-space-percent" not in content:
+                with open(config_path, 'a') as file:
+                    file.write("min-free-space-percent=0\n")
+
         # Create 'starlingx' remote on the feed ostree_repo
         cmd = ["ostree", "remote", "add", "--repo=%s/ostree_repo/" % to_feed_dir,
                FEED_REMOTE, "http://controller:8080/feed/rel-%s/ostree_repo/" % to_major_rel,
