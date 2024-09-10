@@ -44,6 +44,7 @@ patch_failed_file = "/var/run/software_install_failed"
 node_is_locked_file = "/var/run/.node_locked"
 ostree_pull_completed_deployment_pending_file = \
     "/var/run/ostree_pull_completed_deployment_pending"
+run_post_hooks_flag = "/var/run/run_post_hooks"
 mount_pending_file = "/var/run/mount_pending"
 insvc_software_scripts = "/run/software/software-scripts"
 insvc_software_flags = "/run/software/software-flags"
@@ -550,56 +551,37 @@ class PatchAgent(PatchService):
             active_commit_id = ostree_utils.get_sysroot_latest_commit()
             if commit_id == active_commit_id:
                 LOG.info("The provided commit-id is already deployed. Skipping install.")
-                self.patch_failed = False
-                clearflag(patch_failed_file)
-                self.state = constants.PATCH_AGENT_STATE_IDLE
-                return True
+                success = True
 
-        self.state = constants.PATCH_AGENT_STATE_INSTALLING
-        setflag(patch_installing_file)
+                # when in major release deployment, if post-hooks failed in a previous deploy
+                # host attempt, a flag is created so that their execution is reattempted here
+                if major_release and os.path.exists(run_post_hooks_flag):
+                    LOG.info("Major release deployment %s flag found. "
+                             "Running post-hooks." % run_post_hooks_flag)
+                    try:
+                        hook_manager = agent_hooks.HookManager.create_hook_manager(major_release)
+                        hook_manager.run_post_hooks()
+                        clearflag(run_post_hooks_flag)
+                    except Exception as e:
+                        LOG.exception("Failure running post-hooks: %s" % str(e))
+                        success = False
 
-        if delete_older_deployments:
-            ostree_utils.delete_older_deployments()
+                if success:
+                    self.patch_failed = False
+                    clearflag(patch_failed_file)
+                    self.state = constants.PATCH_AGENT_STATE_IDLE
+                else:
+                    self.patch_failed = True
+                    setflag(patch_failed_file)
+                    self.state = constants.PATCH_AGENT_STATE_INSTALL_FAILED
+                return success
 
-        try:
-            # Create insvc patch directories
-            if not os.path.exists(insvc_software_scripts):
-                os.makedirs(insvc_software_scripts, 0o700)
-            if not os.path.exists(insvc_software_flags):
-                os.makedirs(insvc_software_flags, 0o700)
-        except Exception:
-            LOG.exception("Failed to create in-service patch directories")
-
-        # Send a hello to provide a state update
-        if self.sock_out is not None:
-            hello_ack = PatchMessageHelloAgentAck()
-            hello_ack.send(self.sock_out)
-
+        # prepare major release deployment
         remote = None
         ref = None
         hook_manager = None
         if major_release:
             LOG.info("Major release deployment for %s with commit %s" % (major_release, commit_id))
-
-            # check if received version is greater (upgrade) or not (rollback)
-            if utils.compare_release_version(major_release, SW_VERSION):
-                LOG.info("Upgrading from %s to %s" % (SW_VERSION, major_release))
-                hook_manager = agent_hooks.HookManager(agent_hooks.MAJOR_RELEASE_UPGRADE,
-                                                       {"major_release": major_release})
-            else:
-                LOG.info("Rolling back from %s to %s" % (SW_VERSION, major_release))
-                hook_manager = agent_hooks.HookManager(agent_hooks.MAJOR_RELEASE_ROLLBACK,
-                                                       {"major_release": major_release})
-
-            # run deploy host pre-hooks for major release
-            try:
-                hook_manager.run_pre_hooks()
-            except Exception as e:
-                LOG.exception("Failure running pre-hooks: %s" % str(e))
-                self.patch_failed = True
-                setflag(patch_failed_file)
-                self.state = constants.PATCH_AGENT_STATE_INSTALL_FAILED
-                return False
 
             # add remote
             nodetype = utils.get_platform_conf("nodetype")
@@ -620,6 +602,37 @@ class PatchAgent(PatchService):
                 return False
 
             ref = "%s:%s" % (remote, constants.OSTREE_REF)
+            hook_manager = agent_hooks.HookManager.create_hook_manager(major_release)
+
+            # run deploy host pre-hooks for major release
+            try:
+                hook_manager.run_pre_hooks()
+            except Exception as e:
+                LOG.exception("Failure running pre-hooks: %s" % str(e))
+                self.patch_failed = True
+                setflag(patch_failed_file)
+                self.state = constants.PATCH_AGENT_STATE_INSTALL_FAILED
+                return False
+
+        self.state = constants.PATCH_AGENT_STATE_INSTALLING
+        setflag(patch_installing_file)
+
+        if delete_older_deployments:
+            ostree_utils.delete_older_deployments()
+
+        try:
+            # Create insvc patch directories
+            if not os.path.exists(insvc_software_scripts):
+                os.makedirs(insvc_software_scripts, 0o700)
+            if not os.path.exists(insvc_software_flags):
+                os.makedirs(insvc_software_flags, 0o700)
+        except Exception:
+            LOG.exception("Failed to create in-service patch directories")
+
+        # Send a hello to provide a state update
+        if self.sock_out is not None:
+            hello_ack = PatchMessageHelloAgentAck()
+            hello_ack.send(self.sock_out)
 
         # Build up the install set
         if verbose_to_stdout:
@@ -714,11 +727,12 @@ class PatchAgent(PatchService):
                 try:
                     hook_manager.run_post_hooks()
                 except Exception as e:
+                    LOG.exception("Failure running post-hooks: %s" % str(e))
+                    setflag(run_post_hooks_flag)
                     self.patch_failed = True
                     setflag(patch_failed_file)
                     self.state = constants.PATCH_AGENT_STATE_INSTALL_FAILED
-                    LOG.exception("Failure running post-hooks: %s" % str(e))
-                    return False
+                    success = False
         else:
             # Update the patch_failed flag
             self.patch_failed = True
