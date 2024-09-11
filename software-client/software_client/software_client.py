@@ -413,8 +413,13 @@ class SoftwareClientShell(object):
     def do_help(self, args):
         """Display help about this program or one of its subcommands."""
         if getattr(args, 'command', None):
-            if args.command in self.subcommands:
-                self.subcommands[args.command].print_help()
+            if getattr(args, 'cmd_area', None):
+                help_cmd = " ".join((args.cmd_area, args.command))
+            else:
+                help_cmd = args.command
+
+            if help_cmd in self.subcommands:
+                self.subcommands[help_cmd].print_help()
             else:
                 raise exc.CommandError("'%s' is not a valid subcommand" %
                                        args.command)

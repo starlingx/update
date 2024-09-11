@@ -39,6 +39,10 @@ def enhance_parser(parser, subparsers, cmd_mapper):
     :param parser: top level parser :param subparsers: top level
         parser's subparsers collection where subcommands will go
     '''
+    deploy_cmds = {}
+
     for command_module in DEPLOY_COMMAND_MODULES:
         utils.define_commands_from_module(subparsers, command_module,
-                                          cmd_mapper, UN_RESTRICTED_COMMANDS)
+                                          deploy_cmds, UN_RESTRICTED_COMMANDS)
+
+    cmd_mapper.update({f"deploy {k}": v for k, v in deploy_cmds.items()})
