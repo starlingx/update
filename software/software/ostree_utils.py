@@ -104,11 +104,19 @@ def add_aux_remote(repo_path, patch_sw_version):
     add_remote_cmd = "ostree --repo=%s remote add --set=gpg-verify=false %s " \
                         "%s/rel-%s/ostree_repo" % (repo_path, constants.OSTREE_AUX_REMOTE,
                         constants.FEED_OSTREE_URL, patch_sw_version)
-    subprocess.run(add_remote_cmd, shell=True, check=True, capture_output=True)
+    try:
+        subprocess.run(add_remote_cmd, shell=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        info_msg = "OSTree log Error: return code: %s , Output: %s" \
+                % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.info(info_msg)
+        msg = "Failed to add remote: %s." % constants.OSTREE_AUX_REMOTE
+        raise OSTreeCommandFail(msg)
 
     add_gpg_verify_false()
 
-    pull_cmd = "ostree --repo=%s pull %s starlingx --commit-metadata-only" % \
+def pull_aux_remote(repo_path):
+    pull_cmd = "ostree --repo=%s pull %s:starlingx --commit-metadata-only --depth=-1" % \
                     (repo_path, constants.OSTREE_AUX_REMOTE)
     try:
         subprocess.run(pull_cmd, shell=True, check=True, capture_output=True)
@@ -116,7 +124,7 @@ def add_aux_remote(repo_path, patch_sw_version):
         info_msg = "OSTree log Error: return code: %s , Output: %s" \
                 % (e.returncode, e.stderr.decode("utf-8"))
         LOG.info(info_msg)
-        msg = "Failed to pull  %s." % constants.OSTREE_AUX_REMOTE
+        msg = "Failed to pull from remote: %s." % constants.OSTREE_AUX_REMOTE
         raise OSTreeCommandFail(msg)
 
 def get_feed_latest_commit(patch_sw_version, repo_path=None):
@@ -137,6 +145,8 @@ def get_feed_latest_commit(patch_sw_version, repo_path=None):
         except subprocess.CalledProcessError:
             # If the remote does not exist, add it
             add_aux_remote(repo_path, patch_sw_version)
+
+        pull_aux_remote(repo_path)
         remote_ref = "%s:%s" % (constants.OSTREE_AUX_REMOTE, constants.OSTREE_REF)
 
         return get_ostree_latest_commit(remote_ref, repo_path)
