@@ -64,6 +64,8 @@ override_dh_install:
 		${ROOT}/etc/goenabled.d/software_check_goenabled.sh
 	install -m 444 service-files/software.logrotate \
 		${ROOT}/etc/logrotate.d/software
+	install -m 755 scripts/controllers-software-sync \
+		${ROOT}/usr/sbin/software-deploy/controllers-software-sync
 	install -m 755 scripts/deploy-precheck \
 		${ROOT}/usr/sbin/software-deploy/deploy-precheck
 	install -m 755 scripts/software-deploy-start \
