@@ -306,7 +306,8 @@ class SoftwareClientShell(object):
         cmd_parser = subparsers.add_parser(
             cmd_area,
             help='Software Deploy',
-            epilog="StarlingX Unified Software Deployment"
+            description="StarlingX Unified Software Deployment",
+            add_help=False
         )
         cmd_parser.set_defaults(cmd_area=cmd_area)
         self.subcommands['deploy'] = cmd_parser
@@ -316,8 +317,8 @@ class SoftwareClientShell(object):
         cmd_parser.set_defaults(region_restricted=True)
 
         sub_cmds = cmd_parser.add_subparsers(
-            title='Software Deploy Commands:',
-            metavar=''
+            title='Software Deploy Commands',
+            metavar='<subcommand>'
         )
         sub_cmds.required = True
 
