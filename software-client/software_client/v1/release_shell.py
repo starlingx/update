@@ -191,7 +191,11 @@ def _print_upload_result(resp, data, debug):
            action='store_true')
 def do_upload(cc, args):
     """Upload a software release"""
-    resp, data = cc.release.upload(args)
+    result = cc.release.upload(args)
+    if isinstance(result, int):
+        return result
+    else:
+        resp, data = result[0], result[1]
     _print_upload_result(resp, data, args.debug)
 
     return utils.check_rc(resp, data)
