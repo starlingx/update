@@ -138,6 +138,7 @@ WORKER = 'worker'
 
 AVAILABILITY_ONLINE = 'online'
 AVAILABILITY_AVAILABLE = 'available'
+AVAILABILITY_DEGRADED = 'degraded'
 ADMIN_LOCKED = 'locked'
 ADMIN_UNLOCKED = 'unlocked'
 

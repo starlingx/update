@@ -3142,6 +3142,14 @@ class PatchController(PatchService):
         msg_info = ""
         msg_warning = ""
         msg_error = ""
+
+        # hosts must be unlocked and online since during delete deployment
+        # a request is sent to all host to clear flags and temporary data
+        # created during the deployment procedure
+        if not are_all_hosts_unlocked_and_online():
+            msg = f"Hosts must be {constants.ADMIN_UNLOCKED} and {constants.AVAILABILITY_ONLINE}."
+            raise SoftwareServiceError(error=msg)
+
         deploy = self.db_api_instance.get_current_deploy()
         to_release = deploy.get("to_release")
         from_release = deploy.get("from_release")
@@ -3242,10 +3250,6 @@ class PatchController(PatchService):
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     def _deploy_complete(self):
-        if not are_all_hosts_unlocked_and_online():
-            msg = f"Hosts must be {constants.ADMIN_UNLOCKED} and {constants.AVAILABILITY_ONLINE}."
-            raise SoftwareServiceError(error=msg)
-
         is_all_hosts_in_deployed_state = all(host_state.get("state") == DEPLOY_HOST_STATES.DEPLOYED.value
                                              for host_state in self.db_api_instance.get_deploy_host())
         if not is_all_hosts_in_deployed_state:
