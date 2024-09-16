@@ -63,7 +63,6 @@ class ReleaseManager(base.Manager):
         return self._fetch(path)
 
     def upload(self, args):
-        rc = 0
 
         # arg.release is a list
         releases = args.release
@@ -92,7 +91,7 @@ class ReleaseManager(base.Manager):
 
         if len(valid_files) == 0:
             print("No file to be uploaded.")
-            return rc
+            return 1
 
         path = '/v1/release'
         if is_local:
