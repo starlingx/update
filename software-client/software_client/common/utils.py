@@ -122,6 +122,10 @@ def _display_info(text):
     '''display the basic info json object '''
     try:
         data = json.loads(text)
+        if "error_message" in data:
+            data = json.loads(data["error_message"])
+            if "faultstring" in data:
+                data = json.loads(data["faultstring"])
     except Exception:
         print(f"Invalid response format: {text}")
         return

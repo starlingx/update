@@ -5,6 +5,7 @@
 #
 
 from oslo_utils import importutils
+from urllib.parse import urljoin
 
 from software_client import exc
 from software_client.constants import LOCAL_ROOT
@@ -131,7 +132,7 @@ def get_client(api_version, auth_mode, session=None, service_type=SERVICE_TYPE, 
     if endpoint:
         api_version_str = 'v' + api_version
         if api_version_str not in endpoint.split('/'):
-            endpoint = endpoint + '/' + api_version_str
+            endpoint = urljoin(endpoint, api_version_str)
 
     if session:
         # this will be a LegacyJsonAdapter
