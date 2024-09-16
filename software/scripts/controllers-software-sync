@@ -1,0 +1,64 @@
+#!/usr/bin/python3
+# -*- encoding: utf-8 -*-
+#
+# vim: tabstop=4 shiftwidth=4 softtabstop=4
+#
+# Copyright (c) 2023-2024 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+"""
+software sync between duplex controllers to be called
+after prestaging
+"""
+
+import argparse
+import sys
+import upgrade_utils
+
+
+def parse_config(args=None):
+    """Parse the parameters passed to the script"""
+    parser = argparse.ArgumentParser(description="Run the script to sync "
+                                                 "software dir between the "
+                                                 "controllers.")
+    parser.add_argument("--auth_url",
+                        help="Authentication URL",
+                        required=True)
+    parser.add_argument("--username",
+                        help="Username",
+                        required=True)
+    parser.add_argument("--password",
+                        help="Password",
+                        required=True)
+    parser.add_argument("--project_name",
+                        help="Project Name",
+                        required=True)
+    parser.add_argument("--user_domain_name",
+                        help="User Domain Name",
+                        required=True)
+    parser.add_argument("--project_domain_name",
+                        help="Project Domain Name",
+                        required=True)
+    parser.add_argument("--region_name",
+                        help="Region Name",
+                        default="RegionOne")
+
+    parsed_args = parser.parse_args(args)
+    return vars(parsed_args)
+
+
+def main(argv=None):
+    config = parse_config(argv)
+    usm_token, usm_endpoint = \
+            upgrade_utils.get_token_endpoint(config, service_type="usm")
+
+    api_cmd = usm_endpoint + "/deploy/software_sync"
+    method = 'POST'
+    output = upgrade_utils.call_api(usm_token, method, api_cmd)
+    return output
+
+
+if __name__ == "__main__":
+    sys.exit(main())
