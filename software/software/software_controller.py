@@ -1912,7 +1912,8 @@ class PatchController(PatchService):
 
         if cannot_del:
             list_str = ','.join(cannot_del)
-            err_msg += f"Release{'' if len(cannot_del) == 1 else 's'} {list_str} not ready to delete\n"
+            err_msg += (f"Release{'' if len(cannot_del) == 1 else 's'} {list_str} "
+                        f"{'is' if len(cannot_del) == 1 else 'are'} not ready to be deleted\n")
 
         if used_by_subcloud:
             list_str = ','.join(used_by_subcloud)
