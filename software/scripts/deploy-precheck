@@ -146,12 +146,6 @@ class HealthCheck(object):
             success = False
         health_ok = health_ok and success
 
-        # check installed license
-        success = self._check_license(self._major_release)
-        output += 'Installed license is valid: [%s]\n' \
-                  % (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
-        health_ok = health_ok and success
-
         return health_ok, output
 
 
@@ -257,6 +251,13 @@ class UpgradeHealthCheck(HealthCheck):
         output += \
             'Active controller is controller-0: [%s]\n' \
             % (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
+        health_ok = health_ok and success
+
+        # check installed license
+        # NOTE(nicodemos): We just need to check the license for major release
+        success = self._check_license(self._major_release)
+        output += 'Installed license is valid: [%s]\n' \
+                  % (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
         health_ok = health_ok and success
 
         return health_ok, output
