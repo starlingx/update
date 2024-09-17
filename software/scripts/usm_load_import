@@ -65,17 +65,6 @@ def setup_from_release_load(from_release, to_feed_dir):
     try:
         from_major_rel = get_major_release_version(from_release)
 
-        # Create 'starlingx' remote on the feed ostree_repo
-        cmd = ["ostree", "remote", "add", "--repo=%s/ostree_repo/" % to_feed_dir,
-               FEED_REMOTE, "http://controller:8080/feed/rel-%s/ostree_repo/" % from_major_rel,
-               FEED_BRANCH]
-        try:
-            subprocess.check_call(cmd)
-            LOG.info("Created feed remote '%s'" % FEED_REMOTE)
-        except subprocess.CalledProcessError as e:
-            LOG.exception("Feed remote '%s' creation failed. Error: %s" % (FEED_REMOTE, str(e)))
-            raise
-
         # Copy install_uuid to /var/www/pages/feed/rel-<release>
         from_feed_dir = os.path.join(FEED_OSTREE_BASE_DIR, ("rel-%s" % from_major_rel))
         shutil.copyfile(os.path.join(from_feed_dir, "install_uuid"),
@@ -139,6 +128,17 @@ def load_import(from_release, to_release, iso_mount_dir):
             elif os.path.isdir(src_abs_path):
                 shutil.copytree(src_abs_path, os.path.join(to_feed_dir, content))
                 LOG.info("Copied %s to %s", src_abs_path, to_feed_dir)
+
+        # Create 'starlingx' remote on the feed ostree_repo
+        cmd = ["ostree", "remote", "add", "--repo=%s/ostree_repo/" % to_feed_dir,
+               FEED_REMOTE, "http://controller:8080/feed/rel-%s/ostree_repo/" % to_major_rel,
+               FEED_BRANCH]
+        try:
+            subprocess.check_call(cmd)
+            LOG.info("Created feed remote '%s'" % FEED_REMOTE)
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Feed remote '%s' creation failed. Error: %s" % (FEED_REMOTE, str(e)))
+            raise
 
         # Converted from upgrade package extraction script
         shutil.copyfile(os.path.join(to_feed_dir, "kickstart", "kickstart.cfg"),
