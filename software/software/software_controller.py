@@ -14,6 +14,7 @@ import gc
 import json
 import os
 from packaging import version
+import re
 import select
 import sh
 import shutil
@@ -3454,11 +3455,16 @@ class PatchController(PatchService):
         from_release = utils.get_major_release_version(deploy.get("from_release"))
         to_release = utils.get_major_release_version(deploy.get("to_release"))
 
-        upgrade_activate_cmd = [cmd_path, from_release, to_release]
+        token, endpoint = utils.get_endpoints_token()
+        env = os.environ.copy()
+        env["OS_AUTH_TOKEN"] = token
+        env["SYSTEM_URL"] = re.sub('/v[1,9]$', '', endpoint)  # remove ending /v1
+
+        upgrade_activate_cmd = ["source", "/etc/platform/openrc;", cmd_path, from_release, to_release]
 
         try:
             LOG.info("starting subprocess %s" % ' '.join(upgrade_activate_cmd))
-            subprocess.Popen(' '.join(upgrade_activate_cmd), start_new_session=True, shell=True)
+            subprocess.Popen(' '.join(upgrade_activate_cmd), start_new_session=True, shell=True, env=env)
             LOG.info("subprocess started")
         except subprocess.SubprocessError as e:
             LOG.error("Failed to start command: %s. Error %s" % (' '.join(upgrade_activate_cmd), e))
@@ -3584,11 +3590,16 @@ class PatchController(PatchService):
         from_release = utils.get_major_release_version(deploy.get("from_release"))
         to_release = utils.get_major_release_version(deploy.get("to_release"))
 
-        upgrade_activate_rollback_cmd = [cmd_path, from_release, to_release]
+        token, endpoint = utils.get_endpoints_token()
+        env = os.environ.copy()
+        env["OS_AUTH_TOKEN"] = token
+        env["SYSTEM_URL"] = re.sub('/v[1,9]$', '', endpoint)  # remove ending /v1
+
+        upgrade_activate_rollback_cmd = ["source", "/etc/platform/openrc;", cmd_path, from_release, to_release]
 
         try:
             LOG.info("starting subprocess %s" % ' '.join(upgrade_activate_rollback_cmd))
-            subprocess.Popen(' '.join(upgrade_activate_rollback_cmd), start_new_session=True, shell=True)
+            subprocess.Popen(' '.join(upgrade_activate_rollback_cmd), start_new_session=True, shell=True, env=env)
             LOG.info("subprocess started")
         except subprocess.SubprocessError as e:
             LOG.error("Failed to start command: %s. Error %s" % (' '.join(upgrade_activate_rollback_cmd), e))

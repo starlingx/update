@@ -22,13 +22,6 @@ from software.utilities.constants import KEYRING_PERMDIR
 from software.utilities import constants
 
 LOG = logging.getLogger('main_logger')
-
-DB_CONNECTION = "postgresql://%s:%s@127.0.0.1/%s\n"
-KUBERNETES_CONF_PATH = "/etc/kubernetes"
-KUBERNETES_ADMIN_CONF_FILE = "admin.conf"
-PLATFORM_LOG = '/var/log/platform.log'
-ERROR_FILE = '/tmp/upgrade_fail_msg'
-
 SOFTWARE_LOG_FILE = "/var/log/software.log"
 
 # well-known default domain name
