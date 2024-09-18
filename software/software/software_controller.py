@@ -1483,6 +1483,40 @@ class PatchController(PatchService):
             to_release_dir = os.path.join(constants.SOFTWARE_STORAGE_DIR, "rel-%s" % to_release)
             shutil.rmtree(to_release_dir, ignore_errors=True)
 
+    def _clean_up_inactive_load_import(self, release_version):
+        """
+        Clean up inactive load and import
+        :param release_version: Release version
+        """
+        dirs_to_remove = [
+            f"{constants.DC_VAULT_PLAYBOOK_DIR}/{release_version}",
+            f"{constants.DC_VAULT_LOADS_DIR}/{release_version}"
+        ]
+
+        for dir_path in dirs_to_remove:
+            if os.path.exists(dir_path):
+                shutil.rmtree(dir_path, ignore_errors=True)
+                LOG.info("Removed %s", dir_path)
+
+        # TODO(ShawnLi): the code below is to only clean up those files that were created in usm_laod_import script
+        # delete 22.12 iso metadata in /opt/software/metadata/unavailable
+        # delete 22.12 patches in /opt/software/metadata/committed
+        file_patterns = [
+            (states.UNAVAILABLE_DIR, fr'^([a-zA-Z]+)-({release_version})-metadata\.xml$'),
+            (states.COMMITTED_DIR, fr'^([a-zA-Z]+)_({release_version})_PATCH_([0-9]+)-metadata\.xml$')
+        ]
+
+        # Remove files matching patterns
+        for directory, pattern in file_patterns:
+            matched_file_names = utils.find_file_by_regex(directory, pattern)
+            for filename in matched_file_names:
+                abs_filename = os.path.join(directory, filename)
+                try:
+                    os.remove(abs_filename)
+                    LOG.info("Removed: %s", abs_filename)
+                except OSError:
+                    LOG.warning("Failed to remove: %s", abs_filename)
+
     def _process_upload_upgrade_files(
             self, from_release, to_release, iso_mount_dir, supported_from_releases, upgrade_files):
         """
@@ -1556,8 +1590,7 @@ class PatchController(PatchService):
         :param release_version: release version
         :return: None
         """
-        dc_vault_playbook_dir = f"/opt/dc-vault/playbooks/{release_version}"
-        PLAYBOOKS_PATH = "/usr/share/ansible/stx-ansible/playbooks"
+        dc_vault_playbook_dir = f"{constants.DC_VAULT_PLAYBOOK_DIR}/{release_version}"
 
         os.makedirs(dc_vault_playbook_dir, exist_ok=True)
         ostree_repo = os.path.join(constants.FEED_DIR,
@@ -1574,7 +1607,7 @@ class PatchController(PatchService):
         try:
             LOG.info("Checking out commit %s to %s", latest_commit, dc_vault_playbook_dir)
             ostree_utils.checkout_commit_to_dir(
-                ostree_repo, latest_commit, dc_vault_playbook_dir, sub_path=PLAYBOOKS_PATH)
+                ostree_repo, latest_commit, dc_vault_playbook_dir, sub_path=constants.PLAYBOOKS_PATH)
         except Exception:
             if os.path.exists(dc_vault_playbook_dir):
                 shutil.rmtree(dc_vault_playbook_dir)
@@ -1701,6 +1734,7 @@ class PatchController(PatchService):
         msg_error = ""
 
         upload_info = []
+        is_importing_inactive_load = False
 
         # Refresh data, if needed
         self.base_pkgdata.loaddirs()
@@ -1765,6 +1799,7 @@ class PatchController(PatchService):
                         SW_VERSION, to_release, iso_mount_dir, supported_from_releases, upgrade_files)
                 elif to_release < SW_VERSION and is_system_controller():
                     # N - 1 release is uploaded, process it only if the region is system controller
+                    is_importing_inactive_load = True
                     tmp_info, tmp_warning, tmp_error, tmp_release_meta_info = self._process_inactive_upgrade_files(
                         None, to_release, iso_mount_dir, upgrade_files)
                     # Checkout commit to dc-vault/playbooks directory
@@ -1775,6 +1810,8 @@ class PatchController(PatchService):
                 raise
             finally:
                 self._clean_up_load_import(iso_mount_dir, to_release, iso, is_import_completed)
+                if is_importing_inactive_load and not is_import_completed:
+                    self._clean_up_inactive_load_import(to_release)
 
             msg_info += tmp_info
             msg_warning += tmp_warning
@@ -1971,6 +2008,10 @@ class PatchController(PatchService):
 
             # TODO(lbonatti): treat the upcoming versioning changes
             PatchFile.delete_versioned_directory(release.sw_release)
+
+            # Delete N-1 load on system controller
+            if is_system_controller():
+                self._clean_up_inactive_load_import(release_sw_version)
 
             self._rollback_last_commit(release)
 

@@ -502,3 +502,14 @@ def get_platform_conf(key):
         except Exception:
             LOG.error("Cannot get '%s' from platform.conf file." % key)
     return value
+
+
+def find_file_by_regex(dir_path, pattern):
+    """
+    Find files by regex pattern in a directory
+    :param dir_path: directory path
+    :param pattern: regex pattern
+    :return: list of matching files
+    """
+    compiled_pattern = re.compile(pattern)
+    return [file for file in os.listdir(dir_path) if compiled_pattern.match(file)]
