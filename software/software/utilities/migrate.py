@@ -42,7 +42,6 @@ POSTGRES_PATH = '/var/lib/postgresql'
 POSTGRES_DATA_DIR = os.path.join(POSTGRES_PATH, constants.SW_VERSION)
 DB_CONNECTION_FORMAT = "connection=postgresql://%s:%s@127.0.0.1:%s/%s\n"
 DB_BARBICAN_CONNECTION_FORMAT = "postgresql://%s:%s@127.0.0.1:%s/%s"
-DB_PASSWORD_ENCRYPTION = "scram-sha-256"
 
 # Configure logging
 LOG = logging.getLogger(__name__)
@@ -241,8 +240,6 @@ def create_database(target_port):
         'chmod -R 700 ' + POSTGRES_DATA_DIR,
         'chown -R postgres ' + POSTGRES_DATA_DIR,
         "sed -i 's/#port = 5432/port = {}/g' {}/postgresql.conf".format(target_port, POSTGRES_DATA_DIR),
-        "sed -i 's/^#\\?password_encryption.*/password_encryption = \"{}\"/' {}/postgresql.conf".format(
-            DB_PASSWORD_ENCRYPTION, POSTGRES_DATA_DIR),
         'mkdir -p /var/run/postgresql/',
         'chown -R postgres /var/run/postgresql',
     ]

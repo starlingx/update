@@ -71,9 +71,6 @@ chmod 700 "$POSTGRESQL_DATA_DIR" ||
 chown postgres "$POSTGRESQL_DATA_DIR" ||
     cleanup_and_exit 1 "Failed to change ownership of data directory: $POSTGRESQL_DATA_DIR"
 
-sudo sed -i "s/^#\?password_encryption.*/password_encryption = 'scram-sha-256'/" $POSTGRESQL_DATA_DIR/postgresql.conf ||
-    cleanup_and_exit 1 "Failed to set password encryption method"
-
 mkdir -p "$POSTGRESQL_RUNTIME" ||
     cleanup_and_exit 1 "Failed to create runtime directory: ${POSTGRESQL_RUNTIME}"
 
