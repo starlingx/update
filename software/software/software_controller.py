@@ -3081,6 +3081,10 @@ class PatchController(PatchService):
 
                     except OSTreeCommandFail:
                         LOG.exception("Failure while removing release %s.", release_id)
+
+                    # Remove contents tag from metadata xml
+                    self.remove_tags_from_metadata(release,constants.CONTENTS_TAG)
+
                     try:
                         # Move the metadata to the deleted dir
                         self.release_collection.update_state([release_id], states.REMOVING)
@@ -3123,6 +3127,23 @@ class PatchController(PatchService):
                 self._update_state_to_peer()
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+    def remove_tags_from_metadata(self, release, tag):
+        LOG.info("Removing %s tag from %s metadata" % (tag, release.id))
+
+        metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[release.state]
+        metadata_path = "%s/%s-metadata.xml" % (metadata_dir, release.id)
+        tree = ET.parse(metadata_path)
+        root = tree.getroot()
+        metadata_tag = root.find(tag)
+
+        if metadata_tag is not None:
+            root.remove(metadata_tag)
+
+            ET.indent(tree, '  ')
+            with open(metadata_path, "wb") as outfile:
+                tree = ET.tostring(root)
+                outfile.write(tree)
 
     @require_deploy_state([DEPLOY_STATES.HOST_ROLLBACK_DONE, DEPLOY_STATES.COMPLETED, DEPLOY_STATES.START_DONE,
                            DEPLOY_STATES.START_FAILED],
