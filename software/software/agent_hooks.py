@@ -221,8 +221,11 @@ class RemoveCephMonHook(BaseHook):
             except subprocess.CalledProcessError as e:
                 LOG.exception("Failure removing mon.controller-0 and mon.controller-1 from ceph cluster: %s" % str(e))
                 raise
-            os.unlink(self.PMON_FILE)
-            LOG.info("Removed %s from pmon." % self.PMON_FILE)
+            try:
+                os.unlink(self.PMON_FILE)
+                LOG.info("Removed %s from pmon." % self.PMON_FILE)
+            except FileNotFoundError:
+                pass  # ignore if link doesn't exist
 
 
 # pre and post keywords
