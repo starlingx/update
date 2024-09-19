@@ -5,9 +5,11 @@
 #
 import unittest
 from unittest.mock import patch
+from unittest.mock import mock_open
 import xml.etree.ElementTree as ET
 
 from software.software_functions import get_to_release_from_metadata_file, read_attributes_from_metadata_file
+from software.software_functions import is_deploy_state_in_sync
 from software.release_data import SWReleaseCollection
 from software.software_functions import ReleaseData
 
@@ -254,3 +256,93 @@ class TestSoftwareFunction(unittest.TestCase):
         result = get_to_release_from_metadata_file('/mnt/iso')
 
         assert result == "1.0.0"
+
+
+    @patch('software.software_controller.os.path.isfile')
+    @patch('software.software_controller.json.load')
+    def test_is_deploy_state_in_sync(self,
+                                     mock_json_load,
+                                     mock_isfile
+                                    ):
+        mock_isfile.side_effect = [True, True]
+        state_1 = {"deploy_host": [{"hostname": "controller-0", "state": "deployed"}, {"hostname": "controller-1", "state": "deployed"}],
+                   "deploy": [{"from_release": "22.12.0", "to_release": "24.09.0", "feed_repo": "/var/www/pages/feed/rel-24.09/ostree_repo",
+                               "commit_id": "67d36b8f06cf3ddca871612012b283b540d118c7c738afd2b7839458eb3db42d", "reboot_required": True,
+                               "state": "activate-failed"}]}
+        state_2 = {"deploy_host": [{"hostname": "controller-0", "state": "deployed"}, {"hostname": "controller-1", "state": "deployed"}],
+                   "deploy": [{"from_release": "22.12.0", "to_release": "24.09.0", "feed_repo": "/var/www/pages/feed/rel-24.09/ostree_repo",
+                               "commit_id": "67d36b8f06cf3ddca871612012b283b540d118c7c738afd2b7839458eb3db42d", "reboot_required": True,
+                               "state": "activate-failed"}]}
+        mock_json_load.side_effect = [state_1, state_2]
+        m = mock_open()
+        with patch('builtins.open', m):
+            res = is_deploy_state_in_sync()
+
+        assert res is True
+
+
+    @patch('software.software_controller.os.path.isfile')
+    @patch('software.software_controller.json.load')
+    def test_is_deploy_state_not_in_sync(self,
+                                         mock_json_load,
+                                         mock_isfile
+                                        ):
+        mock_isfile.side_effect = [True, True]
+        state_1 = {"deploy_host": [{"hostname": "controller-0", "state": "deployed"}, {"hostname": "controller-1", "state": "deployed"}],
+                   "deploy": [{"from_release": "22.12.0", "to_release": "24.09.0", "feed_repo": "/var/www/pages/feed/rel-24.09/ostree_repo",
+                               "commit_id": "67d36b8f06cf3ddca871612012b283b540d118c7c738afd2b7839458eb3db42d", "reboot_required": True,
+                               "state": "activate"}]}
+        state_2 = {"deploy_host": [{"hostname": "controller-0", "state": "deployed"}, {"hostname": "controller-1", "state": "deployed"}],
+                   "deploy": [{"from_release": "22.12.0", "to_release": "24.09.0", "feed_repo": "/var/www/pages/feed/rel-24.09/ostree_repo",
+                               "commit_id": "67d36b8f06cf3ddca871612012b283b540d118c7c738afd2b7839458eb3db42d", "reboot_required": True,
+                               "state": "activate-failed"}]}
+        mock_json_load.side_effect = [state_1, state_2]
+        m = mock_open()
+        with patch('builtins.open', m):
+            res = is_deploy_state_in_sync()
+
+        assert res is False
+
+    @patch('software.software_controller.os.path.isfile')
+    @patch('software.software_controller.json.load')
+    def test_is_deploy_state_in_sync_no_state(self,
+                                              mock_json_load,
+                                              mock_isfile
+                                             ):
+        mock_isfile.side_effect = [False, False]
+        state_1 = {"deploy_host": [{"hostname": "controller-0", "state": "deployed"}, {"hostname": "controller-1", "state": "deployed"}],
+                   "deploy": [{"from_release": "22.12.0", "to_release": "24.09.0", "feed_repo": "/var/www/pages/feed/rel-24.09/ostree_repo",
+                               "commit_id": "67d36b8f06cf3ddca871612012b283b540d118c7c738afd2b7839458eb3db42d", "reboot_required": True,
+                               "state": "activate-failed"}]}
+        state_2 = {"deploy_host": [{"hostname": "controller-0", "state": "deployed"}, {"hostname": "controller-1", "state": "deployed"}],
+                   "deploy": [{"from_release": "22.12.0", "to_release": "24.09.0", "feed_repo": "/var/www/pages/feed/rel-24.09/ostree_repo",
+                               "commit_id": "67d36b8f06cf3ddca871612012b283b540d118c7c738afd2b7839458eb3db42d", "reboot_required": True,
+                               "state": "activate-failed"}]}
+        mock_json_load.side_effect = [state_1, state_2]
+        m = mock_open()
+        with patch('builtins.open', m):
+            res = is_deploy_state_in_sync()
+
+        assert res is True
+
+    @patch('software.software_controller.os.path.isfile')
+    @patch('software.software_controller.json.load')
+    def test_is_deploy_state_not_in_sync_no_synced(self,
+                                                   mock_json_load,
+                                                   mock_isfile
+                                                  ):
+        mock_isfile.side_effect = [False, True]
+        state_1 = {"deploy_host": [{"hostname": "controller-0", "state": "deployed"}, {"hostname": "controller-1", "state": "deployed"}],
+                   "deploy": [{"from_release": "22.12.0", "to_release": "24.09.0", "feed_repo": "/var/www/pages/feed/rel-24.09/ostree_repo",
+                               "commit_id": "67d36b8f06cf3ddca871612012b283b540d118c7c738afd2b7839458eb3db42d", "reboot_required": True,
+                               "state": "activate-failed"}]}
+        state_2 = {"deploy_host": [{"hostname": "controller-0", "state": "deployed"}, {"hostname": "controller-1", "state": "deployed"}],
+                   "deploy": [{"from_release": "22.12.0", "to_release": "24.09.0", "feed_repo": "/var/www/pages/feed/rel-24.09/ostree_repo",
+                               "commit_id": "67d36b8f06cf3ddca871612012b283b540d118c7c738afd2b7839458eb3db42d", "reboot_required": True,
+                               "state": "activate-failed"}]}
+        mock_json_load.side_effect = [state_1, state_2]
+        m = mock_open()
+        with patch('builtins.open', m):
+            res = is_deploy_state_in_sync()
+
+        assert res is False

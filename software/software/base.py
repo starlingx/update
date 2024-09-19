@@ -28,6 +28,10 @@ class PatchService(object):
         self.pre_bootstrap = True
         self.install_local = True
 
+    @property
+    def mgmt_ip(self):
+        return cfg.get_mgmt_ip()
+
     def update_config(self):
         # Implemented in subclass
         pass
@@ -39,14 +43,13 @@ class PatchService(object):
         pass
 
     def setup_socket_ipv4(self):
-        mgmt_ip = cfg.get_mgmt_ip()
-        if mgmt_ip is None:
+        if self.mgmt_ip is None:
             # Don't setup socket unless we have a mgmt ip
             return None
 
         self.update_config()
 
-        interface_addr = socket.inet_pton(socket.AF_INET, mgmt_ip)
+        interface_addr = socket.inet_pton(socket.AF_INET, self.mgmt_ip)
 
         # Close sockets, if necessary
         for s in [self.sock_out, self.sock_in]:
@@ -83,8 +86,7 @@ class PatchService(object):
         return self.sock_in
 
     def setup_socket_ipv6(self):
-        mgmt_ip = cfg.get_mgmt_ip()
-        if mgmt_ip is None:
+        if self.mgmt_ip is None:
             # Don't setup socket unless we have a mgmt ip
             return None
 
@@ -106,7 +108,7 @@ class PatchService(object):
         self.sock_out.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock_in.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-        self.sock_out.bind((mgmt_ip, 0))
+        self.sock_out.bind((self.mgmt_ip, 0))
         self.sock_in.bind(('', self.port))
 
         if self.mcast_addr:

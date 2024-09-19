@@ -9,6 +9,7 @@ import contextlib
 import getopt
 import glob
 import hashlib
+import json
 import logging
 import os
 import platform
@@ -1342,26 +1343,33 @@ def is_deploy_state_in_sync():
     Check if deploy state in sync
     :return: bool true if in sync, false otherwise
     """
-    if os.path.isfile(constants.SOFTWARE_JSON_FILE) \
-            and os.path.isfile(constants.SYNCED_SOFTWARE_JSON_FILE):
+    is_in_sync = False
 
-        working_data_deploy_state = utils.load_from_json_file(
-            constants.SOFTWARE_JSON_FILE)
+    does_synced_software_exist = os.path.isfile(constants.SYNCED_SOFTWARE_JSON_FILE)
+    does_software_exist = os.path.isfile(constants.SOFTWARE_JSON_FILE)
 
-        synced_data_deploy_state = utils.load_from_json_file(
-            constants.SYNCED_SOFTWARE_JSON_FILE)
+    if does_synced_software_exist and does_software_exist:
+        # both files exist, compare them
+        with open(constants.SYNCED_SOFTWARE_JSON_FILE, 'r') as f:
+            synced_software = json.load(f)
+        with open(constants.SOFTWARE_JSON_FILE, 'r') as f:
+            software = json.load(f)
 
-        working_deploy_state = working_data_deploy_state.get("deploy", {})
+        deploy_state = software.get("deploy", {})
+        synced_deploy_state = synced_software.get("deploy", {})
+        deploy_host_state = software.get("deploy_host", {})
+        synced_deploy_host_state = synced_software.get("deploy_host", {})
 
-        synced_deploy_state = synced_data_deploy_state.get("deploy", {})
+        is_in_sync = (deploy_state == synced_deploy_state and
+                      deploy_host_state == synced_deploy_host_state)
+    elif not does_synced_software_exist and not does_software_exist:
+        # neither file exists, it is not in deploying state
+        is_in_sync = True
+    else:
+        # either file does not exist, it is in deploying state
+        is_in_sync = False
 
-        working_deploy_host_state = working_data_deploy_state.get("deploy_host", {})
-
-        synced_deploy_host_state = synced_data_deploy_state.get("deploy_host", {})
-
-        return working_deploy_state == synced_deploy_state \
-            and working_deploy_host_state == synced_deploy_host_state
-    return False
+    return is_in_sync
 
 
 def is_deployment_in_progress():
