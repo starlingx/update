@@ -47,10 +47,10 @@ function do_setup {
         LOG "Creating repo."
 
         # TODO(cshort) Remove this once gpg support is added.
-        sed -i '$a gpg-verify=false' \
-            /var/www/pages/feed/rel-${SW_VERSION}/ostree_repo/config
-        sed -i '$a gpg-verify=false' \
-            /sysroot/ostree/repo/config
+        FEED_OSTREE_CONFIG="/var/www/pages/feed/rel-${SW_VERSION}/ostree_repo/config"
+        SYSROOT_OSTREE_CONFIG="/sysroot/ostree/repo/config"
+        grep -xq "gpg-verify=false" $FEED_OSTREE_CONFIG || sed -i '$a gpg-verify=false' $FEED_OSTREE_CONFIG
+        grep -xq "gpg-verify=false" $SYSROOT_OSTREE_CONFIG || sed -i '$a gpg-verify=false' $SYSROOT_OSTREE_CONFIG
 
         apt-ostree repo init \
             --feed $REPO_DIR \
