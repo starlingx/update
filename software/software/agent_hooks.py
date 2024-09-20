@@ -299,3 +299,12 @@ class HookManager(object):
 
     def run_post_hooks(self):
         self._run_hooks(POST)
+
+    @staticmethod
+    def create_hook_manager(software_version):
+        # check if received version is greater (upgrade) or not (rollback)
+        if utils.compare_release_version(software_version, constants.SW_VERSION):
+            LOG.info("Upgrading from %s to %s" % (constants.SW_VERSION, software_version))
+            return HookManager(MAJOR_RELEASE_UPGRADE, {"major_release": software_version})
+        LOG.info("Rolling back from %s to %s" % (constants.SW_VERSION, software_version))
+        return HookManager(MAJOR_RELEASE_ROLLBACK, {"major_release": software_version})
