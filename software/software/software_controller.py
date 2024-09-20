@@ -1716,6 +1716,7 @@ class PatchController(PatchService):
         Upload software release files
         :return: dict of info, warning and error messages
         """
+
         msg_info = ""
         msg_warning = ""
         msg_error = ""
@@ -1749,6 +1750,8 @@ class PatchController(PatchService):
             msg = "Missing upgrade file or signature file"
             LOG.error(msg)
             msg_error += msg + "\n"
+        elif upgrade_files[constants.ISO_EXTENSION] and self.hostname != constants.CONTROLLER_0_HOSTNAME:
+            raise SoftwareServiceError("Upload can only be performed on controller-0.")
         elif len(upgrade_files) == 2:  # Two upgrade files uploaded
             tmp_info = ""
             tmp_error = ""
