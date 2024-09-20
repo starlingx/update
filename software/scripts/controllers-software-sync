@@ -13,52 +13,43 @@ software sync between duplex controllers to be called
 after prestaging
 """
 
-import argparse
+import os
+import six.moves.configparser as configparser
+import software.constants as constants
 import sys
 import upgrade_utils
 
+KEYSTONE_CONFIG_SECTION = "keystone_authtoken"
 
-def parse_config(args=None):
-    """Parse the parameters passed to the script"""
-    parser = argparse.ArgumentParser(description="Run the script to sync "
-                                                 "software dir between the "
-                                                 "controllers.")
-    parser.add_argument("--auth_url",
-                        help="Authentication URL",
-                        required=True)
-    parser.add_argument("--username",
-                        help="Username",
-                        required=True)
-    parser.add_argument("--password",
-                        help="Password",
-                        required=True)
-    parser.add_argument("--project_name",
-                        help="Project Name",
-                        required=True)
-    parser.add_argument("--user_domain_name",
-                        help="User Domain Name",
-                        required=True)
-    parser.add_argument("--project_domain_name",
-                        help="Project Domain Name",
-                        required=True)
-    parser.add_argument("--region_name",
-                        help="Region Name",
-                        default="RegionOne")
+CONF = configparser.ConfigParser(interpolation=None)
+CONF.optionxform = str
 
-    parsed_args = parser.parse_args(args)
-    return vars(parsed_args)
+def main():
+    try:
+        if not os.path.exists(constants.SOFTWARE_CONFIG_FILE_LOCAL):
+            raise Exception("Software config file is not found!")
 
+        CONF.read(constants.SOFTWARE_CONFIG_FILE_LOCAL)
 
-def main(argv=None):
-    config = parse_config(argv)
-    usm_token, usm_endpoint = \
+        if not CONF.has_section(KEYSTONE_CONFIG_SECTION):
+            raise Exception(f"ERROR: {KEYSTONE_CONFIG_SECTION} section does not exist!")
+
+        config = dict(CONF.items(KEYSTONE_CONFIG_SECTION))
+        usm_token, usm_endpoint = \
             upgrade_utils.get_token_endpoint(config, service_type="usm")
 
-    api_cmd = usm_endpoint + "/deploy/software_sync"
-    method = 'POST'
-    output = upgrade_utils.call_api(usm_token, method, api_cmd)
-    return output
+        api_cmd = usm_endpoint + "/deploy/software_sync"
+        method = 'POST'
+        output = upgrade_utils.call_api(usm_token, method, api_cmd)
 
+        result = output.get("result")
+        if not result:
+            raise Exception(f"ERROR: Unable to sync subclouds controllers!")
+
+        print(result)
+    except Exception as ex:
+        print(f"Exception: {str(ex)}")
+        return -1
 
 if __name__ == "__main__":
     sys.exit(main())
