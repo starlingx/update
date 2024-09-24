@@ -840,24 +840,11 @@ class SWMessageDeployStateChanged(messages.PatchMessage):
 
         if self.deploy_state:
             LOG.info("Received deploy state changed to %s, agent %s" %
-                    (self.deploy_state, self.agent))
-            try:
-                sc.deploy_state_changed(self.deploy_state)
-            except Exception as e:
-                LOG.exception("Deploy state change failed: %s" % str(e))
-
-                # Error occurred while transitioning state to start-done
-                # so change it to start-failed
-                if self.deploy_state == DEPLOY_STATES.START_DONE:
-                    sc.deploy_state_changed(DEPLOY_STATES.START_FAILED)
-
-                # Error occurred while transitioning state to activate-done
-                # so change it to activate-failed
-                if self.deploy_state == DEPLOY_STATES.ACTIVATE_DONE:
-                    sc.deploy_state_changed(DEPLOY_STATES.ACTIVATE_FAILED)
+                     (self.deploy_state, self.agent))
+            sc.deploy_state_changed(self.deploy_state)
         else:
             LOG.info("Received %s deploy host state changed to %s, agent %s" %
-                    (self.hostname, self.host_state, self.agent))
+                     (self.hostname, self.host_state, self.agent))
             sc.host_deploy_state_changed(self.hostname, self.host_state)
 
         sock.sendto(str.encode("OK"), addr)
