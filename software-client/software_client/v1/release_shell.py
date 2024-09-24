@@ -57,29 +57,6 @@ def do_show(cc, args):
     return rc
 
 
-# NOTE(bqian) need to review the commit patch CLI
-@utils.arg('patch',
-           nargs="+",  # accepts a list
-           help='Patch ID/s to commit')
-# --dry-run is an optional argument
-@utils.arg('--dry-run',
-           action='store_true',
-           required=False,
-           help='Check the space savings without committing the patch')
-# --all is an optional argument
-@utils.arg('--all',
-           action='store_true',
-           required=False,
-           help='Commit all the applied patches')
-# --sw-version is an optional argument
-@utils.arg('--sw-version',
-           required=False,
-           help='Software release version')
-def do_commit_patch(cc, args):
-    """Commit patches to free disk space. WARNING: This action is irreversible!"""
-    return cc.release.commit_patch(args)
-
-
 @utils.arg('--delete',
            required=False,
            action='store_true',
