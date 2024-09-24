@@ -445,8 +445,12 @@ def delete_older_deployments():
     # We want to delete all deployments except the two mentioned above.
     # This means we will undeploy all deployments starting from the
     # 2nd index of deployment_id_list
+    deploys_amount = len(deployment_id_list)
+    if deploys_amount <= 2:
+        LOG.info("No older deployments to delete")
+        return
 
-    for index in reversed(range(2, len(deployment_id_list))):
+    for index in reversed(range(2, deploys_amount)):
         try:
             cmd = "ostree admin undeploy %s" % index
             output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
