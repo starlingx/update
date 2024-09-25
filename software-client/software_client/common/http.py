@@ -24,7 +24,6 @@ import os
 from oslo_serialization import jsonutils
 from oslo_utils import encodeutils
 import requests
-from requests_toolbelt import MultipartEncoder
 import socket
 from pecan.core import Response as PCResponse
 
