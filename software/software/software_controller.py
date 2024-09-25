@@ -92,6 +92,7 @@ from software.sysinv_utils import get_k8s_ver
 from software.sysinv_utils import is_system_controller
 from software.sysinv_utils import update_host_sw_version
 from software.sysinv_utils import are_all_hosts_unlocked_and_online
+from software.sysinv_utils import get_system_info
 
 from software.db.api import get_instance
 
@@ -123,10 +124,18 @@ pending_queries = []
 
 thread_death = None
 keep_running = True
+system_mode = None
 
 # Limit socket blocking to 5 seconds to allow for thread to shutdown
 api_socket_timeout = 5.0
 
+
+def is_simplex():
+    global system_mode
+    if system_mode is None:
+        _, system_mode = get_system_info()
+
+    return system_mode == constants.SYSTEM_MODE_SIMPLEX
 
 class ControllerNeighbour(object):
     def __init__(self):
@@ -691,6 +700,11 @@ class SoftwareMessageDeployStateUpdate(messages.PatchMessage):
         self.message["deploy_state"] = deploys_state
 
     def handle(self, sock, addr):
+        global sc
+        if sc.mgmt_ip == addr[0]:
+            # update from localhost, ignore
+            return
+
         filesystem_data = utils.get_software_filesystem_data()
         synced_filesystem_data = utils.get_synced_software_filesystem_data()
 
@@ -708,9 +722,9 @@ class SoftwareMessageDeployStateUpdate(messages.PatchMessage):
             result = messages.MSG_ACK_SUCCESS
         elif actual_state == synced_state:
             result = messages.MSG_ACK_SUCCESS
+            utils.save_to_json_file(constants.SOFTWARE_JSON_FILE, peer_state)
 
         if result == messages.MSG_ACK_SUCCESS:
-            utils.save_to_json_file(constants.SOFTWARE_JSON_FILE, peer_state)
             utils.save_to_json_file(constants.SYNCED_SOFTWARE_JSON_FILE, peer_state)
 
         resp = SoftwareMessageDeployStateUpdateAck()
@@ -740,6 +754,10 @@ class SoftwareMessageDeployStateUpdateAck(messages.PatchMessage):
 
     def handle(self, sock, addr):
         global sc
+        if sc.mgmt_ip == addr[0]:
+            # update from localhost, ignore
+            return
+
         if self.peer_state_data["result"] == messages.MSG_ACK_SUCCESS:
             LOG.debug("Peer controller is synced with value: %s",
                       self.peer_state_data["deploy_state"])
@@ -965,6 +983,21 @@ class PatchController(PatchService):
             self.read_state_file()
         else:
             self.write_state_file()
+
+        self.register_deploy_state_change_listeners()
+
+    def _state_changed_sync(self, *args):  # pylint: disable=unused-argument
+        if is_simplex():
+            # ensure the in-sync state for SX
+            # treat it as SX for deploy before bootstrap
+            shutil.copyfile(constants.SOFTWARE_JSON_FILE, constants.SYNCED_SOFTWARE_JSON_FILE)
+        else:
+            self._update_state_to_peer()
+
+    def register_deploy_state_change_listeners(self):
+        # data sync listener
+        DeployState.register_event_listener(self._state_changed_sync)
+        DeployHostState.register_event_listener(self._state_changed_sync)
 
         DeployHostState.register_event_listener(DeployState.host_deploy_updated)
         DeployState.register_event_listener(ReleaseState.deploy_updated)
@@ -2011,28 +2044,7 @@ class PatchController(PatchService):
         Check if both controllers are in sync
         by checking the database JSON file
         """
-        is_in_sync = False
-
-        does_synced_software_exist = os.path.isfile(constants.SYNCED_SOFTWARE_JSON_FILE)
-        does_software_exist = os.path.isfile(constants.SOFTWARE_JSON_FILE)
-
-        if does_synced_software_exist and does_software_exist:
-            # both files exist, compare them
-            with open(constants.SYNCED_SOFTWARE_JSON_FILE, 'r') as f:
-                synced_software = json.load(f)
-            with open(constants.SOFTWARE_JSON_FILE, 'r') as f:
-                software = json.load(f)
-            LOG.debug("Synced software: %s", synced_software)
-            LOG.debug("Software: %s", software)
-
-            is_in_sync = synced_software == software
-        elif not does_synced_software_exist and not does_software_exist:
-            # neither file exists, it is not in deploying state
-            is_in_sync = True
-        else:
-            # either file does not exist, it is in deploying state
-            is_in_sync = False
-
+        is_in_sync = is_deploy_state_in_sync()
         return {"in_sync": is_in_sync}
 
     def patch_init_release_api(self, release_id):
@@ -2489,9 +2501,9 @@ class PatchController(PatchService):
                     LOG.exception(msg)
 
     def _update_state_to_peer(self):
-        state_update_msg = SoftwareMessageDeployStateUpdate()
         self.socket_lock.acquire()
         try:
+            state_update_msg = SoftwareMessageDeployStateUpdate()
             state_update_msg.send(self.sock_out)
         finally:
             self.socket_lock.release()
@@ -2791,8 +2803,6 @@ class PatchController(PatchService):
                         msg = "service is running in incorrect state. No registered host"
                         raise InternalError(msg)
 
-                    self._update_state_to_peer()
-
                     with self.hosts_lock:
                         self.interim_state[release_id] = list(self.hosts)
 
@@ -2826,7 +2836,6 @@ class PatchController(PatchService):
                 # move the deploy state to start-done
                 deploy_state = DeployState.get_instance()
                 deploy_state.start_done(self.latest_feed_commit)
-                self._update_state_to_peer()
 
                 LOG.info("Finished releases %s deploy start" % deployment_list)
 
@@ -2841,7 +2850,6 @@ class PatchController(PatchService):
                     # set state to failed
                     deploy_state = DeployState.get_instance()
                     deploy_state.start_failed()
-                    self._update_state_to_peer()
                 except Exception as e:
                     msg = "Unable to set deploy failed: %s" % str(e)
                     LOG.exception(msg)
@@ -2913,7 +2921,6 @@ class PatchController(PatchService):
                 release_state.start_deploy()
                 deploy_state = DeployState.get_instance()
                 deploy_state.start(running_release, to_release, feed_repo, commit_id, deploy_release.reboot_required)
-                self._update_state_to_peer()
 
                 msg_info = "Deployment for %s started" % deployment
             else:
@@ -3062,7 +3069,6 @@ class PatchController(PatchService):
             deploy_state = DeployState.get_instance()
             to_release = deploy_release.sw_release
             deploy_state.start(running_release, to_release, feed_repo, commit_id, reboot_required)
-            self._update_state_to_peer()
 
             try:
                 for release_id in deployment_list:
@@ -3126,7 +3132,6 @@ class PatchController(PatchService):
                 # move the deploy state to start-done
                 deploy_state = DeployState.get_instance()
                 deploy_state.start_done(self.latest_feed_commit)
-                self._update_state_to_peer()
 
                 self.send_latest_feed_commit_to_agent()
                 self.software_sync()
@@ -3139,7 +3144,6 @@ class PatchController(PatchService):
                 # set state to failed
                 deploy_state = DeployState.get_instance()
                 deploy_state.start_failed()
-                self._update_state_to_peer()
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
@@ -3292,7 +3296,6 @@ class PatchController(PatchService):
         msg_info += "Deploy deleted with success"
         self.db_api_instance.delete_deploy_host_all()
         self.db_api_instance.delete_deploy()
-        self._update_state_to_peer()
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     def _deploy_complete(self):
@@ -3847,26 +3850,6 @@ class PatchController(PatchService):
             }
             deploy_host_list.append(deploy_host)
         return deploy_host_list
-
-    def update_and_sync_deploy_state(self, func, *args, **kwargs):
-        """
-        :param func: SoftwareApi method
-        :param args: arguments passed related to func
-        :param kwargs: keyword arguments passed related to func
-
-        Example:
-        -------
-
-        Usage of *args:
-        update_and_sync_deploy_state(self.db_api_instance.create_deploy,
-                                     release_version, to_release, bool)
-        Usage of **kwargs:
-        update_and_sync_deploy_state(self.db_api_instance.update_deploy_host,
-                                     hostname=hostname, state=state)
-        """
-
-        func(*args, **kwargs)
-        self._update_state_to_peer()
 
     def manage_software_alarm(self, alarm_id, alarm_state, entity_instance_id, **kwargs):
         try:
@@ -4446,22 +4429,25 @@ class PatchControllerMainThread(threading.Thread):
                     deploy_state_update_remaining = int(
                         SEND_MSG_INTERVAL_IN_SECONDS)
 
-                    # Get out-of-sync alarm to request peer sync even if no deployment in progress
-                    out_of_sync_alarm_fault = sc.get_out_of_sync_alarm()
+                    if not is_simplex():
+                        # Get out-of-sync alarm to request peer sync even if no deployment in progress
+                        out_of_sync_alarm_fault = sc.get_out_of_sync_alarm()
 
-                    # Only send the deploy state update from the active controller
-                    if ((out_of_sync_alarm_fault or is_deployment_in_progress()) and
-                            (utils.is_active_controller() or sc.pre_bootstrap)):
-                        try:
-                            sc.socket_lock.acquire()
-                            deploy_state_update = SoftwareMessageDeployStateUpdate()
-                            deploy_state_update.send(sc.sock_out)
+                        # data sync always start only from the active controller
+                        if utils.is_active_controller():
+                            if out_of_sync_alarm_fault or is_deployment_in_progress():
+                                sc.socket_lock.acquire()
+                                try:
+                                    deploy_state_update = SoftwareMessageDeployStateUpdate()
+                                    deploy_state_update.send(sc.sock_out)
+                                except Exception as e:
+                                    LOG.exception("Failed to send deploy state update. Error: %s", str(e))
+                                finally:
+                                    sc.socket_lock.release()
+
                             if not sc.pre_bootstrap:
                                 sc.handle_deploy_state_sync()
-                        except Exception as e:
-                            LOG.exception("Failed to send deploy state update. Error: %s", str(e))
-                        finally:
-                            sc.socket_lock.release()
+
         except Exception as ex:
             # Log all exceptions
             LOG.exception("%s: error occurred during request processing: %s" % (self.name, str(ex)))
