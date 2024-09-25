@@ -33,7 +33,7 @@ deploy_state_transition = {
                                 DEPLOY_STATES.HOST_DONE,
                                 DEPLOY_STATES.HOST_ROLLBACK],
     DEPLOY_STATES.HOST_DONE: [DEPLOY_STATES.ACTIVATE, DEPLOY_STATES.HOST_ROLLBACK,
-                              DEPLOY_STATES.HOST_FAILED], # manual recovery scenario
+                              DEPLOY_STATES.HOST_FAILED],  # manual recovery scenario
 
     # deploy host rollback
     DEPLOY_STATES.HOST_ROLLBACK: [DEPLOY_STATES.HOST_ROLLBACK,
@@ -62,6 +62,7 @@ deploy_state_transition = {
 deploy_reentrant_states = [DEPLOY_STATES.START_DONE,
                            DEPLOY_STATES.ACTIVATE_DONE,
                            DEPLOY_STATES.ACTIVATE_ROLLBACK_DONE]
+
 
 class DeployState(object):
     _callbacks = []

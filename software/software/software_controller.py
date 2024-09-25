@@ -137,6 +137,7 @@ def is_simplex():
 
     return system_mode == constants.SYSTEM_MODE_SIMPLEX
 
+
 class ControllerNeighbour(object):
     def __init__(self):
         self.last_ack = 0
@@ -2660,10 +2661,10 @@ class PatchController(PatchService):
         if ret:
             if ret.get("system_healthy") is None:
                 ret["error"] = "Fail to perform deploy precheck. Internal error has occurred.\n" + \
-                                ret.get("error")
+                               ret.get("error")
             elif not ret.get("system_healthy"):
                 ret["error"] = "The following issues have been detected, which prevent " \
-                                "deploying %s\n" % deployment + ret.get("info")
+                               "deploying %s\n" % deployment + ret.get("info")
         return ret
 
     def _deploy_upgrade_start(self, to_release, commit_id):
@@ -2777,7 +2778,7 @@ class PatchController(PatchService):
                         # This case is for node with prestaged data where ostree
                         # commits have been pulled from system controller
                         LOG.info("Commit %s already exists in feed repo for release %s"
-                                %(deploy_release.commit_id, release_id))
+                                 % (deploy_release.commit_id, release_id))
                         continue
 
                     packages = [pkg.split("_")[0] for pkg in deploy_release.packages]
@@ -2786,7 +2787,7 @@ class PatchController(PatchService):
                         LOG.error(msg)
                         raise MetadataFail(msg)
 
-                    #commit consistency check
+                    # commit consistency check
                     latest_commit = all_commits[0]
                     # Install debian package through apt-ostree
                     try:
@@ -3110,7 +3111,7 @@ class PatchController(PatchService):
                         LOG.exception("Failure while removing release %s.", release_id)
 
                     # Remove contents tag from metadata xml
-                    self.remove_tags_from_metadata(release,constants.CONTENTS_TAG)
+                    self.remove_tags_from_metadata(release, constants.CONTENTS_TAG)
 
                     try:
                         # Move the metadata to the deleted dir
@@ -4159,7 +4160,6 @@ class PatchControllerAuthApiThread(threading.Thread):
             # Log all exceptions
             LOG.exception("%s: error occurred during request processing: %s" % (self.name, str(ex)))
             thread_death.set()
-
 
     def kill(self):
         # Must run from other thread

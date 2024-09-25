@@ -8,9 +8,10 @@ from unittest.mock import patch
 from unittest.mock import mock_open
 import xml.etree.ElementTree as ET
 
-from software.software_functions import get_to_release_from_metadata_file, read_attributes_from_metadata_file
-from software.software_functions import is_deploy_state_in_sync
 from software.release_data import SWReleaseCollection
+from software.software_functions import get_to_release_from_metadata_file
+from software.software_functions import is_deploy_state_in_sync
+from software.software_functions import read_attributes_from_metadata_file
 from software.software_functions import ReleaseData
 
 metadata = """<?xml version="1.0" ?>
@@ -257,13 +258,12 @@ class TestSoftwareFunction(unittest.TestCase):
 
         assert result == "1.0.0"
 
-
     @patch('software.software_controller.os.path.isfile')
     @patch('software.software_controller.json.load')
     def test_is_deploy_state_in_sync(self,
                                      mock_json_load,
                                      mock_isfile
-                                    ):
+                                     ):
         mock_isfile.side_effect = [True, True]
         state_1 = {"deploy_host": [{"hostname": "controller-0", "state": "deployed"}, {"hostname": "controller-1", "state": "deployed"}],
                    "deploy": [{"from_release": "22.12.0", "to_release": "24.09.0", "feed_repo": "/var/www/pages/feed/rel-24.09/ostree_repo",
@@ -280,13 +280,12 @@ class TestSoftwareFunction(unittest.TestCase):
 
         assert res is True
 
-
     @patch('software.software_controller.os.path.isfile')
     @patch('software.software_controller.json.load')
     def test_is_deploy_state_not_in_sync(self,
                                          mock_json_load,
                                          mock_isfile
-                                        ):
+                                         ):
         mock_isfile.side_effect = [True, True]
         state_1 = {"deploy_host": [{"hostname": "controller-0", "state": "deployed"}, {"hostname": "controller-1", "state": "deployed"}],
                    "deploy": [{"from_release": "22.12.0", "to_release": "24.09.0", "feed_repo": "/var/www/pages/feed/rel-24.09/ostree_repo",
@@ -308,7 +307,7 @@ class TestSoftwareFunction(unittest.TestCase):
     def test_is_deploy_state_in_sync_no_state(self,
                                               mock_json_load,
                                               mock_isfile
-                                             ):
+                                              ):
         mock_isfile.side_effect = [False, False]
         state_1 = {"deploy_host": [{"hostname": "controller-0", "state": "deployed"}, {"hostname": "controller-1", "state": "deployed"}],
                    "deploy": [{"from_release": "22.12.0", "to_release": "24.09.0", "feed_repo": "/var/www/pages/feed/rel-24.09/ostree_repo",
@@ -330,7 +329,7 @@ class TestSoftwareFunction(unittest.TestCase):
     def test_is_deploy_state_not_in_sync_no_synced(self,
                                                    mock_json_load,
                                                    mock_isfile
-                                                  ):
+                                                   ):
         mock_isfile.side_effect = [False, True]
         state_1 = {"deploy_host": [{"hostname": "controller-0", "state": "deployed"}, {"hostname": "controller-1", "state": "deployed"}],
                    "deploy": [{"from_release": "22.12.0", "to_release": "24.09.0", "feed_repo": "/var/www/pages/feed/rel-24.09/ostree_repo",

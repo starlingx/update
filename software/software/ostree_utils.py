@@ -69,6 +69,7 @@ def get_ostree_latest_commit(ostree_ref, repo_path):
     latest_commit = split_output_string[1]
     return latest_commit
 
+
 def add_gpg_verify_false():
     # TODO(mmachado): remove once gpg is enabled
     # Modify the ostree configuration to disable gpg-verify
@@ -88,6 +89,7 @@ def add_gpg_verify_false():
         LOG.exception(err_msg)
         raise OSTreeCommandFail(msg)
 
+
 def add_aux_remote(repo_path, patch_sw_version):
     """
     Adds "controller-feed" auxiliary remote to non-controller nodes
@@ -102,30 +104,32 @@ def add_aux_remote(repo_path, patch_sw_version):
     add_gpg_verify_false()
 
     add_remote_cmd = "ostree --repo=%s remote add --set=gpg-verify=false %s " \
-                        "%s/rel-%s/ostree_repo" % (repo_path, constants.OSTREE_AUX_REMOTE,
-                        constants.FEED_OSTREE_URL, patch_sw_version)
+                     "%s/rel-%s/ostree_repo" % (repo_path, constants.OSTREE_AUX_REMOTE,
+                                                constants.FEED_OSTREE_URL, patch_sw_version)
     try:
         subprocess.run(add_remote_cmd, shell=True, check=True, capture_output=True)
     except subprocess.CalledProcessError as e:
         info_msg = "OSTree log Error: return code: %s , Output: %s" \
-                % (e.returncode, e.stderr.decode("utf-8"))
+                   % (e.returncode, e.stderr.decode("utf-8"))
         LOG.info(info_msg)
         msg = "Failed to add remote: %s." % constants.OSTREE_AUX_REMOTE
         raise OSTreeCommandFail(msg)
 
     add_gpg_verify_false()
 
+
 def pull_aux_remote(repo_path):
     pull_cmd = "ostree --repo=%s pull %s:starlingx --commit-metadata-only --depth=-1" % \
-                    (repo_path, constants.OSTREE_AUX_REMOTE)
+               (repo_path, constants.OSTREE_AUX_REMOTE)
     try:
         subprocess.run(pull_cmd, shell=True, check=True, capture_output=True)
     except subprocess.CalledProcessError as e:
         info_msg = "OSTree log Error: return code: %s , Output: %s" \
-                % (e.returncode, e.stderr.decode("utf-8"))
+                   % (e.returncode, e.stderr.decode("utf-8"))
         LOG.info(info_msg)
         msg = "Failed to pull from remote: %s." % constants.OSTREE_AUX_REMOTE
         raise OSTreeCommandFail(msg)
+
 
 def get_feed_latest_commit(patch_sw_version, repo_path=None):
     """
@@ -139,7 +143,7 @@ def get_feed_latest_commit(patch_sw_version, repo_path=None):
 
     if repo_path == constants.OSTREE_AUX_REMOTE_PATH:
         check_remote_cmd = "ostree --repo=%s remote list | grep -w %s" % \
-                            (repo_path, constants.OSTREE_AUX_REMOTE)
+                           (repo_path, constants.OSTREE_AUX_REMOTE)
         try:
             subprocess.run(check_remote_cmd, shell=True, check=True, capture_output=True)
         except subprocess.CalledProcessError:
@@ -152,8 +156,9 @@ def get_feed_latest_commit(patch_sw_version, repo_path=None):
         return get_ostree_latest_commit(remote_ref, repo_path)
     else:
         repo_path = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR,
-                                           patch_sw_version)
+                                               patch_sw_version)
         return get_ostree_latest_commit(constants.OSTREE_REF, repo_path)
+
 
 def get_sysroot_latest_commit():
     """
@@ -269,7 +274,7 @@ def pull_ostree_from_remote(remote=None):
     Pull from remote ostree to sysroot ostree
     """
 
-    #Make sure gpg-verify is disabled
+    # Make sure gpg-verify is disabled
     add_gpg_verify_false()
 
     cmd = "ostree pull %s --depth=-1"
