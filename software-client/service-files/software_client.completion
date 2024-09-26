@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2023 Wind River Systems, Inc.
+# Copyright (c) 2024 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -9,4 +9,50 @@
 # the unified software management CLI
 #
 
-eval "$(register-python-argcomplete3 software)"
+_software_opts="" # lazy init
+_software_flags="" # lazy init
+_software_deploy_opts="" # lazy init
+_software_deploy_flags="" # lazy init
+_software_opts_exp="" # lazy init
+
+_software()
+
+{
+    local cur prev cmd kbc
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    cmd="${COMP_WORDS[1]}"
+
+    if [ "x$_software_opts" == "x" ] ; then
+        kbc="`software bash-completion | sed -e "s/ -h / /"`"
+        _software_opts="`echo "$kbc" | sed -e "s/--[a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
+        _software_flags="`echo " $kbc" | sed -e "s/ [^-][^-][a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
+        _software_opts_exp="`echo $_software_opts | sed -e "s/[ ]/|/g"`"
+    fi
+
+    if [ "x$_software_deploy_opts" == "x" ] && [ "$cmd" == "deploy" ] ; then
+        kbc="`software deploy bash-completion | sed -e "s/ -h / /"`"
+        _software_deploy_opts="`echo "$kbc" | sed -e "s/--[a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
+        _software_deploy_flags="`echo " $kbc" | sed -e "s/ [^-][^-][a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
+        _software_deploy_opts_exp="`echo $_software_deploy_opts | sed -e "s/[ ]/|/g"`"
+    fi
+
+    if [ "$cmd" == "deploy" ] ; then
+        if [[ " ${COMP_WORDS[@]} " =~ " "$_software_deploy_opts_exp" " && "$prev" != "help" ]] ; then
+            COMPREPLY=($(compgen -W "${_software_deploy_flags}" -- ${cur}))
+        else
+            COMPREPLY=($(compgen -W "${_software_deploy_opts}" -- ${cur}))
+        fi
+    else
+        if [[ " ${COMP_WORDS[@]} " =~ " "$_software_opts_exp" " && "$prev" != "help" ]] ; then
+            COMPREPLY=($(compgen -W "${_software_flags}" -- ${cur}))
+        else
+            COMPREPLY=($(compgen -W "${_software_opts}" -- ${cur}))
+        fi
+    fi
+
+    return 0
+}
+
+complete -F _software software

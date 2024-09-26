@@ -400,14 +400,31 @@ class SoftwareClientShell(object):
         """Prints all of the commands and options to stdout.
         """
         commands = set()
+        deploy_commands = set()
         options = set()
-        for sc_str, sc in self.subcommands.items():
-            commands.add(sc_str)
-            for option in list(sc._optionals._option_string_actions):
-                options.add(option)
+        deploy_options = set()
+        software_deploy_command = "software deploy"
+        deploy_command = "deploy"
+        unlisted_commands = [deploy_command, "bash-completion", "bash_completion"]
 
-        commands.remove('bash_completion')
-        print(' '.join(commands | options))
+        for sc_str, sc in self.subcommands.items():
+            # Separate between software command and deploy commands
+            if sc.prog.startswith(software_deploy_command):
+                if sc_str in unlisted_commands:
+                    continue
+                deploy_commands.add(sc_str)
+                for option in list(sc._optionals._option_string_actions):
+                    deploy_options.add(option)
+            else:
+                commands.add(sc_str)
+                for option in list(sc._optionals._option_string_actions):
+                    options.add(option)
+
+        if getattr(args, 'cmd_area', None):
+            print(' '.join(deploy_commands | deploy_options))
+        else:
+            commands.add(deploy_command)
+            print(' '.join(commands | options))
 
     @utils.arg('command', metavar='<subcommand>', nargs='?',
                help='Display help for <subcommand>')
