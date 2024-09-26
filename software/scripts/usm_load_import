@@ -95,7 +95,7 @@ def setup_from_release_load(from_release, to_feed_dir):
         raise
 
 
-def load_import(from_release, to_release, iso_mount_dir):
+def load_import(from_release, to_major_rel, iso_mount_dir):
     """
     Import the iso files to the feed and pxeboot directories
     :param from_release: from release version (MM.mm/MM.mm.p)
@@ -106,8 +106,6 @@ def load_import(from_release, to_release, iso_mount_dir):
     # for now the from_release is the same as from_major_rel. until
     # the sw_version is redefied to major release version, there is
     # chance that from_release could be major.minor.patch.
-
-    to_major_rel = get_major_release_version(to_release)
 
     try:
         # Copy the iso file to /var/www/pages/feed/rel-<release>
@@ -273,6 +271,26 @@ def copy_patch_metadata_files_to_committed(iso_mount_dir):
         raise
 
 
+def sync_inactive_load_to_controller1(to_major_rel):
+    """
+    Sync inactive load to controller-1
+    Upload is only allowed in controller-0 so sync to controller-1 is needed
+    :param to_major_rel: release version
+    """
+    feed_dir = os.path.join(FEED_OSTREE_BASE_DIR, ("rel-%s" % to_major_rel))
+    sync_cmd = [
+        "rsync",
+        "-ac",
+        "--delete",
+        "--exclude", "tmp",
+        feed_dir,
+        "rsync://controller-1/feed"]
+    LOG.info("Syncing inactive load to controllers %s", ' '.join(sync_cmd))
+    subprocess.run(sync_cmd, stdout=subprocess.PIPE,
+                   stderr=subprocess.STDOUT, check=True, text=True)
+    LOG.info("Sync controllers completed")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Import files from uploaded iso image to controller.",
@@ -306,8 +324,9 @@ def main():
     args = parser.parse_args()
 
     try:
+        to_major_rel = get_major_release_version(args.to_release)
         LOG.info("Load import from %s to %s started", args.from_release, args.to_release)
-        load_import(args.from_release, args.to_release, args.iso_dir)
+        load_import(args.from_release, to_major_rel, args.iso_dir)
 
         if args.is_usm_iso in ["True", True]:
             move_metadata_file_to_available_dir(args.to_release, args.iso_dir)
@@ -315,6 +334,10 @@ def main():
             # pre USM iso needs to generate metadata file
             generate_metadata_file_in_unavailable_dir(args.to_release)
             copy_patch_metadata_files_to_committed(args.iso_dir)
+
+        # Currently imported load is N-1
+        if args.from_release in ['None', None]:
+            sync_inactive_load_to_controller1(to_major_rel)
 
     except Exception as e:
         LOG.exception(e)
