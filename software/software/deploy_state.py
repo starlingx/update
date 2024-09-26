@@ -59,6 +59,9 @@ deploy_state_transition = {
     DEPLOY_STATES.COMPLETED: [DEPLOY_STATES.ACTIVATE_ROLLBACK_PENDING, None]
 }
 
+deploy_reentrant_states = [DEPLOY_STATES.START_DONE,
+                           DEPLOY_STATES.ACTIVATE_DONE,
+                           DEPLOY_STATES.ACTIVATE_ROLLBACK_DONE]
 
 class DeployState(object):
     _callbacks = []
@@ -128,6 +131,16 @@ class DeployState(object):
             cur_state = DEPLOY_STATES(cur_state)
         if target_state in deploy_state_transition[cur_state]:
             return True
+
+        # Below is to tolerate reentrant of certain states.
+        # by doing this it can simplify the workflow code to fire deploy_done
+        # event more than once.
+        # As "done" states are reported from an external process,
+        # there could be race condition and double report could happen.
+        # We should not fail the operation if it is the case
+        if target_state == cur_state and cur_state in deploy_reentrant_states:
+            return True
+
         # TODO(bqian) reverse lookup the operation that is not permitted, as feedback
         msg = f"Deploy state transform not permitted from {str(cur_state)} to {str(target_state)}"
         LOG.info(msg)
