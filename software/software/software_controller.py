@@ -3607,8 +3607,13 @@ class PatchController(PatchService):
                 major_release, force, async_req, commit_id)
             msg_info += msg + "\n"
             LOG.info(msg)
-            set_host_target_load(hostname, major_release)
-            copy_pxeboot_update_file(major_release, rollback=rollback)
+            try:
+                set_host_target_load(hostname, major_release)
+                copy_pxeboot_update_file(major_release, rollback=rollback)
+            except Exception:
+                LOG.error("Fail to start deploy host")
+                deploy_host_state.deploy_failed()
+                raise
 
         self.hosts_lock.acquire()
         self.hosts[ip].install_pending = True

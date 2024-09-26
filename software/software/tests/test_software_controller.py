@@ -5,9 +5,10 @@
 #
 
 # This import has to be first
+import subprocess
 from software.tests import base  # pylint: disable=unused-import # noqa: F401
 from software.software_controller import PatchController
-from software.exceptions import UpgradeNotSupported
+from software.exceptions import HostIpNotFound, HostNotFound, UpgradeNotSupported
 import unittest
 from unittest.mock import MagicMock
 from unittest.mock import mock_open
@@ -15,7 +16,7 @@ from unittest.mock import patch
 from unittest.mock import call
 from software import constants
 from software import states
-
+from socket import gaierror
 
 class TestSoftwareController(unittest.TestCase):
 
@@ -490,6 +491,119 @@ class TestSoftwareController(unittest.TestCase):
         db_api_instance_mock.get_deploy_all.assert_called_once()
 
         self.assertIsNone(result)
+
+    @patch('software.software_controller.PatchController.__init__', return_value=None)
+    @patch('software.software_controller.utils.gethostbyname', side_effect=gaierror)
+    def test_deploy_host_hostname_not_found(self,
+                                            mock_gethostbyname,     # pylint: disable=unused-argument
+                                            mock_init):  # pylint: disable=unused-argument
+        controller = PatchController()
+        hostname = "nonexistent_host"
+        force = False
+        async_req = False
+        rollback = False
+
+        result = controller._deploy_host(hostname, force, async_req, rollback)  # pylint: disable=protected-access
+
+        self.assertIn("Host %s not found" % hostname, result['error'])
+        self.assertEqual(result['info'], "")
+        self.assertEqual(result['warning'], "")
+
+    @patch('software.software_controller.PatchController.__init__', return_value=None)
+    @patch('software.software_controller.utils.gethostbyname', return_value='192.168.1.1')
+    def test_deploy_host_raises_HostIpNotFound(self,
+                                               mock_gethostbyname,  # pylint: disable=unused-argument
+                                               mock_init):  # pylint: disable=unused-argument
+        controller = PatchController()
+        controller.hosts = {}
+
+        with self.assertRaises(HostIpNotFound):
+            controller._deploy_host('test-hostname', force=True)    # pylint: disable=protected-access
+
+    @patch('software.software_controller.PatchController.__init__', return_value=None)
+    @patch('software.software_controller.utils.gethostbyname', return_value='192.168.1.1')
+    def test_deploy_host_raises_host_not_found(self,
+                                               mock_gethostbyname,  # pylint: disable=unused-argument
+                                               mock_init):  # pylint: disable=unused-argument
+        controller = PatchController()
+        controller.db_api_instance = MagicMock()
+        controller.db_api_instance.get_deploy_host_by_hostname.return_value = None
+        controller.hosts = {'192.168.1.1': MagicMock()}
+
+        with self.assertRaises(HostNotFound):
+            controller._deploy_host('test-host', force=True)    # pylint: disable=protected-access
+
+
+    @patch('software.software_controller.PatchController.__init__', return_value=None)
+    @patch('software.software_controller.utils.gethostbyname', return_value='192.168.1.1')
+    @patch('software.software_controller.DeployState.get_instance')
+    @patch('software.software_controller.DeployHostState')
+    @patch('software.software_controller.set_host_target_load',
+           side_effect=subprocess.CalledProcessError(returncode=1, cmd='ls'))
+    def test_deploy_host_set_host_target_load_exception(self,
+                                                        mock_set_host_target_load,  # pylint: disable=unused-argument
+                                                        mock_deploy_host_state,
+                                                        mock_deploy_state,
+                                                        mock_gethostbyname,     # pylint: disable=unused-argument
+                                                        mock_patch_controller_init):    # pylint: disable=unused-argument
+        mock_deploy_state_instance = MagicMock()
+        mock_deploy_state.return_value = mock_deploy_state_instance
+        mock_deploy_host_state_instance = MagicMock()
+        mock_deploy_host_state.return_value = mock_deploy_host_state_instance
+
+        controller = PatchController()
+        controller.hosts = {'192.168.1.1': MagicMock()}
+        controller.hosts_lock = MagicMock()
+        controller.socket_lock = MagicMock()
+        controller.db_api_instance = MagicMock()
+        controller.db_api_instance.get_deploy_host_by_hostname.return_value = MagicMock()
+        controller.db_api_instance.get_deploy_all.return_value = [
+            {'to_release': '2.1.1', 'commit_id': 'commit_1'}]
+        controller.allow_insvc_patching = False
+        controller.install_local = True
+        controller.check_upgrade_in_progress = MagicMock(return_value=True)
+        controller.get_software_upgrade = MagicMock(return_value={'to_release': '2.1.1'})
+        controller.manage_software_alarm = MagicMock()
+
+        with self.assertRaises(subprocess.CalledProcessError):
+            controller._deploy_host('hostname', force=False, async_req=False)    # pylint: disable=protected-access
+            assert mock_deploy_host_state.assert_called_once()
+
+    @patch('software.software_controller.PatchController.__init__', return_value=None)
+    @patch('software.software_controller.utils.gethostbyname', return_value='192.168.1.1')
+    @patch('software.software_controller.DeployState.get_instance')
+    @patch('software.software_controller.DeployHostState')
+    @patch('software.software_controller.set_host_target_load')
+    @patch('software.software_controller.copy_pxeboot_update_file', side_effect=Exception)
+    def test_copy_pxeboot_update_file_exception(self,
+                                                mock_copy_pxeboot_update_file,  # pylint: disable=unused-argument
+                                                mock_set_host_target_load,  # pylint: disable=unused-argument
+                                                mock_deploy_host_state,
+                                                mock_deploy_state,
+                                                mock_gethostbyname,     # pylint: disable=unused-argument
+                                                mock_patch_controller_init):    # pylint: disable=unused-argument
+        mock_deploy_state_instance = MagicMock()
+        mock_deploy_state.return_value = mock_deploy_state_instance
+        mock_deploy_host_state_instance = MagicMock()
+        mock_deploy_host_state.return_value = mock_deploy_host_state_instance
+
+        controller = PatchController()
+        controller.hosts = {'192.168.1.1': MagicMock()}
+        controller.hosts_lock = MagicMock()
+        controller.socket_lock = MagicMock()
+        controller.db_api_instance = MagicMock()
+        controller.db_api_instance.get_deploy_host_by_hostname.return_value = MagicMock()
+        controller.db_api_instance.get_deploy_all.return_value = [
+            {'to_release': '2.1.1', 'commit_id': 'commit_1'}]
+        controller.allow_insvc_patching = False
+        controller.install_local = True
+        controller.check_upgrade_in_progress = MagicMock(return_value=True)
+        controller.get_software_upgrade = MagicMock(return_value={'to_release': '2.1.1'})
+        controller.manage_software_alarm = MagicMock()
+
+        with self.assertRaises(Exception):
+            controller._deploy_host('hostname', force=False, async_req=False)    # pylint: disable=protected-access
+            assert mock_deploy_host_state.assert_called_once()
 
     @patch('software.software_controller.PatchController.__init__', return_value=None)
     @patch('os.path.exists')
