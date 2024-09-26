@@ -2960,11 +2960,10 @@ class PatchController(PatchService):
         # If current running release is R4 and command issued is "software deploy start R2"
         # operation is "remove" with order [R4, R3]
         if operation == "apply":
+            deployment_list = self.release_apply_order(deployment, running_release.sw_version)
 
             collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
             create_deploy_hosts(hostname=hostname)
-
-            deployment_list = self.release_apply_order(deployment, running_release.sw_version)
 
             msg = "Deploy start order for apply operation: %s" % ",".join(deployment_list)
             LOG.info(msg)
