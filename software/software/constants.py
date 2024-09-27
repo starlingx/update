@@ -34,6 +34,8 @@ SOFTWARE_CONFIG_FILE_LOCAL = "/etc/software/software.conf"
 RC_SUCCESS = 0
 RC_UNHEALTHY = 3
 
+PRECHECK_RESULT_VALID_PERIOD = 300
+
 DEPLOY_PRECHECK_SCRIPT = "deploy-precheck"
 UPGRADE_UTILS_SCRIPT = "upgrade_utils.py"
 DEPLOY_START_SCRIPT = "software-deploy-start"
