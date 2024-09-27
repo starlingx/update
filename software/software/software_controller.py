@@ -2865,8 +2865,8 @@ class PatchController(PatchService):
         thread.start()
 
     @require_deploy_state([None],
-                          "There is already a deployment is in progress ({state}). "
-                          "Please complete the current deployment.")
+                          "There is already a deployment in progress ({state.value}). "
+                          "Please complete/delete the current deployment.")
     def software_deploy_start_api(self, deployment: str, force: bool, **kwargs) -> dict:
         """
         to start deploy of a specified release.
@@ -3313,7 +3313,7 @@ class PatchController(PatchService):
         return True
 
     @require_deploy_state([DEPLOY_STATES.ACTIVATE_DONE],
-                          "Must complete deploy activate before completing the deployment")
+                          "Deploy must be in %s state to be able to complete." % DEPLOY_STATES.ACTIVATE_DONE.value)
     def software_deploy_complete_api(self) -> dict:
         """
         Completes a deployment associated with the release
