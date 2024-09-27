@@ -1779,8 +1779,9 @@ class PatchController(PatchService):
             elif ext == constants.SIG_EXTENSION:
                 upgrade_files[constants.SIG_EXTENSION] = uploaded_file
             else:
-                LOG.exception(
-                    "The file extension is not supported. Supported extensions include .patch, .iso and .sig")
+                msg = "The file extension is not supported. Supported extensions include .patch, .iso and .sig"
+                LOG.exception(msg)
+                raise ReleaseValidationFailure(error=msg)
 
         if len(upgrade_files) == 1:  # Only one upgrade file uploaded
             msg = "Missing upgrade file or signature file"
