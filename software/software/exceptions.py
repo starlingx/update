@@ -54,6 +54,11 @@ class HostNotFound(SoftwareServiceError):
         super().__init__(error="Host %s can not be found" % hostname)
 
 
+class HostIpNotFound(SoftwareServiceError):
+    def __init__(self, hostname):
+        super().__init__(error="Host %s not found\n" % hostname)
+
+
 # TODO(bqian) gradually convert SoftwareError based exception to
 # either SoftwareServiceError for user visible exceptions, or
 # InternalError for internal error (bug)
@@ -178,9 +183,4 @@ class FileSystemError(SoftwareError):
     A failure during a linux file operation.
     Likely fixable by a root user.
     """
-    pass
-
-
-class HostIpNotFound(SoftwareError):
-    """Host IP not found"""
     pass

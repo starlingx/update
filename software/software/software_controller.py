@@ -3559,7 +3559,6 @@ class PatchController(PatchService):
         # need to review the design
         # ensure ip is in table as in some cases the host is aged out from the hosts table
         if ip not in self.hosts:
-            msg_warning += "Host %s ip %s not found\n" % (hostname, ip)
             raise HostIpNotFound(hostname)
 
         deploy_host = self.db_api_instance.get_deploy_host_by_hostname(hostname)
