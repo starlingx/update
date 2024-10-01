@@ -88,22 +88,28 @@ class DeployHostState(object):
         state = self.get_deploy_host_state()
         if state in [DEPLOY_HOST_STATES.PENDING, DEPLOY_HOST_STATES.FAILED]:
             self.transform(DEPLOY_HOST_STATES.DEPLOYING)
-        else:
+        elif state in [DEPLOY_HOST_STATES.ROLLBACK_PENDING, DEPLOY_HOST_STATES.ROLLBACK_FAILED]:
             self.transform(DEPLOY_HOST_STATES.ROLLBACK_DEPLOYING)
+        else:
+            LOG.warning("Unmapped host state transition: deploy_started from %s" % state.value)
 
     def deployed(self):
         state = self.get_deploy_host_state()
         if state == DEPLOY_HOST_STATES.DEPLOYING:
             self.transform(DEPLOY_HOST_STATES.DEPLOYED)
-        else:
+        elif state == DEPLOY_HOST_STATES.ROLLBACK_DEPLOYING:
             self.transform(DEPLOY_HOST_STATES.ROLLBACK_DEPLOYED)
+        else:
+            LOG.warning("Unmapped host state transition: deployed from %s" % state.value)
 
     def deploy_failed(self):
         state = self.get_deploy_host_state()
         if state == DEPLOY_HOST_STATES.DEPLOYING:
             self.transform(DEPLOY_HOST_STATES.FAILED)
-        else:
+        elif state == DEPLOY_HOST_STATES.ROLLBACK_DEPLOYING:
             self.transform(DEPLOY_HOST_STATES.ROLLBACK_FAILED)
+        else:
+            LOG.warning("Unmapped host state transition: deploy_failed from %s" % state.value)
 
     def failed(self):
         """Transform deploy host state to failed without rollback logic."""
