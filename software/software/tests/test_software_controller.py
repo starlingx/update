@@ -8,7 +8,9 @@
 import subprocess
 from software.tests import base  # pylint: disable=unused-import # noqa: F401
 from software.software_controller import PatchController
-from software.exceptions import HostIpNotFound, HostNotFound, UpgradeNotSupported
+from software.exceptions import HostIpNotFound
+from software.exceptions import HostNotFound
+from software.exceptions import UpgradeNotSupported
 import unittest
 from unittest.mock import MagicMock
 from unittest.mock import mock_open
@@ -17,6 +19,7 @@ from unittest.mock import call
 from software import constants
 from software import states
 from socket import gaierror
+
 
 class TestSoftwareController(unittest.TestCase):
 
@@ -28,7 +31,6 @@ class TestSoftwareController(unittest.TestCase):
 
     def tearDown(self):
         pass
-
 
     @patch('software.software_controller.PatchController.__init__', return_value=None)
     @patch('software.software_controller.PatchController.major_release_upload_check')
@@ -115,7 +117,7 @@ class TestSoftwareController(unittest.TestCase):
         controller = PatchController()
         mock_run_load_import.return_value = "Load import successful"
         mock_major_release_upload_check.return_value = True
-        mock_read_upgrade_support_versions.return_value =[{'version': '3.0.0'}, {'version': '2.0.0'}]
+        mock_read_upgrade_support_versions.return_value = [{'version': '3.0.0'}, {'version': '2.0.0'}]
         from_release = None
         to_release = '1.0.0'
         iso_mount_dir = '/test/iso'
@@ -226,7 +228,6 @@ class TestSoftwareController(unittest.TestCase):
         mock_copytree.assert_called_once_with(
             "/mnt/iso/upgrades/software-deploy", "/opt/software/rel-2.0.0/bin")
 
-
     @patch('software.software_controller.PatchController.__init__', return_value=None)
     @patch('os.path.isfile', return_value=True)
     @patch('software.software_controller.PatchController.get_release_meta_info')
@@ -297,7 +298,7 @@ class TestSoftwareController(unittest.TestCase):
                                                               mock_init):    # pylint: disable=unused-argument
         # Setup
         mock_path_exists.return_value = True
-        mock_subprocess_run.side_effect = Exception("Unexpected error")
+        mock_subprocess_run.side_effect = FileNotFoundError("Unexpected error")
         mock_get_release_meta_info.return_value = {}
 
         controller = PatchController()
@@ -310,8 +311,8 @@ class TestSoftwareController(unittest.TestCase):
         }
 
         # Call the method and assert exception
-        with self.assertRaises(Exception) as context:
-            controller._run_load_import(from_release, to_release, iso_mount_dir, upgrade_files) # pylint: disable=protected-access
+        with self.assertRaises(FileNotFoundError) as context:
+            controller._run_load_import(from_release, to_release, iso_mount_dir, upgrade_files)  # pylint: disable=protected-access
 
         self.assertTrue("Unexpected error" in str(context.exception))
         mock_rmtree.assert_called_once_with("/opt/software/rel-2.0.0/bin")
@@ -533,7 +534,6 @@ class TestSoftwareController(unittest.TestCase):
         with self.assertRaises(HostNotFound):
             controller._deploy_host('test-host', force=True)    # pylint: disable=protected-access
 
-
     @patch('software.software_controller.PatchController.__init__', return_value=None)
     @patch('software.software_controller.utils.gethostbyname', return_value='192.168.1.1')
     @patch('software.software_controller.DeployState.get_instance')
@@ -574,7 +574,7 @@ class TestSoftwareController(unittest.TestCase):
     @patch('software.software_controller.DeployState.get_instance')
     @patch('software.software_controller.DeployHostState')
     @patch('software.software_controller.set_host_target_load')
-    @patch('software.software_controller.copy_pxeboot_update_file', side_effect=Exception)
+    @patch('software.software_controller.copy_pxeboot_update_file', side_effect=FileNotFoundError)
     def test_copy_pxeboot_update_file_exception(self,
                                                 mock_copy_pxeboot_update_file,  # pylint: disable=unused-argument
                                                 mock_set_host_target_load,  # pylint: disable=unused-argument
@@ -601,7 +601,7 @@ class TestSoftwareController(unittest.TestCase):
         controller.get_software_upgrade = MagicMock(return_value={'to_release': '2.1.1'})
         controller.manage_software_alarm = MagicMock()
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(FileNotFoundError):
             controller._deploy_host('hostname', force=False, async_req=False)    # pylint: disable=protected-access
             assert mock_deploy_host_state.assert_called_once()
 

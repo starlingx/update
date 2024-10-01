@@ -112,4 +112,4 @@ class DeployController(RestController):
     def software_sync(self):
         reload_release_data()
         result = sc.software_sync()
-        return {"result" : result}
+        return {"result": result}
