@@ -9,6 +9,7 @@ import pecan
 
 from software.config import CONF
 from software.utils import ExceptionHook
+from software.logging_hook import LoggingHook
 
 
 def get_pecan_config():
@@ -40,7 +41,7 @@ def setup_app(pecan_config=None):
         pecan_config = get_pecan_config()
     pecan.configuration.set_config(dict(pecan_config), overwrite=True)
 
-    hook_list = [ExceptionHook()]
+    hook_list = [ExceptionHook(), LoggingHook()]
 
     # todo(abailey): It seems like the call to pecan.configuration above
     # mean that the following lines are redundnant?
