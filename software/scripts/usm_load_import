@@ -27,6 +27,7 @@ import upgrade_utils
 AVAILABLE_DIR = "/opt/software/metadata/available"
 UNAVAILABLE_DIR = "/opt/software/metadata/unavailable"
 COMMITTED_DIR = "/opt/software/metadata/committed"
+PATCHING_COMMITTED_DIR = "/opt/patching/metadata/committed"
 FEED_OSTREE_BASE_DIR = "/var/www/pages/feed"
 RELEASE_GA_NAME = "starlingx-%s"
 SOFTWARE_STORAGE_DIR = "/opt/software"
@@ -271,6 +272,38 @@ def copy_patch_metadata_files_to_committed(iso_mount_dir):
         raise
 
 
+def copy_patch_metadata_files_to_patching_committed(iso_mount_dir):
+    # TODO(jli14): remove this function when 'sw-patch query' is deprecated
+    """
+    Copy patch metadata files to /opt/patching/metadata/committed
+    :param iso_mount_dir: iso mount dir
+    """
+    deployed_patch_dir = os.path.join(iso_mount_dir, 'patches')
+    try:
+        shutil.copytree(deployed_patch_dir, PATCHING_COMMITTED_DIR, dirs_exist_ok=True)
+        LOG.info("Copied patch metadata file to %s", PATCHING_COMMITTED_DIR)
+    except shutil.Error:
+        LOG.exception("Failed to copy patch metadata file(s) to %s" %
+                      PATCHING_COMMITTED_DIR)
+        raise
+
+
+def restart_legacy_patching_service():
+    """
+    Restart legacy patching service daemon
+    """
+    # TODO(jli14): remove this function when 'sw-patch query' is deprecated
+    try:
+        restart_cmd = ['pmon-restart', 'sw-patch-controller-daemon']
+        LOG.info("Restarting legacy patching service daemon: %s", " ".join(restart_cmd))
+        subprocess.run(restart_cmd, stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT, check=True, text=True)
+        LOG.info("Restarted legacy patching service daemon successfully")
+    except Exception as e:
+        LOG.exception("Failed to restart legacy patching service daemon with error: %s", str(e))
+        raise
+
+
 def sync_inactive_load_to_controller1(to_major_rel):
     """
     Sync inactive load to controller-1
@@ -337,6 +370,8 @@ def main():
 
         # Currently imported load is N-1
         if args.from_release in ['None', None]:
+            copy_patch_metadata_files_to_patching_committed(args.iso_dir)
+            restart_legacy_patching_service()
             sync_inactive_load_to_controller1(to_major_rel)
 
     except Exception as e:
