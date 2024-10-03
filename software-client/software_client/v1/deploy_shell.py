@@ -83,7 +83,7 @@ def do_precheck(cc, args):
 
     rc = utils.check_rc(resp, data)
     if rc == 0:
-        if data["system_healthy"] is False:
+        if data.get("system_healthy") is False:
             print("System is unhealthy for deploy")
             rc = 1
 
