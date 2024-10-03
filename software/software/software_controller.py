@@ -2031,9 +2031,26 @@ class PatchController(PatchService):
                 metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[release.state]
                 os.remove("%s/%s" % (metadata_dir, metadata_file))
             except OSError:
-                msg = "Failed to remove metadata for %s" % release_id
-                LOG.exception(msg)
-                raise MetadataFail(msg)
+                # When deleting the load from a system controller, the unavailable
+                # and commited directories are cleaned up and, if the metadata file
+                # is located in one of those, it will result in a exception since
+                # it would have been already removed by the
+                # _clean_up_inactive_load_import method
+                if (
+                    is_system_controller() and
+                    (
+                        metadata_dir == states.UNAVAILABLE_DIR or
+                        metadata_dir == states.COMMITTED_DIR
+                    )
+                ):
+                    msg = (
+                        f"Metadata file already removed: {metadata_dir}/{metadata_file}"
+                    )
+                    LOG.warning(msg)
+                else:
+                    msg = "Failed to remove metadata for %s" % release_id
+                    LOG.exception(msg)
+                    raise MetadataFail(msg)
 
             self.delete_install_script(release_id)
             reload_release_data()
