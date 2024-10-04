@@ -43,7 +43,7 @@ def configure_logging():
 
 def execute_migration_scripts(from_release, to_release, action, port=None,
                               migration_script_dir="/etc/upgrade.d"):
-    """Execute upgrade scripts with an action:
+    """Execute deployment scripts with an action:
           start: Prepare for upgrade on release N side. Called during
                  "system upgrade-start".
           migrate: Perform data migration on release N+1 side. Called while
@@ -53,8 +53,13 @@ def execute_migration_scripts(from_release, to_release, action, port=None,
                    "software deploy activate".
     """
 
-    LOG.info("Executing upgrade scripts with from_release: %s, "
-             "to_release: %s, action: %s" % (from_release, to_release, action))
+    LOG.info("Executing deployment scripts from: %s with from_release: %s, to_release: %s, "
+             "action: %s" % (migration_script_dir, from_release, to_release, action))
+
+    if not os.path.isdir(migration_script_dir):
+        msg = "Folder %s does not exist" % migration_script_dir
+        LOG.exception(msg)
+        raise Exception(msg)
 
     # Get a sorted list of all the migration scripts
     # Exclude any files that can not be executed, including .pyc and .pyo files
@@ -68,17 +73,17 @@ def execute_migration_scripts(from_release, to_release, action, port=None,
     try:
         files.sort(key=lambda x: int(x.split("-")[0]))
     except Exception:
-        LOG.exception("Upgrade script sequence validation failed, invalid "
+        LOG.exception("Deployment script sequence validation failed, invalid "
                       "file name format")
         raise
 
-    MSG_SCRIPT_FAILURE = "Upgrade script %s failed with returncode %d" \
+    MSG_SCRIPT_FAILURE = "Deployment script %s failed with returncode %d" \
                          "Script output:\n%s"
     # Execute each migration script
     for f in files:
         migration_script = os.path.join(migration_script_dir, f)
         try:
-            LOG.info("Executing upgrade script %s" % migration_script)
+            LOG.info("Executing deployment script %s" % migration_script)
             cmdline = [migration_script, from_release, to_release, action]
             if port is not None:
                 cmdline.append(port)
