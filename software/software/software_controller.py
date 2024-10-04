@@ -3400,6 +3400,7 @@ class PatchController(PatchService):
         msg_info += "Deploy deleted with success"
         self.db_api_instance.delete_deploy_host_all()
         self.db_api_instance.delete_deploy()
+        LOG.info("Deploy is deleted")
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     def _deploy_complete(self):
@@ -3802,13 +3803,13 @@ class PatchController(PatchService):
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     @require_deploy_state([DEPLOY_STATES.START_DONE, DEPLOY_STATES.HOST, DEPLOY_STATES.HOST_FAILED],
-                          "Current deployment ({state}) is not ready to deploy host")
+                          "Current deployment ({state.value}) is not ready to deploy host")
     def software_deploy_host_api(self, hostname, force, async_req=False):
         return self._deploy_host(hostname, force, async_req)
 
     @require_deploy_state([DEPLOY_STATES.ACTIVATE_ROLLBACK_DONE,
                            DEPLOY_STATES.HOST_ROLLBACK, DEPLOY_STATES.HOST_ROLLBACK_FAILED],
-                          "Current deployment ({state}) is not ready to rollback host")
+                          "Current deployment ({state.value}) is not ready to rollback host")
     def software_deploy_host_rollback_api(self, hostname, force, async_req=False):
         return self._deploy_host(hostname, force, async_req, rollback=True)
 

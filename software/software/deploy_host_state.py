@@ -71,18 +71,21 @@ class DeployHostState(object):
 
     def transform(self, target_state: DEPLOY_HOST_STATES):
         db_api = get_instance()
+        cur_state = self.get_deploy_host_state()
         db_api.begin_update()
         try:
             if self.check_transition(target_state):
                 db_api.update_deploy_host(self._hostname, target_state)
-                LOG.info("Deploy host state for host %s updated to: %s" % (self._hostname, target_state.value))
-                for callback in DeployHostState._callbacks:
-                    callback(self._hostname, target_state)
+                msg = f"[deploy state] {self._hostname} from {cur_state.value} to {target_state.value}."
+                LOG.info(msg)
             else:
-                msg = "Host can not transform to %s from current state" % target_state.value
+                msg = f"{self._hostname} can not transform from {cur_state.value} to {target_state.value}."
                 raise InvalidOperation(msg)
         finally:
             db_api.end_update()
+
+        for callback in DeployHostState._callbacks:
+            callback(self._hostname, target_state)
 
     def deploy_started(self):
         state = self.get_deploy_host_state()

@@ -142,12 +142,10 @@ class DeployState(object):
         if target_state == cur_state and cur_state in deploy_reentrant_states:
             return True
 
-        # TODO(bqian) reverse lookup the operation that is not permitted, as feedback
-        msg = f"Deploy state transform not permitted from {str(cur_state)} to {str(target_state)}"
-        LOG.info(msg)
         return False
 
     def transform(self, target_state: DEPLOY_STATES):
+        cur_state = DeployState.get_deploy_state()
         db_api = get_instance()
         db_api.begin_update()
         try:
@@ -155,14 +153,17 @@ class DeployState(object):
                 # None means not existing or deleting
                 if target_state is not None:
                     db_api.update_deploy(state=target_state)
-                    LOG.info("Deploy state updated to: %s" % target_state.value)
+                    msg = f"[deploy state] from {cur_state.value} to {target_state.value}"
+                    LOG.info(msg)
+                else:
+                    LOG.info("[deploy state] Deploy is deleted")
             else:
                 # TODO(bqian) check the current state, and provide guidence on what is
                 # the possible next operation
                 if target_state is None:
-                    msg = "Deployment can not deleted in current state."
+                    msg = f"Can not delete deploy as it is {cur_state.value}."
                 else:
-                    msg = "Host can not transform to %s from current state" % target_state.value
+                    msg = f"Can not transform deploy to {target_state.value} from {cur_state.value}"
                 raise InvalidOperation(msg)
         finally:
             db_api.end_update()
@@ -179,7 +180,7 @@ class DeployState(object):
         if isinstance(to_release, SWRelease):
             to_release = to_release.sw_release
 
-        msg = f"Start deploy {to_release}, current sw {from_release}"
+        msg = f"[deploy state] deploy ({from_release} to {to_release}) started"
         LOG.info(msg)
         db_api_instance = get_instance()
         db_api_instance.create_deploy(from_release, to_release, feed_repo, commit_id, reboot_required)
