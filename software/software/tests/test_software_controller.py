@@ -8,12 +8,14 @@
 import subprocess
 from software.tests import base  # pylint: disable=unused-import # noqa: F401
 from software.software_controller import PatchController
+from software.software_controller import AgentNeighbour
 from software.exceptions import HostIpNotFound
 from software.exceptions import HostNotFound
 from software.exceptions import UpgradeNotSupported
 import unittest
 from unittest.mock import MagicMock
 from unittest.mock import mock_open
+from unittest.mock import PropertyMock
 from unittest.mock import patch
 from unittest.mock import call
 from software import constants
@@ -523,13 +525,21 @@ class TestSoftwareController(unittest.TestCase):
 
     @patch('software.software_controller.PatchController.__init__', return_value=None)
     @patch('software.software_controller.utils.gethostbyname', return_value='192.168.1.1')
+    @patch('software.software_controller.AgentNeighbour.is_alive', new_callable=PropertyMock)
     def test_deploy_host_raises_host_not_found(self,
+                                               mock_is_alive,
                                                mock_gethostbyname,  # pylint: disable=unused-argument
                                                mock_init):  # pylint: disable=unused-argument
+
+        mock_is_alive.return_value = True
+
         controller = PatchController()
+        agent_neighbor = AgentNeighbour('192.168.1.1')
         controller.db_api_instance = MagicMock()
+        controller.socket_lock = MagicMock()
+        controller.sock_out = MagicMock()
         controller.db_api_instance.get_deploy_host_by_hostname.return_value = None
-        controller.hosts = {'192.168.1.1': MagicMock()}
+        controller.hosts = {'192.168.1.1': agent_neighbor}
 
         with self.assertRaises(HostNotFound):
             controller._deploy_host('test-host', force=True)    # pylint: disable=protected-access
@@ -540,21 +550,26 @@ class TestSoftwareController(unittest.TestCase):
     @patch('software.software_controller.DeployHostState')
     @patch('software.software_controller.set_host_target_load',
            side_effect=subprocess.CalledProcessError(returncode=1, cmd='ls'))
+    @patch('software.software_controller.AgentNeighbour.is_alive', new_callable=PropertyMock)
     def test_deploy_host_set_host_target_load_exception(self,
+                                                        mock_is_alive,
                                                         mock_set_host_target_load,  # pylint: disable=unused-argument
                                                         mock_deploy_host_state,
                                                         mock_deploy_state,
                                                         mock_gethostbyname,     # pylint: disable=unused-argument
                                                         mock_patch_controller_init):    # pylint: disable=unused-argument
+        mock_is_alive.return_value = True
         mock_deploy_state_instance = MagicMock()
         mock_deploy_state.return_value = mock_deploy_state_instance
         mock_deploy_host_state_instance = MagicMock()
         mock_deploy_host_state.return_value = mock_deploy_host_state_instance
 
         controller = PatchController()
-        controller.hosts = {'192.168.1.1': MagicMock()}
+        agent_neighbor = AgentNeighbour('192.168.1.1')
+        controller.hosts = {'192.168.1.1': agent_neighbor}
         controller.hosts_lock = MagicMock()
         controller.socket_lock = MagicMock()
+        controller.sock_out = MagicMock()
         controller.db_api_instance = MagicMock()
         controller.db_api_instance.get_deploy_host_by_hostname.return_value = MagicMock()
         controller.db_api_instance.get_deploy_all.return_value = [
@@ -575,22 +590,27 @@ class TestSoftwareController(unittest.TestCase):
     @patch('software.software_controller.DeployHostState')
     @patch('software.software_controller.set_host_target_load')
     @patch('software.software_controller.copy_pxeboot_update_file', side_effect=FileNotFoundError)
+    @patch('software.software_controller.AgentNeighbour.is_alive', new_callable=PropertyMock)
     def test_copy_pxeboot_update_file_exception(self,
+                                                mock_is_alive,
                                                 mock_copy_pxeboot_update_file,  # pylint: disable=unused-argument
                                                 mock_set_host_target_load,  # pylint: disable=unused-argument
                                                 mock_deploy_host_state,
                                                 mock_deploy_state,
                                                 mock_gethostbyname,     # pylint: disable=unused-argument
                                                 mock_patch_controller_init):    # pylint: disable=unused-argument
+        mock_is_alive.return_value = True
         mock_deploy_state_instance = MagicMock()
         mock_deploy_state.return_value = mock_deploy_state_instance
         mock_deploy_host_state_instance = MagicMock()
         mock_deploy_host_state.return_value = mock_deploy_host_state_instance
 
         controller = PatchController()
-        controller.hosts = {'192.168.1.1': MagicMock()}
+        agent_neighbor = AgentNeighbour('192.168.1.1')
+        controller.hosts = {'192.168.1.1': agent_neighbor}
         controller.hosts_lock = MagicMock()
         controller.socket_lock = MagicMock()
+        controller.sock_out = MagicMock()
         controller.db_api_instance = MagicMock()
         controller.db_api_instance.get_deploy_host_by_hostname.return_value = MagicMock()
         controller.db_api_instance.get_deploy_all.return_value = [

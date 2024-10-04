@@ -409,6 +409,39 @@ class SoftwareMessageDeployDeleteCleanupResp(messages.PatchMessage):
         sock.sendto(str.encode(message), (addr[0], cfg.controller_port))
 
 
+class SoftwareMessageCheckAgentAliveReq(messages.PatchMessage):
+    def __init__(self):
+        messages.PatchMessage.__init__(self, messages.PATCHMSG_CHECK_AGENT_ALIVE_REQ)
+
+    def decode(self, data):
+        messages.PatchMessage.decode(self, data)
+
+    def handle(self, sock, addr):
+        LOG.info("Handling check agent alive from %s", addr[0])
+        check_alive_resp = SoftwareMessageCheckAgentAliveResp()
+        check_alive_resp.send(sock, addr)
+
+    def send(self, sock):  # pylint: disable=unused-argument
+        LOG.error("Should not get here")
+
+
+class SoftwareMessageCheckAgentAliveResp(messages.PatchMessage):
+    def __init__(self):
+        messages.PatchMessage.__init__(self, messages.PATCHMSG_CHECK_AGENT_ALIVE_RESP)
+
+    def encode(self):
+        messages.PatchMessage.encode(self)
+
+    def handle(self, sock, addr):
+        LOG.error("Should not get here")
+
+    def send(self, sock, addr):
+        LOG.info("Sending check agent alive resp to %s", addr[0])
+        self.encode()
+        message = json.dumps(self.message)
+        sock.sendto(str.encode(message), (addr[0], cfg.controller_port))
+
+
 class PatchAgent(PatchService):
     def __init__(self):
         PatchService.__init__(self)
@@ -926,6 +959,8 @@ class PatchAgent(PatchService):
                         msg = PatchMessageAgentInstallReq()
                     elif msgdata['msgtype'] == messages.PATCHMSG_DEPLOY_DELETE_CLEANUP_REQ:
                         msg = SoftwareMessageDeployDeleteCleanupReq()
+                    elif msgdata['msgtype'] == messages.PATCHMSG_CHECK_AGENT_ALIVE_REQ:
+                        msg = SoftwareMessageCheckAgentAliveReq()
 
                 if msg is None:
                     msg = messages.PatchMessage()
