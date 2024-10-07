@@ -53,6 +53,7 @@ from software.exceptions import ReleaseValidationFailure
 from software.exceptions import ReleaseIsoDeleteFailure
 from software.exceptions import SoftwareServiceError
 from software.exceptions import InvalidOperation
+from software.exceptions import HostAgentUnreachable
 from software.exceptions import HostIpNotFound
 from software.release_data import reload_release_data
 from software.release_data import get_SWReleaseCollection
@@ -175,6 +176,15 @@ class AgentNeighbour(object):
         self.sw_version = "unknown"
         self.subfunctions = []
         self.state = None
+        self._is_alive = False
+
+    @property
+    def is_alive(self):
+        return self._is_alive
+
+    @is_alive.setter
+    def is_alive(self, value):
+        self._is_alive = value
 
     def rx_ack(self,
                hostname,
@@ -924,6 +934,50 @@ class SoftwareMessageDeployDeleteCleanupResp(messages.PatchMessage):
             return
         LOG.error("Host %s failed executing deploy delete "
                   "cleanup tasks." % sc.hosts[ip].hostname)
+
+    def send(self, sock):  # pylint: disable=unused-argument
+        LOG.error("Should not get here")
+
+
+class SoftwareMessageCheckAgentAliveReq(messages.PatchMessage):
+    def __init__(self):
+        messages.PatchMessage.__init__(self, messages.PATCHMSG_CHECK_AGENT_ALIVE_REQ)
+        self.ip = None
+
+    def encode(self):
+        messages.PatchMessage.encode(self)
+
+    def handle(self, sock, addr):
+        LOG.error("Should not get here")
+
+    def send(self, sock):
+        LOG.info("Sending check agent alive to %s", self.ip)
+        self.encode()
+        message = json.dumps(self.message)
+        sock.sendto(str.encode(message), (self.ip, cfg.agent_port))
+
+
+class SoftwareMessageCheckAgentAliveResp(messages.PatchMessage):
+    def __init__(self):
+        messages.PatchMessage.__init__(self, messages.PATCHMSG_CHECK_AGENT_ALIVE_RESP)
+        self.status = False
+
+    def decode(self, data):
+        messages.PatchMessage.decode(self, data)
+
+    def encode(self):
+        # Nothing to add, so just call the super class
+        messages.PatchMessage.encode(self)
+
+    def handle(self, sock, addr):
+        LOG.info("Handling check agent alive resp from %s", addr[0])
+        global sc
+
+        ip = addr[0]
+        sc.hosts_lock.acquire()
+        sc.hosts[ip].is_alive = True
+        sc.hosts_lock.release()
+        LOG.info("Agent from %s is reachable and alive." % ip)
 
     def send(self, sock):  # pylint: disable=unused-argument
         LOG.error("Should not get here")
@@ -3605,6 +3659,17 @@ class PatchController(PatchService):
         if ip not in self.hosts:
             raise HostIpNotFound(hostname)
 
+        # check if host agent is reachable via message
+        self.hosts[ip].is_alive = False
+        check_alive_req = SoftwareMessageCheckAgentAliveReq()
+        check_alive_req.ip = ip
+        self.socket_lock.acquire()
+        check_alive_req.send(self.sock_out)
+        self.socket_lock.release()
+        time.sleep(5)  # sleep 5 seconds for agent to reply
+        if not self.hosts[ip].is_alive:
+            raise HostAgentUnreachable(hostname)
+
         deploy_host = self.db_api_instance.get_deploy_host_by_hostname(hostname)
         if deploy_host is None:
             raise HostNotFound(hostname)
@@ -4409,6 +4474,8 @@ class PatchControllerMainThread(threading.Thread):
                             msg = SWMessageDeployStateChanged()
                         elif msgdata['msgtype'] == messages.PATCHMSG_DEPLOY_DELETE_CLEANUP_RESP:
                             msg = SoftwareMessageDeployDeleteCleanupResp()
+                        elif msgdata['msgtype'] == messages.PATCHMSG_CHECK_AGENT_ALIVE_RESP:
+                            msg = SoftwareMessageCheckAgentAliveResp()
 
                     if msg is None:
                         msg = messages.PatchMessage()

@@ -59,6 +59,12 @@ class HostIpNotFound(SoftwareServiceError):
         super().__init__(error="Host %s not found\n" % hostname)
 
 
+class HostAgentUnreachable(SoftwareServiceError):
+    def __init__(self, hostname):
+        super().__init__(error="Agent is unreachable, please check if %s is online "
+                               "and software-agent process is running\n" % hostname)
+
+
 # TODO(bqian) gradually convert SoftwareError based exception to
 # either SoftwareServiceError for user visible exceptions, or
 # InternalError for internal error (bug)
