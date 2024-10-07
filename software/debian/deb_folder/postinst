@@ -1,0 +1,5 @@
+#!/bin/sh
+
+set -e
+
+chmod 700 /usr/lib/python3/dist-packages/software/utilities/deploy_set_failed.py
