@@ -1,9 +1,11 @@
 *.a
+*.coverage*
 *.egg
 *.egg-info
 *.o
-*.py[co]
+*.pyo
 *.pyc
+*__pycache__*
 *.so
 *.sqlite
 .*.swp
@@ -12,7 +14,7 @@
 .stestr
 .testrepository
 .tox
-.venv
+.vscode
 AUTHORS
 ChangeLog
 _build
@@ -22,6 +24,11 @@ develop-eggs
 dist
 eggs
 sdist
+
+.env
+.venv
+env
+venv
 
 # Sphinx documentation
 doc/build

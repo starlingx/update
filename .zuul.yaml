@@ -11,8 +11,10 @@
         - py3-flake8
         - patch-alarm-tox-pylint
         - patch-alarm-tox-py39
-        - stx-software-tox-pylint
-        - stx-software-tox-py39
+        - software-tox-flake8
+        - software-tox-pylint
+        - software-client-tox-flake8
+        - software-client-tox-pylint
         - sw-patch-tox-pylint
         - sw-patch-tox-py39
     gate:
@@ -22,8 +24,10 @@
         - py3-flake8
         - patch-alarm-tox-pylint
         - patch-alarm-tox-py39
-        - stx-software-tox-pylint
-        - stx-software-tox-py39
+        - software-tox-flake8
+        - software-tox-pylint
+        - software-client-tox-flake8
+        - software-client-tox-pylint
         - sw-patch-tox-pylint
         - sw-patch-tox-py39
     post:
@@ -47,9 +51,10 @@
     vars:
       tox_envlist: flake8
 
+
 - job:
-    name: stx-software-tox-py39
-    parent: tox-py39
+    name: software-tox-flake8
+    parent: tox
     nodeset: debian-bullseye
     required-projects:
       - starlingx/config
@@ -57,12 +62,12 @@
     files:
       - software/*
     vars:
-      tox_envlist: py39
-      python_version: 3.9
+      tox_envlist: flake8
       tox_extra_args: -c software/tox.ini
 
+
 - job:
-    name: stx-software-tox-pylint
+    name: software-tox-pylint
     parent: tox
     nodeset: debian-bullseye
     required-projects:
@@ -72,8 +77,34 @@
       - software/*
     vars:
       tox_envlist: pylint
-      python_version: 3.9
       tox_extra_args: -c software/tox.ini
+
+
+- job:
+    name: software-client-tox-flake8
+    parent: tox
+    nodeset: debian-bullseye
+    required-projects:
+      - starlingx/config
+    files:
+      - software-client/*
+    vars:
+      tox_envlist: flake8
+      tox_extra_args: -c software-client/tox.ini
+
+
+- job:
+    name: software-client-tox-pylint
+    parent: tox
+    nodeset: debian-bullseye
+    required-projects:
+      - starlingx/config
+    files:
+      - software-client/*
+    vars:
+      tox_envlist: pylint
+      tox_extra_args: -c software-client/tox.ini
+    voting: false
 
 
 - job:
