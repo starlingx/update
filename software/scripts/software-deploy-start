@@ -141,7 +141,7 @@ info "Data migration completed."
 
 info "Syncing feed between controllers..."
 SYNC_CONTROLLERS_SCRIPT="${script_dir}/sync-controllers-feed"
-sync_controllers_cmd="${SYNC_CONTROLLERS_SCRIPT} ${cmd_line} --feed=$(dirname $feed)"
+sync_controllers_cmd="${SYNC_CONTROLLERS_SCRIPT} --feed=$(dirname $feed)"
 ${sync_controllers_cmd} || handle_error $? "Failed to sync feeds"
 info "Feed sync complete."
 
