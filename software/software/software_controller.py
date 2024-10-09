@@ -23,6 +23,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import typing
 from wsgiref import simple_server
 
 from fm_api import fm_api
@@ -2626,7 +2627,7 @@ class PatchController(PatchService):
         return release
 
     def _deploy_precheck(self, release_version: str, force: bool = False,
-                         region_name: str = None, patch: bool = False) -> dict:
+                         region_name: typing.Optional[str] = None, patch: bool = False) -> dict:
         """
         Verify if system satisfy the requisites to upgrade to a specified deployment.
         :param release_version: full release name, e.g. starlingx-MM.mm.pp
@@ -2647,6 +2648,7 @@ class PatchController(PatchService):
         if not os.path.isfile(precheck_script) and patch:
             # Precheck script may not be available for some patches
             # In that case, report system as healthy with info message to proceed
+            self._save_precheck_result(release_version, healthy=True)
             msg_info = f"No deploy-precheck script available for patch version {release_version}"
             return dict(info=msg_info, warning=msg_warning, error=msg_error, system_healthy=True)
 
@@ -2657,6 +2659,7 @@ class PatchController(PatchService):
             msg_error = "Fail to perform deploy precheck. " \
                         "Uploaded release may have been damaged. " \
                         "Try delete and re-upload the release.\n"
+            self._save_precheck_result(release_version, healthy=False)
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         if self.pre_bootstrap and not force:
@@ -2664,6 +2667,7 @@ class PatchController(PatchService):
             # script access any of services like sysinv, keystone, etc.
             msg_warning = "Pre-bootstrap environment may not support deploy precheck.\n" \
                           "Use --force option to execute deploy precheck script.\n"
+            self._save_precheck_result(release_version, healthy=True)
             return dict(info=msg_info, warning=msg_warning, error=msg_error, system_healthy=True)
 
         deploy_in_progress = self._get_software_upgrade()
@@ -2684,6 +2688,7 @@ class PatchController(PatchService):
             LOG.error(msg)
             msg_error = "Fail to perform deploy precheck. Internal error has occured." \
                         "Try lock and unlock the controller for recovery.\n"
+            self._save_precheck_result(release_version, healthy=False)
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         # TODO(heitormatsui) if different region was passed as parameter then
@@ -2727,8 +2732,10 @@ class PatchController(PatchService):
         system_healthy = None
         if precheck_return.returncode in [constants.RC_SUCCESS, constants.RC_UNHEALTHY]:
             system_healthy = precheck_return.returncode == constants.RC_SUCCESS
+            self._save_precheck_result(release_version, healthy=system_healthy)
             msg_info += precheck_return.stdout
         else:
+            self._save_precheck_result(release_version, healthy=False)
             msg_error += precheck_return.stdout
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error, system_healthy=system_healthy)
@@ -2959,6 +2966,60 @@ class PatchController(PatchService):
         thread = threading.Thread(target=run)
         thread.start()
 
+    def _precheck_before_start(self, deployment, release_version, is_patch, force=False):
+        LOG.info("Running deploy precheck.")
+        precheck_result = self._deploy_precheck(release_version, force=force, patch=is_patch)
+        if precheck_result.get('system_healthy') is None:
+            precheck_result["error"] = (
+                f"Fail to perform deploy precheck. Internal error has occurred.\n"
+                f"{precheck_result['error']}"
+            )
+            return precheck_result
+        elif precheck_result.get('system_healthy') is False:
+            precheck_result["error"] = (
+                f"The following issues have been detected, which prevent deploying {deployment}\n"
+                f"{precheck_result['info']}\n"
+                "Please fix above issues then retry the deploy.\n"
+            )
+            return precheck_result
+        return None
+
+    def _get_precheck_result_file_path(self, release_version):
+        return os.path.join("/opt/software/", f"rel-{release_version}", "precheck-result.json")
+
+    def _safe_remove_precheck_result_file(self, release_version):
+        precheck_result_file = self._get_precheck_result_file_path(release_version)
+        if os.path.isfile(precheck_result_file):
+            os.remove(precheck_result_file)
+
+    def _save_precheck_result(self, release_version, healthy):
+        precheck_result_file = self._get_precheck_result_file_path(release_version)
+        with open(precheck_result_file, "w") as f:
+            json.dump({"healthy": healthy, "timestamp": time.time()}, f)
+
+    def _should_run_precheck_prior_deploy_start(self, release_version, force, is_patch):
+        # there is not precheck script in this state
+        if self.pre_bootstrap:
+            return False
+
+        # we should be able to patch an unhealthy system ignoring the unhealthy state
+        if is_patch and force:
+            return False
+
+        file_path = self._get_precheck_result_file_path(release_version)
+        if not os.path.isfile(file_path):
+            LOG.info("The precheck result file %s does not exist." % file_path)
+            return True
+
+        with open(file_path) as f:
+            last_result = json.load(f)
+
+        if time.time() - last_result["timestamp"] > constants.PRECHECK_RESULT_VALID_PERIOD:
+            LOG.info("The precheck result expired.")
+            return True
+
+        return not last_result["healthy"]
+
     @require_deploy_state([None],
                           "There is already a deployment in progress ({state.value}). "
                           "Please complete/delete the current deployment.")
@@ -2971,7 +3032,8 @@ class PatchController(PatchService):
         The operation includes steps:
         1. find all undeployed dependency releases
         2. ensure all releases (dependency and specified release) are ready to deployed
-        3. precheck
+        3. precheck, if last precheck was not executed or if was executed and failed or
+           if precheck result expired
         4. transform all involved releases to deploying state
         5. start the deploy subprocess
         """
@@ -3000,24 +3062,25 @@ class PatchController(PatchService):
             if hostname not in valid_hostnames:
                 LOG.warning("Using unknown hostname for local install: %s", hostname)
 
-        patch_release = True
-        if utils.is_upgrade_deploy(SW_VERSION, deploy_release.sw_release):
+        to_release = deploy_release.sw_release
+        is_upgrade_deploy = utils.is_upgrade_deploy(SW_VERSION, deploy_release.sw_release)
+        is_patch = not is_upgrade_deploy
+
+        if self._should_run_precheck_prior_deploy_start(to_release, force, is_patch):
+            LOG.info("Executing software deploy precheck prior to software deploy start")
+            if precheck_result := self._precheck_before_start(
+                deployment,
+                to_release,
+                is_patch=is_patch,
+                force=force
+            ):
+                return precheck_result
+        self._safe_remove_precheck_result_file(to_release)
+
+        if is_upgrade_deploy:
             # TODO(bqian) remove default latest commit when a commit-id is built into GA metadata
             if commit_id is None:
                 commit_id = ostree_utils.get_feed_latest_commit(deploy_sw_version)
-
-            patch_release = False
-            to_release = deploy_release.sw_release
-            ret = self._deploy_precheck(to_release, force, patch=patch_release)
-            if ret["system_healthy"] is None:
-                ret["error"] = "Fail to perform deploy precheck. Internal error has occurred.\n" + \
-                               ret["error"]
-                return ret
-            elif not ret["system_healthy"]:
-                ret["error"] = "The following issues have been detected, which prevent " \
-                               "deploying %s\n" % deployment + ret["info"] + \
-                               "Please fix above issues then retry the deploy.\n"
-                return ret
 
             if self._deploy_upgrade_start(to_release, commit_id):
                 collect_current_load_for_hosts(deploy_sw_version)
