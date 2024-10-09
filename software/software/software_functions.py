@@ -939,8 +939,7 @@ class PatchFile(object):
 
         try:
             patch_sw_version = utils.get_major_release_version(
-                thispatch.metadata[patch_id]["sw_version"]
-            )
+                thispatch.metadata[patch_id]["sw_version"])
             abs_ostree_tar_dir = package_dir[patch_sw_version]
             os.remove("%s/%s-software.tar" % (abs_ostree_tar_dir, patch_id))
         except Exception:
