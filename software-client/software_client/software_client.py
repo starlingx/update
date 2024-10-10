@@ -405,14 +405,16 @@ class SoftwareClientShell(object):
         deploy_options = set()
         software_deploy_command = "software deploy"
         deploy_command = "deploy"
-        unlisted_commands = [deploy_command, "bash-completion", "bash_completion"]
+        unlisted_commands = ["bash-completion", "bash_completion"]
 
         for sc_str, sc in self.subcommands.items():
             # Separate between software command and deploy commands
             if sc.prog.startswith(software_deploy_command):
                 if sc_str in unlisted_commands:
                     continue
-                deploy_commands.add(sc_str)
+                # Remove deploy prefix output
+                opt = sc_str[len(f"{deploy_command} "):]
+                deploy_commands.add(opt)
                 for option in list(sc._optionals._option_string_actions):
                     deploy_options.add(option)
             else:
