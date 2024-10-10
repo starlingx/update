@@ -3344,8 +3344,9 @@ class PatchController(PatchService):
         :return: dict of info, warning and error messages
         """
 
-        if self.hostname != constants.CONTROLLER_0_HOSTNAME:
-            raise SoftwareServiceError("Deployment deletion can only be performed on controller-0.")
+        if not self.pre_bootstrap:
+            if self.hostname != constants.CONTROLLER_0_HOSTNAME:
+                raise SoftwareServiceError("Deployment deletion can only be performed on controller-0.")
 
         msg_info = ""
         msg_warning = ""
@@ -3361,11 +3362,12 @@ class PatchController(PatchService):
         # hosts must be unlocked and online since during delete deployment
         # a request is sent to all hosts to clear flags and temporary data
         # created during the deployment procedure
-        if (deploy_state_instance.get_deploy_state() not in [DEPLOY_STATES.START_DONE,
-                                                             DEPLOY_STATES.START_FAILED] and
-                not are_all_hosts_unlocked_and_online()):
-            msg = f"Hosts must be {constants.ADMIN_UNLOCKED} and {constants.AVAILABILITY_ONLINE}."
-            raise SoftwareServiceError(error=msg)
+        if not self.pre_bootstrap:
+            if (deploy_state_instance.get_deploy_state() not in [DEPLOY_STATES.START_DONE,
+                                                                 DEPLOY_STATES.START_FAILED] and
+                    not are_all_hosts_unlocked_and_online()):
+                msg = f"Hosts must be {constants.ADMIN_UNLOCKED} and {constants.AVAILABILITY_ONLINE}."
+                raise SoftwareServiceError(error=msg)
 
         is_major_release = False
 
@@ -3541,9 +3543,10 @@ class PatchController(PatchService):
         return True
 
     def _check_pre_activate(self):
-        if not are_all_hosts_unlocked_and_online():
-            msg = f"Hosts must be {constants.ADMIN_UNLOCKED} and {constants.AVAILABILITY_ONLINE}."
-            raise SoftwareServiceError(error=msg)
+        if not self.pre_bootstrap:
+            if not are_all_hosts_unlocked_and_online():
+                msg = f"Hosts must be {constants.ADMIN_UNLOCKED} and {constants.AVAILABILITY_ONLINE}."
+                raise SoftwareServiceError(error=msg)
         # check current deployment, deploy to all hosts have completed,
         # the deploy state is host-done, or
         # activate-failed' as reattempt from a previous failed activate
