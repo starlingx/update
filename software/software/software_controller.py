@@ -2068,9 +2068,7 @@ class PatchController(PatchService):
             is_major_release = ReleaseState(release_ids=[release.id]).is_major_release_deployment()
             if not is_major_release:
                 package_repo_dir = "%s/rel-%s" % (constants.PACKAGE_FEED_DIR, release_sw_version)
-                packages = [pkg.split("_")[0] for pkg in release.packages]
-                if packages:
-                    apt_utils.package_remove(package_repo_dir, release.sw_release, packages)
+                apt_utils.component_remove(package_repo_dir, release.sw_release)
 
             # Delete upgrade iso file in folder
             # TODO(heitormatsui): treat the prepatched iso scenario
