@@ -3749,6 +3749,7 @@ class PatchController(PatchService):
         if not self.hosts[ip].is_alive:
             raise HostAgentUnreachable(hostname)
 
+        is_major_release = self.check_upgrade_in_progress()
         deploy_host = self.db_api_instance.get_deploy_host_by_hostname(hostname)
         if deploy_host is None:
             raise HostNotFound(hostname)
@@ -3757,7 +3758,7 @@ class PatchController(PatchService):
         if not self.install_local:
             deploy_host_validations(
                 hostname,
-                is_major_release=self.check_upgrade_in_progress(),
+                is_major_release=is_major_release,
                 rollback=rollback
             )
         deploy_state = DeployState.get_instance()
@@ -3777,7 +3778,7 @@ class PatchController(PatchService):
         LOG.info(msg)
         audit_log_info(msg)
 
-        if self.allow_insvc_patching:
+        if not is_major_release and self.allow_insvc_patching:
             LOG.info("Allowing in-service patching")
             force = True
             self.copy_install_scripts()
@@ -3785,7 +3786,7 @@ class PatchController(PatchService):
         # Check if there is a major release deployment in progress
         # and set agent request parameters accordingly
         major_release = None
-        if self.check_upgrade_in_progress():
+        if is_major_release:
             upgrade_release = self.get_software_upgrade()
             major_release = upgrade_release["to_release"]
             force = False
