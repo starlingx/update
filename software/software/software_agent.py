@@ -689,6 +689,12 @@ class PatchAgent(PatchService):
                 # "/sysroot/ostree/repo/config" file
                 ostree_utils.pull_ostree_from_remote(remote=remote)
                 setflag(ostree_pull_completed_deployment_pending_file)
+
+                # Create a new deployment once the changes are pulled
+                ostree_utils.create_deployment(ref=ref)
+
+                changed = True
+                clearflag(ostree_pull_completed_deployment_pending_file)
             except OSTreeCommandFail:
                 LOG.exception("Failed to pull changes and create deployment"
                               "during host-install.")
@@ -696,18 +702,6 @@ class PatchAgent(PatchService):
             except subprocess.CalledProcessError as e:
                 LOG.exception("Failed to execute pre-install scripts.")
                 LOG.error("Command output: %s", e.output)
-                success = False
-
-            try:
-                # Create a new deployment once the changes are pulled
-                ostree_utils.create_deployment(ref=ref)
-
-                changed = True
-                clearflag(ostree_pull_completed_deployment_pending_file)
-
-            except OSTreeCommandFail:
-                LOG.exception("Failed to pull changes and create deployment"
-                              "during host-install.")
                 success = False
 
             if changed:
