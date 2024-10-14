@@ -185,16 +185,26 @@ class CreateUSMUpgradeInProgressFlag(BaseHook):
 
 class RemoveKubernetesConfigSymlinkHook(BaseHook):
     K8S_ENCRYPTION_PROVIDER_FILE = "/etc/kubernetes/encryption-provider.yaml"
+    LUKS_K8S_ENCRYPTION_PROVIDER_FILE = (
+            "/var/luks/stx/luks_fs/controller/etc/kubernetes/encryption-provider.yaml"
+            )
 
     def run(self):
         nodetype = utils.get_platform_conf("nodetype")
         if nodetype == constants.CONTROLLER:
             try:
+                # Remove the K8S encryption provider symlink
                 if os.path.exists(self.K8S_ENCRYPTION_PROVIDER_FILE):
                     os.unlink(self.K8S_ENCRYPTION_PROVIDER_FILE)
                     LOG.info("%s symlink removed" % self.K8S_ENCRYPTION_PROVIDER_FILE)
+
+                # Remove the LUKS K8S encryption provider file
+                if os.path.exists(self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE):
+                    os.remove(self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE)
+                    LOG.info("%s file removed" % self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE)
+
             except Exception as e:
-                LOG.exception("Failed to remove symlink: %s" % str(e))
+                LOG.exception("Failed to remove symlink or file: %s" % str(e))
                 raise
 
 
