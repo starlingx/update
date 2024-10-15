@@ -3344,10 +3344,6 @@ class PatchController(PatchService):
         :return: dict of info, warning and error messages
         """
 
-        if not self.pre_bootstrap:
-            if self.hostname != constants.CONTROLLER_0_HOSTNAME:
-                raise SoftwareServiceError("Deployment deletion can only be performed on controller-0.")
-
         msg_info = ""
         msg_warning = ""
         msg_error = ""
@@ -3371,13 +3367,24 @@ class PatchController(PatchService):
 
         is_major_release = False
 
+        deploy_state = deploy_state_instance.get_deploy_state()
+        deploying_release_state = ReleaseState(release_state=states.DEPLOYING)
+        is_applying = deploying_release_state.has_release_id()
+
+        if deploy_state in [
+                DEPLOY_STATES.START_DONE, DEPLOY_STATES.START_FAILED, DEPLOY_STATES.COMPLETED]:
+            is_major_release = deploying_release_state.is_major_release_deployment() if is_applying else False
+        elif deploy_state == DEPLOY_STATES.HOST_ROLLBACK_DONE:
+            is_major_release = ReleaseState(
+                release_state=states.DEPLOYING).is_major_release_deployment()
+
+        # Only major release is required to be deleted on controller-0
+        # Patch deletion can take place on either controller
+        if is_major_release and self.hostname != constants.CONTROLLER_0_HOSTNAME:
+            raise SoftwareServiceError("Deploy delete can only be performed on controller-0.")
+
         if DEPLOY_STATES.COMPLETED == deploy_state_instance.get_deploy_state():
-            deploying_release_state = ReleaseState(release_state=states.DEPLOYING)
-            is_applying = deploying_release_state.has_release_id()
-
             if is_applying:
-                is_major_release = deploying_release_state.is_major_release_deployment()
-
                 major_release = utils.get_major_release_version(from_release)
                 # In case of a major release deployment set all the releases related to from_release to unavailable
                 if is_major_release:
@@ -3396,8 +3403,6 @@ class PatchController(PatchService):
         elif DEPLOY_STATES.HOST_ROLLBACK_DONE == deploy_state_instance.get_deploy_state():
             major_release = utils.get_major_release_version(from_release)
             release_state = ReleaseState(release_state=states.DEPLOYING)
-            is_major_release = release_state.is_major_release_deployment()
-
             release_state.available()
 
         elif deploy_state_instance.get_deploy_state() in [DEPLOY_STATES.START_DONE, DEPLOY_STATES.START_FAILED]:
@@ -3409,12 +3414,8 @@ class PatchController(PatchService):
                 raise SoftwareServiceError(f"There are hosts already {DEPLOY_HOST_STATES.DEPLOYED.value} "
                                            f"or in {DEPLOY_HOST_STATES.DEPLOYING.value} process")
 
-            deploying_release_state = ReleaseState(release_state=states.DEPLOYING)
-            is_applying = deploying_release_state.has_release_id()
-
             if is_applying:
                 major_release = utils.get_major_release_version(to_release)
-                is_major_release = deploying_release_state.is_major_release_deployment()
 
                 if is_major_release:
                     try:
