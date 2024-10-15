@@ -13,16 +13,22 @@ Run feed synchronization between controllers
 """
 
 import logging as LOG
+import os
+import socket
 import subprocess
 import sys
-
 import upgrade_utils
 
+CONTROLLER_0_HOSTNAME = "controller-0"
 CONTROLLER_1_HOSTNAME = "controller-1"
 SYSTEM_MODE_SIMPLEX = "simplex"
 
+def sync_controllers(feed):
+    controller = socket.gethostname()
+    controller = CONTROLLER_1_HOSTNAME if \
+        controller == CONTROLLER_0_HOSTNAME else CONTROLLER_0_HOSTNAME
 
-def sync_controllers(to_release, feed, controller):
+    LOG.info(f"Synchronized feed with {controller}")
     cmd = [
         "rsync",
         "-ac",
@@ -33,49 +39,53 @@ def sync_controllers(to_release, feed, controller):
     ]
     subprocess.run(cmd)
 
+def print_usage(sys_argv):
+    script_name = sys_argv[0]
+    print("Usage: %s --feed=<feed>" % script_name)
+
+def get_system_mode():
+    system_mode=None
+    with open(os.devnull, "w") as fnull:
+        cmd = "bash -c 'grep system_mode /etc/platform/platform.conf'"
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE,
+                                   shell=True,
+                                   executable='/bin/bash')
+
+    stdout, stderr = process.communicate()
+
+    output = stdout.decode("utf-8").strip()
+    error_output = stderr.decode("utf-8").strip()
+
+    if process.returncode == 0:
+        system_mode = output.split('=')[1]
+    else:
+        LOG.error(f"Error: {error_output}")
+
+    return system_mode
 
 def main(sys_argv):
     args = upgrade_utils.parse_arguments(sys_argv)
     try:
         feed = args["feed"]
-        to_release = args["to_release"]
+
+        system_mode = get_system_mode()
+        if system_mode is None:
+            LOG.error("Unable to get the system mode.")
+            return 1
+        elif system_mode == SYSTEM_MODE_SIMPLEX:
+            LOG.info("System mode is simplex. Skipping sync controllers feed.")
+            return 0
+
+        sync_controllers(feed)
+        LOG.info("Feed synchronized between controllers.")
+
     except KeyError as e:
         msg = "%s is not provided" % str(e)
         LOG.error(msg)
         print(msg)
-        upgrade_utils.print_usage(sys_argv[0], "--feed=<feed>")
+        print_usage(sys_argv)
         return 1
-
-    if feed is None or to_release is None:
-        msg = "feed or to_release are missing"
-        LOG.error(msg)
-        print(msg)
-        upgrade_utils.print_usage(sys_argv[0], "--feed=<feed>")
-        return 1
-
-    try:
-        keystone_config = upgrade_utils.get_keystone_config(args)
-        token, endpoint = upgrade_utils.get_token_endpoint(keystone_config)
-        sysinv_client = upgrade_utils.get_sysinv_client(token, endpoint)
-        _, system_mode = upgrade_utils.get_system_info(sysinv_client)
-        simplex = (system_mode == SYSTEM_MODE_SIMPLEX)
-        if simplex:
-            LOG.info("System mode is simplex. Skipping sync controllers feed.. ")
-            return 0
-
-    except ImportError:
-        msg = "Failed to import cgtsclient"
-        LOG.exception(msg)
-        return 1
-
-    except Exception as e:
-        LOG.exception("Failed to get host attributes from sysinv. Error: %s", e)
-        return 1
-
-    LOG.info("Syncing feed.")
-    try:
-        sync_controllers(to_release, feed, CONTROLLER_1_HOSTNAME)
-        LOG.info("Feed synchronized between controllers.")
 
     except subprocess.CalledProcessError as e:
         LOG.exception("Feed synchronization command failed. Error: %s", e)
@@ -84,8 +94,6 @@ def main(sys_argv):
     except Exception as e:
         LOG.exception("Feed synchronization failed. Error: %s", e)
         return 1
-    return 0
-
 
 if __name__ == "__main__":
     upgrade_utils.configure_logging('/var/log/software.log', log_level=LOG.INFO)
