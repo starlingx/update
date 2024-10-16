@@ -87,10 +87,10 @@ class EnableNewServicesHook(BaseHook):
 
 class CopyPxeFilesHook(BaseHook):
     """
-    Copy pxeboot files from the target feed post deploy host during
-    major release deployment. These files are copied during the
+    Copy pxeboot files from the to-release ostree on 'deploy host'
+    for major release deployment. These files are copied during the
     release upload, but only to the host where it is uploaded, so
-    this post action is needed to copy the files to other hosts.
+    this post hook is needed to copy the files to other hosts.
     """
     def __init__(self, attrs):
         super().__init__()
@@ -104,18 +104,17 @@ class CopyPxeFilesHook(BaseHook):
         if nodetype == constants.CONTROLLER:
             if self._major_release:
                 # copy to_release pxeboot files to /var/pxeboot/pxelinux.cfg.files
-                pxeboot_feed_dir = ("/var/www/pages/feed/rel-%s/pxeboot/pxelinux.cfg.files/*" %
-                                    self._major_release)
-                pxeboot_dest_dir = "/var/pxeboot/pxelinux.cfg.files/"
-                cmd = "rsync -ac %s %s" % (pxeboot_feed_dir, pxeboot_dest_dir)
+                pxeboot_dst_dir = "/var/pxeboot/pxelinux.cfg.files/"
+                pxeboot_src_dir = "/ostree/1" + pxeboot_dst_dir  # deployed to-release ostree dir
+                cmd = "rsync -ac %s %s" % (pxeboot_src_dir, pxeboot_dst_dir)
                 try:
                     subprocess.check_call(cmd, shell=True)
                     LOG.info(
                         "Copied %s pxeboot files to %s." % (
-                            self._major_release, pxeboot_dest_dir))
+                            self._major_release, pxeboot_dst_dir))
                 except subprocess.CalledProcessError as e:
                     LOG.exception("Error copying pxeboot files from %s to %s: %s" % (
-                        pxeboot_feed_dir, pxeboot_dest_dir, str(e)))
+                        pxeboot_src_dir, pxeboot_dst_dir, str(e)))
                     raise
             else:
                 LOG.error("Cannot copy pxeboot files, major_release value is %s" %

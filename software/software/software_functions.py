@@ -1617,6 +1617,7 @@ def copy_pxeboot_update_file(to_major_release, rollback=False):
             src_file = constants.FEED_DIR + "/rel-%s/upgrades/%s" % (to_major_release, filename)
         try:
             shutil.copy(src_file, dst_file)
+            os.chmod(dst_file, mode=0o755)
             LOG.info("Copied %s to %s" % (src_file, dst_file))
         except Exception as e:
             LOG.exception("Error copying %s file: %s" % (filename, str(e)))
