@@ -7,6 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 import filecmp
 import glob
 import os
+import re
 import shutil
 import subprocess
 
@@ -119,6 +120,87 @@ class CopyPxeFilesHook(BaseHook):
             else:
                 LOG.error("Cannot copy pxeboot files, major_release value is %s" %
                           self._major_release)
+
+
+class UpdateKernelParametersHook(BaseHook):
+    """
+    Update the kernel parameters
+    isolcpus=<cpu_range> ==> isolcpus=nohz,domain,managed_irq,<cpu_range>
+    """
+    def __init__(self, attrs):
+        super().__init__()
+
+    def read_isolcpus_kernel_parameters(self):
+
+        isolcpus = ''
+        try:
+            BOOT_ENV = "/boot/efi/EFI/BOOT/boot.env"
+            cmd = f'grub-editenv {BOOT_ENV} list'
+            output = subprocess.check_output(cmd.split()).decode('utf-8')
+        except Exception as e:
+            err = str(e)
+            msg = f"Failed to run {cmd} - {err}"
+            LOG.exception(msg)
+            raise
+
+        kernel_params = ''
+        for line in output.split('\n'):
+            if line.startswith('kernel_params='):
+                kernel_params = line[len('kernel_params='):]
+                break
+
+        for param in kernel_params.split():
+            if param.startswith('isolcpus='):
+                isolcpus = param
+                break
+
+        return isolcpus
+
+    def run(self):
+        """Execute the hook"""
+        try:
+            # Get the isolcpus cpu range
+            isolcpus = self.read_isolcpus_kernel_parameters()
+            if not isolcpus:
+                # do nothing 'isolcpus' kernel parameter not configured
+                return
+
+            _, val = isolcpus.split("=")
+            isolcpus_ranges = []  # only numeric values
+            isolcpus_prefix = ['nohz', 'domain', 'managed_irq']
+
+            for cpu_range in val.split(","):
+                if re.search(r"^\d+-?\d*$", cpu_range):
+                    isolcpus_ranges.append(cpu_range)
+                    isolcpus_prefix.append(cpu_range)
+
+            if not isolcpus_ranges:
+                # isolated application cpus not configured
+                return
+
+            # Convert to list to string
+            isolcpus_prefix = ",".join(isolcpus_prefix)
+
+            # remove 'isolcpus' kernel parameter
+            cmd = "python /usr/local/bin/puppet-update-grub-env.py --remove-kernelparams isolcpus"
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+
+            # add updated 'isolcpus' kernel parameter
+            cmd = f"python /usr/local/bin/puppet-update-grub-env.py --add-kernelparams isolcpus={isolcpus_prefix}"
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+
+            LOG.info("Successfully updated kernel parameter isolcpus=%s", isolcpus_prefix)
+
+        except subprocess.CalledProcessError as e:
+            msg = ("Failed to run puppet-update-grub-env.py: rc=%s, output=%s"
+                   % (e.returncode, e.stderr.decode("utf-8")))
+            LOG.exception(msg)
+        except Exception as e:
+            err = str(e)
+            msg = f"Failed to update isolcpus kernel paramater. Error = {err}"
+            LOG.exception(msg)
+
+        return
 
 
 class ReconfigureKernelHook(BaseHook):
@@ -244,6 +326,7 @@ AGENT_HOOKS = {
         POST: [
             CopyPxeFilesHook,
             ReconfigureKernelHook,
+            UpdateKernelParametersHook,
             EnableNewServicesHook,
             # enable usm-initialize service for next reboot only
             # if everything else is done
