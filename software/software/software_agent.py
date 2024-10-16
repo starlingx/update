@@ -631,6 +631,7 @@ class PatchAgent(PatchService):
                 LOG.exception("The OSTree commit_id %s sent by the controller "
                               "doesn't match with the remote commit_id." % commit_id)
                 ostree_utils.delete_ostree_remote(remote)
+                ostree_utils.delete_ostree_ref(constants.OSTREE_REF)
                 LOG.info("OSTree remote deleted: %s" % remote)
                 return False
 
@@ -645,6 +646,9 @@ class PatchAgent(PatchService):
                 self.patch_failed = True
                 setflag(patch_failed_file)
                 self.state = constants.PATCH_AGENT_STATE_INSTALL_FAILED
+                ostree_utils.delete_ostree_remote(remote)
+                ostree_utils.delete_ostree_ref(constants.OSTREE_REF)
+                LOG.info("OSTree remote deleted: %s" % remote)
                 return False
 
         self.state = constants.PATCH_AGENT_STATE_INSTALLING
