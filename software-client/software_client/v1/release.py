@@ -71,6 +71,18 @@ class ReleaseManager(base.Manager):
         # Ignore interrupts during this function
         signal.signal(signal.SIGINT, signal.SIG_IGN)
 
+        path = '/v1/release'
+        if is_local:
+            # We can only validate the file extension as files are on remote active controller
+            local_valid_files = [filename for filename in releases
+                                 if os.path.splitext(filename)[1] in
+                                 constants.SUPPORTED_UPLOAD_FILE_EXT]
+            if len(local_valid_files) == 0:
+                print("No file on active controller to be specified.")
+                return 1
+            headers = {'Content-Type': 'text/plain'}
+            return self._create(path, body=local_valid_files, headers=headers)
+
         to_upload_files = {}
         valid_files = []
         invalid_files = []
@@ -93,20 +105,14 @@ class ReleaseManager(base.Manager):
             print("No file to be uploaded.")
             return 1
 
-        path = '/v1/release'
-        if is_local:
-            to_upload_filenames = valid_files
-            headers = {'Content-Type': 'text/plain'}
-            return self._create(path, body=to_upload_filenames, headers=headers)
-        else:
-            for software_file in valid_files:
-                with open(software_file, 'rb') as file:
-                    data_content = file.read()
-                to_upload_files[software_file] = (software_file, data_content)
+        for software_file in valid_files:
+            with open(software_file, 'rb') as file:
+                data_content = file.read()
+            to_upload_files[software_file] = (software_file, data_content)
 
-            encoder = MultipartEncoder(fields=to_upload_files)
-            headers = {'Content-Type': encoder.content_type}
-            return self._create_multipart(path, body=encoder, headers=headers)
+        encoder = MultipartEncoder(fields=to_upload_files)
+        headers = {'Content-Type': encoder.content_type}
+        return self._create_multipart(path, body=encoder, headers=headers)
 
     def upload_dir(self, args):
         # arg.release is a list

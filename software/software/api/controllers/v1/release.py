@@ -73,6 +73,11 @@ class ReleaseController(RestController):
                 raise SoftwareServiceError(error="No files uploaded")
 
             if is_local:
+                missing_files = [f for f in local_files if not os.path.isfile(f)]
+                if missing_files:
+                    raise SoftwareServiceError(
+                        error=f"File(s) not found on the active controller: {', '.join(missing_files)}")
+
                 uploaded_files = local_files
                 LOG.info("Uploaded local files: %s", uploaded_files)
             else:
