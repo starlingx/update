@@ -11,6 +11,17 @@ ExecStop=/etc/init.d/sw-patch-agent stop
 ExecReload=/etc/init.d/sw-patch-agent restart
 PIDFile=/var/run/sw-patch-agent.pid
 
+# cgroup performance engineering
+# - sw-patch-agent.service does not provide latency critical service
+# - ostree pull, ostree admin processes are 100% cpu hog;
+#   these do significant disk read and write IO
+# - set 1/8th default share
+# - set lower IO priority (effective only with 'bfq' scheduler)
+CPUShares=128
+Nice=19
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
 [Install]
 WantedBy=multi-user.target
 
