@@ -165,7 +165,11 @@ def _print_upload_result(resp, data, debug):
 @utils.arg('--local',
            required=False,
            default=False,
-           action='store_true')
+           action='store_true',
+           help=("Upload the release locally from active controller. "
+                 "To use this option, first upload the .iso,.sig and/or .patch "
+                 "files to active controller and then specify the absolute path of "
+                 "each file."))
 def do_upload(cc, args):
     """Upload a software release"""
     result = cc.release.upload(args)
