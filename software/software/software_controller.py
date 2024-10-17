@@ -3045,10 +3045,12 @@ class PatchController(PatchService):
         running_release = self.release_collection.running_release
         deploy_sw_version = deploy_release.sw_version  # MM.mm
 
-        if ((deploy_release.is_ga_release or deploy_release.prepatched_iso) and
-                socket.gethostname() != constants.CONTROLLER_0_HOSTNAME):
-            raise SoftwareServiceError(f"Deploy start for major releases needs to be executed in "
-                                       f"{constants.CONTROLLER_0_HOSTNAME} host.")
+        # pre-bootstrap patch removal case
+        if not self.pre_bootstrap:
+            if ((deploy_release.is_ga_release or deploy_release.prepatched_iso) and
+                    socket.gethostname() != constants.CONTROLLER_0_HOSTNAME):
+                raise SoftwareServiceError(f"Deploy start for major releases needs to be executed in "
+                                           f"{constants.CONTROLLER_0_HOSTNAME} host.")
 
         feed_repo = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, deploy_sw_version)
         commit_id = deploy_release.commit_id
@@ -3741,6 +3743,9 @@ class PatchController(PatchService):
         # ensure ip is in table as in some cases the host is aged out from the hosts table
         if ip not in self.hosts:
             raise HostIpNotFound(hostname)
+        # for rr patch in pre bootstrap
+        if self.pre_bootstrap:
+            self.allow_insvc_patching = True
 
         # check if host agent is reachable via message
         self.hosts[ip].is_alive = False
