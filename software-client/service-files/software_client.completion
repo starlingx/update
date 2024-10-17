@@ -35,11 +35,11 @@ _software()
         kbc="`software deploy bash-completion | sed -e "s/ -h / /"`"
         _software_deploy_opts="`echo "$kbc" | sed -e "s/--[a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
         _software_deploy_flags="`echo " $kbc" | sed -e "s/ [^-][^-][a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
-        _software_deploy_opts_exp="`echo $_software_deploy_opts | sed -e "s/[ ]/|/g"`"
+        _software_deploy_opts_exp="`echo $_software_deploy_opts | sed -e "s/[ ]\+/|/g"`"
     fi
 
     if [ "$cmd" == "deploy" ] ; then
-        if [[ " ${COMP_WORDS[@]} " =~ " "$_software_deploy_opts_exp" " && "$prev" != "help" ]] ; then
+        if [[ " ${_software_deploy_opts} " == *" $prev "* && "$prev" != "help" ]] ; then
             COMPREPLY=($(compgen -W "${_software_deploy_flags}" -- ${cur}))
         else
             COMPREPLY=($(compgen -W "${_software_deploy_opts}" -- ${cur}))
