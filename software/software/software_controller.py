@@ -2570,17 +2570,18 @@ class PatchController(PatchService):
             folder = ["preinstall", "postinstall"]
             if release.state in applying_states:
                 try:
-                    for i, file in enumerate(file for file in (pre_install, post_install) if file):
-                        full_name_file = "%s_%s" % (release.id, file)
-                        script_path = "%s/%s" % (root_scripts_dir, full_name_file)
-                        dest_path = constants.PATCH_SCRIPTS_STAGING_DIR + "/" + folder[i]
-                        dest_script_file = "%s/%s" % (dest_path, full_name_file)
-                        if not os.path.exists(dest_path):
-                            os.makedirs(dest_path, 0o700)
-                        shutil.copyfile(script_path, dest_script_file)
-                        os.chmod(dest_script_file, 0o700)
-                        msg = "Creating install script %s for %s" % (full_name_file, release.id)
-                        LOG.info(msg)
+                    for i, file in enumerate([pre_install, post_install]):
+                        if file:
+                            full_name_file = "%s_%s" % (release.id, file)
+                            script_path = "%s/%s" % (root_scripts_dir, full_name_file)
+                            dest_path = constants.PATCH_SCRIPTS_STAGING_DIR + "/" + folder[i]
+                            dest_script_file = "%s/%s" % (dest_path, full_name_file)
+                            if not os.path.exists(dest_path):
+                                os.makedirs(dest_path, 0o700)
+                            shutil.copyfile(script_path, dest_script_file)
+                            os.chmod(dest_script_file, 0o700)
+                            msg = "Creating install script %s for %s" % (full_name_file, release.id)
+                            LOG.info(msg)
                 except shutil.Error:
                     msg = "Failed to copy the install script %s for %s" % (full_name_file, release.id)
                     LOG.exception(msg)
