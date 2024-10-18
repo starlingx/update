@@ -510,6 +510,12 @@ class PatchAgent(PatchService):
         self.listener.bind(('', self.port))
         self.listener.listen(2)  # Allow two connections, for two controllers
 
+    def set_install_failed_flags(self):
+        """Set flags and states for a failed patch"""
+        self.patch_failed = True
+        setflag(patch_failed_file)
+        self.state = constants.PATCH_AGENT_STATE_INSTALL_FAILED
+
     def query(self, major_release=None):
         """Check current patch state """
         if not self.install_local and not check_install_uuid():
@@ -574,10 +580,7 @@ class PatchAgent(PatchService):
         # controller, we don't want to install patches.
         if not self.install_local and not check_install_uuid():
             LOG.error("Failed install_uuid check. Skipping install")
-
-            self.patch_failed = True
-            setflag(patch_failed_file)
-            self.state = constants.PATCH_AGENT_STATE_INSTALL_FAILED
+            self.set_install_failed_flags()
 
             # Send a hello to provide a state update
             if self.sock_out is not None:
@@ -611,9 +614,7 @@ class PatchAgent(PatchService):
                     clearflag(patch_failed_file)
                     self.state = constants.PATCH_AGENT_STATE_IDLE
                 else:
-                    self.patch_failed = True
-                    setflag(patch_failed_file)
-                    self.state = constants.PATCH_AGENT_STATE_INSTALL_FAILED
+                    self.set_install_failed_flags()
                 return success
 
         # prepare major release deployment
@@ -754,21 +755,22 @@ class PatchAgent(PatchService):
                 except Exception as e:
                     LOG.exception("Failure running hooks: %s" % str(e))
                     setflag(run_hooks_flag)
-                    self.patch_failed = True
-                    setflag(patch_failed_file)
-                    self.state = constants.PATCH_AGENT_STATE_INSTALL_FAILED
+                    self.set_install_failed_flags()
                     success = False
         else:
-            # Update the patch_failed flag
-            self.patch_failed = True
-            setflag(patch_failed_file)
-            self.state = constants.PATCH_AGENT_STATE_INSTALL_FAILED
+            self.set_install_failed_flags()
 
         clearflag(patch_installing_file)
-        self.query()
 
+        self.query()  # Update self.changes
         if self.changes:
             LOG.warning("Installing the patch did not change the patch current status")
+
+            if os.path.exists(node_is_software_updated_rr_file):
+                LOG.error("No deployment created and reboot required flag exists")
+                self.set_install_failed_flags()
+                # Clear flag to avoid reboot loop
+                clearflag(node_is_software_updated_rr_file)
 
         # Send a hello to provide a state update
         if self.sock_out is not None:
