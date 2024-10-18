@@ -378,8 +378,8 @@ class HTTPClient(httplib2.Http):
 
         self.http_log_req(_logger, args, log_kargs)
         try:
-            _, body = self.request(*args, **kargs)
-            resp = PCResponse(body=body)
+            response, body = self.request(*args, **kargs)
+            resp = PCResponse(body=body, status=response.get('status', None))
         except requests.exceptions.SSLError as e:
             raise exceptions.SslCertificateValidationError(reason=str(e))
         except Exception as e:
