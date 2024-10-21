@@ -203,3 +203,5 @@ DC_VAULT_DIR = "/opt/dc-vault"
 DC_VAULT_PLAYBOOK_DIR = "%s/playbooks" % DC_VAULT_DIR
 DC_VAULT_LOADS_DIR = "%s/loads" % DC_VAULT_DIR
 PLAYBOOKS_PATH = "/usr/share/ansible/stx-ansible/playbooks"
+
+ENABLE_DEV_CERTIFICATE_PATCH_IDENTIFIER = 'ENABLE_DEV_CERTIFICATE'
