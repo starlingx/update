@@ -3157,7 +3157,7 @@ class PatchController(PatchService):
             to_deploy_release = self.release_collection.get_release_by_id(to_deploy_release_id)
             reboot_required = self.is_deployment_list_reboot_required(deployment_list)
 
-            collect_current_load_for_hosts(to_deploy_release.sw_version)
+            collect_current_load_for_hosts(to_deploy_release.sw_version, hostname=hostname)
             release_state = ReleaseState(release_ids=deployment_list)
             release_state.start_deploy()
 
