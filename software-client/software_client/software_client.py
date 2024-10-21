@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2013-2024 Wind River Systems, Inc.
+# Copyright (c) 2013-2025 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -275,7 +275,8 @@ class SoftwareClientShell(object):
         subparsers2 = self._add_deploy_subparser(subparsers)
         deploy_submodule = utils.import_versioned_module(version, 'deploy_cmd')
         deploy_submodule.enhance_parser(parser, subparsers2, self.subcommands)
-        utils.define_commands_from_module(subparsers2, self, self.subcommands)
+        utils.define_commands_from_module(subparsers2, self, self.subcommands,
+                                          cmd_area='deploy')
         self._add_bash_completion_subparser(subparsers2)
         return parser
 

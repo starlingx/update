@@ -1,4 +1,4 @@
-# Copyright 2013-2024 Wind River, Inc
+# Copyright 2013-2025 Wind River, Inc
 # Copyright 2012 OpenStack LLC.
 # All Rights Reserved.
 #
@@ -20,6 +20,8 @@ import argparse
 import json
 import os
 import re
+import signal
+import sys
 from tabulate import tabulate
 from oslo_utils import importutils
 
@@ -28,6 +30,7 @@ from software_client.common.http_errors import HTTP_ERRORS
 #####################################################
 
 TERM_WIDTH = 72
+CONFIRMATION_YES = "yes"
 
 
 class HelpFormatter(argparse.HelpFormatter):
@@ -37,7 +40,9 @@ class HelpFormatter(argparse.HelpFormatter):
         super(HelpFormatter, self).start_section(heading)
 
 
-def define_command(subparsers, command, callback, cmd_mapper, unrestricted_cmds):
+def define_command(subparsers, command, callback, cmd_mapper,
+                   unrestricted_cmds, cmd_area):
+
     '''Define a command in the subparsers collection.
 
     :param subparsers: subparsers collection where the command will go
@@ -54,7 +59,12 @@ def define_command(subparsers, command, callback, cmd_mapper, unrestricted_cmds)
                                       formatter_class=HelpFormatter)
     subparser.add_argument('-h', '--help', action='help',
                            help=argparse.SUPPRESS)
-
+    if _is_service_impacting_command(command, cmd_area):
+        subparser.add_argument(
+            '--yes',
+            action='store_true',
+            help=f"Automatically confirm the action: {command}")
+        callback = prompt_cli_confirmation(callback)
     func = callback
     cmd_mapper[command] = subparser
     for (args, kwargs) in arguments:
@@ -65,7 +75,9 @@ def define_command(subparsers, command, callback, cmd_mapper, unrestricted_cmds)
         subparser.set_defaults(restricted=False)
 
 
-def define_commands_from_module(subparsers, command_module, cmd_mapper, unrestricted_cmds=[]):
+def define_commands_from_module(subparsers, command_module, cmd_mapper,
+                                unrestricted_cmds=[], cmd_area=""):
+
     '''Find all methods beginning with 'do_' in a module, and add them
     as commands into a subparsers collection.
     '''
@@ -73,7 +85,8 @@ def define_commands_from_module(subparsers, command_module, cmd_mapper, unrestri
         # Commands should be hypen-separated instead of underscores.
         command = method_name[3:].replace('_', '-')
         callback = getattr(command_module, method_name)
-        define_command(subparsers, command, callback, cmd_mapper, unrestricted_cmds)
+        define_command(subparsers, command, callback, cmd_mapper,
+                       unrestricted_cmds, cmd_area)
 
 
 # Decorator for cli-args
@@ -348,3 +361,65 @@ def print_result_debug(req, data):
             print(m.group(0))
         else:
             print("%s %s" % (req.status_code, req.reason))
+
+
+def input_with_timeout(prompt, timeout):
+    def timeout_handler(signum, frame):
+        raise TimeoutError
+
+    # Set the timeout handler
+    signal.signal(signal.SIGALRM, timeout_handler)
+    signal.alarm(timeout)  # Set the alarm for the timeout
+
+    try:
+        # Try to get input from the user
+        result = input(prompt)
+        signal.alarm(0)  # Cancel the alarm if input is received in time
+        return result
+    except TimeoutError:
+        print("\nError: No response received within the time limit.")
+        sys.exit(1)
+
+
+def prompt_cli_confirmation(func, timeout=10):
+    """Decorator that asks for user confirmation before running the function."""
+    def wrapper(*args, **kwargs):
+        YELLOW = '\033[93m'
+        RESET = '\033[0m'
+        BOLD = '\033[1m'
+
+        if not _is_cli_confirmation_param_enabled():
+            return func(*args, **kwargs)
+        if hasattr(args[1], 'yes') and args[1].yes:
+            # Skip confirmation if --yes was passed
+            return func(*args, **kwargs)
+
+        confirmation = input_with_timeout(
+            f"{BOLD}{YELLOW}WARNING: This is a high-risk operation that may "
+            f"cause a service interruption or remove critical resources{RESET}\n"
+            f"{BOLD}{YELLOW}Do you want to continue? ({CONFIRMATION_YES}/No): {RESET}",
+            timeout)
+        if confirmation is None:
+            print("\nNo response received within the time limit.")
+            return
+        elif confirmation.lower() != CONFIRMATION_YES:
+            print("Operation cancelled by the user.")
+            sys.exit(1)
+        return func(*args, **kwargs)
+    return wrapper
+
+
+def _is_service_impacting_command(command, cmd_area):
+    SERVICE_IMPACTING_COMMAND_RULES = [
+        ('*', 'delete'),
+        ('deploy', 'host'),
+    ]
+
+    for area, cmd in SERVICE_IMPACTING_COMMAND_RULES:
+        if (area == '*' or area == cmd_area) and cmd in command:
+            return True
+    return False
+
+
+def _is_cli_confirmation_param_enabled():
+    return env("CLI_CONFIRMATIONS", default="disabled") == "enabled"
