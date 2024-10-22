@@ -6,6 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 """
 import logging
 import os
+import re
 import sh
 import shutil
 import subprocess
@@ -467,6 +468,34 @@ def delete_older_deployments():
                        % (e.returncode, e.stderr.decode("utf-8"))
             LOG.info(info_msg)
             raise OSTreeCommandFail(msg)
+
+
+def undeploy_inactive_deployments():
+    """
+    Remove deployments other than the current deployment,
+    i.e. deployments from index 1 to len(deployments) - 1
+    """
+    cmd = ["ostree", "admin", "status"]
+    try:
+        output = subprocess.run(cmd, text=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        LOG.exception("Error getting ostree deployment list: %s" % e.stderr)
+        return False
+
+    success = True
+    pattern = r"debian [a-z0-9]+.[0-9]+"
+    deployments = re.findall(pattern, output.stdout)
+    # skip the first (active) deployment
+    for index, deployment in enumerate(deployments[1:], 1):
+        commit_id = deployment.lstrip("debian ").split(".")[0]
+        cmd = ["ostree", "admin", "undeploy", str(index)]
+        try:
+            subprocess.run(cmd, check=True)
+            LOG.info("Removed deployment %s, commit-id %s" % (index, commit_id))
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Error removing deployment %s, commit-id %s: %s" % (index, commit_id, e.stderr))
+            success = False
+    return success
 
 
 def checkout_latest_ostree_commit(patch_sw_version):
