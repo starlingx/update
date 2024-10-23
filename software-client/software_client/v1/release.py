@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+import contextlib
 import os
 import re
 import signal
@@ -105,14 +106,14 @@ class ReleaseManager(base.Manager):
             print("No file to be uploaded.")
             return 1
 
-        for software_file in valid_files:
-            with open(software_file, 'rb') as file:
-                data_content = file.read()
-            to_upload_files[software_file] = (software_file, data_content)
+        with contextlib.ExitStack() as stack:
+            for software_file in valid_files:
+                file = stack.enter_context(open(software_file, 'rb'))
+                to_upload_files[software_file] = (software_file, file)
 
-        encoder = MultipartEncoder(fields=to_upload_files)
-        headers = {'Content-Type': encoder.content_type}
-        return self._create_multipart(path, body=encoder, headers=headers)
+            encoder = MultipartEncoder(fields=to_upload_files)
+            headers = {'Content-Type': encoder.content_type}
+            return self._create_multipart(path, body=encoder, headers=headers)
 
     def upload_dir(self, args):
         # arg.release is a list
