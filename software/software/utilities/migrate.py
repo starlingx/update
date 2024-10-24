@@ -59,21 +59,6 @@ def migrate_keyring_data(from_release, to_release):
     shutil.rmtree(target_path, ignore_errors=True)
     shutil.copytree(os.path.join(constants.KEYRING_DIR_PATH, from_release), target_path)
 
-    # change group ownership to sys_protected for keyring directory
-    if os.path.isdir(constants.KEYRING_DIR_PATH):
-        chgrp_cmd = 'chgrp -R sys_protected ' + constants.KEYRING_DIR_PATH
-        try:
-            LOG.info("Executing keyring migrate command: %s" % chgrp_cmd)
-            subprocess.check_call([chgrp_cmd],
-                                  shell=True, stdout=sout, stderr=sout)
-        except subprocess.CalledProcessError as ex:
-            LOG.exception("Failed to execute command: '%s' during upgrade "
-                          "processing, return code: %d" % (chgrp_cmd, ex.returncode))
-            raise
-    else:
-        LOG.error("Directory %s does not exist" % constants.KEYRING_DIR_PATH)
-        raise Exception("keyring directory cannot be found")
-
 
 def migrate_pxeboot_config(from_release, to_release):
     """Migrates pxeboot configuration. """
@@ -834,6 +819,21 @@ def upgrade_controller(from_release, to_release, target_port):
     if from_release == "22.12":
         LOG.info("Generating mgmt-ip config for %s" % first_controller)
         create_mgmt_ip_hieradata(first_controller, target_port)
+
+    # Change group ownership to sys_protected for keyring directory
+    if os.path.isdir(constants.KEYRING_DIR_PATH):
+        chgrp_cmd = 'chgrp -R sys_protected ' + constants.KEYRING_DIR_PATH
+        try:
+            LOG.info("Executing keyring migrate command: %s" % chgrp_cmd)
+            subprocess.check_call([chgrp_cmd],
+                                  shell=True, stdout=sout, stderr=sout)
+        except subprocess.CalledProcessError as ex:
+            LOG.exception("Failed to execute command: '%s' during upgrade "
+                          "processing, return code: %d" % (chgrp_cmd, ex.returncode))
+            raise
+    else:
+        LOG.error("Directory %s does not exist" % constants.KEYRING_DIR_PATH)
+        raise Exception("keyring directory cannot be found")
 
     # Stop postgres server
     LOG.info("Shutting down PostgreSQL...")
