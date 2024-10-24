@@ -3045,11 +3045,11 @@ class PatchController(PatchService):
 
         running_release = self.release_collection.running_release
         deploy_sw_version = deploy_release.sw_version  # MM.mm
+        is_patch = (not utils.is_upgrade_deploy(SW_VERSION, deploy_sw_version))
 
         # pre-bootstrap patch removal case
         if not self.pre_bootstrap:
-            if ((deploy_release.is_ga_release or deploy_release.prepatched_iso) and
-                    socket.gethostname() != constants.CONTROLLER_0_HOSTNAME):
+            if (not is_patch) and socket.gethostname() != constants.CONTROLLER_0_HOSTNAME:
                 raise SoftwareServiceError(f"Deploy start for major releases needs to be executed in "
                                            f"{constants.CONTROLLER_0_HOSTNAME} host.")
 
@@ -3066,8 +3066,6 @@ class PatchController(PatchService):
                 LOG.warning("Using unknown hostname for local install: %s", hostname)
 
         to_release = deploy_release.sw_release
-        is_upgrade_deploy = utils.is_upgrade_deploy(SW_VERSION, deploy_release.sw_release)
-        is_patch = not is_upgrade_deploy
 
         if self._should_run_precheck_prior_deploy_start(to_release, force, is_patch):
             LOG.info("Executing software deploy precheck prior to software deploy start")
@@ -3080,7 +3078,7 @@ class PatchController(PatchService):
                 return precheck_result
         self._safe_remove_precheck_result_file(to_release)
 
-        if is_upgrade_deploy:
+        if not is_patch:
             # TODO(bqian) remove default latest commit when a commit-id is built into GA metadata
             if commit_id is None:
                 commit_id = ostree_utils.get_feed_latest_commit(deploy_sw_version)
