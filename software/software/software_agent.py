@@ -363,6 +363,7 @@ class SoftwareMessageDeployDeleteCleanupReq(messages.PatchMessage):
         success_update = ostree_utils.add_ostree_remote(self.major_release, nodetype,
                                                         replace_default_remote=True)
         success_flags = remove_major_release_deployment_flags()
+        success_undeploy = ostree_utils.undeploy_inactive_deployments()
 
         if success_cleanup:
             LOG.info("Success cleaning temporary refs/remotes.")
@@ -381,6 +382,12 @@ class SoftwareMessageDeployDeleteCleanupReq(messages.PatchMessage):
         else:
             LOG.error("Failure removing major release deployment flags. "
                       "Please remove them manually.")
+
+        if success_undeploy:
+            LOG.info("Success undeploying from-release deployment.")
+        else:
+            LOG.error("Failure undeploying from-release deployment. "
+                      "Please remove it manually using 'ostree admin undeploy' command.")
 
         success = success_cleanup and success_update
         resp = SoftwareMessageDeployDeleteCleanupResp()
