@@ -319,6 +319,38 @@ class RemoveCephMonHook(BaseHook):
                 pass  # ignore if link doesn't exist
 
 
+class RestartKubeApiServer(BaseHook):
+    """
+    Restart the kube-apiserver after the host rollback to
+    resolve issues with the pods that are pending
+    or show errors with kubectl exec following a host-swact
+    on controller-1. This action ensures all pods run correctly
+    and enables successful exec operations.
+    """
+    def __init__(self, attrs):
+        super().__init__()
+
+    def run(self):
+        nodetype = utils.get_platform_conf("nodetype")
+        if nodetype == constants.CONTROLLER:
+            try:
+                # Get and stop all kube-apiserver container IDs
+                cmd = "crictl ps | awk '/kube-apiserver/{print $1}' | xargs crictl stop"
+                subprocess.run(
+                    cmd,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True
+                )
+                LOG.info("Successfully stopped kube-apiserver containers.")
+            except subprocess.CalledProcessError as e:
+                LOG.exception("An error occurred while trying to stop kube-apiserver"
+                              "containers: %s", e)
+                LOG.error("Command '%s' failed:\n%s\n%s\n" % (
+                    cmd, e.stdout.decode('utf-8'), e.stderr.decode('utf-8')))
+
+
 # pre and post keywords
 PRE = "pre"
 POST = "post"
@@ -350,6 +382,7 @@ AGENT_HOOKS = {
         POST: [
             ReconfigureKernelHook,
             RemoveCephMonHook,
+            RestartKubeApiServer,
             # enable usm-initialize service for next reboot only
             # if everything else is done
             UsmInitHook,
