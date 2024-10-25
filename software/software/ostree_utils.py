@@ -327,10 +327,36 @@ def delete_ostree_repo_commit(commit, repo_path):
         raise OSTreeCommandFail(msg)
 
 
+def sync_boot_entries():
+    """
+    TODO(mmachado): Remove if Missing bootloader entry error is fixed upstream
+    Syncs the contents of /boot/loader.0/entries/ to /boot/loader/entries/.
+    If the contents are different, the contents of /boot/loader.0/entries/
+    are copied to /boot/loader/entries/.
+    """
+
+    try:
+        # Get the list of files in both directories
+        boot_entries_files = os.listdir("/boot/loader/entries/")
+        boot_entries_0_files = os.listdir("/boot/loader.0/entries/")
+
+        # Check if the contents are different
+        if set(boot_entries_files) != set(boot_entries_0_files):
+            # Copy the contents of /boot/loader.0/entries/ to /boot/loader/entries/
+            shutil.rmtree("/boot/loader/entries/")
+            shutil.copytree("/boot/loader.0/entries/", "/boot/loader/entries/")
+            info_msg = "Boot entries synchronized"
+            LOG.info(info_msg)
+    except Exception as e:
+        LOG.exception("Failed to sync boot entries: %s" % str(e))
+
+
 def create_deployment(ref=None):
     """
     Create a new deployment while retaining the previous ones
     """
+
+    sync_boot_entries()
 
     if not ref:
         ref = constants.OSTREE_REF
