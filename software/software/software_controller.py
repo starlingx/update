@@ -253,16 +253,6 @@ class AgentNeighbour(object):
              "sw_version": self.sw_version,
              "state": self.state}
 
-        global sc
-        if self.out_of_date and not sc.allow_insvc_patching:
-            d["requires_reboot"] = True
-        else:
-            d["requires_reboot"] = self.requires_reboot
-
-        # Included for future enhancement, to allow per-node determination
-        # of in-service patching
-        d["allow_insvc_patching"] = sc.allow_insvc_patching
-
         return d
 
 
@@ -545,7 +535,6 @@ class PatchMessageQueryDetailedResp(messages.PatchMessage):
                     if len(sc.interim_state[patch_id]) == 0:
                         del sc.interim_state[patch_id]
             sc.hosts_lock.release()
-            sc.check_patch_states()
         else:
             sc.hosts_lock.release()
 
@@ -1020,7 +1009,6 @@ class PatchController(PatchService):
                           "initializing Patch Controller")
             self.latest_feed_commit = None
 
-        self.check_patch_states()
         self.base_pkgdata = BasePackageData()
 
         # This is for alarm cache. It will be used to store the last raising alarm id
@@ -1207,7 +1195,6 @@ class PatchController(PatchService):
 
         self.interim_state = {}
         reload_release_data()
-        self.check_patch_states()
 
         if os.path.exists(app_dependency_filename):
             try:
@@ -1223,25 +1210,6 @@ class PatchController(PatchService):
     def inc_patch_op_counter(self):
         self.patch_op_counter += 1
         self.write_state_file()
-
-    def check_patch_states(self):
-        # Default to allowing in-service patching
-        self.allow_insvc_patching = True
-
-        # NOTE(bqian) How is this loop relevant?
-        # all_insevc_patching equals not required_reboot in deploy entity
-        # see software_entity.
-        for ip in (ip for ip in list(self.hosts) if self.hosts[ip].out_of_date):
-            for release in self.release_collection.iterate_releases():
-                # NOTE(bqian) below consolidates DEPLOYING_START to DEPLOYING
-                # all_insevc_patching equals not required_reboot in deploy entity
-                # see software_entity.
-                # also apparently it is a bug to check release state as it will
-                # end up return default (true) when it is not DEPLOYING_START for
-                # example, checking during removal.
-                if release.reboot_required and release.state == states.DEPLOYING:
-                    self.allow_insvc_patching = False
-        # NOTE(bqian) this function looks very buggy, should probably be rewritten
 
     def get_release_dependency_list(self, release_id):
         """
@@ -2259,8 +2227,6 @@ class PatchController(PatchService):
     def software_sync(self):
         # Increment the software_op_counter here
         self.inc_patch_op_counter()
-
-        self.check_patch_states()
 
         if self.sock_out is None or self.install_local:
             return True
@@ -3744,9 +3710,6 @@ class PatchController(PatchService):
         # ensure ip is in table as in some cases the host is aged out from the hosts table
         if ip not in self.hosts:
             raise HostIpNotFound(hostname)
-        # for rr patch in pre bootstrap
-        if self.pre_bootstrap:
-            self.allow_insvc_patching = True
 
         # check if host agent is reachable via message
         self.hosts[ip].is_alive = False
@@ -3763,7 +3726,18 @@ class PatchController(PatchService):
         deploy_host = self.db_api_instance.get_deploy_host_by_hostname(hostname)
         if deploy_host is None:
             raise HostNotFound(hostname)
+
         deploy = self.db_api_instance.get_deploy_all()[0]
+        # Determine reboot required from deployment info
+        self.allow_insvc_patching = True
+        is_reboot_req = deploy.get(constants.REBOOT_REQUIRED, False)
+        if is_reboot_req:
+            self.allow_insvc_patching = False
+
+        # for rr patch in pre bootstrap
+        if self.pre_bootstrap:
+            self.allow_insvc_patching = True
+
         commit_id = deploy.get("commit_id")
         if not self.install_local:
             deploy_host_validations(
