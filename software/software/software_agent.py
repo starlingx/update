@@ -44,7 +44,7 @@ patch_failed_file = "/var/run/software_install_failed"
 node_is_locked_file = "/var/run/.node_locked"
 ostree_pull_completed_deployment_pending_file = \
     "/var/run/ostree_pull_completed_deployment_pending"
-run_post_hooks_flag = "/var/run/run_post_hooks"
+run_hooks_flag = "/var/run/run_hooks"
 mount_pending_file = "/var/run/mount_pending"
 insvc_software_scripts = "/run/software/software-scripts"
 insvc_software_flags = "/run/software/software-flags"
@@ -593,17 +593,17 @@ class PatchAgent(PatchService):
                 LOG.info("The provided commit-id is already deployed. Skipping install.")
                 success = True
 
-                # when in major release deployment, if post-hooks failed in a previous deploy
+                # when in major release deployment, if hooks failed in a previous deploy
                 # host attempt, a flag is created so that their execution is reattempted here
-                if major_release and os.path.exists(run_post_hooks_flag):
+                if major_release and os.path.exists(run_hooks_flag):
                     LOG.info("Major release deployment %s flag found. "
-                             "Running post-hooks." % run_post_hooks_flag)
+                             "Running hooks." % run_hooks_flag)
                     try:
                         hook_manager = agent_hooks.HookManager.create_hook_manager(major_release)
-                        hook_manager.run_post_hooks()
-                        clearflag(run_post_hooks_flag)
+                        hook_manager.run_hooks()
+                        clearflag(run_hooks_flag)
                     except Exception as e:
-                        LOG.exception("Failure running post-hooks: %s" % str(e))
+                        LOG.exception("Failure running hooks: %s" % str(e))
                         success = False
 
                 if success:
@@ -644,19 +644,6 @@ class PatchAgent(PatchService):
 
             ref = "%s:%s" % (remote, constants.OSTREE_REF)
             hook_manager = agent_hooks.HookManager.create_hook_manager(major_release)
-
-            # run deploy host pre-hooks for major release
-            try:
-                hook_manager.run_pre_hooks()
-            except Exception as e:
-                LOG.exception("Failure running pre-hooks: %s" % str(e))
-                self.patch_failed = True
-                setflag(patch_failed_file)
-                self.state = constants.PATCH_AGENT_STATE_INSTALL_FAILED
-                ostree_utils.delete_ostree_remote(remote)
-                ostree_utils.delete_ostree_ref(constants.OSTREE_REF)
-                LOG.info("OSTree remote deleted: %s" % remote)
-                return False
 
         self.state = constants.PATCH_AGENT_STATE_INSTALLING
         setflag(patch_installing_file)
@@ -760,13 +747,13 @@ class PatchAgent(PatchService):
             clearflag(patch_failed_file)
             self.state = constants.PATCH_AGENT_STATE_IDLE
 
-            # run deploy host post-hooks for major release
+            # run deploy host hooks for major release
             if major_release:
                 try:
-                    hook_manager.run_post_hooks()
+                    hook_manager.run_hooks()
                 except Exception as e:
-                    LOG.exception("Failure running post-hooks: %s" % str(e))
-                    setflag(run_post_hooks_flag)
+                    LOG.exception("Failure running hooks: %s" % str(e))
+                    setflag(run_hooks_flag)
                     self.patch_failed = True
                     setflag(patch_failed_file)
                     self.state = constants.PATCH_AGENT_STATE_INSTALL_FAILED

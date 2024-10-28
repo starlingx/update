@@ -259,13 +259,13 @@ class CreateUSMUpgradeInProgressFlag(BaseHook):
         super().__init__(attrs)
 
     def run(self):
-        flag_file = constants.USM_UPGRADE_IN_PROGRESS_FLAG
+        flag_file = "%s/%s" % (self.DEPLOYED_OSTREE_DIR, constants.USM_UPGRADE_IN_PROGRESS_FLAG)
         with open(flag_file, "w") as _:
             LOG.info("Created %s flag" % flag_file)
 
 
 class RemoveKubernetesConfigSymlinkHook(BaseHook):
-    K8S_ENCRYPTION_PROVIDER_FILE = "/etc/kubernetes/encryption-provider.yaml"
+    K8S_ENCRYPTION_PROVIDER_FILE = "%s/etc/kubernetes/encryption-provider.yaml" % BaseHook.DEPLOYED_OSTREE_DIR
     LUKS_K8S_ENCRYPTION_PROVIDER_FILE = (
             "/var/luks/stx/luks_fs/controller/etc/kubernetes/encryption-provider.yaml"
             )
@@ -361,11 +361,8 @@ MAJOR_RELEASE_ROLLBACK = "major_release_rollback"
 
 # agent hooks mapping per action
 AGENT_HOOKS = {
-    MAJOR_RELEASE_UPGRADE: {
-        PRE: [
+    MAJOR_RELEASE_UPGRADE: [
             CreateUSMUpgradeInProgressFlag,
-        ],
-        POST: [
             CopyPxeFilesHook,
             ReconfigureKernelHook,
             UpdateKernelParametersHook,
@@ -374,12 +371,8 @@ AGENT_HOOKS = {
             # if everything else is done
             UsmInitHook,
         ],
-    },
-    MAJOR_RELEASE_ROLLBACK: {
-        PRE: [
+    MAJOR_RELEASE_ROLLBACK: [
             RemoveKubernetesConfigSymlinkHook,
-        ],
-        POST: [
             ReconfigureKernelHook,
             RemoveCephMonHook,
             RestartKubeApiServer,
@@ -387,7 +380,6 @@ AGENT_HOOKS = {
             # if everything else is done
             UsmInitHook,
         ],
-    },
 }
 
 
@@ -398,32 +390,19 @@ class HookManager(object):
     def __init__(self, action, attrs=None):
         self._action = action
         self._attrs = attrs
-        self._pre_hooks = AGENT_HOOKS.get(action).get(PRE)
-        self._post_hooks = AGENT_HOOKS.get(action).get(POST)
+        self._hooks = AGENT_HOOKS.get(action)
 
-    def _run_hooks(self, timing):
+    def _run_hooks(self):
         """
-        Run all hooks registered under the self._action value
-        :param timing: pre (before install) or post (after successful install)
+        Run all hooks
         """
-        if timing == PRE:
-            hooks = self._pre_hooks
-        elif timing == POST:
-            hooks = self._post_hooks
-        else:
-            LOG.error("Invalid parameter: timing=%s" % timing)
-            return
-
-        LOG.info("Running %s-hooks for '%s'" % (timing, self._action))
-        for hook in hooks:
+        LOG.info("Running hooks for '%s'" % self._action)
+        for hook in self._hooks:
             pg = hook(self._attrs)
             pg.run()
 
-    def run_pre_hooks(self):
-        self._run_hooks(PRE)
-
-    def run_post_hooks(self):
-        self._run_hooks(POST)
+    def run_hooks(self):
+        self._run_hooks()
 
     @staticmethod
     def create_hook_manager(software_version):
