@@ -19,6 +19,7 @@ import software.utils as utils
 class BaseHook(object):
     """Base Hook object"""
     DEPLOYED_OSTREE_DIR = "/ostree/1"
+    ROLLBACK_OSTREE_DIR = "/ostree/2"
     SYSTEMD_LIB_DIR = "/lib/systemd/system"
     SYSTEMD_ETC_DIR = "%s/etc/systemd/system/multi-user.target.wants" % DEPLOYED_OSTREE_DIR
 
@@ -106,16 +107,26 @@ class CopyPxeFilesHook(BaseHook):
             if self._major_release:
                 # copy to_release pxeboot files to /var/pxeboot/pxelinux.cfg.files
                 pxeboot_dst_dir = "/var/pxeboot/pxelinux.cfg.files/"
-                pxeboot_src_dir = "/ostree/1" + pxeboot_dst_dir  # deployed to-release ostree dir
+                pxeboot_src_dir = self.DEPLOYED_OSTREE_DIR + pxeboot_dst_dir  # deployed to-release ostree dir
                 cmd = "rsync -ac %s %s" % (pxeboot_src_dir, pxeboot_dst_dir)
                 try:
-                    subprocess.check_call(cmd, shell=True)
-                    LOG.info(
-                        "Copied %s pxeboot files to %s." % (
-                            self._major_release, pxeboot_dst_dir))
+                    subprocess.run(cmd, shell=True, check=True, capture_output=True)
+                    LOG.info("Copied %s pxeboot files to %s" %
+                             (self._major_release, pxeboot_dst_dir))
                 except subprocess.CalledProcessError as e:
                     LOG.exception("Error copying pxeboot files from %s to %s: %s" % (
-                        pxeboot_src_dir, pxeboot_dst_dir, str(e)))
+                        pxeboot_src_dir, pxeboot_dst_dir, e.stderr.decode("utf-8")))
+                    raise
+
+                # ensure the script pxeboot-update-<from-release>.sh is in to-release /etc
+                try:
+                    cmd = "rsync -aci %s %s/etc" % (self.ROLLBACK_OSTREE_DIR + "/etc/pxeboot-update-*.sh",
+                                                    self.DEPLOYED_OSTREE_DIR)
+                    output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
+                    LOG.info("Copied pxeboot-update-*.sh to /etc: %s" % output.stdout.decode("utf-8"))
+                except subprocess.CalledProcessError as e:
+                    LOG.exception("Error copying pxeboot-update-*.sh to /etc: %s" %
+                                  e.stderr.decode("utf-8"))
                     raise
             else:
                 LOG.error("Cannot copy pxeboot files, major_release value is %s" %
