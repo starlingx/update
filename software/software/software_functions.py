@@ -868,6 +868,12 @@ class PatchFile(object):
                 # Run version validation tests first
                 patch_sw_version = utils.get_major_release_version(
                     thispatch.metadata[patch_id]["sw_version"])
+                if utils.compare_release_version(constants.LOWEST_MAJOR_RELEASE_FOR_PATCH_SUPPORT,
+                                                 patch_sw_version):
+                    msg = "Software patching is supported starting from release %s and later" % (
+                        constants.LOWEST_MAJOR_RELEASE_FOR_PATCH_SUPPORT)
+                    LOG.exception(msg)
+                    raise ReleaseValidationFailure(error=msg)
                 if not base_pkgdata.check_release(patch_sw_version):
                     msg = "Software version %s for release %s is not installed" % (patch_sw_version, patch_id)
                     LOG.exception(msg)
