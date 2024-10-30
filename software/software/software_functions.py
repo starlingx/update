@@ -390,6 +390,11 @@ class ReleaseData(object):
             for deb in req.findall("deb"):
                 self.metadata[release_id]["packages"].append(deb.text)
 
+        self.metadata[release_id]["activation_scripts"] = []
+        for req in root.findall("activation_scripts"):
+            for script in req.findall("script"):
+                self.metadata[release_id]["activation_scripts"].append(script.text)
+
         self.contents[release_id] = {}
 
         for content in root.findall("contents/ostree"):
@@ -904,6 +909,12 @@ class PatchFile(object):
                 post_install_script_name = thispatch.metadata[patch_id]["post_install"]
                 shutil.move(os.path.join(tmpdir, post_install_script_name),
                             "%s/%s_%s" % (root_scripts_dir, patch_id, post_install_script_name))
+
+            activate_scripts = thispatch.metadata[patch_id].get("activation_scripts")
+            if activate_scripts:
+                for script in activate_scripts:
+                    shutil.move(os.path.join(tmpdir, script),
+                                "%s/%s_%s" % (root_scripts_dir, patch_id, script))
 
         except tarfile.TarError as te:
             error_msg = "Extract software failed %s" % str(te)
