@@ -573,6 +573,7 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
         self.status = False
         self.reject_reason = None
         self.reboot_required = False
+        reload_release_data()
 
     def decode(self, data):
         messages.PatchMessage.decode(self, data)
