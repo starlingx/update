@@ -11,7 +11,10 @@ import logging
 import os
 import re
 import requests
+import subprocess
 import sys
+import time
+import yaml
 
 from keystoneauth1 import exceptions
 from keystoneauth1 import identity
@@ -172,3 +175,42 @@ def configure_logging(filename, log_level=logging.INFO):
     log_datefmt = "%FT%T"
 
     logging.basicConfig(filename=filename, format=log_format, level=log_level, datefmt=log_datefmt)
+
+
+def get_distributed_cloud_role():
+    lines = [line.rstrip('\n') for line in
+             open('/etc/platform/platform.conf')]
+    for line in lines:
+        values = line.split('=')
+        if values[0] == 'distributed_cloud_role':
+            return values[1]
+    return None
+
+
+def is_tls_key_rsa(key):
+    cmd = 'openssl rsa -in <(echo \'%s\') -noout -check' % key
+    sub = subprocess.Popen(cmd,
+                           shell=True,
+                           stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE)
+    _, _ = sub.communicate()
+    return sub.returncode == 0
+
+
+def get_secret_data_yaml(name, namespace):
+    get_cmd = 'kubectl get secret -n %s %s' % (namespace, name)
+    flags = ' -o yaml --ignore-not-found --kubeconfig=/etc/kubernetes/admin.conf'
+    retries = 3
+    wait_seconds = 5
+
+    for _ in range(0, retries):
+        sub = subprocess.Popen(get_cmd + flags,
+                               shell=True,
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE)
+        stdout, _ = sub.communicate()
+        if sub.returncode == 0:
+            return yaml.safe_load(stdout.decode('utf-8'))
+        else:
+            time.sleep(wait_seconds)
+    return None
