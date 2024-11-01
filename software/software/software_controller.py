@@ -121,6 +121,7 @@ insvc_patch_restart_controller = "/run/software/.restart.software-controller"
 
 ETC_HOSTS_FILE_PATH = "/etc/hosts"
 ETC_HOSTS_BACKUP_FILE_PATH = "/etc/hosts.patchbak"
+PATCH_MIGRATION_SCRIPT_DIR = "/etc/update.d"
 
 stale_hosts = []
 pending_queries = []
@@ -1291,6 +1292,25 @@ class PatchController(PatchService):
             LOG.exception(msg)
             raise SoftwareError(msg)
 
+    def delete_patch_activate_scripts(self, patch_id):
+        '''
+        Deletes the activate scripts associated with the patch
+        :param patch_id: The patch ID
+        '''
+
+        release = self.release_collection.get_release_by_id(patch_id)
+        activate_scripts_list = release.activation_scripts
+
+        for script in activate_scripts_list:
+            full_name_file = "%s_%s" % (patch_id, script)
+            script_path = "%s/%s" % (root_scripts_dir, full_name_file)
+
+            try:
+                os.remove(script_path)
+            except OSError:
+                msg = "Failed to remove the activate script for %s" % patch_id
+                LOG.warning(msg)
+
     def run_semantic_check(self, action, patch_list):
         if not os.path.exists(INITIAL_CONFIG_COMPLETE_FLAG):
             # Skip semantic checks if initial configuration isn't complete
@@ -2094,6 +2114,7 @@ class PatchController(PatchService):
                     raise MetadataFail(msg)
 
             self.delete_install_script(release_id)
+            self.delete_patch_activate_scripts(release_id)
             reload_release_data()
             msg = "%s has been deleted" % release_id
             LOG.info(msg)
@@ -2824,6 +2845,50 @@ class PatchController(PatchService):
                 return True
         return False
 
+    def copy_patch_activate_scripts(self, release_id, activate_scripts_list):
+        """Copy patch activate scripts to /etc/update.d"""
+
+        try:
+            if not os.path.exists(PATCH_MIGRATION_SCRIPT_DIR):
+                os.makedirs(PATCH_MIGRATION_SCRIPT_DIR, 0o755)
+
+            existing_scripts = list(os.listdir(PATCH_MIGRATION_SCRIPT_DIR))
+
+            for script in activate_scripts_list:
+                full_name_file = "%s_%s" % (release_id, script)
+                script_path = "%s/%s" % (root_scripts_dir, full_name_file)
+                dest_script_file = "%s/%s" % (PATCH_MIGRATION_SCRIPT_DIR, script)
+
+                # Do not copy if script already exists in folder
+                if script in existing_scripts:
+                    msg = "Script %s already exists in %s. Skipping copy" \
+                        % (script, PATCH_MIGRATION_SCRIPT_DIR)
+                    LOG.info(msg)
+                    continue
+
+                shutil.copyfile(script_path, dest_script_file)
+                os.chmod(dest_script_file, 0o755)
+                msg = "Creating patch activate script %s for %s" \
+                    % (full_name_file, release_id)
+                LOG.info(msg)
+        except shutil.Error:
+            msg = "Failed to copy patch activate script %s for %s" \
+                % (full_name_file, release_id)
+            LOG.exception(msg)
+            raise SoftwareError(msg)
+
+    def delete_all_patch_activate_scripts(self):
+        """Delete all patch activate scripts by deleting /etc/update.d"""
+        if os.path.exists(PATCH_MIGRATION_SCRIPT_DIR):
+            try:
+                shutil.rmtree(PATCH_MIGRATION_SCRIPT_DIR)
+                msg = "Deleted directory %s" % PATCH_MIGRATION_SCRIPT_DIR
+                LOG.info(msg)
+            except Exception as e:
+                msg = "Failed to delete directory %s. Reason: %s" \
+                    % (PATCH_MIGRATION_SCRIPT_DIR, e)
+                LOG.error(msg)
+
     def install_releases_thread(self, deployment_list, feed_repo, running_release):
         """
         In a separated thread.
@@ -2839,6 +2904,8 @@ class PatchController(PatchService):
                     audit_log_info(msg)
 
                     deploy_release = self._release_basic_checks(release_id)
+                    self.copy_patch_activate_scripts(release_id, deploy_release.activation_scripts)
+
                     all_commits = ostree_utils.get_all_feed_commits(running_release.sw_version)
                     if deploy_release.commit_id in all_commits:
                         # This case is for node with prestaged data where ostree
@@ -3217,6 +3284,8 @@ class PatchController(PatchService):
                         msg_info += msg + "\n"
                         continue
 
+                    self.copy_patch_activate_scripts(release_id, release.activation_scripts)
+
                     major_release_sw_version = release.sw_version
                     # this is an ostree patch
                     # Base commit is fetched from the patch metadata.
@@ -3433,6 +3502,8 @@ class PatchController(PatchService):
             self.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_CLEANUP_DEPLOYMENT_DATA,
                                        fm_constants.FM_ALARM_STATE_CLEAR,
                                        "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, constants.CONTROLLER_FLOATING_HOSTNAME))
+        else:
+            self.delete_all_patch_activate_scripts()
 
         msg_info += "Deploy deleted with success"
         self.db_api_instance.delete_deploy_host_all()

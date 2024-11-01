@@ -171,6 +171,10 @@ class SWRelease(object):
         return self._get_by_key('packages')
 
     @property
+    def activation_scripts(self):
+        return self._get_by_key('activation_scripts')
+
+    @property
     def pre_install(self):
         return self._get_by_key('pre_install')
 
@@ -261,7 +265,8 @@ class SWRelease(object):
                 "reboot_required": self.reboot_required,
                 "prepatched_iso": self.prepatched_iso,
                 "requires": self.requires_release_ids[:],
-                "packages": self.packages[:]}
+                "packages": self.packages[:],
+                "activation_scripts": self.activation_scripts[:]}
         return data
 
 
