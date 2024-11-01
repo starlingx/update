@@ -3546,36 +3546,26 @@ class PatchController(PatchService):
             msg = "Deployment is missing unexpectedly"
             raise InvalidOperation(msg)
 
+        cmd_path = "/usr/bin/software-deploy-activate"
+        from_release = deploy.get("from_release")
+        to_release = deploy.get("to_release")
+        activate_cmd = ["source", "/etc/platform/openrc;", cmd_path, from_release, to_release]
+
         deploying = ReleaseState(release_state=states.DEPLOYING)
         if deploying.is_major_release_deployment():
-            return self._activate_major_release(deploy)
-        else:
-            return self._activate_patching_release()
-
-    def _activate_patching_release(self):
-        deploy_state = DeployState.get_instance()
-        # patching release activate operations go here
-        deploy_state.activate_done()
-        return True
-
-    def _activate_major_release(self, deploy):
-        cmd_path = "/usr/bin/software-deploy-activate"
-        from_release = utils.get_major_release_version(deploy.get("from_release"))
-        to_release = utils.get_major_release_version(deploy.get("to_release"))
+            activate_cmd.append('--is_major_release')
 
         token, endpoint = utils.get_endpoints_token()
         env = os.environ.copy()
         env["OS_AUTH_TOKEN"] = token
         env["SYSTEM_URL"] = re.sub('/v[1,9]$', '', endpoint)  # remove ending /v1
 
-        upgrade_activate_cmd = ["source", "/etc/platform/openrc;", cmd_path, from_release, to_release]
-
         try:
-            LOG.info("starting subprocess %s" % ' '.join(upgrade_activate_cmd))
-            subprocess.Popen(' '.join(upgrade_activate_cmd), start_new_session=True, shell=True, env=env)
+            LOG.info("starting subprocess %s" % ' '.join(activate_cmd))
+            subprocess.Popen(' '.join(activate_cmd), start_new_session=True, shell=True, env=env)
             LOG.info("subprocess started")
         except subprocess.SubprocessError as e:
-            LOG.error("Failed to start command: %s. Error %s" % (' '.join(upgrade_activate_cmd), e))
+            LOG.error("Failed to start command: %s. Error %s" % (' '.join(activate_cmd), e))
             return False
 
         return True
