@@ -361,10 +361,8 @@ _local_storage = LocalStorage()
 def get_SWReleaseCollection():
     release_data = _local_storage.get_value('release_data')
     if release_data is None:
-        LOG.info("Load release_data")
         release_data = ReleaseData()
         release_data.load_all()
-        LOG.info("release_data loaded")
         _local_storage.set_value('release_data', release_data)
 
     return SWReleaseCollection(release_data)
