@@ -213,7 +213,7 @@ class SessionClient(adapter.LegacyJsonAdapter):
         if 'body' in kwargs:
             kwargs['data'] = jsonutils.dumps(kwargs.pop('body'))
 
-        resp = self._http_request(url, method, **kwargs)
+        resp = self._http_request(url, method, timeout=UPLOAD_REQUEST_TIMEOUT, **kwargs)
         body = resp.content
         content_type = resp.headers.get('content-type', None)
         status = resp.status_code
@@ -235,7 +235,7 @@ class SessionClient(adapter.LegacyJsonAdapter):
         if 'body' in kwargs:
             kwargs['data'] = kwargs.pop('body')
 
-        resp = self._http_request(url, method, **kwargs)
+        resp = self._http_request(url, method, timeout=UPLOAD_REQUEST_TIMEOUT, **kwargs)
         body = resp.content
         content_type = resp.headers.get('content-type', None)
         status = resp.status_code
