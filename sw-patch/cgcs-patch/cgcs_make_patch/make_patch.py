@@ -37,6 +37,7 @@ import argparse
 import filecmp
 import hashlib
 import logging
+import re
 import tarfile
 import time
 import tempfile
@@ -424,6 +425,50 @@ class PatchBuilder(object):
         os.rename(initramfs_file, os.path.join(ostree_boot_dir, initramfs_new_name))
         return True
 
+    def __add_latest_missing_ostree_commit_tombstone(self, ref_ostree_repo):
+        """
+        Consider an ostree repo with history that is missing commits
+        (eg.: using ostree pull with depth 0 to create a copy with just the last commit
+        of a repo that has several commits).
+
+        If commits are missing, there must be an ostree commit tombstone for the most recent missing one
+        to signal that it is missing intentionally. Otherwise ostree will throw an error for some operations.
+
+        For example, starting with a repo that has 5 commits, if a copy is created
+        using pull depth 0 it will contain only the latest commit.
+        This copy MUST have a tombstone for the 4th commit.
+
+        This function checks the :ref_ostree_repo: for the latest missing ostree commit
+        and adds the corresponding tombstone file to self.delta_dir to be included in the patch,
+        to assert it will be available in the running system.
+
+        :param ref_ostree_repo: Reference ostree repo. The one without the patch content.
+        """
+
+        cmd = f"ostree --repo={ref_ostree_repo} log starlingx"
+        repo_history = subprocess.check_output(cmd, shell=True).decode(sys.stdout.encoding)
+
+        if "History beyond this commit not fetched" not in repo_history:
+            # No commits are missing. Nothing to do
+            return
+
+        try:
+            latest_missing_commit = re.findall(pattern=r"[Pp]arent:\s*(.*)", string=repo_history)[-1]
+            log.info("Latest missing commit in ref ostree repo: %s", latest_missing_commit)
+        except IndexError:
+            log.warning("Could not add tombstone for latest missing commit. Ostree history does not show commit parents.")
+            return
+
+        tombstone_relative_path = f"objects/{latest_missing_commit[:2]}/{latest_missing_commit[2:]}.tombstone-commit"
+        tombstone_to_create = os.path.join(self.delta_dir, tombstone_relative_path)
+
+        os.makedirs(os.path.dirname(tombstone_to_create), exist_ok=True)
+
+        with open(file=tombstone_to_create, mode='w'):
+            pass
+
+        log.info("Added tombstone to the patch: %s", tombstone_relative_path)
+
     def __create_patch_repo(self, clone_dir="ostree-clone"):
         """
         Create the ostree contains delta content
@@ -599,6 +644,8 @@ class PatchBuilder(object):
                          patch_repo_dir + "/",
                          self.delta_dir + "/"])
         log.info("Delta dir created")
+
+        self.__add_latest_missing_ostree_commit_tombstone(ref_ostree_repo=clone_dir)
 
     def __get_commit_checksum(self, commit_id, repo="ostree_repo"):
         """
