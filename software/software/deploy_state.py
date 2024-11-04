@@ -226,6 +226,8 @@ class DeployState(object):
         state = DeployState.get_deploy_state()
         if state == DEPLOY_STATES.HOST_ROLLBACK:
             self.transform(DEPLOY_STATES.HOST_ROLLBACK_FAILED)
+        elif state in [DEPLOY_STATES.HOST_ROLLBACK_FAILED, DEPLOY_STATES.HOST_FAILED]:
+            LOG.warning("Deployment is already in a failed state")
         else:
             self.transform(DEPLOY_STATES.HOST_FAILED)
 
