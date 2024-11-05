@@ -276,27 +276,31 @@ class CreateUSMUpgradeInProgressFlag(BaseHook):
 
 
 class RemoveKubernetesConfigSymlinkHook(BaseHook):
-    K8S_ENCRYPTION_PROVIDER_FILE = "%s/etc/kubernetes/encryption-provider.yaml" % BaseHook.DEPLOYED_OSTREE_DIR
-    LUKS_K8S_ENCRYPTION_PROVIDER_FILE = (
-            "/var/luks/stx/luks_fs/controller/etc/kubernetes/encryption-provider.yaml"
-            )
+    K8S_ENCRYPTION_PROVIDER_FILE = "/etc/kubernetes/encryption-provider.yaml"
+    DEPLOYED_K8S_ENCRYPTION_PROVIDER_FILE = \
+        BaseHook.DEPLOYED_OSTREE_DIR + K8S_ENCRYPTION_PROVIDER_FILE
+    LUKS_K8S_ENCRYPTION_PROVIDER_FILE = \
+        "/var/luks/stx/luks_fs/controller" + K8S_ENCRYPTION_PROVIDER_FILE
 
     def run(self):
         nodetype = utils.get_platform_conf("nodetype")
         if nodetype == constants.CONTROLLER:
             try:
                 # Remove the K8S encryption provider symlink
-                if os.path.exists(self.K8S_ENCRYPTION_PROVIDER_FILE):
-                    os.unlink(self.K8S_ENCRYPTION_PROVIDER_FILE)
-                    LOG.info("%s symlink removed" % self.K8S_ENCRYPTION_PROVIDER_FILE)
+                for symlink in (self.K8S_ENCRYPTION_PROVIDER_FILE, self.DEPLOYED_K8S_ENCRYPTION_PROVIDER_FILE):
+                    if os.path.exists(symlink):
+                        os.unlink(symlink)
+                        LOG.info("%s symlink removed" % symlink)
 
-                # Remove the LUKS K8S encryption provider file
+                # Copy the LUKS K8S encryption provider file to /etc/kubernetes and remove it afterward
                 if os.path.exists(self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE):
+                    shutil.copy2(self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE, "/etc/kubernetes")
+                    LOG.info("Copied %s to /etc/kubernetes" % self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE)
                     os.remove(self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE)
                     LOG.info("%s file removed" % self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE)
 
             except Exception as e:
-                LOG.exception("Failed to remove symlink or file: %s" % str(e))
+                LOG.exception("Failed to manage symlink or file: %s" % str(e))
                 raise
 
 
