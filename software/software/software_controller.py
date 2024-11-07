@@ -1155,7 +1155,7 @@ class PatchController(PatchService):
             for neighbour in list(self.hosts):
                 if (self.hosts[neighbour].nodetype == "controller" and
                         self.hosts[neighbour].ip == host):
-                    LOG.info("Starting feed sync")
+                    LOG.info("Starting sync controllers")
                     # The output is a string that lists the directories
                     # Example output:
                     # >>> dir_names = sh.ls("/var/www/pages/feed/")
@@ -1188,9 +1188,24 @@ class PatchController(PatchService):
                                                           "--update",
                                                           "--repo=%s" % feed_repo],
                                                          stderr=subprocess.STDOUT)
-            LOG.info("Synced to mate feed via ostree pull: %s", output)
-        except subprocess.CalledProcessError:
-            LOG.error("Failed to sync feed repo between controllers: %s", output)
+                    LOG.info("Synced to mate feed via ostree pull: %s", output)
+
+                    try:
+                        output = subprocess.check_output(["rsync",
+                                                          "-acv",
+                                                          "--delete",
+                                                          "rsync://%s/update_scripts/" % host_url,
+                                                          "%s/" % PATCH_MIGRATION_SCRIPT_DIR],
+                                                         stderr=subprocess.STDOUT)
+                        LOG.info("Synced %s folder between controllers: %s"
+                                 % (PATCH_MIGRATION_SCRIPT_DIR, output))
+                    except Exception as e:
+                        LOG.warning("Failed to sync %s: Error: %s"
+                                    % (PATCH_MIGRATION_SCRIPT_DIR, e))
+                        # Do nothing since it is a temporary folder
+
+        except subprocess.CalledProcessError as e:
+            LOG.error("Failed during controllers sync tasks: %s", e.output)
             return False
 
         self.read_state_file()
