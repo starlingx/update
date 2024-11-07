@@ -55,9 +55,14 @@ stop_database() {
 unmount_filesystems() {
     local rootdir=$1
     local rc=0
+    local filepath="${rootdir}/usr/sbin/software-deploy/chroot_mounts.sh"
+
+    if [ ! -f $filepath ]; then
+      filepath=/var/www/pages/feed/rel-${to_ver}/upgrades/software-deploy/chroot_mounts.sh
+    fi
 
     info "Attempting to unmount filesystems under ${rootdir}..."
-    sudo ${rootdir}/usr/sbin/software-deploy/chroot_mounts.sh ${rootdir} -u
+    sudo $filepath ${rootdir} -u
     if [ $? -ne 0 ]; then
         rc=1
         error "Error unmounting filesystems."
@@ -71,9 +76,14 @@ remove_temp_directories() {
     local repo=$1
     local rootdir=$2
     local rc=0
+    local filepath="${rootdir}/usr/sbin/software-deploy/chroot_mounts.sh"
+
+    if [ ! -f $filepath ]; then
+      filepath=/var/www/pages/feed/rel-${to_ver}/upgrades/software-deploy/chroot_mounts.sh
+    fi
 
     info "Attempting to remove temporary deployment directories [${repo}, ${rootdir}]..."
-    sudo ${rootdir}/usr/sbin/software-deploy/chroot_mounts.sh ${rootdir} -c
+    sudo $filepath ${rootdir} -c
     if [ $? -ne 0 ]; then
        rc=1
        error "Some mount points are still mounted, cannot proceed with the cleanup."
