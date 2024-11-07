@@ -570,15 +570,14 @@ def migrate_sysinv_database():
 
     sysinv_cmd = 'sysinv-dbsync'
     try:
-        print("Migrating sysinv")
         LOG.info("Executing migrate command: %s" % sysinv_cmd)
-        subprocess.check_call(sysinv_cmd,
-                              shell=True, stdout=sout, stderr=sout)
+        subprocess.run(sysinv_cmd, shell=True, check=True, text=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
     except subprocess.CalledProcessError as ex:
         LOG.exception("Failed to execute command: '%s' during upgrade "
-                      "processing, return code: %d"
-                      % (sysinv_cmd, ex.returncode))
+                      "processing, return code: %d, output: %s"
+                      % (sysinv_cmd, ex.returncode, ex.stdout))
         raise
 
 
