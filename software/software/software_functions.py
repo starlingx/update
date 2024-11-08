@@ -9,7 +9,6 @@ import contextlib
 import getopt
 import glob
 import hashlib
-import json
 import logging
 import os
 import platform
@@ -1357,12 +1356,8 @@ def collect_current_load_for_hosts(local_load, hostname=None):
                     "hostname": hostname,
                     "running_release": software_load
                 })
-        if os.path.exists(constants.SOFTWARE_JSON_FILE):
-            data = utils.load_from_json_file(constants.SOFTWARE_JSON_FILE)
-        else:
-            data = {}
-        data.update(load_data)
-        utils.save_to_json_file(constants.SOFTWARE_JSON_FILE, data)
+        dbapi = get_instance()
+        dbapi.create_current_loads(load_data)
         LOG.info("Collect current load for hosts successfully.")
     except Exception as err:
         LOG.error("Error in collect current load for hosts: %s", err)
@@ -1401,15 +1396,12 @@ def is_deploy_state_in_sync():
 
     if does_synced_software_exist and does_software_exist:
         # both files exist, compare them
-        with open(constants.SYNCED_SOFTWARE_JSON_FILE, 'r') as f:
-            synced_software = json.load(f)
-        with open(constants.SOFTWARE_JSON_FILE, 'r') as f:
-            software = json.load(f)
+        dbapi = get_instance()
 
-        deploy_state = software.get("deploy", {})
-        synced_deploy_state = synced_software.get("deploy", {})
-        deploy_host_state = software.get("deploy_host", {})
-        synced_deploy_host_state = synced_software.get("deploy_host", {})
+        deploy_state = dbapi.get_deploy_all()
+        synced_deploy_state = dbapi.get_deploy_all_synced()
+        deploy_host_state = dbapi.get_deploy_host()
+        synced_deploy_host_state = dbapi.get_deploy_host_synced()
 
         is_in_sync = (deploy_state == synced_deploy_state and
                       deploy_host_state == synced_deploy_host_state)
