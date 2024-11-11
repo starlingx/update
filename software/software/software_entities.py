@@ -18,6 +18,7 @@ from software.utils import check_instances
 from software.utils import check_state
 from software.utils import save_to_json_file
 from software.utils import get_software_filesystem_data
+from software.utils import get_synced_software_filesystem_data
 from software.utils import validate_versions
 
 from software.states import DEPLOY_HOST_STATES
@@ -299,6 +300,14 @@ class DeployHandler(Deploy):
         data = get_software_filesystem_data()
         return data.get("deploy", [])
 
+    def query_all_synced(self):
+        """
+        Query all deployments inside synced/software.json file.
+        :return: A list of deploy dictionary
+        """
+        data = get_synced_software_filesystem_data()
+        return data.get("deploy", [])
+
     def update(self, from_release=None, to_release=None, feed_repo=None, commit_id=None,
                reboot_required: bool = None, new_state: DEPLOY_STATES = None):
         """
@@ -386,7 +395,19 @@ class DeployHostHandler(DeployHosts):
         return None
 
     def query_all(self):
+        """
+        Query all host deployments inside synced/software.json file.
+        :return: A list of host deploy dictionary
+        """
         data = get_software_filesystem_data()
+        return data.get("deploy_host", [])
+
+    def query_all_synced(self):
+        """
+        Query all host deployments inside synced/software.json file.
+        :return: A list of host deploy dictionary
+        """
+        data = get_synced_software_filesystem_data()
         return data.get("deploy_host", [])
 
     def update(self, hostname, state: DEPLOY_HOST_STATES):

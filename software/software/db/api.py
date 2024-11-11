@@ -7,9 +7,12 @@ SPDX-License-Identifier: Apache-2.0
 
 import logging
 import threading
+from software import constants
 from software.software_entities import DeployHandler
 from software.software_entities import DeployHostHandler
 from software.states import DEPLOY_STATES
+from software.utils import get_software_filesystem_data
+from software.utils import save_to_json_file
 
 LOG = logging.getLogger('main_logger')
 
@@ -56,6 +59,13 @@ class SoftwareAPI:
         self.begin_update()
         try:
             return self.deploy_handler.query_all()
+        finally:
+            self.end_update()
+
+    def get_deploy_all_synced(self):
+        self.begin_update()
+        try:
+            return self.deploy_handler.query_all_synced()
         finally:
             self.end_update()
 
@@ -106,6 +116,13 @@ class SoftwareAPI:
         finally:
             self.end_update()
 
+    def get_deploy_host_synced(self):
+        self.begin_update()
+        try:
+            return self.deploy_host_handler.query_all_synced()
+        finally:
+            self.end_update()
+
     def get_deploy_host_by_hostname(self, hostname):
         self.begin_update()
         try:
@@ -131,6 +148,15 @@ class SoftwareAPI:
         self.begin_update()
         try:
             self.deploy_host_handler.delete_all()
+        finally:
+            self.end_update()
+
+    def create_current_loads(self, current_load_data):
+        self.begin_update()
+        try:
+            data = get_software_filesystem_data()
+            data.update(current_load_data)
+            save_to_json_file(constants.SOFTWARE_JSON_FILE, data)
         finally:
             self.end_update()
 
