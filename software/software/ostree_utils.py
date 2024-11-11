@@ -503,7 +503,8 @@ def delete_older_deployments():
 def undeploy_inactive_deployments():
     """
     Remove deployments other than the current deployment,
-    i.e. deployments from index 1 to len(deployments) - 1
+    i.e. deployments from index 1 to len(deployments) - 1,
+    in the reverse order, from the oldest to the newest
     """
     cmd = ["ostree", "admin", "status"]
     try:
@@ -516,8 +517,8 @@ def undeploy_inactive_deployments():
     pattern = r"debian [a-z0-9]+.[0-9]+"
     deployments = re.findall(pattern, output.stdout)
     # skip the first (active) deployment
-    for index, deployment in enumerate(deployments[1:], 1):
-        commit_id = deployment.lstrip("debian ").split(".")[0]
+    for index, deployment in reversed(list(enumerate(deployments[1:], 1))):
+        commit_id = deployment.replace("debian ", "").split(".")[0]
         cmd = ["ostree", "admin", "undeploy", str(index)]
         try:
             subprocess.run(cmd, check=True)
