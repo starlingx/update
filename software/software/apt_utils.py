@@ -14,28 +14,28 @@ from software.exceptions import APTOSTreeCommandFail
 LOG = logging.getLogger('main_logger')
 
 
-def package_upload(feed_dir, sw_release, package):
+def package_list_upload(feed_dir, sw_release, package_list):
     """
     Upload a Debian package to an apt repository.
 
     :param feed_dir: apt package feed directory
     :param sw_release: Uploading patch release version (MM.mm.pp)
-    :param package: Debian package
+    :param package_list: Debian package list
     """
     try:
-        msg = "Uploading package: %s" % package
-        LOG.info(msg)
-
         subprocess.run(
             ["apt-ostree", "repo", "add",
              "--feed", str(feed_dir),
              "--release", constants.DEBIAN_RELEASE,
              "--component", sw_release,
-             package],
+             *package_list],
             check=True,
             capture_output=True)
+
+        LOG.info("package list uploaded")
     except subprocess.CalledProcessError as e:
-        msg = "Failed to upload package: %s" % package
+        packages = " ".join(package_list)
+        msg = "Failed to upload package list: %s" % packages
         info_msg = "\"apt-ostree repo add\" error: return code %s , Output: %s" \
                    % (e.returncode, e.stderr.decode("utf-8"))
         LOG.error(info_msg)
