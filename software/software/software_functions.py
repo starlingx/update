@@ -1015,10 +1015,26 @@ class PatchFile(object):
 
             # Upload the package to the apt repository
             deb_dir = os.scandir(tmpdir)
+            package_list = []
+            list_size = 25  # Number of files per group
+
             for deb in deb_dir:
-                apt_utils.package_upload(package_repo_dir,
-                                         sw_release,
-                                         os.path.join(tmpdir, deb.name))
+                deb_path = os.path.join(tmpdir, deb.name)
+                msg = "Adding package to upload list: %s" % deb_path
+                LOG.info(msg)
+                package_list.append(os.path.join(tmpdir, deb.name))
+                if len(package_list) == list_size:
+                    apt_utils.package_list_upload(package_repo_dir,
+                                                  sw_release,
+                                                  package_list)
+                    package_list = []
+
+            # send the rest of packages to be uploaded
+            if package_list:
+                apt_utils.package_list_upload(package_repo_dir,
+                                              sw_release,
+                                              package_list)
+
         except tarfile.TarError:
             msg = "Failed to extract the ostree tarball for %s" \
                   % sw_version
