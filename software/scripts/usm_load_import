@@ -194,15 +194,16 @@ def load_import(from_release, to_major_rel, iso_mount_dir):
         raise
 
 
-def move_metadata_file_to_available_dir(to_release, iso_mount_dir):
+def move_metadata_file_to_target_dir(to_release, iso_mount_dir, target_dir):
     """
-    Move release metadata file to /opt/software/metadata/available
+    Move release metadata file to target dir in /opt/software/metadata/
     :param to_release: release version
     :param iso_mount_dir: iso mount dir
+    :param target_dir: target directory the metadata file moves to
     """
     try:
-        # Copy metadata.xml to /opt/software/metadata/available
-        os.makedirs(AVAILABLE_DIR, exist_ok=True)
+        # Copy metadata.xml to target dir in /opt/software/metadata/
+        os.makedirs(target_dir, exist_ok=True)
         metadata_name = f"{RELEASE_GA_NAME % to_release}-metadata.xml"
         LOG.info("metadata name: %s", metadata_name)
         abs_stx_release_metadata_file = os.path.join(iso_mount_dir,
@@ -212,11 +213,11 @@ def move_metadata_file_to_available_dir(to_release, iso_mount_dir):
         # Copy stx release metadata.xml to available metadata dir
         # TODO(jli14): prepatched iso will have more than one metadata file.
         shutil.copyfile(abs_stx_release_metadata_file,
-                        os.path.join(AVAILABLE_DIR, metadata_name))
-        LOG.info("Copied %s to %s", abs_stx_release_metadata_file, AVAILABLE_DIR)
+                        os.path.join(target_dir, metadata_name))
+        LOG.info("Copied %s to %s", abs_stx_release_metadata_file, target_dir)
     except shutil.Error:
         LOG.exception("Failed to copy the release %s metadata file to %s" %
-                      (to_release, AVAILABLE_DIR))
+                      (to_release, target_dir))
         raise
 
 
@@ -361,8 +362,11 @@ def main():
         LOG.info("Load import from %s to %s started", args.from_release, args.to_release)
         load_import(args.from_release, to_major_rel, args.iso_dir)
 
-        if args.is_usm_iso in ["True", True]:
-            move_metadata_file_to_available_dir(args.to_release, args.iso_dir)
+        if args.is_usm_iso in ["True", True]:  # This is USM compatible iso
+            if args.from_release in ['None', None]:  # This is N-1 load
+                move_metadata_file_to_target_dir(args.to_release, args.iso_dir, UNAVAILABLE_DIR)
+            else:
+                move_metadata_file_to_target_dir(args.to_release, args.iso_dir, AVAILABLE_DIR)
         else:
             # pre USM iso needs to generate metadata file
             generate_metadata_file_in_unavailable_dir(args.to_release)
