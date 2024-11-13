@@ -116,7 +116,13 @@ class HealthCheck(object):
         force = self._config.get("force", False)
         health_ok = success = True
 
-        alarm_ignore_list = ["900.201"]
+        alarm_ignore_list = ["280.001", # subcloud offline
+                             "280.002", # subcloud resource out-of-sync
+                             "280.003", # subcloud backup failure
+                             "280.004", # subcloud peer group in disconnected state
+                             "280.005", # subcloud peer group managed with lower priority
+                             "900.201", # Software upgrade auto apply in progress
+                             ]
         api_cmd = self._sysinv_endpoint + "/health/kube-upgrade"
 
         if force:
