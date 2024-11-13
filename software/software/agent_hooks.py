@@ -304,34 +304,44 @@ class RemoveKubernetesConfigSymlinkHook(BaseHook):
                 raise
 
 
+# TODO(heitormatsui): delete in the future, not needed for stx-10 -> <future-releases>
 class RemoveCephMonHook(BaseHook):
     """
     Remove additional ceph-mon added for each controller
     """
     PMON_FILE = "/etc/pmon.d/ceph-fixed-mon.conf"
 
+    def __init__(self, attrs):
+        super().__init__(attrs)
+        self._major_release = None
+        if "major_release" in attrs:
+            self._major_release = attrs.get("major_release")
+
     def run(self):
-        system_type = utils.get_platform_conf("system_type")
-        system_mode = utils.get_platform_conf("system_mode")
-        nodetype = utils.get_platform_conf("nodetype")
-        # additional monitors were added only for AIO-DX
-        if (system_type == constants.SYSTEM_TYPE_ALL_IN_ONE and
-                system_mode != constants.SYSTEM_MODE_SIMPLEX and
-                nodetype == constants.CONTROLLER):
-            cmd_remove_mon_controller_0 = ["timeout", "30", "ceph", "mon", "rm", "controller-0"]
-            cmd_remove_mon_controller_1 = ["timeout", "30", "ceph", "mon", "rm", "controller-1"]
-            try:
-                subprocess.check_call(cmd_remove_mon_controller_0)
-                subprocess.check_call(cmd_remove_mon_controller_1)
-                LOG.info("Removed mon.controller-0 and mon.controller-1 from ceph cluster.")
-            except subprocess.CalledProcessError as e:
-                LOG.exception("Failure removing mon.controller-0 and mon.controller-1 from ceph cluster: %s" % str(e))
-                raise
-            try:
-                os.unlink(self.PMON_FILE)
-                LOG.info("Removed %s from pmon." % self.PMON_FILE)
-            except FileNotFoundError:
-                pass  # ignore if link doesn't exist
+        # (DX only) on 22.12 there is 1 mon, on 24.09 there are 3
+        # so only in 24.09 -> 22.12 rollback this hook is needed
+        if self._major_release == "22.12":
+            system_type = utils.get_platform_conf("system_type")
+            system_mode = utils.get_platform_conf("system_mode")
+            nodetype = utils.get_platform_conf("nodetype")
+            # additional monitors were added only for AIO-DX
+            if (system_type == constants.SYSTEM_TYPE_ALL_IN_ONE and
+                    system_mode != constants.SYSTEM_MODE_SIMPLEX and
+                    nodetype == constants.CONTROLLER):
+                cmd_remove_mon_controller_0 = ["timeout", "30", "ceph", "mon", "rm", "controller-0"]
+                cmd_remove_mon_controller_1 = ["timeout", "30", "ceph", "mon", "rm", "controller-1"]
+                try:
+                    subprocess.check_call(cmd_remove_mon_controller_0)
+                    subprocess.check_call(cmd_remove_mon_controller_1)
+                    LOG.info("Removed mon.controller-0 and mon.controller-1 from ceph cluster.")
+                except subprocess.CalledProcessError as e:
+                    LOG.exception("Failure removing mon.controller-0 and mon.controller-1 from ceph cluster: %s" % str(e))
+                    raise
+                try:
+                    os.unlink(self.PMON_FILE)
+                    LOG.info("Removed %s from pmon." % self.PMON_FILE)
+                except FileNotFoundError:
+                    pass  # ignore if link doesn't exist
 
 
 class RestartKubeApiServer(BaseHook):
