@@ -554,6 +554,16 @@ class PatchAgent(PatchService):
                          active_sysroot_commit, self.latest_feed_commit)
                 self.changes = True
 
+            latest_deployment_commit = ostree_utils.get_latest_deployment_commit()
+            if latest_deployment_commit:
+                if latest_deployment_commit != self.latest_feed_commit:
+                    LOG.info("Latest deployment Commit:%s does not match "
+                             "active controller's Feed Repo Commit: %s",
+                             latest_deployment_commit, self.latest_feed_commit)
+                    self.changes = True
+                else:
+                    self.changes = False
+
         return True
 
     def handle_install(self,

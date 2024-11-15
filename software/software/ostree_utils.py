@@ -194,11 +194,11 @@ def get_all_feed_commits(patch_sw_version):
 
 def get_latest_deployment_commit():
     """
-    Get the active deployment commit ID
-    :return: The commit ID associated with the active commit
+    Get the latest deployment commit ID (pending or active)
+    :return: The commit ID associated with the latest commit or None
     """
 
-    # Sample command and output that is parsed to get the active commit
+    # Sample command and output that is parsed to get the latest commit
     # associated with the deployment
     #
     # Command: ostree admin status
@@ -208,7 +208,6 @@ def get_latest_deployment_commit():
     # debian 0658a62854647b89caf5c0e9ed6ff62a6c98363ada13701d0395991569248d7e.0 (pending)
     # origin refspec: starlingx
     # * debian a5d8f8ca9bbafa85161083e9ca2259ff21e5392b7595a67f3bc7e7ab8cb583d9.0
-    # Unlocked: hotfix
     # origin refspec: starlingx
 
     cmd = "ostree admin status"
@@ -225,12 +224,10 @@ def get_latest_deployment_commit():
     # Store the output of the above command in a string
     output_string = output.stdout.decode('utf-8')
 
-    # Parse the string to get the active commit on this deployment
-    # Trim everything before * as * represents the active deployment commit
-    trimmed_output_string = output_string[output_string.index("*"):]
-    split_output_string = trimmed_output_string.split()
-    active_deployment_commit = split_output_string[2]
-    return active_deployment_commit
+    match = re.search(r'\b(\w+)\.\d+\b', output_string)
+    if match:
+        return match.group(1)
+    return None
 
 
 def update_repo_summary_file(repo_path):
