@@ -1,5 +1,0 @@
-etc/init.d/sw-patch-agent
-lib/systemd/system/sw-patch-agent.service
-usr/sbin/sw-patch-agent
-usr/sbin/sw-patch-agent-restart
-usr/share/starlingx/pmon.d/sw-patch-agent.conf

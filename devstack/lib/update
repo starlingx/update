@@ -48,7 +48,6 @@ function install_sw_patch {
     $STX_SUDO install -m 755 -d ${stx_patch_sysconfdir}/patching
     $STX_SUDO install -m 755 -d ${stx_patch_sysconfdir}/patching/patch-scripts
     $STX_SUDO install -m 755 -d ${stx_patch_sysconfdir}/pmon.d
-    $STX_SUDO install -m 500 $STX_PATCH_DIR/bin/sw-patch-agent ${stx_patch_sbindir}/sw-patch-agent
 }
 
 function install_update {
