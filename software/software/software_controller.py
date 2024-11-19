@@ -1167,7 +1167,6 @@ class PatchController(PatchService):
                     # >>> list_of_dirs = dir_names.stdout.decode().rstrip().split()
                     # >>> print(list_of_dirs)
                     # ['rel-22.12', 'rel-22.5']
-
                     list_of_dirs = dir_names.stdout.decode("utf-8").rstrip().split()
 
                     for rel_dir in list_of_dirs:
@@ -1190,19 +1189,14 @@ class PatchController(PatchService):
                                                          stderr=subprocess.STDOUT)
                     LOG.info("Synced to mate feed via ostree pull: %s", output)
 
-                    try:
-                        output = subprocess.check_output(["rsync",
-                                                          "-acv",
-                                                          "--delete",
-                                                          "rsync://%s/update_scripts/" % host_url,
-                                                          "%s/" % PATCH_MIGRATION_SCRIPT_DIR],
-                                                         stderr=subprocess.STDOUT)
-                        LOG.info("Synced %s folder between controllers: %s"
-                                 % (PATCH_MIGRATION_SCRIPT_DIR, output))
-                    except Exception as e:
-                        LOG.warning("Failed to sync %s: Error: %s"
-                                    % (PATCH_MIGRATION_SCRIPT_DIR, e))
-                        # Do nothing since it is a temporary folder
+                    output = subprocess.check_output(["rsync",
+                                                      "-acv",
+                                                      "--delete",
+                                                      "rsync://%s/update_scripts/" % host_url,
+                                                      "%s/" % PATCH_MIGRATION_SCRIPT_DIR],
+                                                     stderr=subprocess.STDOUT)
+                    LOG.info("Synced %s folder between controllers: %s"
+                             % (PATCH_MIGRATION_SCRIPT_DIR, output))
 
         except subprocess.CalledProcessError as e:
             LOG.error("Failed during controllers sync tasks: %s", e.output)
@@ -2893,16 +2887,17 @@ class PatchController(PatchService):
             raise SoftwareError(msg)
 
     def delete_all_patch_activate_scripts(self):
-        """Delete all patch activate scripts by deleting /etc/update.d"""
+        """Delete all patch activate scripts in /etc/update.d"""
         if os.path.exists(PATCH_MIGRATION_SCRIPT_DIR):
-            try:
-                shutil.rmtree(PATCH_MIGRATION_SCRIPT_DIR)
-                msg = "Deleted directory %s" % PATCH_MIGRATION_SCRIPT_DIR
-                LOG.info(msg)
-            except Exception as e:
-                msg = "Failed to delete directory %s. Reason: %s" \
-                    % (PATCH_MIGRATION_SCRIPT_DIR, e)
-                LOG.error(msg)
+            for script_name in os.listdir(PATCH_MIGRATION_SCRIPT_DIR):
+                script_path = os.path.join(PATCH_MIGRATION_SCRIPT_DIR, script_name)
+                try:
+                    os.remove(script_path)
+                    msg = "Deleted patch script: %s" % script_path
+                    LOG.info(msg)
+                except Exception as e:
+                    msg = "Failed to delete patch script %s. Reason: %s" % (script_path, e)
+                    LOG.error(msg)
 
     def install_releases_thread(self, deployment_list, feed_repo, running_release):
         """
