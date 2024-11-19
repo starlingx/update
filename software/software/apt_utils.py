@@ -8,7 +8,6 @@ import logging
 import subprocess
 
 from software import constants
-import software.config as cfg
 from software.exceptions import APTOSTreeCommandFail
 
 LOG = logging.getLogger('main_logger')
@@ -107,16 +106,19 @@ def component_remove(pkg_feed_dir, component):
         raise APTOSTreeCommandFail(msg)
 
 
-def run_install(repo_dir, sw_release, packages):
+def run_install(repo_dir, sw_version, sw_release, packages):
     """
     Run Debian package upgrade.
 
     :param repo_dir: the path to the ostree repo
+    :param sw_version: System version (MM.mm)
     :param sw_release: Patch release version (MM.mm.pp)
     :param packages: List of Debian packages
     """
     LOG.info("Running apt-ostree install")
 
+    package_feed = "http://controller:8080/updates/debian/rel-%s/ %s %s" \
+        % (sw_version, constants.DEBIAN_RELEASE, sw_release)
     packages = " ".join(packages)
 
     try:
@@ -124,7 +126,7 @@ def run_install(repo_dir, sw_release, packages):
             ["apt-ostree", "compose", "install",
              "--repo", repo_dir,
              "--branch", "starlingx",
-             "--feed", cfg.package_feed,
+             "--feed", package_feed,
              "--component", sw_release,
              packages],
             check=True,

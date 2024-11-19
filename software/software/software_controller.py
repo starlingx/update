@@ -2939,7 +2939,11 @@ class PatchController(PatchService):
                     latest_commit = all_commits[0]
                     # Install debian package through apt-ostree
                     try:
-                        apt_utils.run_install(feed_repo, deploy_release.sw_release, packages)
+                        apt_utils.run_install(
+                            feed_repo,
+                            deploy_release.sw_version,
+                            deploy_release.sw_release,
+                            packages)
                     except APTOSTreeCommandFail:
                         msg = "Failed to install Debian packages."
                         LOG.exception(msg)
