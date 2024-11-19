@@ -65,6 +65,11 @@ class HostAgentUnreachable(SoftwareServiceError):
                                "and software-agent process is running\n" % hostname)
 
 
+class MaxReleaseExceeded(SoftwareServiceError):
+    def __init__(self, msg):
+        super().__init__(error=msg)
+
+
 # TODO(bqian) gradually convert SoftwareError based exception to
 # either SoftwareServiceError for user visible exceptions, or
 # InternalError for internal error (bug)

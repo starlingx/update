@@ -57,6 +57,7 @@ from software.exceptions import SoftwareServiceError
 from software.exceptions import InvalidOperation
 from software.exceptions import HostAgentUnreachable
 from software.exceptions import HostIpNotFound
+from software.exceptions import MaxReleaseExceeded
 from software.release_data import reload_release_data
 from software.release_data import get_SWReleaseCollection
 from software.software_functions import collect_current_load_for_hosts
@@ -1414,7 +1415,7 @@ class PatchController(PatchService):
             msg = f"Major releases {major_releases} have already been uploaded{' in system controller' if is_system_controller() else ''}. " + \
                 f"Max major releases is {max_releases}"
             LOG.info(msg)
-            raise SoftwareServiceError(error=msg)
+            raise MaxReleaseExceeded(msg)
 
     def _run_load_import(self, from_release, to_release, iso_mount_dir, upgrade_files):
         """
@@ -1550,7 +1551,7 @@ class PatchController(PatchService):
             }
         }
 
-    def _clean_up_load_import(self, iso_mount_dir, to_release, iso_file, is_import_completed):
+    def _clean_up_load_import(self, iso_mount_dir, to_release, iso_file, is_import_completed, is_max_rel_exceeded):
         """
         Clean up load and import
         :param iso_mount_dir: ISO mount directory
@@ -1563,7 +1564,7 @@ class PatchController(PatchService):
             LOG.info("Unmounted iso file %s", iso_file)
 
         # remove upload leftover in case of failure
-        if to_release and not is_import_completed:
+        if to_release and not is_import_completed and not is_max_rel_exceeded:
             to_release_dir = os.path.join(constants.SOFTWARE_STORAGE_DIR, "rel-%s" % to_release)
             shutil.rmtree(to_release_dir, ignore_errors=True)
 
@@ -1873,6 +1874,7 @@ class PatchController(PatchService):
             tmp_warning = ""
             tmp_release_meta_info = {}
             is_import_completed = True
+            is_max_rel_exceeded = False
 
             iso = upgrade_files[constants.ISO_EXTENSION]
             sig = upgrade_files[constants.SIG_EXTENSION]
@@ -1909,12 +1911,15 @@ class PatchController(PatchService):
                         None, to_release, iso_mount_dir, upgrade_files)
                     # Checkout commit to dc-vault/playbooks directory
                     self._checkout_commit_to_dc_vault_playbook_dir(to_release_maj_ver)
+            except MaxReleaseExceeded:
+                is_max_rel_exceeded = True
+                raise
             except Exception as e:
                 LOG.error("Error occurred while processing software release upload: %s", str(e))
                 is_import_completed = False
                 raise
             finally:
-                self._clean_up_load_import(iso_mount_dir, to_release, iso, is_import_completed)
+                self._clean_up_load_import(iso_mount_dir, to_release, iso, is_import_completed, is_max_rel_exceeded)
                 if is_importing_inactive_load and not is_import_completed:
                     self._clean_up_inactive_load_import(to_release)
 
