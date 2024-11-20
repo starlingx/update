@@ -1475,8 +1475,7 @@ class PatchController(PatchService):
                 reload_release_data()
                 LOG.info("Updated release metadata for %s", to_release)
 
-                release_meta_info = self.get_release_meta_info(
-                    to_release, iso_mount_dir, upgrade_files)
+                release_meta_info = self.get_release_meta_info(iso_mount_dir, upgrade_files)
 
                 return local_info, local_warning, local_error, release_meta_info
 
@@ -1524,7 +1523,7 @@ class PatchController(PatchService):
             LOG.exception("Error occurred while running local load import script: %s", str(e))
             raise
 
-    def get_release_meta_info(self, to_release, iso_mount_dir, upgrade_files) -> dict:
+    def get_release_meta_info(self, iso_mount_dir, upgrade_files) -> dict:
         """
         Get release metadata information from metadata.xml
         :param iso_mount_dir: ISO mount directory
@@ -1537,8 +1536,14 @@ class PatchController(PatchService):
         # also prepatched iso needs to be handled.
         # should go through the release_data to find the latest release of major release
         # to_release
+        abs_meta_file_dir = os.path.join(iso_mount_dir, 'upgrades')
+        release_metadata_file_list = utils.find_file_by_regex(
+            abs_meta_file_dir, r'^([a-zA-Z]+)-([\d.]+)-metadata\.xml$')
+        if len(release_metadata_file_list) == 0:
+            raise SoftwareServiceError("No release metadata file found in %s" % abs_meta_file_dir)
+        release_metadata_file = release_metadata_file_list[0]
         abs_stx_release_metadata_file = os.path.join(
-            iso_mount_dir, 'upgrades', f"{constants.RELEASE_GA_NAME % to_release}-metadata.xml")
+            iso_mount_dir, 'upgrades', release_metadata_file)
         all_release_meta_info = parse_release_metadata(abs_stx_release_metadata_file)
         return {
             os.path.basename(upgrade_files[constants.ISO_EXTENSION]): {
@@ -1551,12 +1556,15 @@ class PatchController(PatchService):
             }
         }
 
-    def _clean_up_load_import(self, iso_mount_dir, to_release, iso_file, is_import_completed, is_max_rel_exceeded):
+    def _clean_up_load_import(
+            self, iso_mount_dir, to_release, iso_file, is_import_completed, is_max_rel_exceeded):
         """
         Clean up load and import
         :param iso_mount_dir: ISO mount directory
         :param to_release: To release
         :param iso_file: ISO file
+        :param is_import_completed: Is import completed
+        :param is_max_rel_exceeded: Is max release exceeded
         """
         # Unmount the iso file
         if iso_mount_dir:
@@ -1899,7 +1907,7 @@ class PatchController(PatchService):
                 # Same release is uploaded, return the metadata info from the iso file
                 if to_release_maj_ver == SW_VERSION:
                     tmp_info = f"Uploaded release {to_release} is the same as current release on the controller"
-                    tmp_release_meta_info = self.get_release_meta_info(to_release, iso_mount_dir, upgrade_files)
+                    tmp_release_meta_info = self.get_release_meta_info(iso_mount_dir, upgrade_files)
                 elif to_release > SW_VERSION:
                     # N + 1 release is uploaded, process it regardless
                     tmp_info, tmp_warning, tmp_error, tmp_release_meta_info = self._process_upload_upgrade_files(
@@ -1919,7 +1927,8 @@ class PatchController(PatchService):
                 is_import_completed = False
                 raise
             finally:
-                self._clean_up_load_import(iso_mount_dir, to_release, iso, is_import_completed, is_max_rel_exceeded)
+                self._clean_up_load_import(iso_mount_dir, to_release, iso,
+                                           is_import_completed, is_max_rel_exceeded)
                 if is_importing_inactive_load and not is_import_completed:
                     self._clean_up_inactive_load_import(to_release)
 
