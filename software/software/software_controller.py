@@ -3578,16 +3578,20 @@ class PatchController(PatchService):
         cmd_path = "/usr/bin/software-deploy-activate"
         from_release = deploy.get("from_release")
         to_release = deploy.get("to_release")
-        activate_cmd = ["source", "/etc/platform/openrc;", cmd_path, from_release, to_release]
+        if self.pre_bootstrap:
+            activate_cmd = [cmd_path, from_release, to_release]
+        else:
+            activate_cmd = ["source", "/etc/platform/openrc;", cmd_path, from_release, to_release]
 
         deploying = ReleaseState(release_state=states.DEPLOYING)
         if deploying.is_major_release_deployment():
             activate_cmd.append('--is_major_release')
 
-        token, endpoint = utils.get_endpoints_token()
         env = os.environ.copy()
-        env["OS_AUTH_TOKEN"] = token
-        env["SYSTEM_URL"] = re.sub('/v[1,9]$', '', endpoint)  # remove ending /v1
+        if not self.pre_bootstrap:
+            token, endpoint = utils.get_endpoints_token()
+            env["OS_AUTH_TOKEN"] = token
+            env["SYSTEM_URL"] = re.sub('/v[1,9]$', '', endpoint)  # remove ending /v1
 
         try:
             LOG.info("starting subprocess %s" % ' '.join(activate_cmd))
