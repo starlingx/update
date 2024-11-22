@@ -3148,7 +3148,9 @@ class PatchController(PatchService):
                 deploy_state = DeployState.get_instance()
                 deploy_state.start(running_release, to_release, feed_repo, commit_id, deploy_release.reboot_required)
 
-                msg_info = "Deployment for %s started" % deployment
+                msg_info += "%s is now starting, await for the states: " \
+                            "[deploy-start-done | deploy-start-failed] in " \
+                            "'software deploy show'\n" % deployment
             else:
                 msg_error = "Deployment for %s failed to start" % deployment
 
@@ -3222,7 +3224,6 @@ class PatchController(PatchService):
 
             # Start applying the releases
             self.install_releases_thread(deployment_list, feed_repo, running_release)
-
             msg_info += "%s is now starting, await for the states: " \
                         "[deploy-start-done | deploy-start-failed] in " \
                         "'software deploy show'\n" % deployment_list
