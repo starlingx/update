@@ -13,6 +13,16 @@ PIDFile=/var/run/software-controller-daemon.pid
 # process recovery is handled by pmon
 Restart=no
 
+# cgroup performance engineering
+# - software-controller-daemon.service does not provide latency critical service
+# - several processes are 100% cpu hog and use significant disk IO
+#   (eg, sysinv-app, system CLI, ansible-playbooks, etc)
+# - set 1/8th default share
+# - set lower IO priority (effective only with 'bfq' scheduler)
+CPUShares=128
+Nice=19
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
 [Install]
 WantedBy=multi-user.target
-
