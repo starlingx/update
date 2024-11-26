@@ -3,6 +3,9 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
+import sys
+import threading
+import time
 
 from software_client.common import utils
 
@@ -171,8 +174,17 @@ def _print_upload_result(resp, data, debug):
                  "files to active controller and then specify the absolute path of "
                  "each file."))
 def do_upload(cc, args):
-    """Upload a software release"""
-    result = cc.release.upload(args)
+    """Upload a software release."""
+    try:
+        print("This operation will take a while. Please wait.")
+        wait_task = WaitThread()
+        wait_task.start()
+        result = cc.release.upload(args)
+        wait_task.join()
+    except Exception as e:
+        wait_task.join()
+        raise Exception("Upload failed. Reason: %s" % e)
+
     if isinstance(result, int):
         return result
     else:
@@ -191,8 +203,16 @@ def do_upload(cc, args):
                  'more files containing a patch release. NOTE: specify at most '
                  'ONE pair of (iso + sig)'))
 def do_upload_dir(cc, args):
-    """Upload a software release dir"""
-    resp, data = cc.release.upload_dir(args)
+    """Upload a software release directory."""
+    try:
+        print("This operation will take a while. Please wait.")
+        wait_task = WaitThread()
+        wait_task.start()
+        resp, data = cc.release.upload_dir(args)
+        wait_task.join()
+    except Exception as e:
+        wait_task.join()
+        raise Exception("Upload directory failed. Reason: %s" % e)
     _print_upload_result(resp, data, args.debug)
 
     return utils.check_rc(resp, data)
@@ -215,3 +235,24 @@ def do_delete(cc, args):
 
     utils.display_info(resp)
     return utils.check_rc(resp, data)
+
+
+class WaitThread(threading.Thread):
+    """Thread to show progress indication."""
+    def __init__(self):
+        super(WaitThread, self).__init__()
+        self.stop = threading.Event()
+
+    def run(self):
+        """Run the progress indication."""
+        while not self.stop.is_set():
+            sys.stdout.write(".")
+            sys.stdout.flush()
+            time.sleep(10)
+
+    def join(self, timeout=None):
+        """Stop the progress indication and join the thread."""
+        self.stop.set()
+        super(WaitThread, self).join(timeout)
+        sys.stdout.write("\n")
+        sys.stdout.flush()
