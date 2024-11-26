@@ -282,26 +282,33 @@ class RemoveKubernetesConfigSymlinkHook(BaseHook):
     LUKS_K8S_ENCRYPTION_PROVIDER_FILE = \
         "/var/luks/stx/luks_fs/controller" + K8S_ENCRYPTION_PROVIDER_FILE
 
+    def __init__(self, attrs):
+        super().__init__(attrs)
+        self._major_release = None
+        if "major_release" in attrs:
+            self._major_release = attrs.get("major_release")
+
     def run(self):
-        nodetype = utils.get_platform_conf("nodetype")
-        if nodetype == constants.CONTROLLER:
-            try:
-                # Remove the K8S encryption provider symlink
-                for symlink in (self.K8S_ENCRYPTION_PROVIDER_FILE, self.DEPLOYED_K8S_ENCRYPTION_PROVIDER_FILE):
-                    if os.path.exists(symlink):
-                        os.unlink(symlink)
-                        LOG.info("%s symlink removed" % symlink)
+        if self._major_release == "22.12":
+            nodetype = utils.get_platform_conf("nodetype")
+            if nodetype == constants.CONTROLLER:
+                try:
+                    # Remove the K8S encryption provider symlink
+                    for symlink in (self.K8S_ENCRYPTION_PROVIDER_FILE, self.DEPLOYED_K8S_ENCRYPTION_PROVIDER_FILE):
+                        if os.path.exists(symlink):
+                            os.unlink(symlink)
+                            LOG.info("%s symlink removed" % symlink)
 
-                # Copy the LUKS K8S encryption provider file to /etc/kubernetes and remove it afterward
-                if os.path.exists(self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE):
-                    shutil.copy2(self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE, "/etc/kubernetes")
-                    LOG.info("Copied %s to /etc/kubernetes" % self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE)
-                    os.remove(self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE)
-                    LOG.info("%s file removed" % self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE)
+                    # Copy the LUKS K8S encryption provider file to /etc/kubernetes and remove it afterward
+                    if os.path.exists(self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE):
+                        shutil.copy2(self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE, "/etc/kubernetes")
+                        LOG.info("Copied %s to /etc/kubernetes" % self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE)
+                        os.remove(self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE)
+                        LOG.info("%s file removed" % self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE)
 
-            except Exception as e:
-                LOG.exception("Failed to manage symlink or file: %s" % str(e))
-                raise
+                except Exception as e:
+                    LOG.exception("Failed to manage symlink or file: %s" % str(e))
+                    raise
 
 
 # TODO(heitormatsui): delete in the future, not needed for stx-10 -> <future-releases>
