@@ -123,58 +123,6 @@ if [ ${FOUND} -eq 0 ]; then
 fi
 
 RC=0
-case "$1" in
-    start)
-        if [ "${system_mode}" = "simplex" ]; then
-            # On a simplex CPE, we need to launch the http server first,
-            # before we can do the patch installation
-            LOG_TO_FILE "***** Launching lighttpd *****"
-            /etc/init.d/lighttpd start
-
-            LOG_TO_FILE "***** Starting patch operation *****"
-            /usr/sbin/sw-patch-agent --install 2>>$logfile
-            if [ -f ${patch_failed_file} ]; then
-                RC=1
-                LOG_TO_FILE "***** Patch operation failed *****"
-            fi
-            LOG_TO_FILE "***** Finished patch operation *****"
-
-            LOG_TO_FILE "***** Shutting down lighttpd *****"
-            /etc/init.d/lighttpd stop
-        else
-            check_install_uuid
-            if [ $? -ne 0 ]; then
-                # The INSTALL_UUID doesn't match the active controller, so exit
-                exit 1
-            fi
-
-            LOG_TO_FILE "***** Starting patch operation *****"
-            /usr/sbin/sw-patch-agent --install 2>>$logfile
-            if [ -f ${patch_failed_file} ]; then
-                RC=1
-                LOG_TO_FILE "***** Patch operation failed *****"
-            fi
-            LOG_TO_FILE "***** Finished patch operation *****"
-        fi
-
-        check_for_rr_patch
-        ;;
-    stop)
-        # Nothing to do here
-        ;;
-    restart)
-        LOG_TO_FILE "***** Starting patch operation *****"
-        /usr/sbin/sw-patch-agent --install 2>>$logfile
-        if [ -f ${patch_failed_file} ]; then
-            RC=1
-            LOG_TO_FILE "***** Patch operation failed *****"
-        fi
-        LOG_TO_FILE "***** Finished patch operation *****"
-        ;;
-    *)
-        echo "Usage: $0 {start|stop|restart}"
-        exit 1
-esac
 
 exit $RC
 

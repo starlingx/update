@@ -33,24 +33,18 @@ override_dh_install:
 	install -m 755 -d ${DEBIAN_DESTDIR}/lib/systemd/system
 	install -m 755 -d ${PMONDIR}
 
-	install -m 500 bin/sw-patch-agent \
-		${DEBIAN_DESTDIR}/usr/sbin/sw-patch-agent
 	install -m 500 bin/sw-patch-controller-daemon \
 		${DEBIAN_DESTDIR}/usr/sbin/sw-patch-controller-daemon
 	install -m 555 bin/sw-patch \
 		${DEBIAN_DESTDIR}/usr/sbin/sw-patch
 	install -m 500 bin/sw-patch-controller-daemon-init.sh \
 		${DEBIAN_DESTDIR}/etc/init.d/sw-patch-controller-daemon
-	install -m 500 bin/sw-patch-agent-init.sh \
-		${DEBIAN_DESTDIR}/etc/init.d/sw-patch-agent
 	install -m 600 bin/patching.conf \
 		${DEBIAN_DESTDIR}/etc/patching/patching.conf
 	install -m 644 bin/policy.json \
 		${DEBIAN_DESTDIR}/etc/patching/policy.json
 	install -m 444 bin/pmon-sw-patch-controller-daemon.conf \
 		${PMONDIR}/sw-patch-controller-daemon.conf
-	install -m 444 bin/pmon-sw-patch-agent.conf \
-		${PMONDIR}/sw-patch-agent.conf
 	install -m 444 bin/*.service \
 	    ${DEBIAN_DESTDIR}/lib/systemd/system
 	install -m 444 bin/sw-patch.completion \
@@ -63,8 +57,6 @@ override_dh_install:
 		${DEBIAN_DESTDIR}/usr/sbin/run-patch-scripts
 	install -m 500 bin/sw-patch-controller-daemon-restart \
 		${DEBIAN_DESTDIR}/usr/sbin/sw-patch-controller-daemon-restart
-	install -m 500 bin/sw-patch-agent-restart \
-		${DEBIAN_DESTDIR}/usr/sbin/sw-patch-agent-restart
 	install -m 500 bin/sw-patch-init.sh \
 		${DEBIAN_DESTDIR}/etc/init.d/sw-patch
 	install -m 500 bin/sw-patch-controller-init.sh \

@@ -1,7 +1,7 @@
 [Unit]
 Description=StarlingX Patching Controller
 After=syslog.service network-online.target sw-patch.service
-Before=sw-patch-agent.service sw-patch-controller-daemon.service
+Before=sw-patch-controller-daemon.service
 
 [Service]
 Type=oneshot
