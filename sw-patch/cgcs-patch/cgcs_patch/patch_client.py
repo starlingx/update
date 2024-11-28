@@ -33,23 +33,12 @@ IPV6_FAMILY = 6
 
 help_upload = "Upload one or more patches to the patching system."
 help_upload_dir = "Upload patches from one or more directories to the patching system."
-help_apply = "Apply one or more patches. This adds the specified patches " + \
-    "to the repository, making the update(s) available to the " + \
-    "hosts in the system. Use --all to apply all available patches."
-help_remove = "Remove one or more patches. This removes the specified " + \
-    "patches from the repository."
-help_delete = "Delete one or more patches from the patching system."
 help_query = "Query system patches. Optionally, specify 'query applied' " + \
     "to query only those patches that are applied, or 'query available' " + \
     "to query those that are not."
 help_show = "Show details for specified patches."
 help_what_requires = "List patches that require the specified patches."
 help_query_hosts = "Query patch states for hosts in the system."
-help_host_install = "Trigger patch install/remove on specified host. " + \
-    "To force install on unlocked node, use the --force option."
-help_host_install_async = "Trigger patch install/remove on specified host. " + \
-    "To force install on unlocked node, use the --force option." + \
-    " Note: This command returns immediately upon dispatching installation request."
 help_patch_args = "Patches are specified as a space-separated list of patch IDs."
 help_install_local = "Trigger patch install/remove on the local host. " + \
     "This command can only be used for patch installation prior to initial " + \
@@ -96,21 +85,6 @@ def print_help():
     print(textwrap.fill("    {0:<15} ".format("upload-dir:") + help_upload_dir,
                         width=TERM_WIDTH, subsequent_indent=' ' * 20))
     print("")
-    print(textwrap.fill("    {0:<15} ".format("apply:") + help_apply,
-                        width=TERM_WIDTH, subsequent_indent=' ' * 20))
-    print(textwrap.fill(help_patch_args,
-                        width=TERM_WIDTH, initial_indent=' ' * 20, subsequent_indent=' ' * 20))
-    print("")
-    print(textwrap.fill("    {0:<15} ".format("remove:") + help_remove,
-                        width=TERM_WIDTH, subsequent_indent=' ' * 20))
-    print(textwrap.fill(help_patch_args,
-                        width=TERM_WIDTH, initial_indent=' ' * 20, subsequent_indent=' ' * 20))
-    print("")
-    print(textwrap.fill("    {0:<15} ".format("delete:") + help_delete,
-                        width=TERM_WIDTH, subsequent_indent=' ' * 20))
-    print(textwrap.fill(help_patch_args,
-                        width=TERM_WIDTH, initial_indent=' ' * 20, subsequent_indent=' ' * 20))
-    print("")
     print(textwrap.fill("    {0:<15} ".format("query:") + help_query,
                         width=TERM_WIDTH, subsequent_indent=' ' * 20))
     print("")
@@ -121,12 +95,6 @@ def print_help():
                         width=TERM_WIDTH, subsequent_indent=' ' * 20))
     print("")
     print(textwrap.fill("    {0:<15} ".format("query-hosts:") + help_query_hosts,
-                        width=TERM_WIDTH, subsequent_indent=' ' * 20))
-    print("")
-    print(textwrap.fill("    {0:<15} ".format("host-install:") + help_host_install,
-                        width=TERM_WIDTH, subsequent_indent=' ' * 20))
-    print("")
-    print(textwrap.fill("    {0:<15} ".format("host-install-async:") + help_host_install_async,
                         width=TERM_WIDTH, subsequent_indent=' ' * 20))
     print("")
     print(textwrap.fill("    {0:<15} ".format("install-local:") + help_install_local,
@@ -444,126 +412,6 @@ def patch_upload_req(debug, args):
             rc = 1
 
     return rc
-
-
-def patch_apply_req(debug, args):
-    if len(args) == 0:
-        print_help()
-
-    # Ignore interrupts during this function
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    extra_opts = []
-
-    if "--skip-semantic" in args:
-        idx = args.index("--skip-semantic")
-
-        # Get rid of the --skip-semantic
-        args.pop(idx)
-
-        # Append the extra opts
-        extra_opts.append("skip-semantic=yes")
-
-    if len(extra_opts) == 0:
-        extra_opts_str = ''
-    else:
-        extra_opts_str = '?%s' % '&'.join(extra_opts)
-
-    patches = "/".join(args)
-    url = "http://%s/patch/apply/%s%s" % (api_addr, patches, extra_opts_str)
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.post(url, headers=headers)
-
-    if debug:
-        print_result_debug(req)
-    else:
-        print_patch_op_result(req)
-
-    return check_rc(req)
-
-
-def patch_remove_req(debug, args):
-    if len(args) == 0:
-        print_help()
-
-    # Ignore interrupts during this function
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    extra_opts = []
-
-    # The removeunremovable option is hidden and should not be added to help
-    # text or customer documentation. It is for emergency use only - under
-    # supervision of the design team.
-    if "--removeunremovable" in args:
-        idx = args.index("--removeunremovable")
-
-        # Get rid of the --removeunremovable
-        args.pop(idx)
-
-        # Append the extra opts
-        extra_opts.append('removeunremovable=yes')
-
-    if "--skipappcheck" in args:
-        idx = args.index("--skipappcheck")
-
-        # Get rid of the --skipappcheck
-        args.pop(idx)
-
-        # Append the extra opts
-        extra_opts.append("skipappcheck=yes")
-
-    if "--skip-semantic" in args:
-        idx = args.index("--skip-semantic")
-
-        # Get rid of the --skip-semantic
-        args.pop(idx)
-
-        # Append the extra opts
-        extra_opts.append("skip-semantic=yes")
-
-    if len(extra_opts) == 0:
-        extra_opts_str = ''
-    else:
-        extra_opts_str = '?%s' % '&'.join(extra_opts)
-
-    patches = "/".join(args)
-    url = "http://%s/patch/remove/%s%s" % (api_addr, patches, extra_opts_str)
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.post(url, headers=headers)
-
-    if debug:
-        print_result_debug(req)
-    else:
-        print_patch_op_result(req)
-
-    return check_rc(req)
-
-
-def patch_delete_req(debug, args):
-    if len(args) == 0:
-        print_help()
-
-    # Ignore interrupts during this function
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    patches = "/".join(args)
-
-    url = "http://%s/patch/delete/%s" % (api_addr, patches)
-
-    headers = {}
-    append_auth_token_if_required(headers)
-    req = requests.post(url, headers=headers)
-
-    if debug:
-        print_result_debug(req)
-    else:
-        print_patch_op_result(req)
-
-    return check_rc(req)
 
 
 def patch_commit_req(debug, args):
@@ -972,73 +820,6 @@ def wait_for_install_complete(agent_ip):
             break
 
     return rc
-
-
-def host_install(debug, args):  # pylint: disable=unused-argument
-    force = False
-    rc = 0
-
-    if "--force" in args:
-        force = True
-        args.remove("--force")
-
-    if len(args) != 1:
-        print_help()
-
-    agent_ip = args[0]
-
-    # Issue host_install_async request and poll for results
-    url = "http://%s/patch/host_install_async/%s" % (api_addr, agent_ip)
-
-    if force:
-        url += "/force"
-
-    req = requests.post(url)
-
-    if req.status_code == 200:
-        data = json.loads(req.text)
-        if 'error' in data and data["error"] != "":
-            print("Error:")
-            print(data["error"])
-            rc = 1
-        else:
-            rc = wait_for_install_complete(agent_ip)
-    elif req.status_code == 500:
-        print("An internal error has occurred. Please check /var/log/patching.log for details")
-        rc = 1
-    else:
-        m = re.search("(Error message:.*)", req.text, re.MULTILINE)
-        print(m.group(0))
-        rc = 1
-
-    return rc
-
-
-def host_install_async(debug, args):
-    force = False
-
-    if "--force" in args:
-        force = True
-        args.remove("--force")
-
-    if len(args) != 1:
-        print_help()
-
-    agent_ip = args[0]
-
-    url = "http://%s/patch/host_install_async/%s" % (api_addr, agent_ip)
-
-    if force:
-        url += "/force"
-
-    req = requests.post(url)
-
-    if debug:
-        print_result_debug(req)
-    else:
-        print_patch_op_result(req)
-
-    return check_rc(req)
 
 
 def drop_host(debug, args):
@@ -1479,12 +1260,6 @@ def main():
     else:
         if action == "upload":
             rc = patch_upload_req(debug, sys.argv[2:])
-        elif action == "apply":
-            rc = patch_apply_req(debug, sys.argv[2:])
-        elif action == "remove":
-            rc = patch_remove_req(debug, sys.argv[2:])
-        elif action == "delete":
-            rc = patch_delete_req(debug, sys.argv[2:])
         elif action == "commit":
             rc = patch_commit_req(debug, sys.argv[2:])
         elif action == "query":
@@ -1497,10 +1272,6 @@ def main():
             what_requires(debug, sys.argv[2:])
         elif action == "query-dependencies":
             query_dependencies(debug, sys.argv[2:])
-        elif action == "host-install":
-            rc = host_install(debug, sys.argv[2:])
-        elif action == "host-install-async":
-            rc = host_install_async(debug, sys.argv[2:])
         elif action == "drop-host":
             rc = drop_host(debug, sys.argv[2:])
         elif action == "upload-dir":
