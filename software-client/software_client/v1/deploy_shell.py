@@ -7,18 +7,6 @@
 from software_client.common import utils
 
 
-# --deployment is an optional argument
-@utils.arg('--deployment',
-           required=False,
-           help='List the deployment specified')
-# --state is an optional argument.
-# default: "all"
-# acceptable values: inactive, active, prestaging, prestaged, all
-@utils.arg('--state',
-           choices=['inactive', 'active', 'prestaging', 'prestaged', 'all'],
-           default="all",
-           required=False,
-           help="List all deployments that have this state")
 def do_show(cc, args):
     """Show the software deployments states"""
     resp, data = cc.deploy.show()
