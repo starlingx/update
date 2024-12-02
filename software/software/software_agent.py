@@ -601,7 +601,7 @@ class PatchAgent(PatchService):
 
         # if commit-id is provided, check if it is already deployed
         if commit_id:
-            active_commit_id = ostree_utils.get_sysroot_latest_commit()
+            active_commit_id = ostree_utils.get_latest_deployment_commit()
             if commit_id == active_commit_id:
                 LOG.info("The provided commit-id is already deployed. Skipping install.")
                 success = True
@@ -697,21 +697,52 @@ class PatchAgent(PatchService):
                 # The remote value is configured inside
                 # "/sysroot/ostree/repo/config" file
                 ostree_utils.pull_ostree_from_remote(remote=remote)
-                setflag(ostree_pull_completed_deployment_pending_file)
 
-                # Create a new deployment once the changes are pulled
-                ostree_utils.create_deployment(ref=ref)
+                self.query()  # Updates following self variables
+                if self.latest_feed_commit:
+                    # If latest_feed_commit is not null, the node can check the deployment health
+                    if self.latest_sysroot_commit == self.latest_feed_commit:
+                        LOG.info("Pull from remote was successful")
+                        setflag(ostree_pull_completed_deployment_pending_file)
 
-                changed = True
-                clearflag(ostree_pull_completed_deployment_pending_file)
+                        # Retry deployment creation until successful or maximum retries reached
+                        retries = 0
+                        while not changed and retries < constants.MAX_OSTREE_DEPLOY_RETRIES:
+                            latest_deployment = None
+                            try:
+                                # Create a new deployment once the changes are pulled
+                                ostree_utils.create_deployment(ref=ref)
+                                latest_deployment = ostree_utils.get_latest_deployment_commit()
+                            except OSTreeCommandFail:
+                                LOG.warning("Failed to create deployment during host-install.")
+
+                            if latest_deployment and \
+                                    latest_deployment == self.latest_feed_commit:
+                                changed = True
+                                clearflag(ostree_pull_completed_deployment_pending_file)
+                            else:
+                                retries += 1
+                                LOG.warning("Deloyment not created in %d attempt(s)", retries)
+                                time.sleep(10)
+                    else:
+                        LOG.error("Sysroot commit does not match the feed commit."
+                                  "Skipping deployment retries")
+                else:
+                    # If not able to retrieve latest_feed_commit, proceed without retries
+                    LOG.info("Creating ostree deployment without live retry")
+                    setflag(ostree_pull_completed_deployment_pending_file)
+                    ostree_utils.create_deployment(ref=ref)
+                    changed = True
+                    clearflag(ostree_pull_completed_deployment_pending_file)
+
             except OSTreeCommandFail:
                 LOG.exception("Failed to pull changes and create deployment"
                               "during host-install.")
-                success = False
             except subprocess.CalledProcessError as e:
                 LOG.exception("Failed to execute pre-install scripts.")
                 LOG.error("Command output: %s", e.output)
-                success = False
+
+            success = changed  # If a change was made, success is true otherwise false
 
             if changed:
                 # Update the node_is_patched flag
