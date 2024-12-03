@@ -211,29 +211,8 @@ class UpgradeHealthCheck(HealthCheck):
     def run_health_check(self):
         """Run specific upgrade health checks"""
 
-        # run health check for 22.12
-        # TODO(ShawnLi): remove this once upgrade from 22.12 is deprecated
-        if SW_VERSION == '22.12':
-            return self.run_health_check_in_from_release()
-
         health_ok = True
         output = ""
-
-        # check if it is a valid upgrade path
-        success, active_release, required_patches = self._check_valid_upgrade_path()
-        output += 'Valid upgrade path from release %s to %s: [%s]\n' \
-                  % (active_release, self._major_release,
-                     HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
-        health_ok = health_ok and success
-
-        # check if required patches are deployed
-        success, missing_patches = self._check_required_patches_state(required_patches)
-        output += 'Required patches are applied: [%s]\n' \
-                  % (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
-        if not success:
-            output += '-> Patches not applied: [%s]\n' \
-                % ', '.join(missing_patches)
-        health_ok = health_ok and success
 
         # check if k8s version is valid
         success, active_version = self._check_kube_version(SUPPORTED_K8S_VERSIONS)
@@ -290,6 +269,31 @@ class UpgradeHealthCheck(HealthCheck):
                        'cert/key to be used by the issuer.\n')
         else:
             LOG.info("system-local-ca has a valid private key.")
+        health_ok = health_ok and success
+
+        # run health check for 22.12, if is the case, and return.
+        # Otherwise, continue with the rest of the prechecks
+        # TODO(ShawnLi): remove this once upgrade from 22.12 is deprecated
+        if SW_VERSION == '22.12':
+            success, output_2212 = self.run_health_check_in_from_release()
+            health_ok = health_ok and success
+            output += output_2212
+            return health_ok, output
+
+        # check if it is a valid upgrade path
+        success, active_release, required_patches = self._check_valid_upgrade_path()
+        output += 'Valid upgrade path from release %s to %s: [%s]\n' \
+                  % (active_release, self._major_release,
+                     HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
+        health_ok = health_ok and success
+
+        # check if required patches are deployed
+        success, missing_patches = self._check_required_patches_state(required_patches)
+        output += 'Required patches are applied: [%s]\n' \
+                  % (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
+        if not success:
+            output += '-> Patches not applied: [%s]\n' \
+                % ', '.join(missing_patches)
         health_ok = health_ok and success
 
         return health_ok, output
