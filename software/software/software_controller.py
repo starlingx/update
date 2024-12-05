@@ -58,6 +58,7 @@ from software.exceptions import InvalidOperation
 from software.exceptions import HostAgentUnreachable
 from software.exceptions import HostIpNotFound
 from software.exceptions import MaxReleaseExceeded
+from software.exceptions import ServiceParameterNotFound
 from software.release_data import reload_release_data
 from software.release_data import get_SWReleaseCollection
 from software.software_functions import collect_current_load_for_hosts
@@ -97,6 +98,7 @@ from software.sysinv_utils import is_system_controller
 from software.sysinv_utils import update_host_sw_version
 from software.sysinv_utils import are_all_hosts_unlocked_and_online
 from software.sysinv_utils import get_system_info
+from software.sysinv_utils import get_oot_drivers
 
 from software.db.api import get_instance
 
@@ -545,12 +547,13 @@ class PatchMessageQueryDetailedResp(messages.PatchMessage):
 
 
 class PatchMessageAgentInstallReq(messages.PatchMessage):
-    def __init__(self):
+    def __init__(self, additional_data=None):
         messages.PatchMessage.__init__(self, messages.PATCHMSG_AGENT_INSTALL_REQ)
         self.ip = None
         self.force = False
         self.major_release = None
         self.commit_id = None
+        self.additional_data = additional_data
 
     def encode(self):
         global sc
@@ -558,14 +561,17 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
         self.message['force'] = self.force
         self.message['major_release'] = self.major_release
         self.message['commit_id'] = self.commit_id
+        if self.additional_data:
+            self.message['additional_data'] = self.additional_data.copy()
 
     def handle(self, sock, addr):
         LOG.error("Should not get here")
 
     def send(self, sock):
-        LOG.info("sending install request to node: %s", self.ip)
         self.encode()
         message = json.dumps(self.message)
+        msg = f"sending install request to node: {self.ip} with {message}"
+        LOG.info(msg)
         sock.sendto(str.encode(message), (self.ip, cfg.agent_port))
 
 
@@ -3861,6 +3867,7 @@ class PatchController(PatchService):
         # Check if there is a major release deployment in progress
         # and set agent request parameters accordingly
         major_release = None
+        additional_data = {}
         if is_major_release:
             upgrade_release = self.get_software_upgrade()
             major_release = upgrade_release["to_release"]
@@ -3878,13 +3885,31 @@ class PatchController(PatchService):
                 deploy_host_state.deploy_failed()
                 raise
 
+            # TODO(bqian) This code below is for upgrading to stx-10. Beside the code is specific for the upgrade
+            # path, the solution is also temporary. Need a better design with smooth support of host deploy with
+            # predetermined parameters
+            impacted_upgrade = ["24.09", "22.12"]
+            if upgrade_release["to_release"] in impacted_upgrade and \
+                    upgrade_release["from_release"] in impacted_upgrade:
+                if rollback:
+                    oot_drivers = ""
+                else:
+                    try:
+                        oot_drivers = get_oot_drivers()
+                    except ServiceParameterNotFound:
+                        # the oot_drivers should be identical to the new default service parameter declare in
+                        # config/controllerconfig/controllerconfig/upgrade-scripts/26-add-service-parameter.py#L52
+                        oot_drivers = "ice,i40e,iavf"
+
+                additional_data.update({"out-of-tree-drivers": oot_drivers})
+
         self.hosts_lock.acquire()
         self.hosts[ip].install_pending = True
         self.hosts[ip].install_status = False
         self.hosts[ip].install_reject_reason = None
         self.hosts_lock.release()
 
-        installreq = PatchMessageAgentInstallReq()
+        installreq = PatchMessageAgentInstallReq(additional_data)
         installreq.ip = ip
         installreq.force = force
         installreq.major_release = major_release

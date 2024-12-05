@@ -383,6 +383,54 @@ class RestartKubeApiServer(BaseHook):
                     cmd, e.stdout.decode('utf-8'), e.stderr.decode('utf-8')))
 
 
+class UpdateKernelParameters(BaseHook):
+    def __init__(self, attrs):
+        super().__init__()
+        self._major_release = None
+        if "major_release" in attrs:
+            self._major_release = attrs.get("major_release")
+        if "from_release" in attrs:
+            self._from_release = attrs.get("from_release")
+        if "additional_data" in attrs:
+            self._additional_data = attrs.get("additional_data")
+        else:
+            self._additional_data = {}
+        msg = f"attrs {attrs} additional data {self._additional_data}"
+        LOG.info(msg)
+
+    def update_kernel_parameters(self, names):
+        for name in names:
+            if name in self._additional_data:
+                value = self._additional_data[name]
+                if value:
+                    cmd = ['/usr/sbin/grubby',
+                           '--update-kernel=ALL',
+                           f'--args={name}={value}']
+                    msg = f"Updated grub for {name}={value}."
+                    LOG.info(msg)
+                else:
+                    cmd = ['/usr/sbin/grubby',
+                           '--update-kernel=ALL',
+                           '--remove-args={name}']
+                    msg = f"Remove kernel parameter {name}."
+                    LOG.info(msg)
+                try:
+                    subprocess.check_call(cmd)
+                except subprocess.CalledProcessError as e:
+                    LOG.exception("Failed to update grub for out of tree drivers.: %s" % str(e))
+
+    def run(self):
+        """Execute the hook"""
+        parameter_names = []
+        subfunction = utils.get_platform_conf("subfunction")
+        if self._major_release and "22.12" == self._from_release:
+            if "worker" in subfunction:
+                parameter_names.append("oot_drivers")
+                LOG.info("Set out-of-tree-drivers for rollback to 22.12")
+
+        self.update_kernel_parameters(parameter_names)
+
+
 # pre and post keywords
 PRE = "pre"
 POST = "post"
@@ -399,6 +447,7 @@ AGENT_HOOKS = {
             ReconfigureKernelHook,
             UpdateKernelParametersHook,
             EnableNewServicesHook,
+            UpdateKernelParameters,
             # enable usm-initialize service for next reboot only
             # if everything else is done
             UsmInitHook,
@@ -408,6 +457,7 @@ AGENT_HOOKS = {
             ReconfigureKernelHook,
             RemoveCephMonHook,
             RestartKubeApiServer,
+            UpdateKernelParameters,
             # enable usm-initialize service for next reboot only
             # if everything else is done
             UsmInitHook,
@@ -437,10 +487,18 @@ class HookManager(object):
         self._run_hooks()
 
     @staticmethod
-    def create_hook_manager(software_version):
+    def create_hook_manager(software_version, additional_data=None):
         # check if received version is greater (upgrade) or not (rollback)
         if utils.compare_release_version(software_version, constants.SW_VERSION):
-            LOG.info("Upgrading from %s to %s" % (constants.SW_VERSION, software_version))
-            return HookManager(MAJOR_RELEASE_UPGRADE, {"major_release": software_version})
-        LOG.info("Rolling back from %s to %s" % (constants.SW_VERSION, software_version))
-        return HookManager(MAJOR_RELEASE_ROLLBACK, {"major_release": software_version})
+            LOG.info("Upgrading from %s to %s additional_data %s" % (constants.SW_VERSION,
+                                                                     software_version,
+                                                                     additional_data))
+            return HookManager(MAJOR_RELEASE_UPGRADE, {"major_release": software_version,
+                                                       "from_release": constants.SW_VERSION,
+                                                       "additional_data": additional_data})
+        LOG.info("Rolling back from %s to %s additional_data %s" % (constants.SW_VERSION,
+                                                                    software_version,
+                                                                    additional_data))
+        return HookManager(MAJOR_RELEASE_ROLLBACK, {"major_release": software_version,
+                                                    "from_release": constants.SW_VERSION,
+                                                    "additional_data": additional_data})

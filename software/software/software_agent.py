@@ -274,15 +274,20 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
         self.force = False
         self.major_release = None
         self.commit_id = None
+        self.additional_data = {}
 
     def decode(self, data):
         messages.PatchMessage.decode(self, data)
+        msg = f"Received InstallReq {data}"
+        LOG.info(msg)
         if 'force' in data:
             self.force = data['force']
         if 'major_release' in data:
             self.major_release = data['major_release']
         if 'commit_id' in data:
             self.commit_id = data['commit_id']
+        if 'additional_data' in data:
+            self.additional_data = data['additional_data']
 
     def encode(self):
         # Nothing to add to the HELLO_AGENT, so just call the super class
@@ -310,7 +315,8 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
                 resp.send(sock, addr)
                 return
         resp.status = pa.handle_install(major_release=self.major_release,
-                                        commit_id=self.commit_id)
+                                        commit_id=self.commit_id,
+                                        additional_data=self.additional_data)
         resp.send(sock, addr)
 
     def send(self, sock):  # pylint: disable=unused-argument
@@ -571,7 +577,8 @@ class PatchAgent(PatchService):
                        disallow_insvc_patch=False,
                        delete_older_deployments=False,
                        major_release=None,
-                       commit_id=None):
+                       commit_id=None,
+                       additional_data=None):
         #
         # The disallow_insvc_patch parameter is set when we're installing
         # the patch during init. At that time, we don't want to deal with
@@ -612,7 +619,8 @@ class PatchAgent(PatchService):
                     LOG.info("Major release deployment %s flag found. "
                              "Running hooks." % run_hooks_flag)
                     try:
-                        hook_manager = agent_hooks.HookManager.create_hook_manager(major_release)
+                        hook_manager = agent_hooks.HookManager.create_hook_manager(major_release,
+                                                                                   additional_data)
                         hook_manager.run_hooks()
                         clearflag(run_hooks_flag)
                     except Exception as e:
@@ -654,7 +662,8 @@ class PatchAgent(PatchService):
                 return False
 
             ref = "%s:%s" % (remote, constants.OSTREE_REF)
-            hook_manager = agent_hooks.HookManager.create_hook_manager(major_release)
+            hook_manager = agent_hooks.HookManager.create_hook_manager(major_release,
+                                                                       additional_data)
 
         self.state = constants.PATCH_AGENT_STATE_INSTALLING
         setflag(patch_installing_file)
