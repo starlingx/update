@@ -19,13 +19,10 @@ function _swpatch()
     #  The available sw-patch subcommands
     #
     local subcommands="
-        apply
         commit
-        delete
         query
         query-dependencies
         query-hosts
-        remove
         show
         upload
         upload-dir
@@ -36,13 +33,6 @@ function _swpatch()
         report-app-dependencies
         query-app-dependencies
     "
-    if [ -f /etc/platform/.initial_config_complete ]; then
-        # Post-config, so the host-install commands are accessible
-        subcommands="${subcommands} host-install host-install-async"
-    else
-        # Pre-config, so the install-local command is accessible
-        subcommands="${subcommands} install-local"
-    fi
 
     # Appends the '/' when completing dir names
     set mark-directories on
@@ -52,27 +42,10 @@ function _swpatch()
         #  Complete the arguments to the subcommands.
         #
         case "$subcommand" in
-            apply|delete|show|what-requires|is-applied|is-available)
+            show|what-requires|is-applied|is-available)
                 # Query the list of known patches
                 local patches=$(sw-patch completion patches 2>/dev/null)
                 COMPREPLY=( $(compgen -W "${patches}" -- ${cur}) )
-                return 0
-                ;;
-            remove)
-                # Query the list of known patches
-                local patches=$(sw-patch completion patches 2>/dev/null)
-                COMPREPLY=( $(compgen -W "--skipappcheck ${patches}" -- ${cur}) )
-                return 0
-                ;;
-            host-install|host-install-async|drop-host)
-                if [ "${prev}" = "${subcommand}" -o "${prev}" = "--force" ]; then
-                    # Query the list of known hosts
-                    local names=$(sw-patch completion hosts 2>/dev/null)
-                    COMPREPLY=( $(compgen -W "${names}" -- ${cur}) )
-                else
-                    # Only one host can be specified, so no more completion
-                    COMPREPLY=( $(compgen -- ${cur}) )
-                fi
                 return 0
                 ;;
             upload)
