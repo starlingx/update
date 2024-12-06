@@ -40,7 +40,11 @@ def main():
 
         api_cmd = usm_endpoint + "/deploy/software_sync"
         method = 'POST'
-        output = upgrade_utils.call_api(usm_token, method, api_cmd)
+        output = upgrade_utils.call_api(
+            usm_token,
+            method,
+            api_cmd,
+            timeout_in_secs=constants.TIMEOUT_SYNC_API_CALL)
 
         result = output.get("result")
         if not result:
