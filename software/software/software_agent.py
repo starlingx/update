@@ -541,6 +541,7 @@ class PatchAgent(PatchService):
         # checks if this is a major release deployment operation
         if major_release:
             self.changes = True
+            self.latest_feed_commit = None
             return True
 
         # latest_feed_commit is sent from patch controller
@@ -707,7 +708,7 @@ class PatchAgent(PatchService):
                 # "/sysroot/ostree/repo/config" file
                 ostree_utils.pull_ostree_from_remote(remote=remote)
 
-                self.query()  # Updates following self variables
+                self.query(major_release=major_release)  # Updates following self variables
                 if self.latest_feed_commit:
                     # If latest_feed_commit is not null, the node can check the deployment health
                     if self.latest_sysroot_commit == self.latest_feed_commit:
@@ -734,7 +735,7 @@ class PatchAgent(PatchService):
                                 LOG.warning("Deloyment not created in %d attempt(s)", retries)
                                 time.sleep(10)
                     else:
-                        LOG.error("Sysroot commit does not match the feed commit."
+                        LOG.error("Sysroot commit does not match the feed commit. "
                                   "Skipping deployment retries")
                 else:
                     # If not able to retrieve latest_feed_commit, proceed without retries
