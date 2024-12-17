@@ -42,7 +42,7 @@ def configure_logging():
 
 
 def execute_migration_scripts(from_release, to_release, action, port=None,
-                              migration_script_dir="/etc/upgrade.d"):
+                              migration_script_dir="/usr/local/share/upgrade.d"):
     """Execute deployment scripts with an action:
           start: Prepare for upgrade on release N side. Called during
                  "system upgrade-start".
