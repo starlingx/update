@@ -15,6 +15,7 @@ to the controller.
 """
 
 import argparse
+import configparser
 import glob
 import logging as LOG
 import os
@@ -129,13 +130,14 @@ def load_import(from_release, to_major_rel, iso_mount_dir):
                 LOG.info("Copied %s to %s", src_abs_path, to_feed_dir)
 
         # Add min-free-space-percent to feed ostree config file
-        config_path = "%s/ostree_repo/config" % to_feed_dir
+        config_path = os.path.join(to_feed_dir, "ostree_repo/config")
         if os.path.exists(config_path):
-            with open(config_path, 'r') as file:
-                content = file.read()
-            if "min-free-space-percent" not in content:
-                with open(config_path, 'a') as file:
-                    file.write("min-free-space-percent=0\n")
+            config = configparser.ConfigParser()
+            config.read(config_path)
+            config.set("core", "min-free-space-percent", "0")
+
+            with open(config_path, 'w') as file:
+                config.write(file, space_around_delimiters=False)
 
         # Create 'starlingx' remote on the feed ostree_repo
         cmd = ["ostree", "remote", "add", "--repo=%s/ostree_repo/" % to_feed_dir,
