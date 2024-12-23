@@ -80,7 +80,9 @@ class HealthCheck(object):
                 license_file.write(license_dict["content"])
                 subprocess.check_call(["/usr/bin/verify-license",  # pylint: disable=not-callable
                                        license_file.name,
-                                       version])
+                                       version],
+                                      stdout=subprocess.DEVNULL,
+                                      stderr=subprocess.STDOUT)
             except subprocess.CalledProcessError:
                 return False
         return True
