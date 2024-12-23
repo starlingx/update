@@ -402,22 +402,24 @@ class UpdateKernelParameters(BaseHook):
         for name in names:
             if name in self._additional_data:
                 value = self._additional_data[name]
-                if value:
-                    cmd = ['/usr/sbin/grubby',
-                           '--update-kernel=ALL',
-                           f'--args={name}={value}']
-                    msg = f"Updated grub for {name}={value}."
-                    LOG.info(msg)
-                else:
-                    cmd = ['/usr/sbin/grubby',
-                           '--update-kernel=ALL',
-                           '--remove-args={name}']
-                    msg = f"Remove kernel parameter {name}."
-                    LOG.info(msg)
                 try:
-                    subprocess.check_call(cmd)
+                    if value:
+                        cmd = "python /usr/local/bin/puppet-update-grub-env.py --remove-kernelparams {name}"
+                        subprocess.run(cmd, shell=True, check=True, capture_output=True)
+                        msg = f"Removed kernel parameter: {name}"
+                        LOG.info(msg)
+
+                        cmd = "python /usr/local/bin/puppet-update-grub-env.py --add-kernelparams {name}={value}"
+                        subprocess.run(cmd, shell=True, check=True, capture_output=True)
+                        msg = f"Updated kernel parameter: {name}={value}"
+                        LOG.info(msg)
+                    else:
+                        cmd = "python /usr/local/bin/puppet-update-grub-env.py --remove-kernelparams {name}"
+                        subprocess.run(cmd, shell=True, check=True, capture_output=True)
+                        msg = f"Removed kernel parameter: {name}"
+                        LOG.info(msg)
                 except subprocess.CalledProcessError as e:
-                    LOG.exception("Failed to update grub for out of tree drivers.: %s" % str(e))
+                    LOG.exception("Failed to update boot.env for out of tree drivers.: %s" % str(e))
 
     def run(self):
         """Execute the hook"""
