@@ -404,17 +404,17 @@ class UpdateKernelParameters(BaseHook):
                 value = self._additional_data[name]
                 try:
                     if value:
-                        cmd = "python /usr/local/bin/puppet-update-grub-env.py --remove-kernelparams {name}"
+                        cmd = f"python /usr/local/bin/puppet-update-grub-env.py --remove-kernelparams {name}"
                         subprocess.run(cmd, shell=True, check=True, capture_output=True)
                         msg = f"Removed kernel parameter: {name}"
                         LOG.info(msg)
 
-                        cmd = "python /usr/local/bin/puppet-update-grub-env.py --add-kernelparams {name}={value}"
+                        cmd = f"python /usr/local/bin/puppet-update-grub-env.py --add-kernelparams {name}={value}"
                         subprocess.run(cmd, shell=True, check=True, capture_output=True)
                         msg = f"Updated kernel parameter: {name}={value}"
                         LOG.info(msg)
                     else:
-                        cmd = "python /usr/local/bin/puppet-update-grub-env.py --remove-kernelparams {name}"
+                        cmd = f"python /usr/local/bin/puppet-update-grub-env.py --remove-kernelparams {name}"
                         subprocess.run(cmd, shell=True, check=True, capture_output=True)
                         msg = f"Removed kernel parameter: {name}"
                         LOG.info(msg)
