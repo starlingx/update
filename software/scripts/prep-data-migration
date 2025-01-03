@@ -3,7 +3,7 @@
 #
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 #
-# Copyright (c) 2023-2024 Wind River Systems, Inc.
+# Copyright (c) 2023-2025 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -209,7 +209,7 @@ class DataMigration(object):
         Export /etc directory to $rootdir/etc
         """
         src_dirs = ["platform", "sudoers.d"]
-        src_files = ["passwd", "shadow", "sudoers", "resolv.conf"]
+        src_files = ["shadow", "sudoers", "resolv.conf"]
         devnull = open(os.devnull, 'w')
         try:
             # Create $rootdir/etc directory
@@ -222,7 +222,7 @@ class DataMigration(object):
                 subprocess.check_call(["cp", "-r", temp_src_dir, etc_dest_dir],
                                       stdout=devnull)
                 LOG.info("Copied files in %s to %s/%s completed", temp_src_dir, etc_dest_dir, src_dir)
-            # Copy /etc/passwd, /etc/shadow, /etc/sudoers, /etc/resolv.conf files
+            # Copy /etc/shadow, /etc/sudoers, /etc/resolv.conf files
             for src_file in src_files:
                 temp_src_file = os.path.join("/etc", src_file)
                 temp_dest_file = os.path.join(etc_dest_dir, src_file)
