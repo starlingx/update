@@ -424,11 +424,9 @@ class UpdateKernelParameters(BaseHook):
     def run(self):
         """Execute the hook"""
         parameter_names = []
-        subfunction = utils.get_platform_conf("subfunction")
-        if self._major_release and "22.12" == self._from_release:
-            if "worker" in subfunction:
-                parameter_names.append("oot_drivers")
-                LOG.info("Set out-of-tree-drivers for rollback to 22.12")
+        if self._major_release and "24.09" == self._from_release:
+            parameter_names.append("out-of-tree-drivers")
+            LOG.info("Set out-of-tree-drivers for rollback to 22.12")
 
         self.update_kernel_parameters(parameter_names)
 
