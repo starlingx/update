@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023-2024 Wind River Systems, Inc.
+Copyright (c) 2023-2025 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -511,5 +511,11 @@ def find_file_by_regex(dir_path, pattern):
     :param pattern: regex pattern
     :return: list of matching files
     """
-    compiled_pattern = re.compile(pattern)
-    return [file for file in os.listdir(dir_path) if compiled_pattern.match(file)]
+    if not os.path.exists(dir_path):
+        return []
+    try:
+        compiled_pattern = re.compile(pattern)
+        return [file for file in os.listdir(dir_path) if compiled_pattern.match(file)]
+    except Exception:
+        LOG.error("Can't find files by regex pattern in directory %s." % dir_path)
+        return []
