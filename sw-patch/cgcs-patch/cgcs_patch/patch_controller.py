@@ -1,5 +1,5 @@
 """
-Copyright (c) 2014-2022 Wind River Systems, Inc.
+Copyright (c) 2014-2025 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -18,6 +18,7 @@ import tarfile
 import tempfile
 import threading
 import time
+from packaging import version
 from wsgiref import simple_server
 
 from oslo_config import cfg as oslo_cfg
@@ -828,6 +829,14 @@ class PatchController(PatchService):
             for patch_id in self.patch_data.metadata:
                 self.patch_data.metadata[patch_id]["patchstate"] = constants.UNKNOWN
             return
+
+        # If the active controller running release > 22.12 then it
+        # should not check or change legacy patch API states
+        try:
+            if version.Version(SW_VERSION) > version.Version("22.12"):
+                return
+        except Exception as e:
+            LOG.warning("Unable to identify running release: %s", str(e))
 
         # Default to allowing in-service patching
         self.allow_insvc_patching = True
