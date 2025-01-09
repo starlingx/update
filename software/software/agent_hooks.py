@@ -43,9 +43,19 @@ class BaseHook(object):
 
 
 class UsmInitHook(BaseHook):
+    USM_CONTROLLER_SERVICES = ["software-controller.service"]
+
+    def _enable_controller_services(self):
+        nodetype = utils.get_platform_conf("nodetype")
+        if nodetype == constants.CONTROLLER:
+            LOG.info("Enabling USM controller services")
+            for service in self.USM_CONTROLLER_SERVICES:
+                self.enable_service(service)
+
     def run(self):
         self.enable_service("usm-initialize.service")
         LOG.info("Enabled usm-initialize.service on next reboot")
+        self._enable_controller_services()
 
 
 class EnableNewServicesHook(BaseHook):
