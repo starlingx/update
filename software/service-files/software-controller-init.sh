@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright (c) 2023 Wind River Systems, Inc.
+# Copyright (c) 2023-2025 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -52,10 +52,17 @@ function do_setup {
         grep -xq "gpg-verify=false" $FEED_OSTREE_CONFIG || sed -i '$a gpg-verify=false' $FEED_OSTREE_CONFIG
         grep -xq "gpg-verify=false" $SYSROOT_OSTREE_CONFIG || sed -i '$a gpg-verify=false' $SYSROOT_OSTREE_CONFIG
 
+        LOG "apt-ostree repo init --feed $REPO_DIR --release $RELEASE --origin $REPO_ID ..."
         apt-ostree repo init \
             --feed $REPO_DIR \
             --release $RELEASE \
             --origin $REPO_ID
+
+        if [ $? -eq 0 ]; then
+            LOG "... done"
+        else
+            LOG "... failed"
+        fi
     fi
 
     if [ ! -d $PATCHING_DIR ]; then
@@ -76,13 +83,27 @@ function do_setup {
         return 0
     fi
 
+    # TODO(bqian) review this rsync below, it could break the atomic data sync mechanism
     # Sync the software dir
     LOG_TO_FILE "rsync -acv --delete rsync://controller/software/ ${PATCHING_DIR}/"
     rsync -acv --delete rsync://controller/software/ ${PATCHING_DIR}/ >> $logfile 2>&1
 
-    # Sync the repo dir
-    LOG_TO_FILE "rsync -acv --delete rsync://controller/repo/ ${REPO_ROOT}/"
-    rsync -acv --delete rsync://controller/repo/ ${REPO_ROOT}/ >> $logfile 2>&1
+    # sync the repo from peer controller if both are running the same sw_version
+    tmp_dir=$(mktemp -d)
+    rsync -acv rsync://controller/platform/platform.conf ${tmp_dir}
+    my_tag="^sw_version=${SW_VERSION}$"
+    grep ${my_tag} ${tmp_dir}/platform.conf
+    rc=$?
+    rm ${tmp_dir}/platform.conf
+    rmdir ${tmp_dir}
+
+    if [ ${rc} -eq 0 ]; then
+        # Sync the repo dir
+        LOG_TO_FILE "rsync -acv --delete rsync://controller/repo/ ${REPO_ROOT}/"
+        rsync -acv --delete rsync://controller/repo/ ${REPO_ROOT}/ >> $logfile 2>&1
+    else
+        LOG "Skip rsync. Peer is not running the same software version"
+    fi
 }
 
 case "$1" in
