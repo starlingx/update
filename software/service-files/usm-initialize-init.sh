@@ -1,6 +1,6 @@
 #! /bin/sh
 #
-# Copyright (c) 2024 Wind River Systems, Inc.
+# Copyright (c) 2025 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -47,7 +47,7 @@ log() {
 
 set_presets() {
     log "apply preset"
-    if [ "${system_type}" == "All-in-one" ] ; then
+    if [ "${system_type}" == "All-in-one" -a "${nodetype}" == "controller"] ; then
         log "AIO System"
         if [[ "${subfunction}" =~ "lowlatency" ]] ; then
             log "System is lowlatency"
@@ -56,7 +56,7 @@ set_presets() {
             ln -sf /usr/share/systemd-presets/aio.preset /etc/systemd/system-preset/10-aio.preset
         fi
     else
-        log "Standard System"
+        log "Standard System or AIO-Worker System"
         log "Setting ${nodetype} preset"
         if [[ "${nodetype}" == "worker" ]] ; then
             if [[ "${subfunction}" =~ "lowlatency" ]] ; then
