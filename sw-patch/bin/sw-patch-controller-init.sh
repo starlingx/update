@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright (c) 2014 Wind River Systems, Inc.
+# Copyright (c) 2014-2025 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -66,9 +66,22 @@ function do_setup {
     LOG_TO_FILE "rsync -acv --delete rsync://controller/patching/ ${PATCHING_DIR}/"
     rsync -acv --delete rsync://controller/patching/ ${PATCHING_DIR}/ >> $logfile 2>&1
 
-    # Sync the patching dir
-    LOG_TO_FILE "rsync -acv --delete rsync://controller/repo/ ${REPO_ROOT}/"
-    rsync -acv --delete rsync://controller/repo/ ${REPO_ROOT}/ >> $logfile 2>&1
+    # sync the repo from peer controller if both are running the same sw_version
+    tmp_dir=$(mktemp -d)
+    rsync -acv rsync://controller/platform/platform.conf ${tmp_dir}
+    my_tag="^sw_version=${SW_VERSION}$"
+    grep ${my_tag} ${tmp_dir}/platform.conf
+    rc=$?
+    rm ${tmp_dir}/platform.conf
+    rmdir ${tmp_dir}
+
+    if [ ${rc} -eq 0 ]; then
+        # Sync the repo dir
+        LOG_TO_FILE "rsync -acv --delete rsync://controller/repo/ ${REPO_ROOT}/"
+        rsync -acv --delete rsync://controller/repo/ ${REPO_ROOT}/ >> $logfile 2>&1
+    else
+        LOG "Skip rsync. Peer is not running the same software version"
+    fi
 }
 
 case "$1" in
