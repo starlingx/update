@@ -166,7 +166,7 @@ def get_sysroot_latest_commit():
     Query ostree sysroot to determine the currently active commit
     :return: The latest commit for sysroot repo
     """
-    return get_ostree_latest_commit(constants.OSTREE_REF, constants.SYSROOT_OSTREE)
+    return get_ostree_latest_commit(constants.SYSROOT_OSTREE_REF, constants.SYSROOT_OSTREE)
 
 
 def get_all_feed_commits(patch_sw_version):
@@ -360,7 +360,7 @@ def create_deployment(ref=None):
     sync_boot_entries()
 
     if not ref:
-        ref = constants.OSTREE_REF
+        ref = constants.SYSROOT_OSTREE_REF
     cmd = "ostree admin deploy %s --no-prune --retain" % ref
 
     try:
