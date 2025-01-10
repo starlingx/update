@@ -78,6 +78,7 @@ class HealthCheck(object):
         with tempfile.NamedTemporaryFile(mode="w", delete=True) as license_file:
             try:
                 license_file.write(license_dict["content"])
+                license_file.flush()
                 subprocess.check_call(["/usr/bin/verify-license",  # pylint: disable=not-callable
                                        license_file.name,
                                        version],
