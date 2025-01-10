@@ -28,7 +28,9 @@ def do_list(cc, args):
     rc = utils.check_rc(resp, data)
     if rc == 0:
         header_data_list = {"Release": "release_id", "RR": "reboot_required", "State": "state"}
-        utils.display_result_list(header_data_list, data)
+        sorted_data = sorted(data, key=lambda x: x['release_id'].translate(
+            dict.fromkeys(map(ord, "-_."), "-")))
+        utils.display_result_list(header_data_list, sorted_data)
     else:
         utils.display_info(resp)
 
