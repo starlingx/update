@@ -1647,3 +1647,18 @@ def copy_pxeboot_update_file(to_major_release, rollback=False):
         except Exception as e:
             LOG.exception("Error copying %s file: %s" % (filename, str(e)))
             raise
+
+
+def copy_pxeboot_cfg_files(to_major_release):
+    """
+    Copies pxeboot.cfg.files from feed to /var/pxeboot/pxelinux.cfg.files if needed
+    :param to_major_release: MM.mm (e.g. 24.09)
+    """
+    src_dir = constants.FEED_DIR + "/rel-%s/pxeboot/pxelinux.cfg.files/" % to_major_release
+    dst_dir = "/var/pxeboot/pxelinux.cfg.files"
+    try:
+        shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
+        LOG.info("Copied %s to %s" % (src_dir, dst_dir))
+    except Exception:
+        LOG.exception("Error copying files from %s to: %s" % (src_dir, dst_dir))
+        raise
