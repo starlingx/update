@@ -26,7 +26,7 @@ NAME=$(basename $0)
 logfile=/var/log/software.log
 software_install_failed_file=/var/run/software_install_failed
 software_updated_during_init_file=/etc/software/.software_updated_during_init
-node_is_software_updated_rr_file=/var/run/node_is_software_updated_rr
+node_is_software_updated_rr_file=/var/persist/software-agent/node_is_software_updated_rr
 
 # if the system has never been bootstrapped, system_mode is not set
 # treat a non bootstrapped system like it is simplex
