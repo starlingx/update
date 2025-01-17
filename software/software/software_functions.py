@@ -1657,8 +1657,9 @@ def copy_pxeboot_cfg_files(to_major_release):
     src_dir = constants.FEED_DIR + "/rel-%s/pxeboot/pxelinux.cfg.files/" % to_major_release
     dst_dir = "/var/pxeboot/pxelinux.cfg.files"
     try:
-        shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
-        LOG.info("Copied %s to %s" % (src_dir, dst_dir))
+        if os.path.exists(src_dir):
+            shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
+            LOG.info("Copied %s to %s" % (src_dir, dst_dir))
     except Exception:
         LOG.exception("Error copying files from %s to: %s" % (src_dir, dst_dir))
         raise
