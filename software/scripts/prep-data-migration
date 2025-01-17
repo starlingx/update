@@ -208,7 +208,7 @@ class DataMigration(object):
         """
         Export /etc directory to $rootdir/etc
         """
-        src_dirs = ["platform", "sudoers.d"]
+        src_dirs = ["platform", "sudoers.d", "ceph"]
         src_files = ["shadow", "sudoers", "resolv.conf"]
         devnull = open(os.devnull, 'w')
         try:
