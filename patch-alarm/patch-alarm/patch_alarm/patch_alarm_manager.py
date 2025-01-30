@@ -89,6 +89,19 @@ class PatchAlarmDaemon(object):
     def check_patch_alarms(self):
         self._handle_patch_alarms()
         self._get_handle_failed_hosts()
+        self._handle_pip_alarm()
+
+    def _handle_pip_alarm(self):
+        entity_instance_id = "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, "controller")
+
+        # Alarm from prior release that's no longer relevant
+        # could've been raised inadvertently when software api is missing during upgrade
+        pip_alarm = self.fm_api.get_fault(fm_constants.FM_ALARM_ID_PATCH_IN_PROGRESS,
+                                          entity_instance_id)
+        if pip_alarm:
+            LOG.info("Clearing patch-in-progress alarm")
+            self.fm_api.clear_fault(fm_constants.FM_ALARM_ID_PATCH_IN_PROGRESS,
+                                    entity_instance_id)
 
     def _handle_patch_alarms(self):
         url = "http://%s/v1/release" % self.api_addr
