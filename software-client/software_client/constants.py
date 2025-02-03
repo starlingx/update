@@ -1,46 +1,49 @@
 #
-# Copyright (c) 2023-2024 Wind River Systems, Inc.
+# Copyright (c) 2023-2025 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
 
+# Network
 ADDRESS_VERSION_IPV4 = 4
 ADDRESS_VERSION_IPV6 = 6
 CONTROLLER_FLOATING_HOSTNAME = "controller"
+LOOPBACK_INTERFACE_NAME = "lo"
 
 SOFTWARE_STORAGE_DIR = "/opt/software"
 
+# USM state and Patch status
+DEPLOYED = 'deployed'
+DEPLOYING = 'deploying'
+FAILED = 'failed'
+PENDING = 'pending'
 PATCH_AGENT_STATE_IDLE = "idle"
 PATCH_AGENT_STATE_INSTALLING = "installing"
 PATCH_AGENT_STATE_INSTALL_FAILED = "install-failed"
 PATCH_AGENT_STATE_INSTALL_REJECTED = "install-rejected"
 
+# Status
 STATUS_DEVELOPEMENT = 'DEV'
 STATUS_OBSOLETE = 'OBS'
 STATUS_RELEASED = 'REL'
 
-LOOPBACK_INTERFACE_NAME = "lo"
-
+# Semantic
 SEMANTIC_PREAPPLY = 'pre-apply'
 SEMANTIC_PREREMOVE = 'pre-remove'
 SEMANTIC_ACTIONS = [SEMANTIC_PREAPPLY, SEMANTIC_PREREMOVE]
 
+# Deployment status
 DEPLOYMENT_STATE_ACTIVE = "Active"
 DEPLOYMENT_STATE_INACTIVE = "Inactive"
 DEPLOYMENT_STATE_PRESTAGING = "Prestaging"
 DEPLOYMENT_STATE_PRESTAGED = "Prestaged"
 
+# Upload
 ISO_EXTENSION = ".iso"
 SIG_EXTENSION = ".sig"
 PATCH_EXTENSION = ".patch"
 SUPPORTED_UPLOAD_FILE_EXT = [ISO_EXTENSION, SIG_EXTENSION, PATCH_EXTENSION]
 SCRATCH_DIR = "/scratch"
-
-# host deploy state
-DEPLOYING = 'deploying'
-FAILED = 'failed'
-PENDING = 'pending'
-DEPLOYED = 'deployed'
 
 # Authorization modes of software cli
 KEYSTONE = 'keystone'
