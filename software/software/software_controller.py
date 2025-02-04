@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023-2024 Wind River Systems, Inc.
+Copyright (c) 2023-2025 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -100,6 +100,7 @@ from software.sysinv_utils import update_host_sw_version
 from software.sysinv_utils import are_all_hosts_unlocked_and_online
 from software.sysinv_utils import get_system_info
 from software.sysinv_utils import get_oot_drivers
+from software.sysinv_utils import trigger_evaluate_apps_reapply
 
 from software.db.api import get_instance
 
@@ -3571,6 +3572,13 @@ class PatchController(PatchService):
         if self._deploy_complete():
             deploy_state.completed()
             msg_info += "Deployment has been completed\n"
+            try:
+                # the sysinv evaluate_apps_reapply function needs to
+                # be triggered after the deploy complete.
+                trigger_evaluate_apps_reapply({"type": "usm-upgrade-complete"})
+            except Exception as e:
+                LOG.error("The attempt to trigger the evaluate apps reapply \
+                    failed with message: %s", e)
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 

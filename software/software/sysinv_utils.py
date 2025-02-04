@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023 Wind River Systems, Inc.
+Copyright (c) 2023-2025 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -145,3 +145,19 @@ def get_oot_drivers():
 
     parameter = res_list[0]
     return parameter["value"]
+
+
+def trigger_evaluate_apps_reapply(trigger):
+    """Trigger for the sysinv function evaluate_apps_reapply.
+
+    This function gets a sysinv_client and calls post_evaluate_apps_reapply,
+    passing the trigger parameter, thereby starting the evaluation process.
+    The evaluate_apps_reapply function synchronously determines whether
+    an application re-apply is needed. If so, it raises a re-apply flag.
+
+    :param trigger: dictionary containing at least the 'type' field.
+    """
+    token, endpoint = utils.get_endpoints_token()
+    sysinv_client = get_sysinv_client(token=token, endpoint=endpoint)
+    sysinv_client.kube_app.post_evaluate_apps_reapply(trigger)
+    LOG.info("Succesfully trigger the sysinv evaluate apps reapply")
