@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023-2024 Wind River Systems, Inc.
+Copyright (c) 2023-2025 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -9,6 +9,7 @@ import contextlib
 import getopt
 import glob
 import hashlib
+import importlib.util
 import logging
 import os
 import platform
@@ -1662,4 +1663,54 @@ def copy_pxeboot_cfg_files(to_major_release):
             LOG.info("Copied %s to %s" % (src_dir, dst_dir))
     except Exception:
         LOG.exception("Error copying files from %s to: %s" % (src_dir, dst_dir))
+        raise
+
+
+def load_module(path, module_name):
+    """
+    Load a module dynamically from a specified source path
+    :param path: module source path
+    :param module_name: name of the module
+    """
+    try:
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        module = importlib.util.module_from_spec(spec)
+
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        LOG.info("Loaded module %s from path %s" % (module_name, path))
+    except Exception as e:
+        LOG.exception("Error loading %s module: %s" % (module_name, str(e)))
+        raise
+
+    return module
+
+
+def execute_agent_hooks(software_version, additional_data=None):
+    """
+    Executes the agent hooks during deploy host step. The
+    agent hook file used will always be from the most recent
+    release, both for upgrade and rollback
+    :param software_version: to-release major release version
+    :param additional_data: additional data used by the hooks
+    """
+    # determine if it is a rollback and set the source directory
+    # of the agent hook file accordingly
+    if version.Version(software_version) > version.Version(constants.SW_VERSION):
+        ostree_path = "/ostree/1"
+    else:
+        ostree_path = "/ostree/2"
+
+    # load the agent hooks module dynamically
+    agent_hooks_path = os.path.normpath(ostree_path +
+                                        "/usr/lib/python3/dist-packages/software/agent_hooks.py")
+    agent_hooks = load_module(agent_hooks_path, "agent_hooks")
+    hook_manager = agent_hooks.HookManager.create_hook_manager(software_version,
+                                                               additional_data=additional_data)
+    # execute the agent hooks
+    try:
+        hook_manager.run_hooks()
+        LOG.info("Agent hooks executed successfully.")
+    except Exception as e:
+        LOG.exception("Error running agent hooks: %s" % str(e))
         raise

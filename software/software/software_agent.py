@@ -1,5 +1,5 @@
 """
-Copyright (c) 2024 Wind River Systems, Inc.
+Copyright (c) 2024-2025 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -15,9 +15,9 @@ import subprocess
 import sys
 import time
 
-import software.agent_hooks as agent_hooks
 import software.ostree_utils as ostree_utils
 from software.software_functions import configure_logging
+from software.software_functions import execute_agent_hooks
 from software.software_functions import remove_major_release_deployment_flags
 from software.software_functions import LOG
 import software.config as cfg
@@ -621,12 +621,9 @@ class PatchAgent(PatchService):
                     LOG.info("Major release deployment %s flag found. "
                              "Running hooks." % run_hooks_flag)
                     try:
-                        hook_manager = agent_hooks.HookManager.create_hook_manager(major_release,
-                                                                                   additional_data)
-                        hook_manager.run_hooks()
+                        execute_agent_hooks(major_release, additional_data=additional_data)
                         clearflag(run_hooks_flag)
-                    except Exception as e:
-                        LOG.exception("Failure running hooks: %s" % str(e))
+                    except Exception:
                         success = False
 
                 if success:
@@ -640,7 +637,6 @@ class PatchAgent(PatchService):
         # prepare major release deployment
         remote = None
         ref = None
-        hook_manager = None
         if major_release:
             LOG.info("Major release deployment for %s with commit %s" % (major_release, commit_id))
 
@@ -664,8 +660,6 @@ class PatchAgent(PatchService):
                 return False
 
             ref = "%s:%s" % (remote, constants.OSTREE_REF)
-            hook_manager = agent_hooks.HookManager.create_hook_manager(major_release,
-                                                                       additional_data)
 
         self.state = constants.PATCH_AGENT_STATE_INSTALLING
         setflag(patch_installing_file)
@@ -799,9 +793,8 @@ class PatchAgent(PatchService):
             # run deploy host hooks for major release
             if major_release:
                 try:
-                    hook_manager.run_hooks()
-                except Exception as e:
-                    LOG.exception("Failure running hooks: %s" % str(e))
+                    execute_agent_hooks(major_release, additional_data=additional_data)
+                except Exception:
                     setflag(run_hooks_flag)
                     self.set_install_failed_flags()
                     success = False

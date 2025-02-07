@@ -1,33 +1,58 @@
 """
-Copyright (c) 2024 Wind River Systems, Inc.
+Copyright (c) 2024-2025 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
+
+#####################################################################
+# NOTE: This module is loaded and executed by the N-1 python runtime
+#       environment in upgrade scenario and by the N+1 counterpart
+#       in rollback scenario, so:
+#       1. This module needs to be independent and should NOT import
+#          other project modules like constants, utils, tsconfig, etc
+#       2. This module needs to be compatible with both N+1 and N-1
+#          python environments
+#####################################################################
+import configparser
 import filecmp
 import glob
+import logging as LOG
 import os
+from packaging import version
 import re
 import shutil
 import subprocess
 
-import software.constants as constants
-from software.software_functions import LOG
-import software.utils as utils
+log_format = ('%(asctime)s: ' + '[%(process)s]: '
+              '%(filename)s(%(lineno)s): %(levelname)s: %(message)s')
+LOG.basicConfig(filename="/var/log/software.log",
+                format=log_format, level=LOG.INFO, datefmt="%FT%T")
 
 
 class BaseHook(object):
     """Base Hook object"""
-    DEPLOYED_OSTREE_DIR = "/ostree/1"
-    ROLLBACK_OSTREE_DIR = "/ostree/2"
+    TO_RELEASE_OSTREE_DIR = "/ostree/1"
+    FROM_RELEASE_OSTREE_DIR = "/ostree/2"
     SYSTEMD_LIB_DIR = "/lib/systemd/system"
-    SYSTEMD_ETC_DIR = "%s/etc/systemd/system/multi-user.target.wants" % DEPLOYED_OSTREE_DIR
+    SYSTEMD_ETC_DIR = "%s/etc/systemd/system/multi-user.target.wants" % TO_RELEASE_OSTREE_DIR
+    CONTROLLER = "controller"
+    PLATFORM_CONF_PATH = "/etc/platform/"
+    PLATFORM_CONF_FILE = os.path.join(PLATFORM_CONF_PATH, "platform.conf")
 
     def __init__(self, attrs=None):
         pass
 
     def run(self):
         pass
+
+    @staticmethod
+    def get_platform_conf(key):
+        default = "DEFAULT"
+        with open(BaseHook.PLATFORM_CONF_FILE, "r") as fp:
+            cp = configparser.ConfigParser()
+            cp.read_string(f"[{default}]\n" + fp.read())
+        return cp[default][key]
 
     def enable_service(self, service):
         src = "%s/%s" % (self.SYSTEMD_LIB_DIR, service)
@@ -43,14 +68,18 @@ class BaseHook(object):
 
 
 class UsmInitHook(BaseHook):
+    """
+    Enable the USM services on the next host reboot
+    """
     USM_CONTROLLER_SERVICES = ["software-controller.service"]
 
     def _enable_controller_services(self):
-        nodetype = utils.get_platform_conf("nodetype")
-        if nodetype == constants.CONTROLLER:
+        nodetype = self.get_platform_conf("nodetype")
+        if nodetype == self.CONTROLLER:
             LOG.info("Enabling USM controller services")
             for service in self.USM_CONTROLLER_SERVICES:
                 self.enable_service(service)
+                LOG.info("Enabled %s" % service)
 
     def run(self):
         self.enable_service("usm-initialize.service")
@@ -59,6 +88,10 @@ class UsmInitHook(BaseHook):
 
 
 class EnableNewServicesHook(BaseHook):
+    """
+    Find the new services between FROM and TO release
+    and enable the new services on the next host reboot
+    """
     SYSTEM_PRESET_DIR = "/etc/systemd/system-preset"
 
     def find_new_services(self):
@@ -77,7 +110,7 @@ class EnableNewServicesHook(BaseHook):
             from_services = [line.strip().split(" ")[1] for line in from_preset
                              if line.startswith("enable")]
         # read to-release preset
-        with open("%s/%s" % (self.DEPLOYED_OSTREE_DIR, system_preset), "r") as fp:
+        with open("%s/%s" % (self.TO_RELEASE_OSTREE_DIR, system_preset), "r") as fp:
             to_preset = fp.readlines()
             to_services = [line.strip().split(" ")[1] for line in to_preset
                            if line.startswith("enable")]
@@ -106,23 +139,23 @@ class CopyPxeFilesHook(BaseHook):
     """
     def __init__(self, attrs):
         super().__init__()
-        self._major_release = None
-        if "major_release" in attrs:
-            self._major_release = attrs.get("major_release")
+        self._to_release = None
+        if "to_release" in attrs:
+            self._to_release = attrs.get("to_release")
 
     def run(self):
         """Execute the hook"""
-        nodetype = utils.get_platform_conf("nodetype")
-        if nodetype == constants.CONTROLLER:
-            if self._major_release:
+        nodetype = self.get_platform_conf("nodetype")
+        if nodetype == self.CONTROLLER:
+            if self._to_release:
                 # copy to_release pxeboot files to /var/pxeboot/pxelinux.cfg.files
                 pxeboot_dst_dir = "/var/pxeboot/pxelinux.cfg.files/"
-                pxeboot_src_dir = self.DEPLOYED_OSTREE_DIR + pxeboot_dst_dir  # deployed to-release ostree dir
+                pxeboot_src_dir = self.TO_RELEASE_OSTREE_DIR + pxeboot_dst_dir  # deployed to-release ostree dir
                 cmd = "rsync -ac %s %s" % (pxeboot_src_dir, pxeboot_dst_dir)
                 try:
                     subprocess.run(cmd, shell=True, check=True, capture_output=True)
                     LOG.info("Copied %s pxeboot files to %s" %
-                             (self._major_release, pxeboot_dst_dir))
+                             (self._to_release, pxeboot_dst_dir))
                 except subprocess.CalledProcessError as e:
                     LOG.exception("Error copying pxeboot files from %s to %s: %s" % (
                         pxeboot_src_dir, pxeboot_dst_dir, e.stderr.decode("utf-8")))
@@ -130,8 +163,8 @@ class CopyPxeFilesHook(BaseHook):
 
                 # ensure the script pxeboot-update-<from-release>.sh is in to-release /etc
                 try:
-                    cmd = "rsync -aci %s %s/etc" % (self.ROLLBACK_OSTREE_DIR + "/etc/pxeboot-update-*.sh",
-                                                    self.DEPLOYED_OSTREE_DIR)
+                    cmd = "rsync -aci %s %s/etc" % (self.FROM_RELEASE_OSTREE_DIR + "/etc/pxeboot-update-*.sh",
+                                                    self.TO_RELEASE_OSTREE_DIR)
                     output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
                     LOG.info("Copied pxeboot-update-*.sh to /etc: %s" % output.stdout.decode("utf-8"))
                 except subprocess.CalledProcessError as e:
@@ -139,8 +172,8 @@ class CopyPxeFilesHook(BaseHook):
                                   e.stderr.decode("utf-8"))
                     raise
             else:
-                LOG.error("Cannot copy pxeboot files, major_release value is %s" %
-                          self._major_release)
+                LOG.error("Cannot copy pxeboot files, to_release value is %s" %
+                          self._to_release)
 
 
 class UpdateKernelParametersHook(BaseHook):
@@ -237,7 +270,7 @@ class ReconfigureKernelHook(BaseHook):
     def run(self):
         """Execute the hook"""
         try:
-            subfunctions = utils.get_platform_conf("subfunction")
+            subfunctions = self.get_platform_conf("subfunction")
             # copy /boot/2/kernel.env to /boot/1/kernel.env
             # this is to preserve args (ie: apparmor)
             # if the files are identical, do nothing
@@ -276,89 +309,16 @@ class ReconfigureKernelHook(BaseHook):
 
 
 class CreateUSMUpgradeInProgressFlag(BaseHook):
+    USM_UPGRADE_IN_PROGRESS_FLAG = os.path.join(BaseHook.PLATFORM_CONF_PATH,
+                                                ".usm_upgrade_in_progress")
+
     def __init__(self, attrs):
         super().__init__(attrs)
 
     def run(self):
-        flag_file = "%s/%s" % (self.DEPLOYED_OSTREE_DIR, constants.USM_UPGRADE_IN_PROGRESS_FLAG)
+        flag_file = "%s/%s" % (self.TO_RELEASE_OSTREE_DIR, self.USM_UPGRADE_IN_PROGRESS_FLAG)
         with open(flag_file, "w") as _:
             LOG.info("Created %s flag" % flag_file)
-
-
-class RemoveKubernetesConfigSymlinkHook(BaseHook):
-    K8S_ENCRYPTION_PROVIDER_FILE = "/etc/kubernetes/encryption-provider.yaml"
-    DEPLOYED_K8S_ENCRYPTION_PROVIDER_FILE = \
-        BaseHook.DEPLOYED_OSTREE_DIR + K8S_ENCRYPTION_PROVIDER_FILE
-    LUKS_K8S_ENCRYPTION_PROVIDER_FILE = \
-        "/var/luks/stx/luks_fs/controller" + K8S_ENCRYPTION_PROVIDER_FILE
-
-    def __init__(self, attrs):
-        super().__init__(attrs)
-        self._major_release = None
-        if "major_release" in attrs:
-            self._major_release = attrs.get("major_release")
-
-    def run(self):
-        if self._major_release == "22.12":
-            nodetype = utils.get_platform_conf("nodetype")
-            if nodetype == constants.CONTROLLER:
-                try:
-                    # Remove the K8S encryption provider symlink
-                    for symlink in (self.K8S_ENCRYPTION_PROVIDER_FILE, self.DEPLOYED_K8S_ENCRYPTION_PROVIDER_FILE):
-                        if os.path.exists(symlink):
-                            os.unlink(symlink)
-                            LOG.info("%s symlink removed" % symlink)
-
-                    # Copy the LUKS K8S encryption provider file to /etc/kubernetes and remove it afterward
-                    if os.path.exists(self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE):
-                        shutil.copy2(self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE, "/etc/kubernetes")
-                        LOG.info("Copied %s to /etc/kubernetes" % self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE)
-                        os.remove(self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE)
-                        LOG.info("%s file removed" % self.LUKS_K8S_ENCRYPTION_PROVIDER_FILE)
-
-                except Exception as e:
-                    LOG.exception("Failed to manage symlink or file: %s" % str(e))
-                    raise
-
-
-# TODO(heitormatsui): delete in the future, not needed for stx-10 -> <future-releases>
-class RemoveCephMonHook(BaseHook):
-    """
-    Remove additional ceph-mon added for each controller
-    """
-    PMON_FILE = "/etc/pmon.d/ceph-fixed-mon.conf"
-
-    def __init__(self, attrs):
-        super().__init__(attrs)
-        self._major_release = None
-        if "major_release" in attrs:
-            self._major_release = attrs.get("major_release")
-
-    def run(self):
-        # (DX only) on 22.12 there is 1 mon, on 24.09 there are 3
-        # so only in 24.09 -> 22.12 rollback this hook is needed
-        if self._major_release == "22.12":
-            system_type = utils.get_platform_conf("system_type")
-            system_mode = utils.get_platform_conf("system_mode")
-            nodetype = utils.get_platform_conf("nodetype")
-            # additional monitors were added only for AIO-DX
-            if (system_type == constants.SYSTEM_TYPE_ALL_IN_ONE and
-                    system_mode != constants.SYSTEM_MODE_SIMPLEX and
-                    nodetype == constants.CONTROLLER):
-                cmd_remove_mon_controller_0 = ["timeout", "30", "ceph", "mon", "rm", "controller-0"]
-                cmd_remove_mon_controller_1 = ["timeout", "30", "ceph", "mon", "rm", "controller-1"]
-                try:
-                    subprocess.check_call(cmd_remove_mon_controller_0)
-                    subprocess.check_call(cmd_remove_mon_controller_1)
-                    LOG.info("Removed mon.controller-0 and mon.controller-1 from ceph cluster.")
-                except subprocess.CalledProcessError as e:
-                    LOG.exception("Failure removing mon.controller-0 and mon.controller-1 from ceph cluster: %s" % str(e))
-                    raise
-                try:
-                    os.unlink(self.PMON_FILE)
-                    LOG.info("Removed %s from pmon." % self.PMON_FILE)
-                except FileNotFoundError:
-                    pass  # ignore if link doesn't exist
 
 
 class RestartKubeApiServer(BaseHook):
@@ -373,8 +333,8 @@ class RestartKubeApiServer(BaseHook):
         super().__init__()
 
     def run(self):
-        nodetype = utils.get_platform_conf("nodetype")
-        if nodetype == constants.CONTROLLER:
+        nodetype = self.get_platform_conf("nodetype")
+        if nodetype == self.CONTROLLER:
             try:
                 # Get and stop all kube-apiserver container IDs
                 cmd = "crictl ps | awk '/kube-apiserver/{print $1}' | xargs crictl stop"
@@ -393,96 +353,39 @@ class RestartKubeApiServer(BaseHook):
                     cmd, e.stdout.decode('utf-8'), e.stderr.decode('utf-8')))
 
 
-class UpdateKernelParameters(BaseHook):
-    def __init__(self, attrs):
-        super().__init__()
-        self._major_release = None
-        if "major_release" in attrs:
-            self._major_release = attrs.get("major_release")
-        if "from_release" in attrs:
-            self._from_release = attrs.get("from_release")
-        if "additional_data" in attrs:
-            self._additional_data = attrs.get("additional_data")
-        else:
-            self._additional_data = {}
-        msg = f"attrs {attrs} additional data {self._additional_data}"
-        LOG.info(msg)
+class HookManager(object):
+    """
+    Object to manage the execution of agent hooks
+    """
+    # actions
+    MAJOR_RELEASE_UPGRADE = "major_release_upgrade"
+    MAJOR_RELEASE_ROLLBACK = "major_release_rollback"
 
-    def update_kernel_parameters(self, names):
-        for name in names:
-            if name in self._additional_data:
-                value = self._additional_data[name]
-                try:
-                    if value:
-                        cmd = f"python /usr/local/bin/puppet-update-grub-env.py --remove-kernelparams {name}"
-                        subprocess.run(cmd, shell=True, check=True, capture_output=True)
-                        msg = f"Removed kernel parameter: {name}"
-                        LOG.info(msg)
-
-                        cmd = f"python /usr/local/bin/puppet-update-grub-env.py --add-kernelparams {name}={value}"
-                        subprocess.run(cmd, shell=True, check=True, capture_output=True)
-                        msg = f"Updated kernel parameter: {name}={value}"
-                        LOG.info(msg)
-                    else:
-                        cmd = f"python /usr/local/bin/puppet-update-grub-env.py --remove-kernelparams {name}"
-                        subprocess.run(cmd, shell=True, check=True, capture_output=True)
-                        msg = f"Removed kernel parameter: {name}"
-                        LOG.info(msg)
-                except subprocess.CalledProcessError as e:
-                    LOG.exception("Failed to update boot.env for out of tree drivers.: %s" % str(e))
-
-    def run(self):
-        """Execute the hook"""
-        parameter_names = []
-        if self._major_release and "24.09" == self._from_release:
-            parameter_names.append("out-of-tree-drivers")
-            LOG.info("Set out-of-tree-drivers for rollback to 22.12")
-
-        self.update_kernel_parameters(parameter_names)
-
-
-# pre and post keywords
-PRE = "pre"
-POST = "post"
-
-# actions
-MAJOR_RELEASE_UPGRADE = "major_release_upgrade"
-MAJOR_RELEASE_ROLLBACK = "major_release_rollback"
-
-# agent hooks mapping per action
-AGENT_HOOKS = {
-    MAJOR_RELEASE_UPGRADE: [
+    # agent hooks mapping per action
+    AGENT_HOOKS = {
+        MAJOR_RELEASE_UPGRADE: [
             CreateUSMUpgradeInProgressFlag,
             CopyPxeFilesHook,
             ReconfigureKernelHook,
             UpdateKernelParametersHook,
             EnableNewServicesHook,
-            UpdateKernelParameters,
-            # enable usm-initialize service for next reboot only
-            # if everything else is done
+            # enable usm-initialize service for next
+            # reboot only if everything else is done
             UsmInitHook,
         ],
-    MAJOR_RELEASE_ROLLBACK: [
-            RemoveKubernetesConfigSymlinkHook,
+        MAJOR_RELEASE_ROLLBACK: [
             ReconfigureKernelHook,
-            RemoveCephMonHook,
             RestartKubeApiServer,
-            UpdateKernelParameters,
-            # enable usm-initialize service for next reboot only
-            # if everything else is done
+            # enable usm-initialize service for next
+            # reboot only if everything else is done
             UsmInitHook,
         ],
-}
+    }
 
-
-class HookManager(object):
-    """
-    Object to manage the execution of agent hooks
-    """
     def __init__(self, action, attrs=None):
         self._action = action
         self._attrs = attrs
-        self._hooks = AGENT_HOOKS.get(action)
+        self._hooks = self.AGENT_HOOKS.get(action)
 
     def _run_hooks(self):
         """
@@ -498,17 +401,19 @@ class HookManager(object):
 
     @staticmethod
     def create_hook_manager(software_version, additional_data=None):
-        # check if received version is greater (upgrade) or not (rollback)
-        if utils.compare_release_version(software_version, constants.SW_VERSION):
-            LOG.info("Upgrading from %s to %s additional_data %s" % (constants.SW_VERSION,
-                                                                     software_version,
-                                                                     additional_data))
-            return HookManager(MAJOR_RELEASE_UPGRADE, {"major_release": software_version,
-                                                       "from_release": constants.SW_VERSION,
-                                                       "additional_data": additional_data})
-        LOG.info("Rolling back from %s to %s additional_data %s" % (constants.SW_VERSION,
-                                                                    software_version,
-                                                                    additional_data))
-        return HookManager(MAJOR_RELEASE_ROLLBACK, {"major_release": software_version,
-                                                    "from_release": constants.SW_VERSION,
-                                                    "additional_data": additional_data})
+        sw_version = BaseHook.get_platform_conf("sw_version")
+
+        hook_attrs = {"to_release": software_version,
+                      "from_release": sw_version,
+                      "additional_data": additional_data}
+
+        # check if the version is greater, i.e. upgrade
+        if version.Version(software_version) > version.Version(sw_version):
+            LOG.info("Upgrading from %s to %s, additional_data %s" % (
+                     sw_version, software_version, additional_data))
+            return HookManager(HookManager.MAJOR_RELEASE_UPGRADE, attrs=hook_attrs)
+
+        # otherwise the operation is a rollback
+        LOG.info("Rolling back from %s to %s, additional_data %s" % (
+                 sw_version, software_version, additional_data))
+        return HookManager(HookManager.MAJOR_RELEASE_ROLLBACK, attrs=hook_attrs)
