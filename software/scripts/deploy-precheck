@@ -325,28 +325,6 @@ class UpgradeHealthCheck(HealthCheck):
                 % ', '.join(missing_patches)
         health_ok = health_ok and success
 
-        # check if system-local-ca's private key is RSA
-        if upgrade_utils.get_distributed_cloud_role() == 'subcloud':
-            # system-local-ca in subclouds either match the systemcontroller's,
-            # or it will be changed to match in upgrade activation
-            LOG.info("Checking system-local-ca's private key is not required for subclouds.")
-            success = True
-        else:
-            success = self._check_local_issuer_rsa_private_key()
-
-        if not success:
-            LOG.error("system-local-ca's private key is either not RSA or not valid.")
-            output += 'Platform Issuer: [%s]\n' % (HealthCheck.FAIL_MSG)
-            output += ('-> Platform Issuer (system-local-ca) TLS private key is not valid. '
-                       'Only RSA keys are supported.\n'
-                       '   Please perform the \'Update system-local-ca or Migrate Platform '
-                       'Certificates to use Cert Manager\'\n'
-                       '   procedure to update the Platform Issuer, providing a valid RSA '
-                       'cert/key to be used by the issuer.\n')
-        else:
-            LOG.info("system-local-ca has a valid private key.")
-        health_ok = health_ok and success
-
         return health_ok, output
 
     def _check_required_patches(self, required_patches):
