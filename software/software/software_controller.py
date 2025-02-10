@@ -127,6 +127,7 @@ insvc_patch_restart_controller = "/run/software/.restart.software-controller"
 ETC_HOSTS_FILE_PATH = "/etc/hosts"
 ETC_HOSTS_BACKUP_FILE_PATH = "/etc/hosts.patchbak"
 PATCH_MIGRATION_SCRIPT_DIR = "/etc/update.d"
+SOFTWARE_LOG_FILE = "/var/log/software.log"
 
 stale_hosts = []
 pending_queries = []
@@ -3607,6 +3608,7 @@ class PatchController(PatchService):
             activate_cmd.append('--is_major_release')
 
         env = os.environ.copy()
+        env["ANSIBLE_LOG_PATH"] = SOFTWARE_LOG_FILE
         if not self.pre_bootstrap:
             token, endpoint = utils.get_endpoints_token()
             env["OS_AUTH_TOKEN"] = token
@@ -3743,6 +3745,7 @@ class PatchController(PatchService):
 
         token, endpoint = utils.get_endpoints_token()
         env = os.environ.copy()
+        env["ANSIBLE_LOG_PATH"] = SOFTWARE_LOG_FILE
         env["OS_AUTH_TOKEN"] = token
         env["SYSTEM_URL"] = re.sub('/v[1,9]$', '', endpoint)  # remove ending /v1
 
