@@ -32,14 +32,12 @@ from tsconfig.tsconfig import install_uuid
 from tsconfig.tsconfig import subfunctions
 from tsconfig.tsconfig import SW_VERSION
 
+SOFTWARE_PERSIST_FOLDER = "/var/persist/software-agent"
+
 pidfile_path = "/var/run/software_agent.pid"
-agent_running_after_reboot_flag = \
-    "/var/run/software_agent_running_after_reboot"
-run_postinstallscript_after_reboot_flag = \
-    "/var/run/run_postinstallscript_after_reboot_flag"
 node_is_patched_file = "/var/run/node_is_patched"
-node_is_software_updated_rr_file = "/var/run/node_is_software_updated_rr"
-patch_installing_file = "/var/run/patch_installing"
+node_is_software_updated_rr_file = "%s/node_is_software_updated_rr" % SOFTWARE_PERSIST_FOLDER
+patch_installing_file = "%s/patch_installing" % SOFTWARE_PERSIST_FOLDER
 patch_failed_file = "/var/run/software_install_failed"
 node_is_locked_file = "/var/run/.node_locked"
 ostree_pull_completed_deployment_pending_file = \
@@ -474,11 +472,18 @@ class PatchAgent(PatchService):
         self.rejection_timestamp = 0
         self.last_repo_revision = None
 
+        # Create persist folder
+        if not os.path.exists(SOFTWARE_PERSIST_FOLDER):
+            try:
+                os.makedirs(SOFTWARE_PERSIST_FOLDER, exist_ok=True)
+            except PermissionError:
+                LOG.error("Permission denied: Cannot create %s", SOFTWARE_PERSIST_FOLDER)
+
         # Check state flags
         if os.path.exists(patch_installing_file):
             # We restarted while installing. Change to failed
             setflag(patch_failed_file)
-            os.remove(patch_installing_file)
+            clearflag(patch_installing_file)
 
         if os.path.exists(patch_failed_file):
             self.state = constants.PATCH_AGENT_STATE_INSTALL_FAILED
@@ -576,7 +581,6 @@ class PatchAgent(PatchService):
     def handle_install(self,
                        verbose_to_stdout=False,
                        disallow_insvc_patch=False,
-                       delete_older_deployments=False,
                        major_release=None,
                        commit_id=None,
                        additional_data=None):
@@ -587,9 +591,6 @@ class PatchAgent(PatchService):
         # a reboot-required when this parameter is set. Rather than running
         # any scripts, the RR flag will be set, which will result in the node
         # being rebooted immediately upon completion of the installation.
-        #
-        # The delete_older_deployments is set when the system has
-        # been rebooted.
         #
 
         LOG.info("Handling install")
@@ -668,9 +669,6 @@ class PatchAgent(PatchService):
 
         self.state = constants.PATCH_AGENT_STATE_INSTALLING
         setflag(patch_installing_file)
-
-        if delete_older_deployments:
-            ostree_utils.delete_older_deployments()
 
         try:
             # Create insvc patch directories
@@ -764,7 +762,6 @@ class PatchAgent(PatchService):
 
                 if os.path.exists(node_is_software_updated_rr_file):
                     LOG.info("Reboot is required. Skipping patch-scripts")
-                    setflag(run_postinstallscript_after_reboot_flag)
                 elif disallow_insvc_patch:
                     LOG.info("Disallowing patch-scripts. Treating as reboot-required")
                     setflag(node_is_software_updated_rr_file)
@@ -1049,15 +1046,11 @@ def main():
 
     pa.query()
 
-    if os.path.exists(agent_running_after_reboot_flag):
-        delete_older_deployments_flag = False
-    else:
-        setflag(agent_running_after_reboot_flag)
-        delete_older_deployments_flag = True
-
-    if os.path.exists(run_postinstallscript_after_reboot_flag):
+    # Run on reboot after the node was updated by a reboot required patch/ISO
+    if os.path.exists(node_is_software_updated_rr_file):
+        ostree_utils.delete_older_deployments()
         run_post_install_script()
-        clearflag(run_postinstallscript_after_reboot_flag)
+        clearflag(node_is_software_updated_rr_file)
 
     if len(sys.argv) <= 1:
         pa.run()
@@ -1070,8 +1063,7 @@ def main():
             http_port_real = 80
 
         pa.handle_install(verbose_to_stdout=True,
-                          disallow_insvc_patch=True,
-                          delete_older_deployments=delete_older_deployments_flag)
+                          disallow_insvc_patch=True)
     elif sys.argv[1] == "--status":
         rc = 0
         if pa.changes:

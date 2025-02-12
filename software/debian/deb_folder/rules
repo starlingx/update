@@ -29,6 +29,7 @@ override_dh_install:
 	install -m 755 -d ${ROOT}/etc/software
 	install -m 755 -d ${ROOT}/etc/software/software-scripts
 	install -m 755 -d ${ROOT}/lib/systemd/system
+	install -m 755 -d ${ROOT}/var/persist/software-agent
 	install -m 755 -d ${PMONDIR}
 	install -m 500 service-files/software-controller-daemon-init.sh \
 		${ROOT}/etc/init.d/software-controller-daemon
