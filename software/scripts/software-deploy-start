@@ -145,11 +145,6 @@ sync_controllers_cmd="${SYNC_CONTROLLERS_SCRIPT} --feed=$(dirname $feed)"
 ${sync_controllers_cmd} || handle_error $? "Failed to sync feeds"
 info "Feed sync complete."
 
-# TODO(heitormatsui) remove once sysinv upgrade tables are deprecated
-info "Creating ${to_ver} load entry in legacy upgrade table..."
-sudo -u postgres psql -d sysinv -c "insert into loads(id, uuid, state, software_version) values (nextval('loads_id_seq'), 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 'available', '${to_ver}');"
-info "Load created successfully."
-
 state="start-done"
 deploy_update_state $state
 info "Update deploy state ${state}."

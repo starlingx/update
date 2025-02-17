@@ -78,7 +78,6 @@ from software.software_functions import PatchFile
 from software.software_functions import package_dir
 from software.software_functions import repo_dir
 from software.software_functions import root_scripts_dir
-from software.software_functions import set_host_target_load
 from software.software_functions import SW_VERSION
 from software.software_functions import LOG
 from software.software_functions import audit_log_info
@@ -3887,7 +3886,6 @@ class PatchController(PatchService):
             msg_info += msg + "\n"
             LOG.info(msg)
             try:
-                set_host_target_load(hostname, major_release)
                 copy_pxeboot_update_file(major_release, rollback=rollback)
                 copy_pxeboot_cfg_files(major_release)
             except Exception:
