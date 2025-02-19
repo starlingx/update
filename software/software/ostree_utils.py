@@ -1,9 +1,10 @@
 """
-Copyright (c) 2023-2024 Wind River Systems, Inc.
+Copyright (c) 2023-2025 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
+import configparser
 import logging
 import os
 import re
@@ -326,6 +327,61 @@ def delete_ostree_repo_commit(commit, repo_path):
                    % (e.returncode, e.stderr.decode("utf-8"))
         LOG.info(info_msg)
         raise OSTreeCommandFail(msg)
+
+
+def add_tombstone_commit_if_prepatched(ostree_ref, repo_path):
+    """
+    Check if the ostree repo history is incomplete, if yes, adds a
+    tombstone commit file to avoid inconsistence in the repo.
+    :param ostree_ref: the ostree ref.
+        example: starlingx
+    :param repo_path: the path to the ostree repo:
+        example: /var/www/pages/feed/rel-24.09/ostree_repo
+    :return: True if the tombstone file was created, false if not.
+    """
+
+    cmd = "ostree log %s --repo=%s" % (ostree_ref, repo_path)
+    try:
+        output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        info_msg = "OSTree log Error: return code: %s , Output: %s" \
+                % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.error(info_msg)
+        msg = "Failed to fetch ostree log (tombstone) for %s." % repo_path
+        raise OSTreeCommandFail(msg)
+
+    # Decode the ostree log
+    output_string = output.stdout.decode('utf-8')
+
+    # Add tombstone file
+    if constants.OSTREE_HISTORY_NOT_FETCHED.lower() in output_string.lower():
+        parent_matches = re.findall(r'^Parent:\s+(\S+)', output_string, re.MULTILINE)
+        if parent_matches:
+            oldest_parent = parent_matches[-1]
+
+            obj_dir = os.path.join(repo_path, "objects", oldest_parent[:2])
+            tombstone_file = os.path.join(obj_dir, oldest_parent[2:] + ".tombstone-commit")
+
+            if os.path.isfile(tombstone_file):
+                LOG.info("Tombstone file already exists: %s", tombstone_file)
+                return False
+
+            os.makedirs(obj_dir, exist_ok=True)
+            with open(tombstone_file, "a"):
+                LOG.info("Tombstone file created: %s", tombstone_file)
+
+            # Add tombstone-commits in Ostree config file
+            config_path = os.path.join(repo_path, "config")
+            if os.path.exists(config_path):
+                config = configparser.ConfigParser()
+                config.read(config_path)
+                config.set("core", "tombstone-commits", "true")
+
+            with open(config_path, 'w') as file:
+                config.write(file, space_around_delimiters=False)
+
+            return True
+    return False
 
 
 def sync_boot_entries():

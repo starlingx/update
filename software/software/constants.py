@@ -64,6 +64,7 @@ SYSROOT_OSTREE_REF = "debian:starlingx"
 OSTREE_REMOTE = "debian"
 OSTREE_AUX_REMOTE = "controller-feed"
 OSTREE_AUX_REMOTE_PATH = "/ostree/repo"
+OSTREE_HISTORY_NOT_FETCHED = "<< History beyond this commit not fetched >>"
 DEBIAN_RELEASE = "bullseye"
 STARLINGX_RELEASE = SW_VERSION
 PATCH_SCRIPTS_STAGING_DIR = "/var/www/pages/updates/software-scripts"

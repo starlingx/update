@@ -3368,6 +3368,10 @@ class PatchController(PatchService):
                     with self.hosts_lock:
                         self.interim_state[release_id] = list(self.hosts)
 
+                # In prepatched add tombstone
+                if ostree_utils.add_tombstone_commit_if_prepatched(constants.OSTREE_REF, feed_repo):
+                    ostree_utils.update_repo_summary_file(feed_repo)
+
                 # There is no defined behavior for deploy start for patching releases, so
                 # move the deploy state to start-done
                 deploy_state = DeployState.get_instance()
