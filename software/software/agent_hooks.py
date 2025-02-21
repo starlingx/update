@@ -353,6 +353,49 @@ class RestartKubeApiServer(BaseHook):
                     cmd, e.stdout.decode('utf-8'), e.stderr.decode('utf-8')))
 
 
+# TODO(heitormatsui): remove after stx-10 -> stx-11 upgrade
+class EtcMergeHook(BaseHook):
+    """
+    This hook ensures some specified files from to-release are
+    kept in the deployed host instead of the 3-way merge version
+    of the file
+    """
+    FILES = [
+        "passwd",
+        "group",
+    ]
+
+    def run(self):
+        for file in self.FILES:
+            src = os.path.normpath(self.TO_RELEASE_OSTREE_DIR + "/usr/etc/" + file)
+            dst = os.path.normpath(self.TO_RELEASE_OSTREE_DIR + "/etc/" + file)
+            shutil.copy2(src, dst)
+            LOG.info("Copied %s to %s" % (src, dst))
+
+
+# TODO(heitormatsui): remove after stx-10 -> stx-11 upgrade
+class FixPSQLPermissionHook(BaseHook):
+    """
+    This hook fix postgres related files/directories permissions
+     due to differences in uids and gids between releases
+    """
+    SSL_DIR = "/etc/ssl/private"
+
+    def fix_cert_dir(self):
+        try:
+            cmd = ["grep", "ssl-cert", f"{self.TO_RELEASE_OSTREE_DIR}/usr/etc/group"]
+            output = subprocess.run(cmd, text=True, check=True, stdout=subprocess.PIPE)
+            gid = int(output.stdout.strip().split(":")[2])
+            os.chown(f"{self.TO_RELEASE_OSTREE_DIR}/{self.SSL_DIR}", uid=0, gid=gid)
+            LOG.info("Fixed %s directory ownership to 0:%s" % (self.SSL_DIR, gid))
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Error fixing %s directory ownership: %s" % (self.SSL_DIR, str(e)))
+            raise
+
+    def run(self):
+        self.fix_cert_dir()
+
+
 class HookManager(object):
     """
     Object to manage the execution of agent hooks
@@ -369,6 +412,8 @@ class HookManager(object):
             ReconfigureKernelHook,
             UpdateKernelParametersHook,
             EnableNewServicesHook,
+            EtcMergeHook,
+            FixPSQLPermissionHook,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
@@ -376,6 +421,8 @@ class HookManager(object):
         MAJOR_RELEASE_ROLLBACK: [
             ReconfigureKernelHook,
             RestartKubeApiServer,
+            EtcMergeHook,
+            FixPSQLPermissionHook,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
