@@ -47,6 +47,12 @@ else
     commit_id=''
 fi
 
+# Check if the environment variable IGNORE_ERRORS is defined
+if [ -z "${IGNORE_ERRORS+x}" ]; then
+    # If not defined, set it to False
+    IGNORE_ERRORS="False"
+fi
+
 k8s_ver=$(echo ${k8s_ver} | sed 's/^v//')
 staging_dir="/sysroot/upgrade"
 rootdir=${staging_dir}"/sysroot"
@@ -136,7 +142,7 @@ sudo chroot ${rootdir} /usr/sbin/software-deploy/create_postgresql_database.sh $
 info "Database creation complete."
 
 info "Starting data migration..."
-sudo chroot ${rootdir} /usr/bin/software-migrate ${from_ver} ${to_ver} ${port} || handle_error $? "Failed to migrate data"
+sudo chroot ${rootdir} /bin/bash -c "export IGNORE_ERRORS=${IGNORE_ERRORS}; /usr/bin/software-migrate ${from_ver} ${to_ver} ${port}" || handle_error $? "Failed to migrate data"
 info "Data migration completed."
 
 info "Syncing feed between controllers..."

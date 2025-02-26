@@ -998,6 +998,8 @@ class PatchController(PatchService):
 
         self.db_api_instance = get_instance()
 
+        self.ignore_errors = 'False'
+
         # interim_state is used to track hosts that have not responded
         # with fresh queries since a patch was applied or removed, on
         # a per-patch basis. This allows the patch controller to move
@@ -2803,8 +2805,8 @@ class PatchController(PatchService):
         LOG.info("k8s version %s" % k8s_ver)
         upgrade_start_cmd = [cmd_path, SW_VERSION, major_to_release, k8s_ver, postgresql_port,
                              feed]
-        if commit_id is not None:
-            upgrade_start_cmd.append(commit_id)
+
+        upgrade_start_cmd.append(commit_id if commit_id is not None else 0)
         # pass in keystone auth through environment variables
         # OS_AUTH_URL, OS_USERNAME, OS_PASSWORD, OS_PROJECT_NAME, OS_USER_DOMAIN_NAME,
         # OS_PROJECT_DOMAIN_NAME, OS_REGION_NAME are in env variables.
@@ -2817,6 +2819,7 @@ class PatchController(PatchService):
         env["OS_USER_DOMAIN_NAME"] = keystone_auth["user_domain_name"]
         env["OS_PROJECT_DOMAIN_NAME"] = keystone_auth["project_domain_name"]
         env["OS_REGION_NAME"] = keystone_auth["region_name"]
+        env["IGNORE_ERRORS"] = self.ignore_errors
 
         try:
             LOG.info("starting subprocess %s" % ' '.join(upgrade_start_cmd))
@@ -3091,7 +3094,8 @@ class PatchController(PatchService):
     @require_deploy_state([None],
                           "There is already a deployment in progress ({state.value}). "
                           "Please complete/delete the current deployment.")
-    def software_deploy_start_api(self, deployment: str, force: bool, **kwargs) -> dict:
+    def software_deploy_start_api(
+            self, deployment: str, force: bool, **kwargs) -> dict:
         """
         to start deploy of a specified release.
         The operation implies deploying all undeployed dependency releases of
@@ -3600,6 +3604,7 @@ class PatchController(PatchService):
             env["OS_AUTH_TOKEN"] = token
             env["SYSTEM_URL"] = re.sub('/v[1,9]$', '', endpoint)  # remove ending /v1
 
+        env["IGNORE_ERRORS"] = self.ignore_errors
         try:
             LOG.info("starting subprocess %s" % ' '.join(activate_cmd))
             subprocess.Popen(' '.join(activate_cmd), start_new_session=True, shell=True, env=env)
@@ -3734,7 +3739,9 @@ class PatchController(PatchService):
         env["OS_AUTH_TOKEN"] = token
         env["SYSTEM_URL"] = re.sub('/v[1,9]$', '', endpoint)  # remove ending /v1
 
-        upgrade_activate_rollback_cmd = ["source", "/etc/platform/openrc;", cmd_path, from_release, to_release]
+        env["IGNORE_ERRORS"] = self.ignore_errors
+        upgrade_activate_rollback_cmd = [
+            "source", "/etc/platform/openrc;", cmd_path, from_release, to_release]
 
         try:
             LOG.info("starting subprocess %s" % ' '.join(upgrade_activate_rollback_cmd))
@@ -4483,6 +4490,9 @@ class PatchControllerMainThread(threading.Thread):
         # Send periodic messages to the agents
         # We only can use one inverval
         SEND_MSG_INTERVAL_IN_SECONDS = 30.0
+
+        sc.ignore_errors = os.environ.get('IGNORE_ERRORS', 'False')
+        LOG.info("IGNORE_ERRORS execution flag is set: %s", sc.ignore_errors)
 
         try:
             if sc.pre_bootstrap and cfg.get_mgmt_ip():
