@@ -353,6 +353,28 @@ class RestartKubeApiServer(BaseHook):
                     cmd, e.stdout.decode('utf-8'), e.stderr.decode('utf-8')))
 
 
+class DeleteControllerFeedRemoteHook(BaseHook):
+    """
+    This hook deletes the controller-feed ostree remote for non-controller
+    hosts, so that the remote is recreated pointing to the to-release feed
+    after a successful deployment with the to-release ostree commit-id
+    """
+    OSTREE_AUX_REMOTE = "controller-feed"
+
+    def run(self):
+        nodetype = self.get_platform_conf("nodetype")
+        if nodetype != self.CONTROLLER:
+            cmd = ["ostree", "remote", "delete", self.OSTREE_AUX_REMOTE]
+            try:
+                subprocess.run(cmd, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                LOG.info("Deleted ostree %s remote" % self.OSTREE_AUX_REMOTE)
+            except subprocess.CalledProcessError as e:
+                LOG.exception("Error deleting %s remote: %s" % (self.OSTREE_AUX_REMOTE, e.stdout))
+                raise
+        else:
+            LOG.info("Host nodetype is %s, no ostree remote to delete" % self.CONTROLLER)
+
+
 # TODO(heitormatsui): remove after stx-10 -> stx-11 upgrade
 class EtcMergeHook(BaseHook):
     """
@@ -414,6 +436,7 @@ class HookManager(object):
             EnableNewServicesHook,
             EtcMergeHook,
             FixPSQLPermissionHook,
+            DeleteControllerFeedRemoteHook,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
@@ -423,6 +446,7 @@ class HookManager(object):
             RestartKubeApiServer,
             EtcMergeHook,
             FixPSQLPermissionHook,
+            DeleteControllerFeedRemoteHook,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
