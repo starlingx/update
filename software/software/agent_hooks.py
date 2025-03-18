@@ -385,6 +385,7 @@ class EtcMergeHook(BaseHook):
     FILES = [
         "passwd",
         "group",
+        "syslog-ng/syslog-ng.conf",
     ]
 
     def run(self):
@@ -418,6 +419,106 @@ class FixPSQLPermissionHook(BaseHook):
         self.fix_cert_dir()
 
 
+class UpdateSyslogConfig(BaseHook):
+    """
+    This class updates the syslog configuration by:
+    1. Removing all lines containing `d_sm` from `/etc/syslog-ng/syslog-ng.conf`.
+    2. Replacing lines containing `f_local3` with `# Facility code local3 is assigned to Service Management`.
+    """
+
+    def __init__(self, attrs):
+        super().__init__()
+        self._config_path = self.TO_RELEASE_OSTREE_DIR + "/etc/syslog-ng/syslog-ng.conf"
+        self._backup_path = f"{self._config_path}.bak"
+
+    def _backup_syslog_config(self):
+        """Create a backup of the syslog configuration file."""
+        try:
+            subprocess.check_call(['cp', self._config_path, self._backup_path])
+            LOG.info("Backup created at %s", self._backup_path)
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Failed to create backup: %s", str(e))
+            raise
+
+    def _remove_and_replace_lines(self):
+        """Use `sed` to remove lines containing `d_sm` and replace lines containing `f_local3`."""
+        try:
+            # Use sed to remove lines containing 'd_sm' and replace 'f_local3' with a comment
+            cmd = [
+                "sed", "-i",
+                "-e", "/d_sm/d",  # Remove lines containing 'd_sm'
+                "-e", "s|.*f_local3.*|# Facility code local3 is assigned to Service Management|g",  # Replace lines with 'f_local3'
+                self._config_path
+            ]
+            subprocess.check_call(cmd)
+            LOG.info("Updated %s by removing lines with `d_sm` and replacing `f_local3` lines", self._config_path)
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Failed to update %s using sed: %s", self._config_path, str(e))
+            raise
+
+    def _reload_syslog_service(self):
+        """Reload the syslog-ng service to apply changes."""
+        try:
+            subprocess.check_call(['systemctl', 'reload', 'syslog-ng'])
+            LOG.info("Syslog-ng service reloaded successfully.")
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Failed to reload syslog-ng service: %s", str(e))
+            raise
+
+    def run(self):
+        """Execute the update process."""
+        try:
+            LOG.info("Starting syslog configuration update.")
+            self._backup_syslog_config()
+            self._remove_and_replace_lines()
+            self._reload_syslog_service()
+            LOG.info("Syslog configuration update completed.")
+        except Exception as e:
+            LOG.error("Syslog configuration update failed: %s", str(e))
+
+
+class RevertSyslogConfig(UpdateSyslogConfig):
+    """
+    This class reverts changes made to the syslog configuration by:
+    1. Restoring the backup of `/etc/syslog-ng/syslog-ng.conf` created by UpdateSyslogConfig.
+    2. Reloading the syslog-ng service to apply the restored configuration.
+    """
+
+    def _restore_backup(self):
+        """Restore the syslog configuration from the backup."""
+        try:
+            if os.path.exists(self._backup_path):
+                subprocess.check_call(['cp', self._backup_path, self._config_path])
+                LOG.info("Restored %s from backup at %s", self._config_path, self._backup_path)
+            else:
+                raise FileNotFoundError(f"Backup file {self._backup_path} not found.")
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Failed to restore the backup: %s", str(e))
+            raise
+        except FileNotFoundError as e:
+            LOG.error(str(e))
+            raise
+
+    def _reload_syslog_service(self):
+        """Reload the syslog-ng service to apply changes."""
+        try:
+            subprocess.check_call(['systemctl', 'reload', 'syslog-ng'])
+            LOG.info("Syslog-ng service reloaded successfully.")
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Failed to reload syslog-ng service: %s", str(e))
+            raise
+
+    def run(self):
+        """Execute the revert process."""
+        try:
+            LOG.info("Starting syslog configuration revert.")
+            self._restore_backup()
+            self._reload_syslog_service()
+            LOG.info("Syslog configuration revert completed.")
+        except Exception as e:
+            LOG.error("Syslog configuration revert failed: %s", str(e))
+
+
 class HookManager(object):
     """
     Object to manage the execution of agent hooks
@@ -434,6 +535,7 @@ class HookManager(object):
             ReconfigureKernelHook,
             UpdateKernelParametersHook,
             EnableNewServicesHook,
+            UpdateSyslogConfig,
             EtcMergeHook,
             FixPSQLPermissionHook,
             DeleteControllerFeedRemoteHook,
@@ -444,6 +546,7 @@ class HookManager(object):
         MAJOR_RELEASE_ROLLBACK: [
             ReconfigureKernelHook,
             RestartKubeApiServer,
+            RevertSyslogConfig,
             EtcMergeHook,
             FixPSQLPermissionHook,
             DeleteControllerFeedRemoteHook,
