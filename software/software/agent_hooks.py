@@ -323,11 +323,11 @@ class CreateUSMUpgradeInProgressFlag(BaseHook):
 
 class RestartKubeApiServer(BaseHook):
     """
-    Restart the kube-apiserver after the host rollback to
-    resolve issues with the pods that are pending
-    or show errors with kubectl exec following a host-swact
-    on controller-1. This action ensures all pods run correctly
-    and enables successful exec operations.
+    Restart the kube-apiserver after the host rollback/upgrade to
+    resolve issues with the pods that are pending or show errors
+    with kubectl exec following a host-swact on controller-1.
+    This action ensures all pods run correctly and enables
+    successful exec operations.
     """
     def __init__(self, attrs):
         super().__init__()
@@ -539,6 +539,7 @@ class HookManager(object):
             EtcMergeHook,
             FixPSQLPermissionHook,
             DeleteControllerFeedRemoteHook,
+            RestartKubeApiServer,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
