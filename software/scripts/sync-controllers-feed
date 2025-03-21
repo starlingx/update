@@ -28,7 +28,7 @@ def sync_controllers(feed):
     controller = CONTROLLER_1_HOSTNAME if \
         controller == CONTROLLER_0_HOSTNAME else CONTROLLER_0_HOSTNAME
 
-    LOG.info(f"Synchronized feed with {controller}")
+    LOG.info(f"Synchronizing feed with {controller}...")
     cmd = [
         "rsync",
         "-ac",
@@ -37,7 +37,7 @@ def sync_controllers(feed):
         feed,
         f"rsync://{controller}/feed"
     ]
-    subprocess.run(cmd)
+    subprocess.run(cmd, check=True, text=True, capture_output=True)
 
 def print_usage(sys_argv):
     script_name = sys_argv[0]
@@ -88,7 +88,7 @@ def main(sys_argv):
         return 1
 
     except subprocess.CalledProcessError as e:
-        LOG.exception("Feed synchronization command failed. Error: %s", e)
+        LOG.exception("Feed synchronization command failed. Error: %s", e.stderr)
         return 1
 
     except Exception as e:

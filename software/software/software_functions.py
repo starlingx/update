@@ -1585,20 +1585,18 @@ def remove_major_release_deployment_flags():
     return success
 
 
-def run_deploy_clean_up_script(release):
+def run_remove_temporary_data_script(release):
     """
-    Runs the deploy-cleanup script for the given release.
+    Runs the remove-temporary-data script for the given release.
 
     :param release: Release to be cleaned.
     """
-    cmd_path = utils.get_software_deploy_script(release, constants.DEPLOY_CLEANUP_SCRIPT)
-    if (os.path.exists(f"{constants.STAGING_DIR}/{constants.OSTREE_REPO}") and
-            os.path.exists(constants.ROOT_DIR)):
+    cmd_path = utils.get_software_deploy_script(release, constants.REMOVE_TEMPORARY_DATA_SCRIPT)
+    if os.path.exists(constants.ROOT_DIR):
         try:
-            subprocess.check_output([cmd_path, f"{constants.STAGING_DIR}/{constants.OSTREE_REPO}",
-                                     constants.ROOT_DIR, "all"], stderr=subprocess.STDOUT)
+            subprocess.check_output([cmd_path, constants.ROOT_DIR], stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
-            LOG.exception("Error running deploy-cleanup script: %s" % str(e))
+            LOG.exception("Error running remove-temporary-data script: %s" % str(e))
             raise
 
 

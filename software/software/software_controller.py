@@ -86,7 +86,7 @@ from software.software_functions import is_deploy_state_in_sync
 from software.software_functions import is_deployment_in_progress
 from software.software_functions import get_release_from_patch
 from software.software_functions import clean_up_deployment_data
-from software.software_functions import run_deploy_clean_up_script
+from software.software_functions import run_remove_temporary_data_script
 from software.release_state import ReleaseState
 from software.deploy_host_state import DeployHostState
 from software.deploy_state import DeployState
@@ -1445,23 +1445,23 @@ class PatchController(PatchService):
                                     stderr=subprocess.STDOUT, check=True, text=True)
             return (result.stdout, None) if result.returncode == 0 else (None, result.stdout)
 
-        # Check if usm_load_import script exists in the iso
-        has_usm_load_import_script = os.path.isfile(os.path.join(
-            iso_mount_dir, 'upgrades', 'software-deploy', constants.USM_LOAD_IMPORT_SCRIPT))
+        # Check if major-release-upload script exists in the iso
+        has_release_upload_script = os.path.isfile(os.path.join(
+            iso_mount_dir, 'upgrades', 'software-deploy', constants.MAJOR_RELEASE_UPLOAD_SCRIPT))
 
-        if has_usm_load_import_script:
-            # usm_load_import script is found. This iso supports upgrade from USM
+        if has_release_upload_script:
+            # major-release-upload script is found. This iso supports upgrade from USM
             try:
                 # Copy iso /upgrades/software-deploy/ to /opt/software/rel-<rel>/bin/
                 to_release_bin_dir = os.path.join(
                     constants.SOFTWARE_STORAGE_DIR, ("rel-%s" % to_release), "bin")
                 if os.path.exists(to_release_bin_dir):
                     shutil.rmtree(to_release_bin_dir)
-                shutil.copytree(os.path.join(iso_mount_dir, "upgrades",
-                                constants.SOFTWARE_DEPLOY_FOLDER), to_release_bin_dir)
+                shutil.copytree(os.path.join(iso_mount_dir, "upgrades", constants.SOFTWARE_DEPLOY_FOLDER),
+                                to_release_bin_dir, symlinks=True)
 
-                # Run usm_load_import script
-                import_script = os.path.join(to_release_bin_dir, constants.USM_LOAD_IMPORT_SCRIPT)
+                # Run major-release-upload script
+                import_script = os.path.join(to_release_bin_dir, constants.MAJOR_RELEASE_UPLOAD_SCRIPT)
                 load_import_cmd = [
                     str(import_script),
                     f"--from-release={from_release}",
@@ -1492,14 +1492,14 @@ class PatchController(PatchService):
                 LOG.exception("Error occurred while running load import: %s", str(e))
                 raise
 
-        # At this step, usm_load_import script is not found in the iso
-        # Therefore, we run the local usm_load_import script which supports importing the N-1 iso
+        # At this step, major-release-upload script is not found in the iso
+        # Therefore, we run the local major-release-upload script which supports importing the N-1 iso
         # that doesn't support USM feature.
         # This is the special case where *only* DC system controller can import this iso
         # TODO(ShawnLi): remove the code below when this special case is not supported
         try:
             local_import_script = os.path.join(
-                "/usr/sbin/software-deploy/", constants.USM_LOAD_IMPORT_SCRIPT)
+                "/usr/sbin/software-deploy/", constants.MAJOR_RELEASE_UPLOAD_SCRIPT)
 
             load_import_cmd = [local_import_script,
                                "--from-release=%s" % from_release,
@@ -1640,7 +1640,7 @@ class PatchController(PatchService):
             if SW_VERSION not in supported_versions:
                 raise UpgradeNotSupported("Current release %s not supported to upgrade to %s"
                                           % (SW_VERSION, to_release))
-            # Run usm_load_import script
+            # Run major-release-upload script
             LOG.info("Starting load import from %s", upgrade_files[constants.ISO_EXTENSION])
             return self._run_load_import(from_release, to_release, iso_mount_dir, upgrade_files)
         except Exception as e:
@@ -3523,7 +3523,7 @@ class PatchController(PatchService):
 
                 if is_major_release:
                     try:
-                        run_deploy_clean_up_script(to_release)
+                        run_remove_temporary_data_script(to_release)
                     except subprocess.CalledProcessError as e:
                         msg_error = "Failed to delete deploy"
                         LOG.error("%s: %s" % (msg_error, e))

@@ -5,6 +5,8 @@ export PBR_VERSION=1.0.0
 
 ROOT := $(CURDIR)/debian/tmp
 PMONDIR := ${ROOT}/usr/share/starlingx/pmon.d
+SBINDIR := ${ROOT}/usr/sbin
+SCRIPTDIR := ${SBINDIR}/software-deploy
 export PLATFORM_RELEASE="$(shell grep SW_VERSION /usr/include/build_info.h | cut -d ' ' -f 3)"
 export METADATA_FILE="starlingx-${PLATFORM_RELEASE}.0-metadata.xml"
 
@@ -20,8 +22,8 @@ override_dh_install:
 	python3 setup.py install -f --install-layout=deb --root=$(ROOT)
 	python3 setup.py bdist_wheel  --universal  -d $(CURDIR)/debian/$(PYBUILD_NAME)-wheels/usr/share/python-wheels
 	install -d -m 755 $(ROOT)/usr/bin
-	install -d -m 755 $(ROOT)/usr/sbin
-	install -d -m 755 $(ROOT)/usr/sbin/software-deploy
+	install -d -m 755 ${SBINDIR}
+	install -d -m 755 ${SCRIPTDIR}
 	install -d -m 755 $(ROOT)/run
 	install -m 755 -d ${ROOT}/etc/goenabled.d
 	install -m 755 -d ${ROOT}/etc/init.d
@@ -50,43 +52,46 @@ override_dh_install:
 	install -m 444 service-files/pmon-software-agent.conf \
 		${PMONDIR}/software-agent.conf
 	install -m 444 service-files/*.service \
-	    ${ROOT}/lib/systemd/system
+		${ROOT}/lib/systemd/system
 	install -m 400 service-files/software-functions \
 		${ROOT}/etc/software/software-functions
 	install -m 444 service-files/software-tmpdirs.conf \
 		${ROOT}/run/software-tmpdirs.conf
 	install -m 500 service-files/run-software-scripts \
-		${ROOT}/usr/sbin/run-software-scripts
+		${SBINDIR}/run-software-scripts
 	install -m 500 service-files/software-controller-daemon-restart \
-		${ROOT}/usr/sbin/software-controller-daemon-restart
+		${SBINDIR}/software-controller-daemon-restart
 	install -m 500 service-files/software-agent-restart \
-		${ROOT}/usr/sbin/software-agent-restart
+		${SBINDIR}/software-agent-restart
 	install -m 555 service-files/software_check_goenabled.sh \
 		${ROOT}/etc/goenabled.d/software_check_goenabled.sh
 	install -m 444 service-files/software.logrotate \
 		${ROOT}/etc/logrotate.d/software
-	install -m 755 scripts/controllers-software-sync \
-		${ROOT}/usr/sbin/software-deploy/controllers-software-sync
-	install -m 755 scripts/deploy-precheck \
-		${ROOT}/usr/sbin/software-deploy/deploy-precheck
-	install -m 755 scripts/software-deploy-start \
-		${ROOT}/usr/sbin/software-deploy/software-deploy-start
-	install -m 444 scripts/upgrade_utils.py \
-		${ROOT}/usr/sbin/software-deploy/upgrade_utils.py
-	install -m 755 scripts/prep-data-migration \
-		${ROOT}/usr/sbin/software-deploy/prep-data-migration
 	install -m 444 ${METADATA_FILE} \
-        ${ROOT}/etc/software/${METADATA_FILE}
-	install -m 755 scripts/chroot_mounts.sh \
-		${ROOT}/usr/sbin/software-deploy/chroot_mounts.sh
-	install -m 755 scripts/create_postgresql_database.sh \
-		${ROOT}/usr/sbin/software-deploy/create_postgresql_database.sh
-	install -m 755 scripts/usm_load_import \
-		${ROOT}/usr/sbin/software-deploy/usm_load_import
+		${ROOT}/etc/software/${METADATA_FILE}
+	install -m 755 scripts/controllers-software-sync \
+		${SCRIPTDIR}/controllers-software-sync
+	install -m 755 scripts/deploy-precheck \
+		${SCRIPTDIR}/deploy-precheck
+	install -m 755 scripts/deploy-start \
+		${SCRIPTDIR}/deploy-start
+	install -m 444 scripts/upgrade_utils.py \
+		${SCRIPTDIR}/upgrade_utils.py
+	install -m 755 scripts/prepare-data-migration \
+		${SCRIPTDIR}/prepare-data-migration
+	install -m 755 scripts/prepare-chroot-mounts \
+		${SCRIPTDIR}/prepare-chroot-mounts
+	install -m 755 scripts/create-postgres-database \
+		${SCRIPTDIR}/create-postgres-database
+	install -m 755 scripts/major-release-upload \
+		${SCRIPTDIR}/major-release-upload
 	install -m 755 scripts/sync-controllers-feed \
-		${ROOT}/usr/sbin/software-deploy/sync-controllers-feed
-	install -m 755 scripts/deploy-cleanup \
-		${ROOT}/usr/sbin/software-deploy/deploy-cleanup
-	install -m 755 scripts/shell-utils \
-		${ROOT}/usr/sbin/software-deploy/shell-utils
+		${SCRIPTDIR}/sync-controllers-feed
+	install -m 755 scripts/remove-temporary-data \
+		${SCRIPTDIR}/remove-temporary-data
+
+	# TODO(heitormatsui): following lines are for backward compatibility and can be removed in stx-12
+	cd ${SCRIPTDIR} ; ln -sf major-release-upload usm_load_import
+	cd ${SCRIPTDIR} ; ln -sf deploy-start software-deploy-start
+
 	dh_install
