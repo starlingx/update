@@ -1233,12 +1233,13 @@ class PatchController(PatchService):
         self.patch_op_counter += 1
         self.write_state_file()
 
-    def get_release_dependency_list(self, release_id):
+    def get_release_dependency_list(self, release_id, preinstalled_patches=None):
         """
         Returns a list of software releases that are required by this release.
         Example: If R5 requires R4 and R1, R4 requires R3 and R1, R3 requires R1
                  then for input param release_id='R5', it will return ['R4', 'R1', 'R3']
         :param release: The software release ID
+        :param preinstalled_patches: A list containing all pre installed patches
         """
 
         def get_dependencies(release_id, visited):
@@ -1252,8 +1253,12 @@ class PatchController(PatchService):
                 if req_release not in visited:
                     visited.add(req_release)
                     dependencies.append(req_release)
-                    dependencies.extend(get_dependencies(req_release, visited))
+                    if req_release not in preinstalled_patches:
+                        dependencies.extend(get_dependencies(req_release, visited))
             return dependencies
+
+        if preinstalled_patches is None:
+            preinstalled_patches = []
 
         return get_dependencies(release_id, set())
 
@@ -1961,20 +1966,39 @@ class PatchController(PatchService):
         :return: List of releases in the order for applying
         """
 
-        release_dependencies = self.get_release_dependency_list(release_id)
-        release_dependencies.append(release_id)
-
         deployed_releases_id = []
+        preinstalled_patches = []
         for rel in self.release_collection.iterate_releases():
             if rel.state == states.DEPLOYED:
                 deployed_releases_id.append(rel.id)
 
+            if rel.prepatched_iso:
+                preinstalled_patches = rel.preinstalled_patches
+
+                # TODO(lvieira): remove this after 24.09 major release
+                # treat special cases for prepatched already released
+                # (they do not have preinstalled_patches list)
+                if not preinstalled_patches:
+                    already_released_prepatched_isos = {
+                        "24.09.100": ["24.09.0"],
+                        "24.09.200": ["24.09.100", "24.09.0"],
+                        "24.09.1": ["24.09.0"],
+                        "24.09.2": ["24.09.1", "24.09.0"],
+                        "24.09.3": ["24.09.2", "24.09.1", "24.09.0"]
+                    }
+                    released = already_released_prepatched_isos.get(rel.sw_release, [])
+                    preinstalled_patches.extend([f"{rel.component}-{release}" for release in released])
+
+        release_dependencies = self.get_release_dependency_list(release_id, preinstalled_patches)
+        release_dependencies.append(release_id)
+
         # filter release_dependencies to include only releases
         # that matches the major running release version
-        # and remove all releases already deployed
+        # and remove all releases already deployed, including prepatched
         to_apply_releases = [
             rel_id for rel_id in release_dependencies
-            if f"-{running_release_sw_version}." in rel_id and rel_id not in deployed_releases_id
+            if f"-{running_release_sw_version}." in rel_id and
+            rel_id not in deployed_releases_id + preinstalled_patches
         ]
 
         to_apply_releases.sort()
