@@ -676,19 +676,6 @@ def migrate_databases(shared_services, db_credentials, port,
                           (cmd[1], ex.returncode))
             raise
 
-    # The database entry for the first controller to be upgrade  will be set
-    # to whatever it was when the sysinv database was dumped on. Update the
-    # state and from/to load to what it should be when it becomes active.
-    try:
-        subprocess.check_call(
-            ["/usr/bin/sysinv-upgrade",
-             "update_controller_state",
-             "--skip_load_update"],
-            stdout=sout, stderr=sout)
-    except subprocess.CalledProcessError:
-        LOG.exception("Failed to update state of the controller")
-        raise
-
 
 def gethostaddress(hostname):
     """Get the IP address for a hostname, supporting IPv4 and IPv6. """
