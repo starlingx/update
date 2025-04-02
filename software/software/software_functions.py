@@ -25,6 +25,7 @@ from lxml import etree as ElementTree
 from xml.dom import minidom
 
 import software.apt_utils as apt_utils
+import software.config as cfg
 from software.db.api import get_instance
 from software.release_verify import verify_files
 from software.release_verify import cert_type_all
@@ -84,11 +85,8 @@ def configure_logging(logtofile=True, level=logging.INFO):
     if logtofile:
         my_exec = os.path.basename(sys.argv[0])
 
-        log_format = '%(asctime)s: ' \
-                     + my_exec + '[%(process)s:%(thread)d]: ' \
-                     + '%(filename)s(%(lineno)s): ' \
-                     + '%(levelname)s: %(message)s'
-
+        log_format = cfg.logging_default_format_string
+        log_format = log_format.replace('%(exec)s', my_exec)
         formatter = logging.Formatter(log_format, datefmt="%FT%T")
 
         LOG.setLevel(level)
@@ -96,16 +94,13 @@ def configure_logging(logtofile=True, level=logging.INFO):
         main_log_handler.setFormatter(formatter)
         LOG.addHandler(main_log_handler)
 
-        try:
-            os.chmod(logfile, 0o640)
-        except Exception:
-            pass
-
         auditLOG.setLevel(level)
         api_log_handler = logging.FileHandler(apilogfile)
         api_log_handler.setFormatter(formatter)
         auditLOG.addHandler(api_log_handler)
+
         try:
+            os.chmod(logfile, 0o640)
             os.chmod(apilogfile, 0o640)
         except Exception:
             pass

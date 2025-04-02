@@ -12,6 +12,7 @@ sys.modules['osprofiler'] = None
 import configparser
 import gc
 import json
+import logging
 import os
 from packaging import version
 import re
@@ -82,7 +83,6 @@ from software.software_functions import package_dir
 from software.software_functions import repo_dir
 from software.software_functions import root_scripts_dir
 from software.software_functions import SW_VERSION
-from software.software_functions import LOG
 from software.software_functions import audit_log_info
 from software.software_functions import repo_root_dir
 from software.software_functions import is_deploy_state_in_sync
@@ -117,6 +117,8 @@ import xml.etree.ElementTree as ET
 
 
 CONF = oslo_cfg.CONF
+
+LOG = logging.getLogger('main_logger')
 
 pidfile_path = "/var/run/patch_controller.pid"
 
@@ -4871,9 +4873,9 @@ def main():
         default_config_files=['/etc/software/software.conf', ]
     )
 
-    configure_logging()
-
     cfg.read_config()
+
+    configure_logging()
 
     # daemon.pidlockfile.write_pid_to_pidfile(pidfile_path)
 
