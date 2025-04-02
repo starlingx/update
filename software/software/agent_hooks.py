@@ -519,6 +519,38 @@ class RevertSyslogConfig(UpdateSyslogConfig):
             LOG.error("Syslog configuration revert failed: %s", str(e))
 
 
+class FixShadowPasswordlessChar(BaseHook):
+    """
+    This hook modifies the shadow file by replacing the 'x' placeholder
+    with '*' for specific users.
+    """
+    USERS_TO_UPDATE = [
+        "nova", "neutron", "ceilometer", "sysinv", "snmpd",
+        "fm", "libvirt", "ironic", "www", "keystone"
+    ]
+
+    def run(self):
+        shadow = os.path.normpath(self.TO_RELEASE_OSTREE_DIR + "/etc/shadow")
+        try:
+            with open(shadow, "r") as file:
+                lines = file.readlines()
+
+                updated_lines = []
+                for line in lines:
+                    parts = line.split(":")
+                    if len(parts) > 1 and parts[0] in self.USERS_TO_UPDATE and parts[1] == "x":
+                        parts[1] = "*"
+                    updated_lines.append(":".join(parts))
+
+            with open(shadow, "w") as file:
+                file.writelines(updated_lines)
+
+            LOG.info("Replaced 'x' entries in the password field with '*' in %s", shadow)
+        except Exception as e:
+            LOG.exception("Error processing shadow file: %s", str(e))
+            raise
+
+
 class HookManager(object):
     """
     Object to manage the execution of agent hooks
@@ -537,6 +569,7 @@ class HookManager(object):
             EnableNewServicesHook,
             UpdateSyslogConfig,
             EtcMergeHook,
+            FixShadowPasswordlessChar,
             FixPSQLPermissionHook,
             DeleteControllerFeedRemoteHook,
             RestartKubeApiServer,
