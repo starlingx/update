@@ -2676,7 +2676,8 @@ class PatchController(PatchService):
         return release
 
     def _deploy_precheck(self, release_version: str, force: bool = False,
-                         region_name: typing.Optional[str] = None, patch: bool = False) -> dict:
+                         region_name: typing.Optional[str] = None, patch: bool = False,
+                         snapshot: bool = False) -> dict:
         """
         Verify if system satisfy the requisites to upgrade to a specified deployment.
         :param release_version: full release name, e.g. starlingx-MM.mm.pp
@@ -2740,13 +2741,6 @@ class PatchController(PatchService):
             self._save_precheck_result(release_version, healthy=False)
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-        # TODO(heitormatsui) if different region was passed as parameter then
-        #  need to discover the subcloud auth_url to pass to precheck script
-        # TODO(jvazhapp) the region_name will not be 'RegionOne' (for standalone
-        #  clouds or subcloud)
-        if region_name != "RegionOne":
-            pass
-
         # Get releases info required for precheck
         releases = self.software_release_query_cached()
         for release in releases:
@@ -2769,6 +2763,8 @@ class PatchController(PatchService):
             cmd.append("--force")
         if patch:
             cmd.append("--patch")
+        if snapshot:
+            cmd.append("--snapshot")
 
         # Call precheck from the deployment files
         precheck_return = subprocess.run(
@@ -2789,7 +2785,8 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error, system_healthy=system_healthy)
 
-    def software_deploy_precheck_api(self, deployment: str, force: bool = False, region_name=None) -> dict:
+    def software_deploy_precheck_api(self, deployment: str, force: bool = False, region_name=None,
+                                     snapshot: bool = False) -> dict:
         """
         Verify if system satisfy the requisites to upgrade to a specified deployment.
         :param deployment: full release name, e.g. starlingx-MM.mm.pp
@@ -2806,7 +2803,7 @@ class PatchController(PatchService):
             raise SoftwareServiceError(f"Deploy precheck for major releases needs to be executed in"
                                        f" {constants.CONTROLLER_0_HOSTNAME} host.")
 
-        ret = self._deploy_precheck(release_version, force, region_name, is_patch)
+        ret = self._deploy_precheck(release_version, force, region_name, is_patch, snapshot)
         if ret:
             if ret.get("system_healthy") is None:
                 ret["error"] = "Fail to perform deploy precheck. Internal error has occurred.\n" + \
@@ -3067,9 +3064,9 @@ class PatchController(PatchService):
         thread = threading.Thread(target=run)
         thread.start()
 
-    def _precheck_before_start(self, deployment, release_version, is_patch, force=False):
+    def _precheck_before_start(self, deployment, release_version, is_patch, force=False, snapshot=False):
         LOG.info("Running deploy precheck.")
-        precheck_result = self._deploy_precheck(release_version, force=force, patch=is_patch)
+        precheck_result = self._deploy_precheck(release_version, patch=is_patch, force=force, snapshot=snapshot)
         if precheck_result.get('system_healthy') is None:
             precheck_result["error"] = (
                 f"Fail to perform deploy precheck. Internal error has occurred.\n"
@@ -3124,8 +3121,7 @@ class PatchController(PatchService):
     @require_deploy_state([None],
                           "There is already a deployment in progress ({state.value}). "
                           "Please complete/delete the current deployment.")
-    def software_deploy_start_api(
-            self, deployment: str, force: bool, **kwargs) -> dict:
+    def software_deploy_start_api(self, deployment: str, force: bool, snapshot: bool, **kwargs) -> dict:
         """
         to start deploy of a specified release.
         The operation implies deploying all undeployed dependency releases of
@@ -3174,7 +3170,8 @@ class PatchController(PatchService):
                 deployment,
                 to_release,
                 is_patch=is_patch,
-                force=force
+                force=force,
+                snapshot=snapshot,
             ):
                 return precheck_result
         self._safe_remove_precheck_result_file(to_release)
@@ -3191,7 +3188,8 @@ class PatchController(PatchService):
                 release_state = ReleaseState(release_ids=[deploy_release.id])
                 release_state.start_deploy()
                 deploy_state = DeployState.get_instance()
-                deploy_state.start(running_release, to_release, feed_repo, commit_id, deploy_release.reboot_required)
+                deploy_state.start(running_release, to_release, feed_repo, commit_id,
+                                   deploy_release.reboot_required, snapshot=snapshot)
 
                 msg_info += "%s is now starting, await for the states: " \
                             "[deploy-start-done | deploy-start-failed] in " \
