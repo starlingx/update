@@ -104,7 +104,7 @@ def execute_migration_scripts(from_release, to_release, action, port=None,
 
         except subprocess.CalledProcessError as e:
             # Deduplicate output lines using set and create error message
-            unique_output = "\n".join(set(e.output.splitlines()))
+            unique_output = "\n".join(e.output.splitlines()) + "\n"
             msg = MSG_SCRIPT_FAILURE % (migration_script, e.returncode, unique_output)
             errors.append(msg)
         except Exception as e:
