@@ -6,6 +6,7 @@
 # This is an utility module used by standalone USM upgrade scripts
 # that runs on the FROM-side context but using TO-side code base
 #
+import configparser
 import json
 import logging
 import os
@@ -177,14 +178,19 @@ def configure_logging(filename, log_level=logging.INFO):
     logging.basicConfig(filename=filename, format=log_format, level=log_level, datefmt=log_datefmt)
 
 
+def get_platform_conf(key):
+    default = "DEFAULT"
+    with open("/etc/platform/platform.conf", "r") as fp:
+        cp = configparser.ConfigParser()
+        cp.read_string(f"[{default}]\n" + fp.read())
+    try:
+        return cp[default][key]
+    except KeyError:
+        return None
+
+
 def get_distributed_cloud_role():
-    lines = [line.rstrip('\n') for line in
-             open('/etc/platform/platform.conf')]
-    for line in lines:
-        values = line.split('=')
-        if values[0] == 'distributed_cloud_role':
-            return values[1]
-    return None
+    return get_platform_conf("distributed_cloud_role")
 
 
 def is_tls_key_rsa(key):
@@ -214,3 +220,20 @@ def get_secret_data_yaml(name, namespace):
         else:
             time.sleep(wait_seconds)
     return None
+
+
+def get_available_gib_in_vg():
+    """Get the free space for cgts-vg volume group
+       returns: Free space in GiB
+    """
+    cmd = ['vgs', 'cgts-vg', '--noheadings', '--units', 'g', '-o', 'free']
+    try:
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+
+        vfree = result.stdout.strip()
+        vfree = float(vfree.strip('gG'))
+    except subprocess.CalledProcessError as e:
+        msg = "Error getting free space for cgts-vg: %s" % e.stderr.strip()
+        raise Exception(msg)
+
+    return vfree

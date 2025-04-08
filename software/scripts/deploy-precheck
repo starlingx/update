@@ -16,7 +16,6 @@ import argparse
 import base64
 import json
 import logging as LOG
-import os
 import re
 import requests
 import subprocess
@@ -43,6 +42,10 @@ RC_SUCCESS = 0
 RC_UNHEALTHY = 3
 STATE_AVAILABLE = 'available'
 STATE_DEPLOYED = 'deployed'
+SYSTEM_MODE_SIMPLEX = "simplex"
+# the space needed is derived from the sum of snapshot sizes
+# defined in lvm_snapshot.LvmSnapshotManager.LOGICAL_VOLUMES
+FREE_SPACE_NEEDED_LVM_SNAPSHOTS_GIB = 24
 
 class HealthCheck(object):
     """This class represents a general health check object
@@ -185,7 +188,7 @@ class HealthCheck(object):
 
 
 class UpgradeHealthCheck(HealthCheck):
-    """This class represents a upgrade-specific health check object
+    """This class represents an upgrade-specific health check object
     that verifies if system is in a valid state for upgrade"""
 
     # TODO(heitormatsui): switch from using upgrade metadata xml to
@@ -234,6 +237,23 @@ class UpgradeHealthCheck(HealthCheck):
                 break
         success = active_version in supported_versions
         return success, active_version
+
+    @staticmethod
+    def _check_system_simplex():
+        system_mode = upgrade_utils.get_platform_conf("system_mode")
+        return system_mode == SYSTEM_MODE_SIMPLEX
+
+    @staticmethod
+    def _check_free_space_for_snapshots():
+        success = True
+        available_gib = upgrade_utils.get_available_gib_in_vg()
+        if available_gib < FREE_SPACE_NEEDED_LVM_SNAPSHOTS_GIB:
+            success = False
+            msg = (("Insufficient free space on cgts-vg to create snapshot\n"
+                    "   Current free space is %.2fGiB but %.2fGiB is needed")
+                   % (available_gib, FREE_SPACE_NEEDED_LVM_SNAPSHOTS_GIB))
+            return success, msg
+        return success, None
 
     def run_health_check(self):
         """Run specific upgrade health checks"""
@@ -287,7 +307,7 @@ class UpgradeHealthCheck(HealthCheck):
 
         if not success:
             LOG.error("system-local-ca's private key is either not RSA or not valid.")
-            output += 'Platform Issuer: [%s]\n' % (HealthCheck.FAIL_MSG)
+            output += 'Platform Issuer: [%s]\n' % HealthCheck.FAIL_MSG
             output += ('-> Platform Issuer (system-local-ca) TLS private key is not valid. '
                        'Only RSA keys are supported.\n'
                        '   Please perform the \'Update system-local-ca or Migrate Platform '
@@ -297,15 +317,6 @@ class UpgradeHealthCheck(HealthCheck):
         else:
             LOG.info("system-local-ca has a valid private key.")
         health_ok = health_ok and success
-
-        # run health check for 22.12, if is the case, and return.
-        # Otherwise, continue with the rest of the prechecks
-        # TODO(ShawnLi): remove this once upgrade from 22.12 is deprecated
-        if SW_VERSION == '22.12':
-            success, output_2212 = self.run_health_check_in_from_release()
-            health_ok = health_ok and success
-            output += output_2212
-            return health_ok, output
 
         # check if it is a valid upgrade path
         success, active_release, required_patches = self._check_valid_upgrade_path()
@@ -324,35 +335,19 @@ class UpgradeHealthCheck(HealthCheck):
         health_ok = health_ok and success
 
         # check for LVM snapshot health checks
-        use_lvm_snapshot = self._config.get("snapshot")
-        # TODO(heitormatsui): placeholder, replace with real health checks
-        output += f"Using LVM Snapshots: [{use_lvm_snapshot}]"
+        use_lvm_snapshot = self._config.get("snapshot", False)
+        if use_lvm_snapshot:
+            success = self._check_system_simplex()
+            output += '(LVM snapshots) System is AIO-SX: [%s]\n' \
+                       % (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
+            health_ok = health_ok and success
 
-        return health_ok, output
-
-    def run_health_check_in_from_release(self):
-        """
-        Run the health check in 22.12 release environment
-        :return: tuple (success, output)
-        """
-
-        health_ok = True
-        output = ""
-
-        success, active_release, required_patches = self._check_valid_upgrade_path()
-        output += 'Valid upgrade path from release %s to %s: [%s]\n' \
-                  % (active_release, self._major_release,
-                     HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
-        health_ok = health_ok and success
-
-        # check if required patches are deployed
-        success, missing_patches = self._check_required_patches(required_patches)
-        output += 'Required patches are applied: [%s]\n' \
-                  % (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
-        if not success:
-            output += '-> Patches not applied: [%s]\n' \
-                % ', '.join(missing_patches)
-        health_ok = health_ok and success
+            success, msg = self._check_free_space_for_snapshots()
+            output += '(LVM snapshots) Disk space available: [%s]\n' \
+                       % (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
+            if not success:
+                output += "-> %s" % msg
+            health_ok = health_ok and success
 
         return health_ok, output
 
