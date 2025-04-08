@@ -136,7 +136,7 @@ class TestSoftwareController(unittest.TestCase):
 
     @patch('software.software_controller.PatchController.__init__', return_value=None)
     @patch('os.path.isfile', return_value=False)
-    @patch('os.path.join', return_value="/usr/sbin/software-deploy/usm_load_import")
+    @patch('os.path.join', return_value="/usr/sbin/software-deploy/major-release-upload")
     @patch('software.software_controller.reload_release_data')
     @patch('shutil.copyfile')
     @patch('subprocess.run')

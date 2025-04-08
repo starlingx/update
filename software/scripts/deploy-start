@@ -1,0 +1,219 @@
+#!/usr/bin/python3
+#
+# Copyright (c) 2023-2025 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+# This script is to start a major release deployment. It does the following:
+# 1. collect data from running system for migration,
+# 2. create bind mounts to deployment directory
+# 3. copy necessary data to deployment directory
+# 4. in chroot, start 2nd instance of PostgreSQL database service
+# 5. perform data migration
+#
+
+import logging as LOG
+import os
+import shutil
+import subprocess
+import sys
+
+import upgrade_utils
+
+
+class DeployStart:
+    STAGING_DIR = "/sysroot/upgrade"
+    SYSROOT_DIR = os.path.join(STAGING_DIR, "sysroot")
+    OSTREE_BRANCH = "starlingx"
+    REPORT_AGENT = "deploy-start"
+    SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))  # this script location
+    DEPLOY_STATE_START_DONE = "start-done"
+    DEPLOY_STATE_START_FAILED = "start-failed"
+
+    def __init__(self, from_version, to_version, k8s_version, postgres_port,
+                 feed_ostree_repo_dir, commit_id=None, ignore_errors=False):
+        self._from_version = from_version
+        self._to_version = to_version
+        self._k8s_version = k8s_version.lstrip("v")
+        self._postgres_port = postgres_port
+        self._feed_ostree_repo_dir = feed_ostree_repo_dir
+        self._feed_ostree_repo_url = f"file://{feed_ostree_repo_dir}"
+        self._commit_id = commit_id
+        self._ignore_errors = ignore_errors
+
+    def _update_deploy_state(self, state):
+        try:
+            script_path = "/usr/bin/software-deploy-update"
+            cmd = [script_path, "-s", state, self.REPORT_AGENT]
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            LOG.error(f"Failed updating deploy state: {e.stderr}")
+
+    def _check_directories(self):
+        for directory in [self.SYSROOT_DIR]:
+            if os.path.isdir(directory):
+                error_msg = (f"{directory} already exists. Please ensure to "
+                             f"clean up the environment before proceeding")
+                LOG.error(error_msg)
+                raise OSError(error_msg)
+
+    def _checkout_ostree_repo(self):
+        # TODO(bqian) make commit_id mandatory once the commit-id is built to metadata.xml for major releases
+        if self._commit_id is None:
+            LOG.info("Retrieving commit-id...")
+            # get commit id, only latest for now
+            try:
+                cmd = ["ostree", "rev-parse", f"--repo={self._feed_ostree_repo_dir}", self.OSTREE_BRANCH]
+                process = subprocess.run(cmd, check=True, text=True, capture_output=True)
+                self._commit_id = process.stdout.strip()
+            except subprocess.CalledProcessError as e:
+                LOG.error(f"Failed to retrieve commit-id: {e.stderr}")
+                raise
+            LOG.info(f"Latest commit-id: {self._commit_id}")
+
+        LOG.info(f"Checking out ostree repo, commit-id: {self._commit_id}")
+        os.makedirs(self.STAGING_DIR, exist_ok=True)
+        try:
+            cmd = ["ostree", "checkout", f"--repo={self._feed_ostree_repo_dir}", self._commit_id, self.SYSROOT_DIR]
+            subprocess.run(cmd, check=True, text=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            LOG.error(f"Failed to checkout commit-id {self._commit_id}: {e.stderr}")
+            raise
+        LOG.info(f"Checked out ostree repo in {self.SYSROOT_DIR}")
+
+    def _prepare_mount_points(self):
+        # create proper mounts on deploy file system
+        LOG.info("Creating mount points...")
+        try:
+            script_path = os.path.join(self.SCRIPT_DIR, "prepare-chroot-mounts")
+            cmd = [script_path, self.SYSROOT_DIR, "-m"]
+            subprocess.run(cmd, check=True, text=True, capture_output=True)
+            shutil.copy2("/etc/kubernetes/admin.conf", os.path.join(self.SYSROOT_DIR, "etc/kubernetes/"))
+        except subprocess.CalledProcessError as e:
+            LOG.error(f"Failed to mount required mount points: {e.stderr}")
+            raise
+        LOG.info("Mount points created successfully")
+
+    def _prepare_data_migration(self):
+        LOG.info("Preparing for data migration...")
+        # OS_AUTH_URL, OS_USERNAME, OS_PASSWORD, OS_PROJECT_NAME, OS_USER_DOMAIN_NAME,
+        # OS_PROJECT_DOMAIN_NAME, OS_REGION_NAME are in environment variables
+        try:
+            script_path = os.path.join(self.SCRIPT_DIR, "prepare-data-migration")
+            cmd = [script_path,
+                   f"--rootdir={self.SYSROOT_DIR}",
+                   f"--from_release={self._from_version}",
+                   f"--to_release={self._to_version}",
+                   f"--auth_url={os.environ.get('OS_AUTH_URL')}",
+                   f"--username={os.environ.get('OS_USERNAME')}",
+                   f"--password={os.environ.get('OS_PASSWORD')}",
+                   f"--project_name={os.environ.get('OS_PROJECT_NAME')}",
+                   f"--user_domain_name={os.environ.get('OS_USER_DOMAIN_NAME')}",
+                   f"--project_domain_name={os.environ.get('OS_PROJECT_DOMAIN_NAME')}",
+                   f"--region_name={os.environ.get('OS_REGION_NAME')}",
+                   ]
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError:
+            LOG.error("Failed to extract data for migration")
+            raise
+        LOG.info("Data migration preparations complete")
+
+    def _create_postgres_database(self):
+        LOG.info("Creating temporary database...")
+        try:
+            script_path = "/usr/sbin/software-deploy/create-postgres-database"
+            cmd = ["/usr/sbin/chroot", self.SYSROOT_DIR, script_path, self._postgres_port]
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError:
+            LOG.error("Failed to start 2nd instance of postgresql")
+            raise
+        LOG.info("Database creation complete")
+
+    def _run_data_migration(self):
+        LOG.info("Starting data migration...")
+        try:
+            script_path = "/usr/bin/software-migrate"
+            cmd = ["/usr/sbin/chroot", self.SYSROOT_DIR, script_path,
+                   self._from_version, self._to_version, self._postgres_port]
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError:
+            LOG.error("Failed to migrate data")
+            raise
+        LOG.info("Data migration completed")
+
+    def _sync_controllers_feed(self):
+        LOG.info("Syncing feed between controllers...")
+        try:
+            script_path = os.path.join(self.SCRIPT_DIR, "sync-controllers-feed")
+            cmd = [script_path, f"--feed={os.path.dirname(self._feed_ostree_repo_dir)}"]
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError:
+            LOG.error("Failed to sync feeds")
+            raise
+        LOG.info("Feed sync complete")
+
+    def _remove_temporary_data(self):
+        LOG.info("Starting cleanup...")
+        try:
+            script_path = os.path.join(self.SCRIPT_DIR, "remove-temporary-data")
+            cmd = [script_path, self.SYSROOT_DIR]
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError:
+            LOG.error("Failed cleaning up temporary data")
+            raise
+        LOG.info("Cleanup complete")
+
+    def run(self):
+        try:
+            self._check_directories()
+            self._checkout_ostree_repo()
+            self._prepare_mount_points()
+            self._prepare_data_migration()
+            self._create_postgres_database()
+            self._run_data_migration()
+            self._sync_controllers_feed()
+            self._update_deploy_state(self.DEPLOY_STATE_START_DONE)
+        except Exception:
+            self._update_deploy_state(self.DEPLOY_STATE_START_FAILED)
+            return 1
+        finally:
+            self._remove_temporary_data()
+        return 0
+
+
+if __name__ == "__main__":
+    upgrade_utils.configure_logging("/var/log/software.log", log_level=LOG.INFO)
+
+    from_version = None
+    to_version = None
+    k8s_version = None
+    postgres_port = None
+    feed_ostree_repo_dir = None
+    commit_id = None
+    for arg in range(1, len(sys.argv)):
+        if arg == 1:
+            from_version = sys.argv[arg]
+        elif arg == 2:
+            to_version = sys.argv[arg]
+        elif arg == 3:
+            k8s_version = sys.argv[arg]
+        elif arg == 4:
+            postgres_port = sys.argv[arg]
+        elif arg == 5:
+            feed_ostree_repo_dir = sys.argv[arg]
+        elif arg == 6:
+            commit_id = sys.argv[arg]
+
+    ignore_errors = os.environ.get("IGNORE_ERRORS", False)
+
+    if any(x is None for x in [from_version, to_version, k8s_version, postgres_port, feed_ostree_repo_dir]):
+        usage_msg = (f"usage: {sys.argv[0]} <from_version> <to_version> <k8s_version> "
+                     f"<postgresql_port> <feed_ostree_repo_dir> [commit_id]")
+        print(usage_msg)
+        LOG.info(usage_msg)
+        sys.exit(1)
+
+    deploy_start = DeployStart(from_version, to_version, k8s_version, postgres_port, feed_ostree_repo_dir,
+                               commit_id=commit_id, ignore_errors=ignore_errors)
+    sys.exit(deploy_start.run())

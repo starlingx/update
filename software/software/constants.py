@@ -66,9 +66,9 @@ RC_UNHEALTHY = 3
 # Script names
 DEPLOY_PRECHECK_SCRIPT = "deploy-precheck"
 UPGRADE_UTILS_SCRIPT = "upgrade_utils.py"
-DEPLOY_START_SCRIPT = "software-deploy-start"
-DEPLOY_CLEANUP_SCRIPT = "deploy-cleanup"
-USM_LOAD_IMPORT_SCRIPT = "usm_load_import"
+DEPLOY_START_SCRIPT = "deploy-start"
+REMOVE_TEMPORARY_DATA_SCRIPT = "remove-temporary-data"
+MAJOR_RELEASE_UPLOAD_SCRIPT = "major-release-upload"
 PATCH_SCRIPTS_STAGING_DIR = "/var/www/pages/updates/software-scripts"
 
 # Status
