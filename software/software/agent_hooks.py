@@ -519,6 +519,34 @@ class RevertSyslogConfig(UpdateSyslogConfig):
             LOG.error("Syslog configuration revert failed: %s", str(e))
 
 
+class RevertUmaskHook(BaseHook):
+    """
+    Reverts the umask setting during a MAJOR_RELEASE_ROLLBACK event by
+    removing 'umask 027' from /root/.bashrc and /root/.bash_profile.
+    """
+    def __init__(self, attrs):
+        super().__init__()
+
+    def run(self):
+        try:
+            self._remove_umask_setting("/root/.bashrc")
+            self._remove_umask_setting("/root/.bash_profile")
+            LOG.info("Successfully reverted umask settings during rollback.")
+        except Exception as e:
+            LOG.exception("Failed to revert umask settings: %s", str(e))
+
+    def _remove_umask_setting(self, filepath):
+        if not os.path.exists(filepath):
+            LOG.warning("File not found: %s", filepath)
+            return
+        try:
+            cmd = f"/bin/sed -i '/^\\s*umask\\s\\+027\\s*$/d' {filepath}"
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+            LOG.info("Removed 'umask 027' from %s", filepath)
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Error updating %s: %s", filepath, e.stderr.decode("utf-8"))
+
+
 class FixShadowPasswordlessChar(BaseHook):
     """
     This hook modifies the shadow file by replacing the 'x' placeholder
@@ -584,6 +612,7 @@ class HookManager(object):
             EtcMergeHook,
             FixPSQLPermissionHook,
             DeleteControllerFeedRemoteHook,
+            RevertUmaskHook,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
