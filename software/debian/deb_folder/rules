@@ -89,6 +89,8 @@ override_dh_install:
 		${SCRIPTDIR}/sync-controllers-feed
 	install -m 755 scripts/remove-temporary-data \
 		${SCRIPTDIR}/remove-temporary-data
+	install -m 755 software/lvm_snapshot.py \
+		${SCRIPTDIR}/manage-lvm-snapshots
 	install -d -m 755 $(ROOT)/usr/local/share/upgrade.d
 	install -p -D -m 755 upgrade-scripts/* $(ROOT)/usr/local/share/upgrade.d
 	install -d -m 755 $(ROOT)/etc/update.d

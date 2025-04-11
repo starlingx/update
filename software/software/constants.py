@@ -52,7 +52,7 @@ DC_VAULT_LOADS_DIR = "%s/loads" % DC_VAULT_DIR
 # Certificate
 ENABLE_DEV_CERTIFICATE_PATCH_IDENTIFIER = 'ENABLE_DEV_CERTIFICATE'
 
-# Software path's
+# Software paths
 SOFTWARE_STORAGE_DIR = "/opt/software"
 SOFTWARE_CONFIG_FILE_LOCAL = "/etc/software/software.conf"
 SOFTWARE_DEPLOY_FOLDER = "software-deploy"

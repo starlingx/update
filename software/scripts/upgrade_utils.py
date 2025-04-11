@@ -273,3 +273,10 @@ def get_available_gib_in_vg():
         raise Exception(msg)
 
     return vfree
+
+
+def get_deployment_data():
+    """Get the current deployment data"""
+    with open("/opt/software/software.json", "r") as fp:
+        deployment = json.loads(fp.read())
+        return deployment.get("deploy")[0]
