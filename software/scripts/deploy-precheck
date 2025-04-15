@@ -102,37 +102,13 @@ class HealthCheck(object):
         success = True
         releases = self._config.get("releases", "")
         releases_in_allowed_states = []
-        preinstalled_patches = []
-
         for release in json.loads(releases):
-            if release['state'] == STATE_DEPLOYED:
-                releases_in_allowed_states.append(release)
-
-                if release['prepatched_iso']:
-                    preinstalled_patches = release.get('preinstalled_patches', [])
-
-                    # TODO(lvieira): remove this after 24.09 major release
-                    # treat special cases for prepatched already released
-                    # (they do not have preinstalled_patches list)
-                    if not preinstalled_patches:
-                        component = release['release_id'].split('-')[0]
-                        already_released_prepatched_isos = {
-                            "24.09.100": ["24.09.0"],
-                            "24.09.200": ["24.09.100", "24.09.0"],
-                            "24.09.1": ["24.09.0"],
-                            "24.09.2": ["24.09.1", "24.09.0"],
-                            "24.09.3": ["24.09.2", "24.09.1", "24.09.0"]
-                        }
-                        released = already_released_prepatched_isos.get(release['sw_version'], [])
-                        preinstalled_patches.extend([f"{component}-{release}" for release in released])
-
-            if patch_health_check and release['state'] == STATE_AVAILABLE:
+            if release['state'] == STATE_DEPLOYED or \
+                (patch_health_check and release['state'] == STATE_AVAILABLE):
                 releases_in_allowed_states.append(release)
 
         allowed_patches = [release['release_id'] for release in releases_in_allowed_states]
-        allowed_patches.extend(preinstalled_patches)
         missing_patches = list(set(required_patches) - set(allowed_patches))
-
         if missing_patches:
             success = False
 

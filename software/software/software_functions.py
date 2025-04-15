@@ -380,6 +380,11 @@ class ReleaseData(object):
             package_dir[release_sw_version] = "%s/%s" % (root_package_dir, release_sw_version)
             repo_dir[release_sw_version] = "%s/rel-%s" % (repo_root_dir, release_sw_version)
 
+        self.metadata[release_id]["preinstalled_patches"] = []
+        for req in root.findall("preinstalled_patches"):
+            for patch_id in req.findall("id"):
+                self.metadata[release_id]["preinstalled_patches"].append(patch_id.text)
+
         self.metadata[release_id]["requires"] = []
         for req in root.findall("requires"):
             for req_release in req.findall("req_patch_id"):
