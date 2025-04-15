@@ -2950,15 +2950,17 @@ class PatchController(PatchService):
                     msg = "Failed to delete patch script %s. Reason: %s" % (script_path, e)
                     LOG.error(msg)
 
-    def install_releases_thread(self, deployment_list, feed_repo, running_release):
+    def install_releases_thread(self, deployment_list, feed_repo, upgrade=False):
         """
         In a separated thread.
         Install the debian packages, create the commit and update the metadata.
+        IF it's an upgrade, also run the upgrade script
         """
         def run():
             LOG.info("Installing releases on repo: %s" % feed_repo)
 
             try:
+                deploy_sw_version = None
                 for release_id in deployment_list:
                     msg = "Starting deployment for: %s" % release_id
                     LOG.info(msg)
@@ -2967,7 +2969,9 @@ class PatchController(PatchService):
                     deploy_release = self._release_basic_checks(release_id)
                     self.copy_patch_activate_scripts(release_id, deploy_release.activation_scripts)
 
-                    all_commits = ostree_utils.get_all_feed_commits(running_release.sw_version)
+                    deploy_sw_version = deploy_release.sw_version
+
+                    all_commits = ostree_utils.get_all_feed_commits(deploy_release.sw_version)
                     if deploy_release.commit_id in all_commits:
                         # This case is for node with prestaged data where ostree
                         # commits have been pulled from system controller
@@ -2996,7 +3000,8 @@ class PatchController(PatchService):
                         raise APTOSTreeCommandFail(msg)
 
                     # Get the latest commit after performing "apt-ostree install".
-                    self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
+                    self.latest_feed_commit = \
+                        ostree_utils.get_feed_latest_commit(deploy_release.sw_version)
 
                     deploystate = deploy_release.state
                     metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[deploystate]
@@ -3012,7 +3017,8 @@ class PatchController(PatchService):
                     with self.hosts_lock:
                         self.interim_state[release_id] = list(self.hosts)
 
-                    self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
+                    self.latest_feed_commit = \
+                        ostree_utils.get_feed_latest_commit(deploy_release.sw_version)
 
                     # Update metadata
                     tree = ET.parse(metadata_file)
@@ -3037,16 +3043,25 @@ class PatchController(PatchService):
 
                 # Update the feed ostree summary
                 ostree_utils.update_repo_summary_file(feed_repo)
-                self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
-
-                # move the deploy state to start-done
-                deploy_state = DeployState.get_instance()
-                deploy_state.start_done(self.latest_feed_commit)
-
-                LOG.info("Finished releases %s deploy start" % deployment_list)
+                self.latest_feed_commit = ostree_utils.get_feed_latest_commit(deploy_sw_version)
 
                 self.send_latest_feed_commit_to_agent()
                 self.software_sync()
+
+                if upgrade:
+                    base_deployment = deployment_list[0]
+                    base_release = self._release_basic_checks(base_deployment)
+                    upgrade_commit_id = base_release.commit_id
+                    if self._deploy_upgrade_start(base_release.sw_release, upgrade_commit_id):
+                        LOG.info("Finished releases %s deploy start" % deployment_list)
+                    else:
+                        raise ValueError("_deploy_upgrade_start failed")
+                else:
+                    # move the deploy state to start-done
+                    deploy_state = DeployState.get_instance()
+                    deploy_state.start_done(self.latest_feed_commit)
+                    LOG.info("Finished releases %s deploy start" % deployment_list)
+
             except Exception as e:
                 msg = "Deploy start applying failed: %s" % str(e)
                 LOG.exception(msg)
@@ -3176,29 +3191,6 @@ class PatchController(PatchService):
                 return precheck_result
         self._safe_remove_precheck_result_file(to_release)
 
-        if not is_patch:
-            # TODO(bqian) remove default latest commit when a commit-id is built into GA metadata
-            if commit_id is None:
-                commit_id = ostree_utils.get_feed_latest_commit(deploy_sw_version)
-
-            if self._deploy_upgrade_start(to_release, commit_id):
-                collect_current_load_for_hosts(deploy_sw_version)
-                create_deploy_hosts()
-
-                release_state = ReleaseState(release_ids=[deploy_release.id])
-                release_state.start_deploy()
-                deploy_state = DeployState.get_instance()
-                deploy_state.start(running_release, to_release, feed_repo, commit_id,
-                                   deploy_release.reboot_required, snapshot=snapshot)
-
-                msg_info += "%s is now starting, await for the states: " \
-                            "[deploy-start-done | deploy-start-failed] in " \
-                            "'software deploy show'\n" % deployment
-            else:
-                msg_error = "Deployment for %s failed to start" % deployment
-
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
         # Patch operation: 'deploy release' major version equals 'running release' major version (MM.mm)
 
         # TODO(bqian) update references of sw_release (string) to SWRelease object
@@ -3225,7 +3217,7 @@ class PatchController(PatchService):
         # If current running release is R4 and command issued is "software deploy start R2"
         # operation is "remove" with order [R4, R3]
         if operation == "apply":
-            deployment_list = self.release_apply_order(deployment, running_release.sw_version)
+            deployment_list = self.release_apply_order(deployment, deploy_sw_version)
 
             collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
             create_deploy_hosts(hostname=hostname)
@@ -3263,10 +3255,18 @@ class PatchController(PatchService):
             # Setting deploy state to start, so that it can transition to start-done or start-failed
             deploy_state = DeployState.get_instance()
             to_release = to_deploy_release.sw_release
-            deploy_state.start(running_release, to_release, feed_repo, None, reboot_required)
+            if is_patch:
+                deploy_state.start(running_release, to_release, feed_repo, None, reboot_required)
+            else:
+                # TODO(bqian) remove default latest commit when a commit-id is built into GA metadata
+                if commit_id is None:
+                    commit_id = ostree_utils.get_feed_latest_commit(deploy_sw_version)
+                deploy_state.start(running_release, to_release, feed_repo, commit_id, reboot_required)
 
             # Start applying the releases
-            self.install_releases_thread(deployment_list, feed_repo, running_release)
+            upgrade = not is_patch
+            self.install_releases_thread(deployment_list, feed_repo, upgrade)
+
             msg_info += "%s is now starting, await for the states: " \
                         "[deploy-start-done | deploy-start-failed] in " \
                         "'software deploy show'\n" % deployment_list
