@@ -286,25 +286,25 @@ def pull_ostree_from_remote(remote=None):
         ref_cmd = "ostree refs --force --create=%s %s" % (ref, constants.OSTREE_REF)
 
     try:
-        output = subprocess.run(cmd % ref, shell=True, check=True, capture_output=True)
+        process = subprocess.run(cmd % ref, shell=True, check=True, text=True, capture_output=True)
     except subprocess.CalledProcessError as e:
         msg = "Failed to pull from %s remote into sysroot ostree" % ref
         err_msg = "OSTree Pull Error: return code: %s, Output: %s" \
-                  % (e.returncode, e.stderr.decode("utf-8"))
+                  % (e.returncode, e.stderr.strip())
         LOG.exception(err_msg)
         raise OSTreeCommandFail(msg)
 
     # Log to help identify errors
-    msg = "Remote pull output: %s" % output
+    msg = "Remote pull output: %s" % process.stdout.strip()
     LOG.info(msg)
 
     if ref_cmd:
         try:
-            subprocess.run(ref_cmd, shell=True, check=True, capture_output=True)
+            subprocess.run(ref_cmd, shell=True, check=True, text=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             msg = "Failed to create ref %s for remote %s" % (ref, remote)
             err_msg = "OSTree Ref Error: return code: %s, Output: %s" \
-                      % (e.returncode, e.stderr.decode("utf-8"))
+                      % (e.returncode, e.stderr.strip())
             LOG.exception(err_msg)
             raise OSTreeCommandFail(msg)
 
