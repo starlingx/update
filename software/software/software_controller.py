@@ -3110,7 +3110,7 @@ class PatchController(PatchService):
         with open(precheck_result_file, "w") as f:
             json.dump({"healthy": healthy, "timestamp": time.time()}, f)
 
-    def _should_run_precheck_prior_deploy_start(self, release_version, force, is_patch):
+    def _should_run_precheck_prior_deploy_start(self, release_version, force, is_patch, snapshot):
         # there is not precheck script in this state
         if self.pre_bootstrap:
             return False
@@ -3122,6 +3122,9 @@ class PatchController(PatchService):
         file_path = self._get_precheck_result_file_path(release_version)
         if not os.path.isfile(file_path):
             LOG.info("The precheck result file %s does not exist." % file_path)
+            return True
+
+        if snapshot:
             return True
 
         with open(file_path) as f:
@@ -3179,7 +3182,7 @@ class PatchController(PatchService):
 
         to_release = deploy_release.sw_release
 
-        if self._should_run_precheck_prior_deploy_start(to_release, force, is_patch):
+        if self._should_run_precheck_prior_deploy_start(to_release, force, is_patch, snapshot):
             LOG.info("Executing software deploy precheck prior to software deploy start")
             if precheck_result := self._precheck_before_start(
                 deployment,
