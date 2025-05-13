@@ -602,9 +602,36 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
         # Nothing to add, so just call the super class
         messages.PatchMessage.encode(self)
 
+    def _set_host_install_completed(self, host):
+        global sc
+
+        sc.hosts_lock.acquire()
+        try:
+            host.install_status = self.status
+            host.install_pending = False
+            host.install_reject_reason = self.reject_reason
+        finally:
+            sc.hosts_lock.release()
+
     def handle(self, sock, addr):
         LOG.info("Handling install resp from %s", addr[0])
         global sc
+
+        ip = addr[0]
+        sc.hosts_lock.acquire()
+        try:
+            # NOTE(bqian) seems like trying to tolerate a failure situation
+            # that a host is directed to install a patch but during the installation
+            # software-controller-daemon gets restarted
+            # should remove the sc.hosts which is in memory volatile storage and replaced with
+            # permanent deploy-host entity
+            if ip not in sc.hosts:
+                sc.hosts[ip] = AgentNeighbour(ip)
+
+            host = sc.hosts[ip]
+            hostname = host.hostname
+        finally:
+            sc.hosts_lock.release()
 
         dbapi = get_instance()
         deploy = dbapi.get_deploy_all()
@@ -613,50 +640,39 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
             return
         deploy = deploy[0]
 
-        sc.hosts_lock.acquire()
-        try:
-            # NOTE(bqian) seems like trying to tolerate a failure situation
-            # that a host is directed to install a patch but during the installation
-            # software-controller-daemon gets restarted
-            # should remove the sc.hosts which is in memory volatile storage and replaced with
-            # permanent deploy-host entity
-            ip = addr[0]
-            if ip not in sc.hosts:
-                sc.hosts[ip] = AgentNeighbour(ip)
-
-            sc.hosts[ip].install_status = self.status
-            sc.hosts[ip].install_pending = False
-            sc.hosts[ip].install_reject_reason = self.reject_reason
-            hostname = sc.hosts[ip].hostname
-        finally:
-            sc.hosts_lock.release()
-
+        success = False
         deploy_host_state = DeployHostState(hostname)
-        if self.status:
-            deploying = ReleaseState(release_state=states.DEPLOYING)
-            if deploying.is_major_release_deployment():
-                # For major release deployment, update sysinv ihost.sw_version
-                # so that right manifest can be generated.
-                sw_version = utils.get_major_release_version(deploy.get("to_release"))
-                msg = f"Update {hostname} to {sw_version}"
-                LOG.info(msg)
-                try:
-                    update_host_sw_version(hostname, sw_version)
-                except Exception:
-                    # Failed a step, fail the host deploy for reattempt
-                    deploy_host_state.deploy_failed()
-                    return
 
-            deploy_host_state.deployed()
-            if self.reboot_required:
-                sc.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_SUCCESS_RR,
+        try:
+            if self.status:
+                deploying = ReleaseState(release_state=states.DEPLOYING)
+                if deploying.is_major_release_deployment():
+                    # For major release deployment, update sysinv ihost.sw_version
+                    # so that right manifest can be generated.
+                    sw_version = utils.get_major_release_version(deploy.get("to_release"))
+                    msg = f"Update {hostname} to {sw_version}"
+                    LOG.info(msg)
+                    try:
+                        update_host_sw_version(hostname, sw_version)
+                    except Exception:
+                        # Failed a step, fail the host deploy for reattempt
+                        return
+
+                success = True
+        finally:
+            if success:
+                deploy_host_state.deployed()
+                if self.reboot_required:
+                    sc.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_SUCCESS_RR,
+                                             fm_constants.FM_ALARM_STATE_SET,
+                                             "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, hostname))
+            else:
+                deploy_host_state.deploy_failed()
+                sc.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_FAILURE,
                                          fm_constants.FM_ALARM_STATE_SET,
                                          "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, hostname))
-        else:
-            deploy_host_state.deploy_failed()
-            sc.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_FAILURE,
-                                     fm_constants.FM_ALARM_STATE_SET,
-                                     "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, hostname))
+
+            self._set_host_install_completed(host)
 
     def send(self, sock):  # pylint: disable=unused-argument
         LOG.error("Should not get here")
