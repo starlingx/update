@@ -3004,6 +3004,20 @@ class PatchController(PatchService):
                     msg = "Failed to delete patch script %s. Reason: %s" % (script_path, e)
                     LOG.error(msg)
 
+    def cleanup_old_releases(self, target_commit, all_commits):
+        index = 0
+        to_delete_releases = []
+
+        while index < len(all_commits) and target_commit != all_commits[index]:
+            to_delete_release = self.release_collection.get_release_by_commit_id(all_commits[index])
+            if to_delete_release:
+                to_delete_releases.append(to_delete_release.id)
+                LOG.info("Deleting %s not used after prestage" % to_delete_release.id)
+            index += 1
+
+        # Delete metadata and all associated release files
+        self.software_release_delete_api(to_delete_releases)
+
     def install_releases_thread(self, deployment_list, feed_repo, upgrade=False, **kwargs):
         """
         In a separated thread.
@@ -3026,11 +3040,22 @@ class PatchController(PatchService):
                     deploy_sw_version = deploy_release.sw_version
 
                     all_commits = ostree_utils.get_all_feed_commits(deploy_release.sw_version)
-                    if deploy_release.commit_id in all_commits:
+                    latest_commit = all_commits[0]
+                    target_commit = deploy_release.commit_id
+                    if target_commit in all_commits:
                         # This case is for node with prestaged data where ostree
                         # commits have been pulled from system controller
                         LOG.info("Commit %s already exists in feed repo for release %s"
                                  % (deploy_release.commit_id, release_id))
+
+                        # If this is the last deployment, and it is not the latest commit in feed
+                        # delete the commits until reach this, and delete metadatas
+                        if release_id == deployment_list[-1] and target_commit != latest_commit:
+                            self.cleanup_old_releases(target_commit, all_commits)
+
+                            # Reset feed to last deployment release
+                            self.reset_feed_commit(deploy_release)
+
                         continue
 
                     packages = [pkg.split("_")[0] for pkg in deploy_release.packages]
@@ -3039,8 +3064,6 @@ class PatchController(PatchService):
                         LOG.error(msg)
                         raise MetadataFail(msg)
 
-                    # commit consistency check
-                    latest_commit = all_commits[0]
                     # Install debian package through apt-ostree
                     try:
                         apt_utils.run_install(

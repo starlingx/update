@@ -306,7 +306,7 @@ class SWReleaseCollection(object):
         return self.get_release_by_id(rel_id)
 
     def get_release_by_commit_id(self, commit_id):
-        for _, sw_release in self._sw_releases:
+        for _, sw_release in self._sw_releases.items():
             if sw_release.commit_id == commit_id:
                 return sw_release
         return None
