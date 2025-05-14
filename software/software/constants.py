@@ -231,3 +231,7 @@ MAX_OSTREE_DEPLOY_RETRIES = 5
 
 # Precheck timeout
 PRECHECK_RESULT_VALID_PERIOD = 300
+
+# Logging
+LOG_DEFAULT_FORMAT = ('%(asctime)s.%(msecs)03d USM - %(exec)s [%(process)s:%(thread)d]: '
+                      '%(filename)s(%(lineno)s): %(levelname)s: %(message)s')

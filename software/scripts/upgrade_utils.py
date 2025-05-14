@@ -1,11 +1,12 @@
 #
-# Copyright (c) 2023-2024 Wind River Systems, Inc.
+# Copyright (c) 2023-2025 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
 # This is an utility module used by standalone USM upgrade scripts
 # that runs on the FROM-side context but using TO-side code base
 #
+
 import configparser
 import json
 import logging
@@ -17,9 +18,18 @@ import sys
 import time
 import yaml
 
+from oslo_config import cfg
+
 from keystoneauth1 import exceptions
 from keystoneauth1 import identity
 from keystoneauth1 import session
+
+LOG = logging.getLogger('main_logger')
+CONF = cfg.CONF
+
+logging_default_format_string = None
+software_conf_mtime = 0
+software_conf = '/etc/software/software.conf'
 
 
 def get_token_endpoint(config, service_type="platform"):
@@ -169,13 +179,18 @@ def get_system_info(sysinv_client):
 
 
 def configure_logging(filename, log_level=logging.INFO):
+    read_log_config()
+
     my_exec = os.path.basename(sys.argv[0])
 
-    log_format = ('%(asctime)s: ' + my_exec + '[%(process)s]: '
-                  '%(filename)s(%(lineno)s): %(levelname)s: %(message)s')
-    log_datefmt = "%FT%T"
+    log_format = logging_default_format_string
+    log_format = log_format.replace('%(exec)s', my_exec)
+    formatter = logging.Formatter(log_format, datefmt="%FT%T")
 
-    logging.basicConfig(filename=filename, format=log_format, level=log_level, datefmt=log_datefmt)
+    LOG.setLevel(log_level)
+    main_log_handler = logging.FileHandler(filename)
+    main_log_handler.setFormatter(formatter)
+    LOG.addHandler(main_log_handler)
 
 
 def get_platform_conf(key):
@@ -220,6 +235,27 @@ def get_secret_data_yaml(name, namespace):
         else:
             time.sleep(wait_seconds)
     return None
+
+
+def read_log_config():
+    global software_conf_mtime
+    global software_conf
+
+    if software_conf_mtime == os.stat(software_conf).st_mtime:
+        # The file has not changed since it was last read
+        return
+
+    global logging_default_format_string
+
+    # TODO(lbonatti) Remove this default_format when logging_default_format_string is present in stx11,
+    #  when this becomes the N release.
+    default_format = ('%(asctime)s.%(msecs)03d USM - %(exec)s [%(process)s:%(thread)d]: %(filename)s(%(lineno)s): '
+                      '%(levelname)s: %(message)s')
+    config = configparser.ConfigParser(interpolation=None)
+
+    config.read(software_conf)
+    software_conf_mtime = os.stat(software_conf).st_mtime
+    logging_default_format_string = config.get("DEFAULT", "logging_default_format_string", fallback=default_format)
 
 
 def get_available_gib_in_vg():

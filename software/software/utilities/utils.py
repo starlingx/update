@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024 Wind River Systems, Inc.
+# Copyright (c) 2023-2025 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -10,6 +10,7 @@ import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import subprocess
+import sys
 import tempfile
 import yaml
 
@@ -20,6 +21,7 @@ from software.utilities.constants import PLATFORM_PATH
 from software.utilities.constants import KEYRING_PERMDIR
 
 from software.utilities import constants
+import software.config as cfg
 
 LOG = logging.getLogger('main_logger')
 SOFTWARE_LOG_FILE = "/var/log/software.log"
@@ -39,10 +41,18 @@ ACTION_ACTIVATE_ROLLBACK = "activate-rollback"
 
 
 def configure_logging():
-    log_format = ('%(asctime)s: ' + __name__ + '[%(process)s]: '
-                                               '%(filename)s(%(lineno)s): %(levelname)s: %(message)s')
-    log_datefmt = "%FT%T"
-    logging.basicConfig(filename=SOFTWARE_LOG_FILE, format=log_format, level=logging.INFO, datefmt=log_datefmt)
+    cfg.read_config()
+
+    my_exec = os.path.basename(sys.argv[0])
+
+    log_format = cfg.logging_default_format_string
+    log_format = log_format.replace('%(exec)s', my_exec)
+    formatter = logging.Formatter(log_format, datefmt="%FT%T")
+
+    LOG.setLevel(logging.INFO)
+    main_log_handler = logging.FileHandler(SOFTWARE_LOG_FILE)
+    main_log_handler.setFormatter(formatter)
+    LOG.addHandler(main_log_handler)
 
 
 def get_migration_scripts(migration_script_dir):

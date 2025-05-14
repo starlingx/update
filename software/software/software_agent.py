@@ -1033,9 +1033,9 @@ class PatchAgent(PatchService):
 def main():
     global pa
 
-    configure_logging()
-
     cfg.read_config()
+
+    configure_logging()
 
     pa = PatchAgent()
     if os.path.isfile(constants.INSTALL_LOCAL_FLAG):
