@@ -89,9 +89,14 @@ override_dh_install:
 		${SCRIPTDIR}/sync-controllers-feed
 	install -m 755 scripts/remove-temporary-data \
 		${SCRIPTDIR}/remove-temporary-data
+	install -d -m 755 $(ROOT)/usr/local/share/upgrade.d
+	install -p -D -m 755 upgrade-scripts/* $(ROOT)/usr/local/share/upgrade.d
+	install -d -m 755 $(ROOT)/etc/update.d
 
 	# TODO(heitormatsui): following lines are for backward compatibility and can be removed in stx-12
 	cd ${SCRIPTDIR} ; ln -sf major-release-upload usm_load_import
 	cd ${SCRIPTDIR} ; ln -sf deploy-start software-deploy-start
 
 	dh_install
+
+override_dh_usrlocal:

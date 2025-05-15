@@ -15,7 +15,7 @@ Run platform upgrade deploy precheck as a standalone executable
 import argparse
 import base64
 import json
-import logging as LOG
+import logging
 import re
 import requests
 import subprocess
@@ -46,6 +46,8 @@ SYSTEM_MODE_SIMPLEX = "simplex"
 # the space needed is derived from the sum of snapshot sizes
 # defined in lvm_snapshot.LvmSnapshotManager.LOGICAL_VOLUMES
 FREE_SPACE_NEEDED_LVM_SNAPSHOTS_GIB = 24
+
+LOG = logging.getLogger('main_logger')
 
 class HealthCheck(object):
     """This class represents a general health check object
@@ -499,5 +501,5 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    upgrade_utils.configure_logging("/var/log/software.log", log_level=LOG.INFO)
+    upgrade_utils.configure_logging("/var/log/software.log", log_level=logging.INFO)
     sys.exit(main())

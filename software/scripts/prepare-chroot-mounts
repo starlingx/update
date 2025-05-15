@@ -11,12 +11,14 @@
 # to the local filesystem data and configuration.
 #
 
-import logging as LOG
+import logging
 import os
 import subprocess
 import sys
 
 import upgrade_utils
+
+LOG = logging.getLogger('main_logger')
 
 
 class ChrootMounts:
@@ -108,7 +110,7 @@ class ChrootMounts:
 
 
 if __name__ == "__main__":
-    upgrade_utils.configure_logging("/var/log/software.log", log_level=LOG.INFO)
+    upgrade_utils.configure_logging("/var/log/software.log", log_level=logging.INFO)
 
     checkout_dir = None
     operation = None
