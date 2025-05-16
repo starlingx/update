@@ -579,6 +579,42 @@ class FixShadowPasswordlessChar(BaseHook):
             raise
 
 
+class RevertCrtPermissionsHook(BaseHook):
+    """
+    This hook resets the permissions of .crt files in /etc/kubernetes/pki
+    to 0644
+    """
+
+    PKI_DIR = "/etc/kubernetes/pki"
+
+    def revert_crt_permissions(self):
+        target_dir = os.path.join(
+            self.TO_RELEASE_OSTREE_DIR, self.PKI_DIR.lstrip("/")
+        )
+
+        if not os.path.isdir(target_dir):
+            LOG.warning("Directory does not exist: %s" % target_dir)
+            return
+
+        for root, _, files in os.walk(target_dir):
+            for f in files:
+                if f.endswith(".crt"):
+                    filepath = os.path.join(root, f)
+                    try:
+                        os.chmod(filepath, 0o644)
+                        LOG.info("Set permission 0644 on %s", filepath)
+                    except Exception as e:
+                        LOG.exception(
+                            "Failed to set permission on %s: %s",
+                            filepath,
+                            str(e)
+                        )
+                        raise
+
+    def run(self):
+        self.revert_crt_permissions()
+
+
 class HookManager(object):
     """
     Object to manage the execution of agent hooks
@@ -613,6 +649,7 @@ class HookManager(object):
             FixPSQLPermissionHook,
             DeleteControllerFeedRemoteHook,
             RevertUmaskHook,
+            RevertCrtPermissionsHook,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
