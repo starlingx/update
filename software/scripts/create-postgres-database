@@ -13,7 +13,7 @@
 
 import configparser
 import grp
-import logging as LOG
+import logging
 import os
 import pwd
 import shutil
@@ -22,6 +22,7 @@ import sys
 
 import upgrade_utils
 
+LOG = logging.getLogger('main_logger')
 
 class PostgresDatabase:
     DEFAULT_POSTGRESQL_PORT = 5432
@@ -118,7 +119,7 @@ class PostgresDatabase:
 
 
 if __name__ == "__main__":
-    upgrade_utils.configure_logging("/var/log/software.log", log_level=LOG.INFO)
+    upgrade_utils.configure_logging("/var/log/software.log", log_level=logging.INFO)
 
     port = None
     error = False

@@ -13,13 +13,15 @@
 # 5. perform data migration
 #
 
-import logging as LOG
+import logging
 import os
 import shutil
 import subprocess
 import sys
 
 import upgrade_utils
+
+LOG = logging.getLogger('main_logger')
 
 
 class DeployStart:
@@ -183,7 +185,7 @@ class DeployStart:
 
 
 if __name__ == "__main__":
-    upgrade_utils.configure_logging("/var/log/software.log", log_level=LOG.INFO)
+    upgrade_utils.configure_logging("/var/log/software.log", log_level=logging.INFO)
 
     from_version = None
     to_version = None

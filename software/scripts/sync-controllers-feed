@@ -12,7 +12,7 @@
 Run feed synchronization between controllers
 """
 
-import logging as LOG
+import logging
 import os
 import socket
 import subprocess
@@ -22,6 +22,8 @@ import upgrade_utils
 CONTROLLER_0_HOSTNAME = "controller-0"
 CONTROLLER_1_HOSTNAME = "controller-1"
 SYSTEM_MODE_SIMPLEX = "simplex"
+
+LOG = logging.getLogger('main_logger')
 
 def sync_controllers(feed):
     controller = socket.gethostname()
@@ -96,5 +98,5 @@ def main(sys_argv):
         return 1
 
 if __name__ == "__main__":
-    upgrade_utils.configure_logging('/var/log/software.log', log_level=LOG.INFO)
+    upgrade_utils.configure_logging('/var/log/software.log', log_level=logging.INFO)
     sys.exit(main(sys.argv))

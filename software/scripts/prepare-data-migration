@@ -12,7 +12,7 @@
 Run platform upgrade prep data migration as a standalone executable
 """
 
-import logging as LOG
+import logging
 import os
 import shutil
 import subprocess
@@ -30,6 +30,7 @@ RABBIT_PATH = '/var/lib/rabbitmq'
 KUBERNETES_CONF_PATH = "/etc/kubernetes"
 KUBERNETES_ADMIN_CONF_FILE = "admin.conf"
 
+LOG = logging.getLogger('main_logger')
 
 class DataMigration(object):
 
@@ -335,5 +336,5 @@ def main(sys_argv):
 
 
 if __name__ == "__main__":
-    upgrade_utils.configure_logging("/var/log/software.log", log_level=LOG.INFO)
+    upgrade_utils.configure_logging("/var/log/software.log", log_level=logging.INFO)
     sys.exit(main(sys.argv))
