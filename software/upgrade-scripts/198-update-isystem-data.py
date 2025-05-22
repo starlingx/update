@@ -56,15 +56,14 @@ def main():
             LOG.exception(f"Error connecting to database: {e}")
             return 1
         try:
-            LOG.info(f"Updating software_version from {from_release} \
-                     to {to_release}\n")
+            LOG.info(f"Updating software_version from {from_release} to {to_release}")
             update_isystem_software_version(conn, to_release)
         except Exception as ex:
             LOG.exception(ex)
             return 1
         finally:
             conn.close()
-        return 0
+    return 0
 
 
 def update_isystem_software_version(conn, new_sw_version):
