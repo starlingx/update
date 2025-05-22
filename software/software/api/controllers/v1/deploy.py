@@ -72,26 +72,24 @@ class DeployController(RestController):
         return result
 
     @expose(method='POST', template='json')
-    def precheck(self, release, force=None, region_name=None, snapshot=None):
+    def precheck(self, release, force=None, region_name=None, **kwargs):
         _force = force is not None
-        _snapshot = snapshot is not None
         reload_release_data()
 
-        result = sc.software_deploy_precheck_api(release, _force, region_name, _snapshot)
+        result = sc.software_deploy_precheck_api(release, _force, region_name, **kwargs)
         if result and 'error' in result and result["error"] != "":
             response.status = 406
         return result
 
     @expose(method='POST', template='json')
-    def start(self, release, force=None, snapshot=None):
+    def start(self, release, force=None, **kwargs):
         reload_release_data()
         _force = force is not None
-        _snapshot = snapshot is not None
 
         if sc.any_patch_host_installing():
             raise SoftwareServiceError(error="Rejected: One or more nodes are installing a release.")
 
-        result = sc.software_deploy_start_api(release, _force, _snapshot)
+        result = sc.software_deploy_start_api(release, _force, **kwargs)
 
         if result and 'error' in result and result["error"] != "":
             response.status = 406

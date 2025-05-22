@@ -257,6 +257,11 @@ class UpgradeHealthCheck(HealthCheck):
             return success, msg
         return success, None
 
+    def _check_snapshot_option(self):
+        options = json.loads(self._config.get("options", {}))
+        snapshot = options.get("snapshot", False)
+        return upgrade_utils.to_bool(snapshot)
+
     def run_health_check(self):
         """Run specific upgrade health checks"""
 
@@ -337,7 +342,7 @@ class UpgradeHealthCheck(HealthCheck):
         health_ok = health_ok and success
 
         # check for LVM snapshot health checks
-        use_lvm_snapshot = self._config.get("snapshot", False)
+        use_lvm_snapshot = self._check_snapshot_option()
         if use_lvm_snapshot:
             success = self._check_system_simplex()
             output += '(LVM snapshots) System is AIO-SX: [%s]\n' \
@@ -456,9 +461,8 @@ def parse_config(args=None):
     parser.add_argument("--patch",
                         help="Set precheck to run against a patch release",
                         action="store_true")
-    parser.add_argument("--snapshot",
-                        help="Execute LVM snapshot feature specific health checks (AIO-SX only)",
-                        action="store_true")
+    parser.add_argument("--options",
+                        help="Additional parameters in key=value format.")
     parser.add_argument("--releases",
                         help="Releases",
                         default="[]")
