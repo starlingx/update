@@ -743,6 +743,11 @@ class PatchAgent(PatchService):
                     changed = True
                     clearflag(ostree_pull_completed_deployment_pending_file)
 
+                # Creating a new deployment restores the kernel.env from ostree
+                # which does not have local modifications (such as selecting a RT kernel)
+                # We need to re-align that file after creating a deployment.
+                ostree_utils.update_deployment_kernel_env()
+
             except OSTreeCommandFail:
                 LOG.exception("Failed to pull changes and create deployment"
                               "during host-install.")

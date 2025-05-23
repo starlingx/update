@@ -5,6 +5,8 @@ SPDX-License-Identifier: Apache-2.0
 
 """
 import configparser
+import filecmp
+import glob
 import logging
 import os
 import re
@@ -21,6 +23,7 @@ from gi.repository import OSTree  # pylint: disable=E0611
 
 from software import constants
 from software.exceptions import OSTreeCommandFail
+from tsconfig.tsconfig import subfunctions
 
 LOG = logging.getLogger('main_logger')
 
@@ -901,3 +904,48 @@ def delete_temporary_refs_and_remotes():
     if not success:
         LOG.error("Failure deleting temporary refs and remotes, please cleanup manually.")
     return success
+
+
+def update_deployment_kernel_env():
+    """
+    Update the /boot/1/kernel.env after creating a deployment
+    """
+    try:
+        # copy /boot/2/kernel.env to /boot/1/kernel.env
+        # this is to preserve args (ie: apparmor)
+        # if the files are identical, do nothing
+        if not filecmp.cmp("/boot/1/kernel.env",
+                           "/boot/2/kernel.env",
+                           shallow=False):
+            shutil.copy2("/boot/2/kernel.env",
+                         "/boot/1/kernel.env")
+        # Determine the appropriate kernel for this env
+        desired_kernel = None
+        for kernel in glob.glob(os.path.join("/boot/1", "vmlinuz*-amd64")):
+            kernel_entry = os.path.basename(kernel)
+            # If we are running in lowlatency mode, we want the rt-amd64 kernel
+            if 'lowlatency' in subfunctions and 'rt-amd64' in kernel_entry:
+                desired_kernel = kernel_entry
+                break
+            # If we are not running lowlatency we want the entry that does NOT contain rt-amd64
+            if 'lowlatency' not in subfunctions and 'rt-amd64' not in kernel_entry:
+                desired_kernel = kernel_entry
+                break
+        if desired_kernel is None:   # This should never happen
+            LOG.warning("Unable to find a valid kernel under /boot/1")
+        else:
+            # Explicitly update /boot/1/kernel.env using the
+            # /usr/local/bin/puppet-update-grub-env.py utility
+            LOG.info("Updating /boot/1/kernel.env to:%s", desired_kernel)
+            cmd = "python /usr/local/bin/puppet-update-grub-env.py --set-kernel %s" % desired_kernel
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to run puppet-update-grub-env.py"
+        info_msg = "OSTree Post-Deployment Error: return code: %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.info(info_msg)
+        raise OSTreeCommandFail(msg)
+    except Exception as e:
+        msg = "Failed to manually update /boot/1/kernel.env. Err=%s" % str(e)
+        LOG.info(msg)
+        raise OSTreeCommandFail(msg)
