@@ -16,7 +16,6 @@ import sys
 import time
 
 import software.ostree_utils as ostree_utils
-from software.lvm_snapshot import LVMSnapshotManager
 from software.software_functions import configure_logging
 from software.software_functions import execute_agent_hooks
 from software.software_functions import LOG
@@ -378,20 +377,11 @@ class SoftwareMessageDeployDeleteCleanupReq(messages.PatchMessage):
         # undeploy the from-release ostree deployment to free sysroot disk space
         success_ostree_undeploy_from_release = ostree_utils.undeploy_inactive_deployments()
 
-        # remove the lvm snapshots created during the upgrade process
-        success_remove_lvm_snapshots = True
-        try:
-            lsm = LVMSnapshotManager()
-            lsm.delete_snapshots()
-        except Exception:
-            success_remove_lvm_snapshots = False
-
         cleanup_results = [
             (success_ostree_remote_cleanup, "cleaning temporary refs/remotes"),
             (success_ostree_remote_update, "updating default remote"),
             (success_remove_upgrade_flags, "removing local upgrade flags"),
             (success_ostree_undeploy_from_release, "undeploying from-release ostree deployment"),
-            (success_remove_lvm_snapshots, "removing LVM snapshots"),
         ]
         for result, log_msg in cleanup_results:
             if result not in [None, False]:

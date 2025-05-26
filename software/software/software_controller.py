@@ -33,6 +33,7 @@ from fm_api import constants as fm_constants
 from oslo_config import cfg as oslo_cfg
 
 import software.apt_utils as apt_utils
+import software.lvm_snapshot as lvm_snapshot
 import software.ostree_utils as ostree_utils
 from software.api import app
 from software.authapi import app as auth_app
@@ -3279,10 +3280,8 @@ class PatchController(PatchService):
             if is_patch:
                 deploy_state.start(running_release, to_release, feed_repo, None, reboot_required)
             else:
-                # TODO(bqian) remove default latest commit when a commit-id is built into GA metadata
-                if commit_id is None:
-                    commit_id = ostree_utils.get_feed_latest_commit(deploy_sw_version)
-                deploy_state.start(running_release, to_release, feed_repo, commit_id, reboot_required)
+                deploy_state.start(running_release, to_release, feed_repo, commit_id,
+                                   reboot_required, snapshot=snapshot)
 
             # Start applying the releases
             upgrade = not is_patch
@@ -3804,6 +3803,27 @@ class PatchController(PatchService):
         env["IGNORE_ERRORS"] = self.ignore_errors
         upgrade_activate_rollback_cmd = [
             "source", "/etc/platform/openrc;", cmd_path, from_release, to_release]
+
+        # check if LVM snapshots are enabled and try to restore them
+        # TODO(heitormatsui): we don't really need to verify the system mode
+        #  as LVM snapshots will only be allowed if the system is AIO-SX
+        system_mode = utils.get_platform_conf("system_mode")
+        if system_mode == constants.SYSTEM_MODE_SIMPLEX:
+            deploy = self.db_api_instance.get_deploy_all()[0]
+            enabled_lvm_snapshots = deploy.get("snapshot")
+            if enabled_lvm_snapshots:
+                LOG.info("LVM snapshots are enabled")
+                manager = lvm_snapshot.LVMSnapshotManager()
+                success = manager.restore_snapshots()
+                if success:
+                    LOG.info("LVM snapshots were restored, upgrade scripts with "
+                             "action=activate-rollback will be skipped")
+                    deploy_state = DeployState.get_instance()
+                    deploy_state.activate_rollback_done()
+                    return
+                else:
+                    LOG.warning("Failure restoring LVM snapshots, falling back "
+                                "to standard activate-rollback procedure")
 
         try:
             LOG.info("starting subprocess %s" % ' '.join(upgrade_activate_rollback_cmd))

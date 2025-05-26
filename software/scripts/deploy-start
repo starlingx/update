@@ -166,10 +166,25 @@ class DeployStart:
             raise
         LOG.info("Cleanup complete")
 
+    def _take_lvm_snapshots(self):
+        deployment = upgrade_utils.get_deployment_data()
+        if deployment.get("snapshot") is True:
+            LOG.info("LVM snapshot option enabled, proceeding to take snapshots...")
+            script_path = os.path.join(self.SCRIPT_DIR, "manage-lvm-snapshots")
+            cmd = [script_path, "--create"]
+            try:
+                subprocess.run(cmd, check=True, text=True, capture_output=True)
+            except subprocess.CalledProcessError as e:
+                LOG.error("Error taking LVM snapshots: %s", e.stderr)
+                raise
+        else:
+            LOG.info("LVM snapshot option is not enabled, skipping...")
+
     def run(self):
         try:
             self._check_directories()
             self._checkout_ostree_repo()
+            self._take_lvm_snapshots()
             self._prepare_mount_points()
             self._prepare_data_migration()
             self._create_postgres_database()
