@@ -12,6 +12,7 @@ from psycopg2.extras import RealDictCursor
 import subprocess
 import sys
 import tempfile
+import traceback
 import yaml
 
 # WARNING: The first controller upgrade is done before any puppet manifests
@@ -86,10 +87,24 @@ def sort_migration_scripts(scripts, action):
     return scripts
 
 
+# This file is currently categorized as independent from framework,
+# which is runnable w/ N+1 code on a N runtime environment. The exception class
+# is defined here instead of software.exceptions module as result.
+# TODO(bqian) move the exception definition to software.exceptions if this code
+# becomes part of framework.
+class MigrationScriptFailed(Exception):
+    def __init__(self, msg, inner_exception):
+        super().__init__(msg)
+        self._inner_exception = inner_exception
+
+    @property
+    def inner_exception(self):
+        return self._inner_exception
+
+
 def execute_script(script, from_release, to_release, action, port):
     MSG_SCRIPT_FAILURE = "Deployment script %s failed with return code %d" \
                          "\nScript output:\n%s"
-    result = (0, f'Deployment script {script} completed successfully')
     try:
         LOG.info("Executing deployment script %s" % script)
         cmdline = [script, from_release, to_release, action]
@@ -107,13 +122,13 @@ def execute_script(script, from_release, to_release, action, port):
         # Deduplicate output lines using set and create error message
         unique_output = "\n".join(e.output.splitlines()) + "\n"
         error = MSG_SCRIPT_FAILURE % (script, e.returncode, unique_output)
-        result = (1, error)
-    except Exception as e:
+        raise MigrationScriptFailed(error, e)
+    except Exception as ee:
         # Log exception but continue processing
-        error = f"Unexpected error executing {script}: {str(e)}"
-        result = (1, error)
+        error = f"Unexpected error executing {script}: {str(ee)}"
+        raise MigrationScriptFailed(error, ee)
 
-    return result
+    LOG.info(f'Deployment script {script} completed successfully')
 
 
 def initialize_deploy_failure_log():
@@ -127,29 +142,37 @@ def initialize_deploy_failure_log():
         DEPLOY_SCRIPTS_FAILURES_LOG.addHandler(log_file_handler)
 
 
+def log_exception(msg, exc):
+    trace = ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    LOG.error(msg)
+    LOG.error(trace)
+
+
 def execute_scripts(scripts, from_release, to_release, action, port, migration_script_dir):
     # Execute each migration script and collect errors
+    ignore_errors = os.environ.get("IGNORE_ERRORS", 'False').upper() == 'TRUE'
     errors = []
     for f in scripts:
         migration_script = os.path.join(migration_script_dir, f)
-        ret_code, msg = execute_script(migration_script, from_release, to_release, action, port)
-        if ret_code:
-            errors.append(msg)
+        try:
+            execute_script(migration_script, from_release, to_release, action, port)
+        except MigrationScriptFailed as e:
+            if ignore_errors:
+                log_exception(f"Migrate script error, action {action} continue.",
+                              e.inner_exception)
+                errors.append(str(e))
+            else:
+                log_exception(f"Migrate script error, action {action} stopped.",
+                              e.inner_exception)
+                raise e.inner_exception
 
-    if errors:
+    if errors and ignore_errors:
+        LOG.warning(f"Action {action} completed with errors. Operation continue as IGNORE_ERRORS is set." +
+                    f" Summarized error information can be found in {DEPLOY_SCRIPTS_FAILURES_LOG_FILE}")
         initialize_deploy_failure_log()
-        LOG.Error(
-            "%d deployment scripts failed.\n See details in %s.\n",
-            len(errors), DEPLOY_SCRIPTS_FAILURES_LOG_FILE)
-
         # initialize_deploy_failure_log Log the errors to the dedicated failure log
         DEPLOY_SCRIPTS_FAILURES_LOG.info("%s action partially failed. " % action)
         DEPLOY_SCRIPTS_FAILURES_LOG.info("\n".join(errors))
-
-    ignore_errors = os.environ.get("IGNORE_ERRORS", 'False').upper() == 'TRUE'
-    # After processing all files, raise any accumulated errors
-    if errors and (not ignore_errors):
-        raise   # pylint: disable=misplaced-bare-raise
 
 
 def execute_migration_scripts(from_release, to_release, action, port=None,
