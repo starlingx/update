@@ -235,3 +235,6 @@ PRECHECK_RESULT_VALID_PERIOD = 300
 # Logging
 LOG_DEFAULT_FORMAT = ('%(asctime)s.%(msecs)03d USM - %(exec)s [%(process)s:%(thread)d]: '
                       '%(filename)s(%(lineno)s): %(levelname)s: %(message)s')
+SOFTWARE_API_SUPPRESS_PATTERNS = [
+    r"GET /v1/deploy/software_upgrade",
+]
