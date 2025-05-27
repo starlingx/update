@@ -12,6 +12,7 @@ from datetime import datetime
 from datetime import timezone
 import json
 import logging
+from packaging import version
 from pathlib import Path
 import shutil
 import subprocess
@@ -170,6 +171,11 @@ class VarSnapshot(LVMSnapshot):
                 deploy = content.get("deploy")
                 for d in deploy:
                     d["state"] = "host-rollback-done"
+                    from_release = d["from_release"]
+                    to_release = d["to_release"]
+                    if version.Version(to_release) > version.Version(from_release):
+                        d["from_release"] = to_release
+                        d["to_release"] = from_release
                 with open(software_json, "w") as fp:
                     fp.write(json.dumps(content))
                 LOG.info("Deployment data updated")
@@ -375,6 +381,7 @@ def main():
             manager.delete_snapshots()
         elif args.list:
             snapshots = [snapshot.to_json() for snapshot in manager.list_snapshots()]
+            success = bool(snapshots)  # True is snapshots exists, False otherwise
             print(json.dumps(snapshots, indent=4))
         else:
             parser.print_usage()
