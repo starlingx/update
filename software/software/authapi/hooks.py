@@ -16,7 +16,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 #
-# Copyright (c) 2023 Wind River Systems, Inc.
+# Copyright (c) 2023,2025 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -25,6 +25,7 @@ from oslo_serialization import jsonutils
 from pecan import hooks
 from webob import exc
 
+from software.authapi.policies import base as base_policy
 from software.authapi.context import RequestContext
 from software.authapi import policy
 from software import utils
@@ -87,7 +88,7 @@ class ContextHook(hooks.PecanHook):
             'project_name': project_name,
             'roles': roles
         }
-        is_admin = policy.authorize('admin_in_system_projects', {},
+        is_admin = policy.authorize(base_policy.ADMIN_OR_CONFIGURATOR, {},
                                     credentials, do_raise=False)
 
         path = utils.safe_rstrip(state.request.path, '/')
@@ -121,8 +122,17 @@ class AccessPolicyHook(hooks.PecanHook):
                 except Exception:
                     raise exc.HTTPForbidden()
             else:
-                has_api_access = policy.authorize(
-                    'admin_in_system_projects', {},
-                    context.to_dict(), do_raise=False)
+                role = ""
+                method = state.request.method
+                if method == 'GET':
+                    role = "reader or operator"
+                    has_api_access = policy.authorize(
+                        base_policy.READER_OR_OPERATOR_OR_CONFIGURATOR, {},
+                        context.to_dict(), do_raise=False)
+                else:
+                    role = "admin or configurator"
+                    has_api_access = policy.authorize(
+                        base_policy.ADMIN_OR_CONFIGURATOR, {},
+                        context.to_dict(), do_raise=False)
                 if not has_api_access:
-                    raise exc.HTTPForbidden()
+                    raise exc.HTTPForbidden("Not allowed/Role " + role + " is needed")
