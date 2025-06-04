@@ -1704,3 +1704,11 @@ def execute_agent_hooks(software_version, additional_data=None):
     except Exception as e:
         LOG.exception("Error running agent hooks: %s" % str(e))
         raise
+
+
+def to_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() == 'true'
+    return False

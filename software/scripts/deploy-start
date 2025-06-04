@@ -13,6 +13,7 @@
 # 5. perform data migration
 #
 
+import json
 import logging
 import os
 import shutil
@@ -34,7 +35,7 @@ class DeployStart:
     DEPLOY_STATE_START_FAILED = "start-failed"
 
     def __init__(self, from_version, to_version, k8s_version, postgres_port,
-                 feed_ostree_repo_dir, commit_id=None, ignore_errors=False):
+                 feed_ostree_repo_dir, commit_id=None, ignore_errors=False, options=None):
         self._from_version = from_version
         self._to_version = to_version
         self._k8s_version = k8s_version.lstrip("v")
@@ -43,6 +44,7 @@ class DeployStart:
         self._feed_ostree_repo_url = f"file://{feed_ostree_repo_dir}"
         self._commit_id = commit_id
         self._ignore_errors = ignore_errors
+        self._options = json.loads(options) if options else {}
 
     def _update_deploy_state(self, state):
         try:
@@ -167,8 +169,8 @@ class DeployStart:
         LOG.info("Cleanup complete")
 
     def _take_lvm_snapshots(self):
-        deployment = upgrade_utils.get_deployment_data()
-        if deployment.get("snapshot") is True:
+        snapshot = upgrade_utils.to_bool(self._options.get("snapshot"))
+        if snapshot is True:
             LOG.info("LVM snapshot option enabled, proceeding to take snapshots...")
             script_path = os.path.join(self.SCRIPT_DIR, "manage-lvm-snapshots")
             cmd = [script_path, "--create"]
@@ -208,6 +210,7 @@ if __name__ == "__main__":
     postgres_port = None
     feed_ostree_repo_dir = None
     commit_id = None
+    options = None
     for arg in range(1, len(sys.argv)):
         if arg == 1:
             from_version = sys.argv[arg]
@@ -221,16 +224,18 @@ if __name__ == "__main__":
             feed_ostree_repo_dir = sys.argv[arg]
         elif arg == 6:
             commit_id = sys.argv[arg]
+        elif arg == 7:
+            options = sys.argv[arg]
 
     ignore_errors = os.environ.get("IGNORE_ERRORS", False)
 
     if any(x is None for x in [from_version, to_version, k8s_version, postgres_port, feed_ostree_repo_dir]):
         usage_msg = (f"usage: {sys.argv[0]} <from_version> <to_version> <k8s_version> "
-                     f"<postgresql_port> <feed_ostree_repo_dir> [commit_id]")
+                     f"<postgresql_port> <feed_ostree_repo_dir> [commit_id] <options>")
         print(usage_msg)
         LOG.info(usage_msg)
         sys.exit(1)
 
     deploy_start = DeployStart(from_version, to_version, k8s_version, postgres_port, feed_ostree_repo_dir,
-                               commit_id=commit_id, ignore_errors=ignore_errors)
+                               commit_id=commit_id, ignore_errors=ignore_errors, options=options)
     sys.exit(deploy_start.run())

@@ -433,6 +433,7 @@ confidence=HIGH,
 # -Refactoring-
 # R0205 useless-object-inheritance
 # R0402 consider-using-from-import
+# R0801 Similar lines in x files
 # R0903 too-few-public-methods
 # R0911 too-many-return-statements
 # R0912 too-many-branches
@@ -453,7 +454,7 @@ confidence=HIGH,
 # W1514 unspecified-encoding
 # W3101 missing-timeout
 disable= C0103,C0114,C0115,C0116,C0209,C0301,C0302,C0411,
-         C0415,R0205,R0402,R0903,R0911,R0912,R0914,R0915,
+         C0415,R0205,R0402,R0801,R0903,R0911,R0912,R0914,R0915,
          R1702,R1705,R1714,R1722,R1724,R1725,R1732,R1735,
          W0602,W0603,W0718,W1514,W3101,
 

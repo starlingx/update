@@ -238,3 +238,10 @@ LOG_DEFAULT_FORMAT = ('%(asctime)s.%(msecs)03d USM - %(exec)s [%(process)s:%(thr
 SOFTWARE_API_SUPPRESS_PATTERNS = [
     r"GET /v1/deploy/software_upgrade",
 ]
+
+# Reserved_words
+RESERVED_WORDS_SET = {"OS_AUTH_TOKEN", "OS_AUTH_TYPE", "OS_AUTH_URL", "OS_ENDPOINT_TYPE", "OS_IDENTITY_API_VERSION",
+                      "OS_INTERFACE", "OS_PASSWORD", "OS_PROJECT_DOMAIN_ID", "OS_PROJECT_DOMAIN_NAME", "OS_PROJECT_ID",
+                      "OS_PROJECT_NAME", "OS_REGION_NAME", "OS_SERVICE_TOKEN", "OS_USERNAME", "OS_USER_DOMAIN_NAME",
+                      "OS_SERVICE_TYPE", "OS_TENANT_ID", "OS_TENANT_NAME", "OS_USER_DOMAIN_ID", "SYSTEM_API_VERSION",
+                      "SYSTEM_URL"}

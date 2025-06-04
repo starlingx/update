@@ -91,6 +91,7 @@ from software.software_functions import is_deployment_in_progress
 from software.software_functions import get_release_from_patch
 from software.software_functions import clean_up_deployment_data
 from software.software_functions import run_remove_temporary_data_script
+from software.software_functions import to_bool
 from software.release_state import ReleaseState
 from software.utilities.deploy_set_failed import start_set_fail
 from software.deploy_host_state import DeployHostState
@@ -2674,6 +2675,39 @@ class PatchController(PatchService):
         finally:
             self.socket_lock.release()
 
+    def _sanitize_extra_options(self, value):
+        """
+        Make sure value have only allowed characters.
+        """
+        # Only letters, numbers, space, -, and _ are allowed.
+        if not re.match(r'^[\w\s\-]+$', value):
+            msg_error = f"Invalid value: '{value}'."
+            raise SoftwareServiceError(msg_error)
+        return value
+
+    def _parse_and_sanitize_extra_options(self, options_list):
+        """
+        Validate, sanitize and convert a 'key=value' to dictionary.
+        """
+
+        for item in options_list:
+            if item.count('=') != 1:
+                msg_error = f"Invalid format: '{item}'. Expected format is key=value"
+                raise SoftwareServiceError(msg_error)
+
+        options = {}
+        for item in options_list:
+            key, value = item.split('=', 1)
+            key = self._sanitize_extra_options(key.strip())
+            value = self._sanitize_extra_options(value.strip())
+
+            if key in constants.RESERVED_WORDS_SET:
+                msg_error = f"{key} is a reserved word and can't be used."
+                raise SoftwareServiceError(msg_error)
+
+            options[key] = value
+        return options
+
     def _release_basic_checks(self, deployment):
         """
         Does basic sanity checks on the release data
@@ -2696,7 +2730,7 @@ class PatchController(PatchService):
 
     def _deploy_precheck(self, release_version: str, force: bool = False,
                          region_name: typing.Optional[str] = None, patch: bool = False,
-                         snapshot: bool = False) -> dict:
+                         **kwargs) -> dict:
         """
         Verify if system satisfy the requisites to upgrade to a specified deployment.
         :param release_version: full release name, e.g. starlingx-MM.mm.pp
@@ -2777,13 +2811,12 @@ class PatchController(PatchService):
                "--project_domain_name=%s" % project_domain_name,
                "--region_name=%s" % region_name,
                "--releases=%s" % json.dumps(releases),
+               "--options=%s" % json.dumps(kwargs.get("options", {})),
                "--deploy_in_progress=%s" % json.dumps(deploy_in_progress)]
         if force:
             cmd.append("--force")
         if patch:
             cmd.append("--patch")
-        if snapshot:
-            cmd.append("--snapshot")
 
         # Call precheck from the deployment files
         precheck_return = subprocess.run(
@@ -2805,7 +2838,7 @@ class PatchController(PatchService):
         return dict(info=msg_info, warning=msg_warning, error=msg_error, system_healthy=system_healthy)
 
     def software_deploy_precheck_api(self, deployment: str, force: bool = False, region_name=None,
-                                     snapshot: bool = False) -> dict:
+                                     **kwargs) -> dict:
         """
         Verify if system satisfy the requisites to upgrade to a specified deployment.
         :param deployment: full release name, e.g. starlingx-MM.mm.pp
@@ -2821,8 +2854,9 @@ class PatchController(PatchService):
         if not is_patch and socket.gethostname() != constants.CONTROLLER_0_HOSTNAME:
             raise SoftwareServiceError(f"Deploy precheck for major releases needs to be executed in"
                                        f" {constants.CONTROLLER_0_HOSTNAME} host.")
-
-        ret = self._deploy_precheck(release_version, force, region_name, is_patch, snapshot)
+        if kwargs.get("options"):
+            kwargs["options"] = self._parse_and_sanitize_extra_options(kwargs.get("options"))
+        ret = self._deploy_precheck(release_version, force, region_name, is_patch, **kwargs)
         if ret:
             if ret.get("system_healthy") is None:
                 ret["error"] = "Fail to perform deploy precheck. Internal error has occurred.\n" + \
@@ -2832,7 +2866,7 @@ class PatchController(PatchService):
                                "deploying %s\n" % deployment + ret.get("info")
         return ret
 
-    def _deploy_upgrade_start(self, to_release, commit_id):
+    def _deploy_upgrade_start(self, to_release, commit_id, **kwargs):
         LOG.info("start deploy upgrade to %s from %s" % (to_release, SW_VERSION))
         deploy_script_name = constants.DEPLOY_START_SCRIPT
         cmd_path = utils.get_software_deploy_script(to_release, deploy_script_name)
@@ -2853,6 +2887,7 @@ class PatchController(PatchService):
                              feed]
 
         upgrade_start_cmd.append(commit_id if commit_id is not None else 0)
+        upgrade_start_cmd.append(json.dumps(kwargs.get("options")) if kwargs.get("options") is not None else "")
         # pass in keystone auth through environment variables
         # OS_AUTH_URL, OS_USERNAME, OS_PASSWORD, OS_PROJECT_NAME, OS_USER_DOMAIN_NAME,
         # OS_PROJECT_DOMAIN_NAME, OS_REGION_NAME are in env variables.
@@ -2869,7 +2904,7 @@ class PatchController(PatchService):
 
         try:
             LOG.info("starting subprocess %s" % ' '.join(upgrade_start_cmd))
-            subprocess.Popen(' '.join(upgrade_start_cmd), start_new_session=True, shell=True, env=env)
+            subprocess.Popen(upgrade_start_cmd, start_new_session=True, shell=False, env=env)
             LOG.info("subprocess started")
             return True
         except subprocess.SubprocessError as e:
@@ -2969,7 +3004,7 @@ class PatchController(PatchService):
                     msg = "Failed to delete patch script %s. Reason: %s" % (script_path, e)
                     LOG.error(msg)
 
-    def install_releases_thread(self, deployment_list, feed_repo, upgrade=False):
+    def install_releases_thread(self, deployment_list, feed_repo, upgrade=False, **kwargs):
         """
         In a separated thread.
         Install the debian packages, create the commit and update the metadata.
@@ -3071,7 +3106,7 @@ class PatchController(PatchService):
                     base_deployment = deployment_list[0]
                     base_release = self._release_basic_checks(base_deployment)
                     upgrade_commit_id = base_release.commit_id
-                    if self._deploy_upgrade_start(base_release.sw_release, upgrade_commit_id):
+                    if self._deploy_upgrade_start(base_release.sw_release, upgrade_commit_id, **kwargs):
                         LOG.info("Finished releases %s deploy start" % deployment_list)
                     else:
                         raise ValueError("_deploy_upgrade_start failed")
@@ -3098,9 +3133,9 @@ class PatchController(PatchService):
         thread = threading.Thread(target=run)
         thread.start()
 
-    def _precheck_before_start(self, deployment, release_version, is_patch, force=False, snapshot=False):
+    def _precheck_before_start(self, deployment, release_version, is_patch, force=False, **kwargs):
         LOG.info("Running deploy precheck.")
-        precheck_result = self._deploy_precheck(release_version, patch=is_patch, force=force, snapshot=snapshot)
+        precheck_result = self._deploy_precheck(release_version, patch=is_patch, force=force, **kwargs)
         if precheck_result.get('system_healthy') is None:
             precheck_result["error"] = (
                 f"Fail to perform deploy precheck. Internal error has occurred.\n"
@@ -3129,7 +3164,7 @@ class PatchController(PatchService):
         with open(precheck_result_file, "w") as f:
             json.dump({"healthy": healthy, "timestamp": time.time()}, f)
 
-    def _should_run_precheck_prior_deploy_start(self, release_version, force, is_patch, snapshot):
+    def _should_run_precheck_prior_deploy_start(self, release_version, force, is_patch, **kwargs):
         # there is not precheck script in this state
         if self.pre_bootstrap:
             return False
@@ -3143,7 +3178,7 @@ class PatchController(PatchService):
             LOG.info("The precheck result file %s does not exist." % file_path)
             return True
 
-        if snapshot:
+        if kwargs:
             return True
 
         with open(file_path) as f:
@@ -3158,7 +3193,7 @@ class PatchController(PatchService):
     @require_deploy_state([None],
                           "There is already a deployment in progress ({state.value}). "
                           "Please complete/delete the current deployment.")
-    def software_deploy_start_api(self, deployment: str, force: bool, snapshot: bool, **kwargs) -> dict:
+    def software_deploy_start_api(self, deployment: str, force: bool, **kwargs) -> dict:
         """
         to start deploy of a specified release.
         The operation implies deploying all undeployed dependency releases of
@@ -3200,15 +3235,16 @@ class PatchController(PatchService):
                 LOG.warning("Using unknown hostname for local install: %s", hostname)
 
         to_release = deploy_release.sw_release
-
-        if self._should_run_precheck_prior_deploy_start(to_release, force, is_patch, snapshot):
+        if kwargs.get("options"):
+            kwargs["options"] = self._parse_and_sanitize_extra_options(kwargs.get("options"))
+        if self._should_run_precheck_prior_deploy_start(to_release, force, is_patch, **kwargs):
             LOG.info("Executing software deploy precheck prior to software deploy start")
             if precheck_result := self._precheck_before_start(
                 deployment,
                 to_release,
                 is_patch=is_patch,
                 force=force,
-                snapshot=snapshot,
+                **kwargs
             ):
                 return precheck_result
         self._safe_remove_precheck_result_file(to_release)
@@ -3281,11 +3317,11 @@ class PatchController(PatchService):
                 deploy_state.start(running_release, to_release, feed_repo, None, reboot_required)
             else:
                 deploy_state.start(running_release, to_release, feed_repo, commit_id,
-                                   reboot_required, snapshot=snapshot)
+                                   reboot_required, **kwargs)
 
             # Start applying the releases
             upgrade = not is_patch
-            self.install_releases_thread(deployment_list, feed_repo, upgrade)
+            self.install_releases_thread(deployment_list, feed_repo, upgrade, **kwargs)
 
             msg_info += "%s is now starting, await for the states: " \
                         "[deploy-start-done | deploy-start-failed] in " \
@@ -3810,7 +3846,8 @@ class PatchController(PatchService):
         system_mode = utils.get_platform_conf("system_mode")
         if system_mode == constants.SYSTEM_MODE_SIMPLEX:
             deploy = self.db_api_instance.get_deploy_all()[0]
-            enabled_lvm_snapshots = deploy.get("snapshot")
+            options = deploy.get("options", {})
+            enabled_lvm_snapshots = to_bool(options.get("snapshot"))
             if enabled_lvm_snapshots:
                 LOG.info("LVM snapshots are enabled")
                 manager = lvm_snapshot.LVMSnapshotManager()

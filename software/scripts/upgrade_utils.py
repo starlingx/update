@@ -280,3 +280,11 @@ def get_deployment_data():
     with open("/opt/software/software.json", "r") as fp:
         deployment = json.loads(fp.read())
         return deployment.get("deploy")[0]
+
+
+def to_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() == 'true'
+    return False

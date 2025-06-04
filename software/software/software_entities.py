@@ -137,7 +137,7 @@ class Deploy(ABC):
 
     @abstractmethod
     def create(self, from_release: str, to_release: str, feed_repo: str,
-               commit_id: str, reboot_required: bool, state: DEPLOY_STATES):
+               commit_id: str, reboot_required: bool, state: DEPLOY_STATES, **kwargs):
         """
         Create a new deployment entry.
 
@@ -267,8 +267,8 @@ class DeployHandler(Deploy):
             "commit_id": commit_id,
             "reboot_required": reboot_required,
             "state": state.value,
+            "options": kwargs.get("options")
         }
-        new_deploy.update(kwargs)
 
         try:
             data = get_software_filesystem_data()
