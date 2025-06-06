@@ -3602,18 +3602,25 @@ class PatchController(PatchService):
                 LOG.error(msg_error)
                 raise SoftwareServiceError(msg_error)
 
-        if os.path.isfile(INSTALL_LOCAL_FLAG):
             # Remove install local flag if enabled
-            if os.path.isfile(INSTALL_LOCAL_FLAG):
-                try:
-                    os.remove(INSTALL_LOCAL_FLAG)
-                except Exception:
-                    msg_error = "Failed to clear install-local mode flag"
-                    LOG.error(msg_error)
-                    raise SoftwareServiceError(msg_error)
-                LOG.info("Software deployment in local installation mode is stopped")
+        if os.path.isfile(INSTALL_LOCAL_FLAG):
+            try:
+                os.remove(INSTALL_LOCAL_FLAG)
+            except Exception:
+                msg_error = "Failed to clear install-local mode flag"
+                LOG.error(msg_error)
+                raise SoftwareServiceError(msg_error)
+            LOG.info("Software deployment in local installation mode is stopped")
 
         if is_major_release:
+
+            if SW_VERSION == major_release:
+                msg_error = (
+                    f"Deploy {major_release} can't be deleted as it is still the"
+                    "current running software.An error may have occurred during the deploy.")
+                LOG.error(msg_error)
+                raise SoftwareServiceError(msg_error)
+
             clean_up_deployment_data(major_release)
 
             # Send message to agents cleanup their ostree environment
