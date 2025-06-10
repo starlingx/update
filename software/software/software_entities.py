@@ -267,7 +267,7 @@ class DeployHandler(Deploy):
             "commit_id": commit_id,
             "reboot_required": reboot_required,
             "state": state.value,
-            "options": kwargs.get("options")
+            "options": kwargs.get("options", {})
         }
 
         try:
