@@ -179,6 +179,14 @@ class SWRelease(object):
         return self._get_by_key('activation_scripts')
 
     @property
+    def pre_start(self):
+        return self._get_by_key('pre_start')
+
+    @property
+    def post_start(self):
+        return self._get_by_key('post_start')
+
+    @property
     def pre_install(self):
         return self._get_by_key('pre_install')
 

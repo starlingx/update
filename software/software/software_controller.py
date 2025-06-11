@@ -1317,31 +1317,24 @@ class PatchController(PatchService):
         ostree_tar_filename = "%s/%s-software.tar" % (ostree_tar_dir, patch_id)
         return ostree_tar_filename
 
-    def delete_install_script(self, patch_id):
+    def delete_start_install_script(self, patch_id):
         '''
-        Deletes the install scripts associated with the patch
+        Deletes the start and install scripts associated with the patch
         :param patch_id: The patch ID
         '''
         release = self.release_collection.get_release_by_id(patch_id)
-        pre_install = release.pre_install
-        post_install = release.post_install
+        scripts = ["pre_start", "post_start", "pre_install", "post_install"]
 
-        pre_install_path = None
-        post_install_path = None
-        if pre_install:
-            pre_install_path = "%s/%s_%s" % (root_scripts_dir, patch_id, pre_install)
-        if post_install:
-            post_install_path = "%s/%s_%s" % (root_scripts_dir, patch_id, post_install)
-        try:
-            # Delete the install scripts
-            if pre_install_path:
-                os.remove(pre_install_path)
-            if post_install_path:
-                os.remove(post_install_path)
-        except OSError:
-            msg = "Failed to remove the install script for %s" % patch_id
-            LOG.exception(msg)
-            raise SoftwareError(msg)
+        for script in scripts:
+            script_name = getattr(release, script, None)
+            if script_name:
+                script_path = os.path.join(root_scripts_dir, f"{patch_id}_{script_name}")
+                try:
+                    os.remove(script_path)
+                    LOG.info("Removed %s script" % script_path)
+                except OSError:
+                    msg = "Failed to remove start/install script for %s" % patch_id
+                    LOG.warning(msg)
 
     def delete_patch_activate_scripts(self, patch_id):
         '''
@@ -2195,7 +2188,7 @@ class PatchController(PatchService):
                     LOG.exception(msg)
                     raise MetadataFail(msg)
 
-            self.delete_install_script(release_id)
+            self.delete_start_install_script(release_id)
             self.delete_patch_activate_scripts(release_id)
             reload_release_data()
             msg = "%s has been deleted" % release_id
@@ -2543,6 +2536,7 @@ class PatchController(PatchService):
             return results
 
         # TODO(ShawnLi): Comment out for 24.09 release. This is gated to 25.03
+        # NOTE(lviera): Must include start scripts, refactor like self.delete_start_install_script(patch_id)
         # for patch_id in commit_list:
         #     # Fetch file paths that need to be cleaned up to
         #     # free patch storage disk space
@@ -3021,6 +3015,27 @@ class PatchController(PatchService):
                     msg = "Failed to delete patch script %s. Reason: %s" % (script_path, e)
                     LOG.error(msg)
 
+    def _run_start_script(self, script_name, release_id, operation):
+        """Run pre_start or post_start scripts"""
+        script_path = os.path.join(root_scripts_dir, f"{release_id}_{script_name}")
+
+        if os.path.isfile(script_path):
+            LOG.info("Running %s script", script_name)
+            try:
+                output = subprocess.check_output(
+                    ["sudo", script_path, f"--operation={operation}"],
+                    stderr=subprocess.STDOUT,
+                    text=True
+                    )
+                LOG.info("%s output:\n%s" % (script_name, output.strip()))
+            except subprocess.CalledProcessError as e:
+                msg = "Failed to execute %s for release %s." % (script_name, release_id)
+                LOG.exception(msg)
+                LOG.error("Command output: %s", e.output)
+                raise SoftwareError(msg)
+        else:
+            LOG.warning("Script %s not found", script_name)
+
     def cleanup_old_releases(self, target_commit, all_commits):
         index = 0
         to_delete_releases = []
@@ -3053,6 +3068,12 @@ class PatchController(PatchService):
 
                     deploy_release = self._release_basic_checks(release_id)
                     self.copy_patch_activate_scripts(release_id, deploy_release.activation_scripts)
+
+                    # Run pre_start script
+                    self._run_start_script(deploy_release.pre_start, release_id, constants.APPLY)
+                    # Reload release in case pre_start script made some change
+                    reload_release_data()
+                    deploy_release = self._release_basic_checks(release_id)
 
                     deploy_sw_version = deploy_release.sw_version
 
@@ -3134,6 +3155,9 @@ class PatchController(PatchService):
                         outfile.write(tree)
 
                     LOG.info("Latest feed commit: %s added to metadata file" % self.latest_feed_commit)
+
+                    # Run post_start script
+                    self._run_start_script(deploy_release.post_start, release_id, constants.APPLY)
 
                 # In prepatched add tombstone
                 ostree_utils.add_tombstone_commit_if_prepatched(constants.OSTREE_REF, feed_repo)
@@ -3297,9 +3321,9 @@ class PatchController(PatchService):
         # TODO(bqian) update references of sw_release (string) to SWRelease object
 
         if deploy_release > running_release:
-            operation = "apply"
+            operation = constants.APPLY
         elif running_release > deploy_release:
-            operation = "remove"
+            operation = constants.REMOVE
         else:
             # NOTE(bqian) The error message doesn't seem right. software version format
             # or any metadata semantic check should be done during upload. If data
@@ -3317,7 +3341,7 @@ class PatchController(PatchService):
         # operation is "apply" with order [R3, R4]
         # If current running release is R4 and command issued is "software deploy start R2"
         # operation is "remove" with order [R4, R3]
-        if operation == "apply":
+        if operation == constants.APPLY:
             deployment_list = self.release_apply_order(deployment, deploy_sw_version)
 
             collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
@@ -3370,7 +3394,7 @@ class PatchController(PatchService):
                         "[deploy-start-done | deploy-start-failed] in " \
                         "'software deploy show'\n" % deployment_list
 
-        elif operation == "remove":
+        elif operation == constants.REMOVE:
             collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
             create_deploy_hosts(hostname=hostname)
             deployment_list = self.release_remove_order(deployment, running_release.sw_version)
@@ -3445,6 +3469,12 @@ class PatchController(PatchService):
                     LOG.info(msg)
                     audit_log_info(msg)
 
+                    # Run pre_start script
+                    self._run_start_script(release.pre_start, release_id, constants.REMOVE)
+                    # Reload release in case pre_start script made some change
+                    reload_release_data()
+                    release = self.release_collection.get_release_by_id(release_id)
+
                     if release.state == states.AVAILABLE:
                         msg = "The deployment for %s has not been created" % release_id
                         LOG.info(msg)
@@ -3497,6 +3527,9 @@ class PatchController(PatchService):
 
                     with self.hosts_lock:
                         self.interim_state[release_id] = list(self.hosts)
+
+                    # Run post_start script
+                    self._run_start_script(release.post_start, release_id, constants.REMOVE)
 
                 # In prepatched add tombstone
                 if ostree_utils.add_tombstone_commit_if_prepatched(constants.OSTREE_REF, feed_repo):
