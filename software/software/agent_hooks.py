@@ -32,13 +32,17 @@ LOG.basicConfig(filename="/var/log/software.log",
 
 class BaseHook(object):
     """Base Hook object"""
+    # directories
     TO_RELEASE_OSTREE_DIR = "/ostree/1"
     FROM_RELEASE_OSTREE_DIR = "/ostree/2"
     SYSTEMD_LIB_DIR = "/lib/systemd/system"
     SYSTEMD_ETC_DIR = "%s/etc/systemd/system/multi-user.target.wants" % TO_RELEASE_OSTREE_DIR
-    CONTROLLER = "controller"
     PLATFORM_CONF_PATH = "/etc/platform/"
     PLATFORM_CONF_FILE = os.path.join(PLATFORM_CONF_PATH, "platform.conf")
+
+    # keywords
+    CONTROLLER = "controller"
+    SIMPLEX = "simplex"
 
     def __init__(self, attrs=None):
         pass
@@ -306,6 +310,29 @@ class ReconfigureKernelHook(BaseHook):
         except Exception as e:
             msg = "Failed to manually update /boot/1/kernel.env. Err=%s" % str(e)
             LOG.exception(msg)
+
+
+class UpdateGrubConfigHook(BaseHook):
+    """
+    Get the grub.cfg.stx file from the to-release files
+    and replace the grub.cfg on /boot contents with it;
+    this approach works both for forward and rollback paths
+    """
+    BOOT_GRUB_CFG = "/boot/efi/EFI/BOOT/grub.cfg"
+
+    def run(self):
+        system_mode = self.get_platform_conf("system_mode")
+        # TODO(heitormatsui): should we update for all types of nodes?
+        if system_mode == self.SIMPLEX:
+            to_release_grub_cfg = os.path.join(self.TO_RELEASE_OSTREE_DIR,
+                                               "var/pxeboot/pxelinux.cfg.files/grub.cfg.stx")
+            if os.path.isfile(to_release_grub_cfg):
+                # replace boot grub.cfg for the new file
+                LOG.info("Copying %s into %s", to_release_grub_cfg, self.BOOT_GRUB_CFG)
+                shutil.copy2(to_release_grub_cfg, self.BOOT_GRUB_CFG)
+            else:
+                LOG.warning("No %s file present in to-release filesystem",
+                            os.path.basename(to_release_grub_cfg))
 
 
 class CreateUSMUpgradeInProgressFlag(BaseHook):
@@ -630,6 +657,7 @@ class HookManager(object):
             CopyPxeFilesHook,
             ReconfigureKernelHook,
             UpdateKernelParametersHook,
+            UpdateGrubConfigHook,
             EnableNewServicesHook,
             UpdateSyslogConfig,
             EtcMergeHook,
@@ -643,6 +671,7 @@ class HookManager(object):
         ],
         MAJOR_RELEASE_ROLLBACK: [
             ReconfigureKernelHook,
+            UpdateGrubConfigHook,
             RestartKubeApiServer,
             RevertSyslogConfig,
             EtcMergeHook,
