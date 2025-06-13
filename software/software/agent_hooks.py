@@ -23,6 +23,12 @@ from packaging import version
 import re
 import shutil
 import subprocess
+from ipaddress import ip_address
+from ipaddress import IPv6Address
+import psycopg2
+
+import software.constants as constants
+import software.utils as utils
 
 log_format = ('%(asctime)s: ' + '[%(process)s]: '
               '%(filename)s(%(lineno)s): %(levelname)s: %(message)s')
@@ -780,6 +786,125 @@ class LogPermissionRestorerHook(BaseHook):
         self.restore_cron_permissions()
 
 
+class ReconfigureCephMonHook(BaseHook):
+    """
+    Reconfigure ceph-mon with the mgmt floating address
+    """
+    def __init__(self, attrs):
+        super().__init__(attrs)
+        self._to_release = None
+        if "to_release" in attrs:
+            self._to_release = attrs.get("to_release")
+
+    def connect_postgres_db(self):
+        DEFAULT_POSTGRES_PORT = 5432
+        username, password = self.get_db_credentials()
+        conn = psycopg2.connect("dbname=sysinv user=%s password=%s \
+                                host=localhost port=%s"
+                                % (username, password, DEFAULT_POSTGRES_PORT))
+        return conn
+
+    def get_db_credentials(self):
+        cp = configparser.ConfigParser()
+        cp.read('/etc/sysinv/sysinv.conf')
+        conn_string = cp['database']['connection']
+        match = re.match(r'postgresql\+psycopg2://([^:]+):([^@]+)@', conn_string)
+        if match:
+            username = match.group(1)
+            password = match.group(2)
+            return username, password
+        else:
+            raise Exception("Failed to get database credentials from sysinv.conf")
+
+    def db_query_one(self, query):
+        try:
+            conn = self.connect_postgres_db()
+            with conn.cursor() as cursor:
+                cursor.execute(query)
+                result = cursor.fetchone()
+                return result[0] if result else None
+        except Exception as e:
+            LOG.exception("Error executing query: %s" % e)
+            raise
+        finally:
+            conn.close()
+
+    def is_ceph_configured(self):
+        query = (
+            "SELECT state FROM storage_backend WHERE backend = 'ceph';"
+        )
+        res = self.db_query_one(query)
+        return res and res == 'configured'
+
+    def get_fsid(self):
+        cp = configparser.ConfigParser()
+        cp.read("/etc/ceph/ceph.conf")
+        return cp["global"]["fsid"]
+
+    def get_mon_ip(self):
+        hosts_path = ""
+        host = ""
+        if self._to_release == "25.09":
+            hosts_path = "/etc/hosts"
+            host = "controller"
+        elif self._to_release == "24.09":
+            hosts_path = "/opt/platform/config/24.09/hosts"
+            host = "controller-0"
+        with open(hosts_path) as f:
+            lines = f.readlines()
+            for line in lines:
+                fields = line.split()
+                if fields[1] == host:
+                    ip = fields[0]
+                    if isinstance(ip_address(ip), IPv6Address):
+                        ip = f"[{ip}]"
+                    return ip
+        return None
+
+    def run(self):
+        # Handle both upgrade to 25.09 and rollback to 24.09
+        if self._to_release == "24.09" or self._to_release == "25.09":
+            system_type = utils.get_platform_conf("system_type")
+            system_mode = utils.get_platform_conf("system_mode")
+            if (system_type == constants.SYSTEM_TYPE_ALL_IN_ONE and
+                    system_mode == constants.SYSTEM_MODE_SIMPLEX):
+                if not self.is_ceph_configured():
+                    LOG.info("ceph-mon: skipping reconfiguration, bare metal ceph not configured")
+                    return
+                fsid = self.get_fsid()
+                mon_name = "controller-0"
+                mon_ip = self.get_mon_ip()
+                if not fsid or not mon_ip:
+                    LOG.exception("Invalid fsid or mon_ip")
+                    raise ValueError("Invalid params")
+                LOG.info("ceph-mon: using fsid=%s, mon_name=%s, mon_ip=%s" % (fsid, mon_name, mon_ip))
+
+                cmds = [
+                    ["rm", "-f", "/etc/pmon.d/ceph.conf"],
+                    ["/etc/init.d/ceph", "stop", "mon"],
+                    ["ceph-mon", "--name", f"mon.{mon_name}", "--extract-monmap", f"/tmp/mon-{mon_name}.map"],
+                    ["monmaptool", "--rm", f"{mon_name}", f"/tmp/mon-{mon_name}.map"],
+                    ["monmaptool", "--add", f"{mon_name}", f"{mon_ip}:6789", f"/tmp/mon-{mon_name}.map"],
+                    ["monmaptool", "--fsid", f"{fsid}", f"/tmp/mon-{mon_name}.map"],
+                    ["ceph-mon", "--name", f"mon.{mon_name}", "--inject-monmap", f"/tmp/mon-{mon_name}.map"],
+                    ["/etc/init.d/ceph", "start", "mon"],
+                    ["ln", "-s", "/etc/ceph/ceph.conf.pmon", "/etc/pmon.d/ceph.conf"],
+                ]
+                if self._to_release == "24.09":
+                    cmds.append(["ceph", "mon", "enable-msgr2"])
+
+                try:
+                    for cmd in cmds:
+                        LOG.info("ceph-mon: exec: '%s'" % ' '.join(cmd))
+                        subprocess.check_call(cmd, timeout=8)
+                    LOG.info("ceph-mon: reconfiguration finished")
+                except subprocess.CalledProcessError as e:
+                    LOG.exception("ceph-mon: failed executing the command '%s': %s" % (' '.join(cmd), str(e)))
+                    raise
+            else:
+                LOG.info("ceph-mon: skipping reconfiguration, system_mode is not simplex")
+
+
 class HookManager(object):
     """
     Object to manage the execution of agent hooks
@@ -803,6 +928,7 @@ class HookManager(object):
             FixPSQLPermissionHook,
             DeleteControllerFeedRemoteHook,
             RestartKubeApiServer,
+            ReconfigureCephMonHook,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
@@ -818,6 +944,7 @@ class HookManager(object):
             RevertUmaskHook,
             RevertCrtPermissionsHook,
             LogPermissionRestorerHook,
+            ReconfigureCephMonHook,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
