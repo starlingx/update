@@ -642,6 +642,98 @@ class RevertCrtPermissionsHook(BaseHook):
         self.revert_crt_permissions()
 
 
+class LogPermissionRestorerHook(BaseHook):
+    """
+    This hook restores file permissions under /var/log
+    from a backup file, and resets /etc/cron* configs using TO_RELEASE_OSTREE_DIR.
+    """
+
+    BACKUP_FILE_RELATIVE_PATH = "/var/log/.permission.txt"
+
+    def restore_log_permissions(self):
+        """Restore file permissions from the backup file."""
+        backup_file = self.BACKUP_FILE_RELATIVE_PATH
+
+        if not os.path.isfile(backup_file):
+            LOG.info("Backup file '%s' not found. Exiting...", backup_file)
+            return False
+
+        success = True
+        with open(backup_file, "r") as file:
+            for line in file:
+                parts = line.strip().split(" ", 1)
+                if len(parts) != 2:
+                    continue
+                perm, file_path = parts
+                if os.path.isfile(file_path):
+                    try:
+                        os.chmod(file_path, int(perm, 8))
+                        LOG.info("Restored permissions %s for %s", perm, file_path)
+                    except OSError as e:
+                        LOG.exception(
+                            "Failed to restore permissions for %s: %s", file_path, e
+                        )
+                        success = False
+                else:
+                    LOG.info("File %s not found, skipping...", file_path)
+
+        if success:
+            LOG.info("Permissions restored successfully. Proceeding to delete backup.")
+            self.delete_backup()
+
+        return success
+
+    def delete_backup(self):
+        """Delete the backup file if restoration was successful."""
+        try:
+            os.remove(self.BACKUP_FILE_RELATIVE_PATH)
+            LOG.info(
+                "Backup file '%s' deleted successfully.", self.BACKUP_FILE_RELATIVE_PATH
+            )
+        except OSError as e:
+            LOG.exception("Failed to delete backup file: %s", e)
+
+    def restore_cron_permissions(self):
+        """
+        Restore /etc/cron* permissions and delete cron.allow/at.allow files
+        in the TO_RELEASE_OSTREE_DIR (next boot image).
+        """
+        cron_files = {
+            "/etc/crontab": 0o644,
+            "/etc/cron.d": 0o755,
+            "/etc/cron.hourly": 0o755,
+            "/etc/cron.daily": 0o755,
+            "/etc/cron.weekly": 0o755,
+            "/etc/cron.monthly": 0o755,
+        }
+
+        for path, perm in cron_files.items():
+            full_path = os.path.join(self.TO_RELEASE_OSTREE_DIR, path.lstrip("/"))
+            if os.path.exists(full_path):
+                try:
+                    os.chmod(full_path, perm)
+                    LOG.info("Restored permissions %o for %s", perm, full_path)
+                except OSError as e:
+                    LOG.exception("Failed to set permissions for %s: %s", full_path, e)
+            else:
+                LOG.warning("%s not found, skipping permission restore", full_path)
+
+        for path in ["/etc/cron.allow", "/etc/at.allow"]:
+            full_path = os.path.join(self.TO_RELEASE_OSTREE_DIR, path.lstrip("/"))
+            try:
+                if os.path.exists(full_path):
+                    os.remove(full_path)
+                    LOG.info("Deleted file: %s", full_path)
+                else:
+                    LOG.info("File %s not found, skipping delete", full_path)
+            except OSError as e:
+                LOG.exception("Failed to delete file %s: %s", full_path, e)
+
+    def run(self):
+        self.restore_log_permissions()
+        self.restore_cron_permissions()
+
+
 class HookManager(object):
     """
     Object to manage the execution of agent hooks
@@ -679,6 +771,7 @@ class HookManager(object):
             DeleteControllerFeedRemoteHook,
             RevertUmaskHook,
             RevertCrtPermissionsHook,
+            LogPermissionRestorerHook,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
