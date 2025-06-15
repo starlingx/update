@@ -1542,50 +1542,6 @@ def mount_remote_directory(remote_dir, local_dir):
             LOG.error("Error unmounting %s: %s" % (local_dir, str(e)))
 
 
-def clean_up_deployment_data(major_release):
-    """
-    Clean up all data generated during deployment.
-
-    :param major_release: Major release to be deleted.
-    """
-    # Delete the data inside /opt/platform/<folder>/<major_release>
-    for folder in constants.DEPLOY_CLEANUP_FOLDERS_NAME:
-        path = os.path.join(constants.PLATFORM_PATH, folder, major_release, "")
-        shutil.rmtree(path, ignore_errors=True)
-    # TODO(lbonatti): These folders should be revisited on software deploy abort/rollback
-    #                 to check additional folders that might be needed to delete.
-    upgrade_folders = [
-        os.path.join(constants.POSTGRES_PATH, constants.UPGRADE),
-        os.path.join(constants.POSTGRES_PATH, major_release),
-        os.path.join(constants.RABBIT_PATH, major_release),
-    ]
-    for folder in upgrade_folders:
-        shutil.rmtree(folder, ignore_errors=True)
-
-    # etcd has different cleanup procedure:
-    # - remove the to-release symlink
-    # - rename from-release directory to to-release
-    # - restart etcd process
-    etcd_from_path = os.path.join(constants.ETCD_PATH, major_release)
-    etcd_to_path = os.path.join(constants.ETCD_PATH, SW_VERSION)
-    if utils.compare_release_version(SW_VERSION, major_release):
-        if os.path.islink(etcd_to_path):
-            os.unlink(etcd_to_path)
-            LOG.info("Removed %s symlink", etcd_to_path)
-        os.rename(etcd_from_path, etcd_to_path)
-        LOG.info("Renamed %s directory to %s", etcd_from_path, etcd_to_path)
-        try:
-            subprocess.run(["/usr/bin/sm-restart-safe", "service", "etcd"], check=True)
-            LOG.info("Restarted etcd service")
-        except subprocess.CalledProcessError as e:
-            LOG.error("Error restarting etcd: %s", str(e))
-    # on rollback, only the symlink needs to be removed
-    else:
-        if os.path.islink(etcd_from_path):
-            os.unlink(etcd_from_path)
-            LOG.info("Removed %s symlink", etcd_from_path)
-
-
 def remove_major_release_deployment_flags():
     """
     Cleanup local major release deployment flags
