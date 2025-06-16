@@ -3095,6 +3095,9 @@ class PatchController(PatchService):
 
                     LOG.info("Latest feed commit: %s added to metadata file" % self.latest_feed_commit)
 
+                # In prepatched add tombstone
+                ostree_utils.add_tombstone_commit_if_prepatched(constants.OSTREE_REF, feed_repo)
+
                 # Update the feed ostree summary
                 ostree_utils.update_repo_summary_file(feed_repo)
                 self.latest_feed_commit = ostree_utils.get_feed_latest_commit(deploy_sw_version)
