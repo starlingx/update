@@ -64,6 +64,7 @@ from software.exceptions import HostAgentUnreachable
 from software.exceptions import HostIpNotFound
 from software.exceptions import MaxReleaseExceeded
 from software.exceptions import ServiceParameterNotFound
+from software.plugin import DeployPluginRunner
 from software.release_data import reload_release_data
 from software.release_data import get_SWReleaseCollection
 from software.software_functions import collect_current_load_for_hosts
@@ -1404,7 +1405,6 @@ class PatchController(PatchService):
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         if os.path.isfile(INSTALL_LOCAL_FLAG) and delete:
-            # Remove install local flag if enabled
             if os.path.isfile(INSTALL_LOCAL_FLAG):
                 try:
                     os.remove(INSTALL_LOCAL_FLAG)
@@ -3498,6 +3498,16 @@ class PatchController(PatchService):
                 tree = ET.tostring(root)
                 outfile.write(tree)
 
+    def execute_delete_actions(self):
+        deploy = self.db_api_instance.get_current_deploy()
+        to_release = deploy.get("to_release")
+        from_release = deploy.get("from_release")
+
+        delete_cmd = f"/usr/bin/software-deploy-delete {from_release} {to_release} --is_major_release"
+
+        runner = DeployPluginRunner(deploy)
+        runner.execute(delete_cmd)
+
     @require_deploy_state([DEPLOY_STATES.HOST_ROLLBACK_DONE, DEPLOY_STATES.COMPLETED, DEPLOY_STATES.START_DONE,
                            DEPLOY_STATES.START_FAILED],
                           "Deploy must be in the following states to be able to delete: %s, %s, %s, %s" % (
@@ -3549,7 +3559,7 @@ class PatchController(PatchService):
         if is_major_release and self.hostname != constants.CONTROLLER_0_HOSTNAME:
             raise SoftwareServiceError("Deploy delete can only be performed on controller-0.")
 
-        if DEPLOY_STATES.COMPLETED == deploy_state_instance.get_deploy_state():
+        if DEPLOY_STATES.COMPLETED == deploy_state:
             if is_applying:
                 major_release = utils.get_major_release_version(from_release)
                 # In case of a major release deployment set all the releases related to from_release to unavailable
@@ -3566,12 +3576,14 @@ class PatchController(PatchService):
                 removing_release_state = ReleaseState(release_state=states.REMOVING)
                 removing_release_state.available()
 
-        elif DEPLOY_STATES.HOST_ROLLBACK_DONE == deploy_state_instance.get_deploy_state():
+        elif DEPLOY_STATES.HOST_ROLLBACK_DONE == deploy_state:
             major_release = utils.get_major_release_version(from_release)
             release_state = ReleaseState(release_state=states.DEPLOYING)
             release_state.available()
 
-        elif deploy_state_instance.get_deploy_state() in [DEPLOY_STATES.START_DONE, DEPLOY_STATES.START_FAILED]:
+        elif deploy_state in [DEPLOY_STATES.START_DONE, DEPLOY_STATES.START_FAILED]:
+            # TODO(bqian), this check is redundant. there should be no host deployed/deploying
+            # when deploy in START_DONE or START_FAILED states
             hosts_states = []
             for host in self.db_api_instance.get_deploy_host():
                 hosts_states.append(host.get("state"))
@@ -3585,6 +3597,7 @@ class PatchController(PatchService):
 
                 if is_major_release:
                     try:
+                        # TODO(bqian) Move below function to a delete action
                         run_remove_temporary_data_script(to_release)
                     except subprocess.CalledProcessError as e:
                         msg_error = "Failed to delete deploy"
@@ -3605,8 +3618,8 @@ class PatchController(PatchService):
                 LOG.error(msg_error)
                 raise SoftwareServiceError(msg_error)
 
-            # Remove install local flag if enabled
         if os.path.isfile(INSTALL_LOCAL_FLAG):
+            # Remove install local flag if enabled
             try:
                 os.remove(INSTALL_LOCAL_FLAG)
             except Exception:
@@ -3616,7 +3629,6 @@ class PatchController(PatchService):
             LOG.info("Software deployment in local installation mode is stopped")
 
         if is_major_release:
-
             if SW_VERSION == major_release:
                 msg_error = (
                     f"Deploy {major_release} can't be deleted as it is still the"
@@ -3624,12 +3636,13 @@ class PatchController(PatchService):
                 LOG.error(msg_error)
                 raise SoftwareServiceError(msg_error)
 
+            # TODO(bqian) Move below function to a delete action
             clean_up_deployment_data(major_release)
 
             # Send message to agents cleanup their ostree environment
             # if the deployment has completed or rolled-back successfully
             finished_deploy_states = [DEPLOY_STATES.COMPLETED, DEPLOY_STATES.HOST_ROLLBACK_DONE]
-            if deploy_state_instance.get_deploy_state() in finished_deploy_states:
+            if deploy_state in finished_deploy_states:
                 cleanup_req = SoftwareMessageDeployDeleteCleanupReq()
                 cleanup_req.major_release = utils.get_major_release_version(to_release)
                 cleanup_req.encode()
@@ -3640,12 +3653,19 @@ class PatchController(PatchService):
             self.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_CLEANUP_DEPLOYMENT_DATA,
                                        fm_constants.FM_ALARM_STATE_CLEAR,
                                        "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, constants.CONTROLLER_FLOATING_HOSTNAME))
+
+            # execute deploy delete plugins
+            # NOTE(bqian) implement for major release deploy delete only as deleting action
+            # for patching is undefined, i.e, in the case of patch is applied, both from and
+            # to releases are applied.
+            self.execute_delete_actions()
         else:
             self.delete_all_patch_activate_scripts()
 
         msg_info += "Deploy deleted with success"
         self.db_api_instance.delete_deploy_host_all()
         self.db_api_instance.delete_deploy()
+
         LOG.info("Deploy is deleted")
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 

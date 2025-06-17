@@ -39,6 +39,7 @@ ACTION_START = "start"
 ACTION_MIGRATE = "migrate"
 ACTION_ACTIVATE = "activate"
 ACTION_ACTIVATE_ROLLBACK = "activate-rollback"
+ACTION_DELETE = "delete"
 
 
 def configure_logging():
