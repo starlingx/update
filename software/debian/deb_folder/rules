@@ -45,6 +45,8 @@ override_dh_install:
 		${ROOT}/etc/init.d/usm-initialize
 	install -m 500 service-files/lvm-snapshot-restore.sh \
 		${ROOT}/etc/init.d/lvm-snapshot-restore
+	install -m 500 service-files/reset-boot-counter.sh \
+		${ROOT}/etc/init.d/reset-boot-counter
 	install -m 600 service-files/software.conf \
 		${ROOT}/etc/software/software.conf
 	install -m 644 service-files/policy.json \
