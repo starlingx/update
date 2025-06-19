@@ -184,13 +184,14 @@ class UpdateKernelParametersHook(BaseHook):
     """
     Update the kernel parameters
     isolcpus=<cpu_range> ==> isolcpus=nohz,domain,managed_irq,<cpu_range>
+    '' ==> rcutree.kthread_prio=21 (default value if not set)
     """
     def __init__(self, attrs):
         super().__init__()
 
-    def read_isolcpus_kernel_parameters(self):
+    def read_kernel_parameters(self) -> str:
+        kernel_params = ''
 
-        isolcpus = ''
         try:
             BOOT_ENV = "/boot/efi/EFI/BOOT/boot.env"
             cmd = f'grub-editenv {BOOT_ENV} list'
@@ -201,28 +202,27 @@ class UpdateKernelParametersHook(BaseHook):
             LOG.exception(msg)
             raise
 
-        kernel_params = ''
         for line in output.split('\n'):
             if line.startswith('kernel_params='):
                 kernel_params = line[len('kernel_params='):]
                 break
 
+        return kernel_params
+
+    def read_isolcpus(self, kernel_params: str) -> str:
+        isolcpus = ''
         for param in kernel_params.split():
             if param.startswith('isolcpus='):
                 isolcpus = param
                 break
-
         return isolcpus
 
-    def run(self):
-        """Execute the hook"""
-        try:
-            # Get the isolcpus cpu range
-            isolcpus = self.read_isolcpus_kernel_parameters()
-            if not isolcpus:
-                # do nothing 'isolcpus' kernel parameter not configured
-                return
+    def update_isolcpus(self, isolcpus: str) -> None:
+        if not isolcpus:
+            LOG.info("Do nothing. Kernel param 'isolcpus' is not configured.")
+            return
 
+        try:
             _, val = isolcpus.split("=")
             isolcpus_ranges = []  # only numeric values
             isolcpus_prefix = ['nohz', 'domain', 'managed_irq']
@@ -247,7 +247,7 @@ class UpdateKernelParametersHook(BaseHook):
             cmd = f"python /usr/local/bin/puppet-update-grub-env.py --add-kernelparams isolcpus={isolcpus_prefix}"
             subprocess.run(cmd, shell=True, check=True, capture_output=True)
 
-            LOG.info("Successfully updated kernel parameter isolcpus=%s", isolcpus_prefix)
+            LOG.info(f"Successfully updated kernel parameter isolcpus={isolcpus_prefix}")
 
         except subprocess.CalledProcessError as e:
             msg = ("Failed to run puppet-update-grub-env.py: rc=%s, output=%s"
@@ -255,10 +255,56 @@ class UpdateKernelParametersHook(BaseHook):
             LOG.exception(msg)
         except Exception as e:
             err = str(e)
-            msg = f"Failed to update isolcpus kernel paramater. Error = {err}"
+            msg = f"Failed to update isolcpus kernel parameter. Error = {err}"
             LOG.exception(msg)
 
-        return
+    def read_kthread_prio(self, kernel_params: str) -> str:
+        kthread_prio = ''
+        for param in kernel_params.split():
+            if param.startswith('rcutree.kthread_prio='):
+                kthread_prio = param
+                break
+        return kthread_prio
+
+    def add_kthread_prio_if_not_set(self, kthread_prio: str) -> None:
+        if kthread_prio:
+            LOG.info(f"Do nothing. Kernel param '{kthread_prio}' is already set.")
+            return
+
+        lowlatency = 'lowlatency' in self.get_platform_conf("subfunction")
+        if not lowlatency:
+            LOG.info("Standard kernel 'rcutree.kthread_prio' will not be set.")
+            return
+
+        # if lowlatency kernel and not previously set, use default value
+        default_kthread_prio = 'rcutree.kthread_prio=21'
+        try:
+            LOG.info(f"Adding kernel parameter '{default_kthread_prio}'")
+
+            # add 'rcutree.kthread_prio' kernel parameter
+            cmd = f"python /usr/local/bin/puppet-update-grub-env.py --add-kernelparams {default_kthread_prio}"
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+
+            LOG.info(f"Successfully added kernel parameter '{default_kthread_prio}'")
+
+        except subprocess.CalledProcessError as e:
+            msg = ("Failed to run puppet-update-grub-env.py: rc=%s, output=%s"
+                   % (e.returncode, e.stderr.decode("utf-8")))
+            LOG.exception(msg)
+        except Exception as e:
+            err = str(e)
+            msg = f"Failed to update {default_kthread_prio} kernel parameter. Error = {err}"
+            LOG.exception(msg)
+
+    def run(self):
+        """Execute the hook"""
+        kernel_params = self.read_kernel_parameters()
+
+        isolcpus = self.read_isolcpus(kernel_params)
+        self.update_isolcpus(isolcpus)
+
+        kthread_prio = self.read_kthread_prio(kernel_params)
+        self.add_kthread_prio_if_not_set(kthread_prio)
 
 
 class ReconfigureKernelHook(BaseHook):
