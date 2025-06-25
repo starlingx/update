@@ -2837,6 +2837,21 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error, system_healthy=system_healthy)
 
+    def _get_release_additional_info(self, release):
+        """
+        Get additional information related to release in precheck api.
+        :return: dict with release info.
+        """
+        release_info = {}
+        running_release = self.release_collection.running_release
+
+        release_info["major_release"] = utils.is_upgrade_deploy(SW_VERSION, release.sw_release)
+        release_info["reboot_required"] = release.reboot_required
+        release_info["prepatched_iso"] = release.prepatched_iso
+        release_info["apply_operation"] = release > running_release
+
+        return release_info
+
     def software_deploy_precheck_api(self, deployment: str, force: bool = False, region_name=None,
                                      **kwargs) -> dict:
         """
@@ -2864,6 +2879,8 @@ class PatchController(PatchService):
             elif not ret.get("system_healthy"):
                 ret["error"] = "The following issues have been detected, which prevent " \
                                "deploying %s\n" % deployment + ret.get("info")
+        release_info = self._get_release_additional_info(release)
+        ret.update(release_info)
         return ret
 
     def _deploy_upgrade_start(self, to_release, commit_id, **kwargs):
@@ -3966,10 +3983,26 @@ class PatchController(PatchService):
     def software_deploy_show_api(self, from_release=None, to_release=None):
         # Retrieve deploy state from db
         if from_release and to_release:
-            return self.db_api_instance.get_deploy(from_release, to_release)
+            deploy_data = self.db_api_instance.get_deploy(from_release, to_release)
+            if not deploy_data:
+                return deploy_data
+            release_deployment = deploy_data["to_release"]
         else:
             # Retrieve deploy state from db in list format
-            return self.db_api_instance.get_deploy_all()
+            deploy_data = self.db_api_instance.get_deploy_all()
+            if not deploy_data:
+                return deploy_data
+            release_deployment = deploy_data[0]["to_release"]
+
+        release_id = self.release_collection.get_release_id_by_sw_release(release_deployment)
+        release = self._release_basic_checks(release_id)
+        release_info = self._get_release_additional_info(release)
+
+        if isinstance(deploy_data, list):
+            deploy_data[0].update(release_info)
+        else:
+            deploy_data.update(release_info)
+        return deploy_data
 
     def _deploy_host(self, hostname, force, async_req=False, rollback=False):
         msg_info = ""
