@@ -9,6 +9,7 @@
 
 import argparse
 import logging
+import os
 
 from software.utilities import utils
 
@@ -46,6 +47,7 @@ def deploy_delete():
     utils.configure_logging()
     parser = argparse.ArgumentParser(add_help=False)
 
+    plugin_path = os.environ.get('plugin_path')
     parser.add_argument("from_release",
                         default=False,
                         help="From release")
@@ -62,7 +64,7 @@ def deploy_delete():
     # Optional flag --plugin-path
     parser.add_argument("--plugin_path",
                         dest="plugin_path",
-                        default=None,
+                        default=plugin_path,
                         help="Specify the path of action plugins")
 
     args = parser.parse_args()
