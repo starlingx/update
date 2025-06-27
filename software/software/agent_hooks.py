@@ -346,8 +346,11 @@ class ReconfigureKernelHook(BaseHook):
             else:
                 # Explicitly update /boot/1/kernel.env using the
                 # /usr/local/bin/puppet-update-grub-env.py utility
-                LOG.info("Updating /boot/1/kernel.env to:%s", desired_kernel)
-                cmd = "python /usr/local/bin/puppet-update-grub-env.py --set-kernel %s" % desired_kernel
+                boot_index = 1
+                LOG.info("Updating /boot/%s/kernel.env to: %s", boot_index, desired_kernel)
+                cmd = ("python %s/usr/local/bin/puppet-update-grub-env.py "
+                       "--set-kernel %s --boot-index %s") % (self.TO_RELEASE_OSTREE_DIR,
+                                                             desired_kernel, boot_index)
                 subprocess.run(cmd, shell=True, check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             msg = ("Failed to run puppet-update-grub-env.py: rc=%s, output=%s"
