@@ -1288,25 +1288,6 @@ class PatchController(PatchService):
 
         return get_dependencies(release_id, set())
 
-    def get_release_required_by_list(self, release_id):
-        """
-        Returns a list of software releases that require this release.
-        Example: If R3 requires R2 and R2 requires R1,
-                 then for input param release_id='R1', it will return ['R3', 'R2']
-        :param release_id: The software release id
-        """
-
-        def get_required_by(release_id, visited):
-            required_by_list = []
-            for req_release in self.release_collection.iterate_releases():
-                if release_id in req_release.requires_release_ids and req_release.id not in visited:
-                    visited.add(req_release.id)
-                    required_by_list.append(req_release.id)
-                    required_by_list.extend(get_required_by(req_release.id, visited))
-            return required_by_list
-
-        return get_required_by(release_id, set())
-
     def get_ostree_tar_filename(self, patch_sw_version, patch_id):
         '''
         Returns the path of the ostree tarball
@@ -2000,20 +1981,6 @@ class PatchController(PatchService):
             if rel.prepatched_iso:
                 preinstalled_patches = rel.preinstalled_patches
 
-                # TODO(lvieira): remove this after 24.09 major release
-                # treat special cases for prepatched already released
-                # (they do not have preinstalled_patches list)
-                if not preinstalled_patches:
-                    already_released_prepatched_isos = {
-                        "24.09.100": ["24.09.0"],
-                        "24.09.200": ["24.09.100", "24.09.0"],
-                        "24.09.1": ["24.09.0"],
-                        "24.09.2": ["24.09.1", "24.09.0"],
-                        "24.09.3": ["24.09.2", "24.09.1", "24.09.0"]
-                    }
-                    released = already_released_prepatched_isos.get(rel.sw_release, [])
-                    preinstalled_patches.extend([f"{rel.component}-{release}" for release in released])
-
         release_dependencies = self.get_release_dependency_list(release_id, preinstalled_patches)
         release_dependencies.append(release_id)
 
@@ -2029,24 +1996,39 @@ class PatchController(PatchService):
         to_apply_releases.sort()
         return to_apply_releases
 
-    def release_remove_order(self, release_id, running_release_sw_version):
+    def release_remove_order(self, target_release_id, running_release_id, running_release_sw_version):
         """
-        Determines the order of releases for removing.
-        :param release_id: The removing release id
+        Determines the order of releases for removing based on the feed commit order.
+        :param target_release_id: The target release id
+        :param running_release_id: The running release id
         :param running_release_sw_version: The running release major version
         :return: List of releases in the order for removing
         """
 
         # if removing release is not from the major running version, cannot remove it
-        if f"-{running_release_sw_version}." not in release_id:
+        if f"-{running_release_sw_version}." not in target_release_id:
             return []
 
-        to_remove_releases = self.get_release_required_by_list(release_id)
-        # The specified release will not be removed
-        if release_id in to_remove_releases:
-            to_remove_releases.remove(release_id)
+        releases = list(self.release_collection.iterate_releases_by_state(states.DEPLOYED))
+        release_map = {release.id: release for release in releases}
 
-        to_remove_releases.sort(reverse=True)
+        to_remove_releases = []
+        current = running_release_id
+
+        while current != target_release_id:
+            to_remove_releases.append(current)
+            current_release = release_map.get(current)
+            if not current_release:
+                error = f"Release {current} not found in releases map"
+                raise SoftwareServiceError(error=error)
+
+            next_release = next((r for r in releases if r.commit_id == current_release.base_commit_id), None)
+            if not next_release:
+                error = f"Release with commit id {current_release.base_commit_id} not found"
+                raise SoftwareServiceError(error=error)
+
+            current = next_release.id
+
         return to_remove_releases
 
     def reset_feed_commit(self, release):
@@ -2796,11 +2778,27 @@ class PatchController(PatchService):
 
         # Get releases info required for precheck
         releases = self.software_release_query_cached()
+
+        preinstalled_patches = []
+        for release in releases:
+            if release['prepatched_iso']:
+                preinstalled_patches = release.get('preinstalled_patches', [])
+                break
+
         for release in releases:
             keys_to_delete = ['packages', 'summary', 'description',
                               'install_instructions', 'warnings', 'component']
             for key in keys_to_delete:
                 del release[key]
+
+            # remove patch from requires if present in preinstalled_patches
+            if preinstalled_patches:
+                requires = release.get('requires', [])
+                common = set(requires) & set(preinstalled_patches)
+                if common:
+                    release['requires'] = [id for id in requires if id not in common]
+                    LOG.info("Removed %s from %s requires list, since these are prepatched"
+                             % (common, release['release_id']))
 
         cmd = [precheck_script,
                "--auth_url=%s" % auth_url,
@@ -3373,7 +3371,7 @@ class PatchController(PatchService):
         elif operation == "remove":
             collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
             create_deploy_hosts(hostname=hostname)
-            deployment_list = self.release_remove_order(deployment, running_release.sw_version)
+            deployment_list = self.release_remove_order(deployment, running_release.id, running_release.sw_version)
 
             msg = "Deploy start order for remove operation: %s" % ",".join(deployment_list)
             LOG.info(msg)
