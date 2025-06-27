@@ -100,6 +100,12 @@ if [ ${FOUND} -eq 0 ]; then
     exit 1
 fi
 
+# skip the service execution if booting in the rollback deployment
+if grep -q "ostree=/ostree/2" /proc/cmdline; then
+    LOG_TO_FILE "System is booted from rollback deployment. Skipping execution..."
+    exit 0
+fi
+
 RC=0
 case "$1" in
     start)
