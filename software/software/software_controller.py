@@ -2747,6 +2747,12 @@ class PatchController(PatchService):
             self._save_precheck_result(release_version, healthy=False)
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
+        if self.pre_bootstrap and not patch:
+            # Deploy precheck should be avoided in case of major release.
+            msg_info = "Major release precheck is not valid in pre bootstrap scenario.\n"
+            self._save_precheck_result(release_version, healthy=True)
+            return dict(info=msg_info, warning=msg_info, error=msg_error, system_healthy=True)
+
         if self.pre_bootstrap and not force:
             # Deploy precheck may not be supported in prebootstrap environment if
             # script access any of services like sysinv, keystone, etc.
@@ -2761,13 +2767,13 @@ class PatchController(PatchService):
         try:
             cp = configparser.ConfigParser()
             cp.read(constants.SOFTWARE_CONFIG_FILE_LOCAL)
-            ks_section = cp["keystone_authtoken"]
-            auth_url = ks_section["auth_url"]
-            username = ks_section["username"]
-            password = ks_section["password"]
-            project_name = ks_section["project_name"]
-            user_domain_name = ks_section["user_domain_name"]
-            project_domain_name = ks_section["project_domain_name"]
+            ks_section = dict(cp["keystone_authtoken"]) if cp.has_section("keystone_authtoken") else {}
+            auth_url = ks_section.get("auth_url")
+            username = ks_section.get("username")
+            password = ks_section.get("password")
+            project_name = ks_section.get("project_name")
+            user_domain_name = ks_section.get("user_domain_name")
+            project_domain_name = ks_section.get("project_domain_name")
         except Exception as e:
             msg = "Error parsing config file: %s." % str(e)
             LOG.error(msg)
