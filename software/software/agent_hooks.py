@@ -367,18 +367,28 @@ class UpdateGrubConfigHook(BaseHook):
     BOOT_GRUB_CFG = "/boot/efi/EFI/BOOT/grub.cfg"
 
     def run(self):
+        to_release_grub_cfg = os.path.join(self.TO_RELEASE_OSTREE_DIR,
+                                           "var/pxeboot/pxelinux.cfg.files/grub.cfg.stx")
+        if os.path.isfile(to_release_grub_cfg):
+            # replace boot grub.cfg for the new file
+            LOG.info("Copying %s into %s", to_release_grub_cfg, self.BOOT_GRUB_CFG)
+            shutil.copy2(to_release_grub_cfg, self.BOOT_GRUB_CFG)
+        else:
+            LOG.warning("No %s file present in to-release filesystem",
+                        os.path.basename(to_release_grub_cfg))
+
         system_mode = self.get_platform_conf("system_mode")
-        # TODO(heitormatsui): should we update for all types of nodes?
-        if system_mode == self.SIMPLEX:
-            to_release_grub_cfg = os.path.join(self.TO_RELEASE_OSTREE_DIR,
-                                               "var/pxeboot/pxelinux.cfg.files/grub.cfg.stx")
-            if os.path.isfile(to_release_grub_cfg):
-                # replace boot grub.cfg for the new file
-                LOG.info("Copying %s into %s", to_release_grub_cfg, self.BOOT_GRUB_CFG)
-                shutil.copy2(to_release_grub_cfg, self.BOOT_GRUB_CFG)
-            else:
-                LOG.warning("No %s file present in to-release filesystem",
-                            os.path.basename(to_release_grub_cfg))
+        try:
+            LOG.info(f"Updating system_mode={system_mode} in boot.env")
+            cmd = [
+                os.path.join(self.TO_RELEASE_OSTREE_DIR,
+                             "usr/local/bin/puppet-update-grub-env.py"),
+                "--set-boot-variable",
+                f"system_mode={system_mode}",
+            ]
+            subprocess.run(cmd, check=True, text=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            LOG.error("Failed to update system_mode in boot.env: %s", e.stderr)
 
 
 class CreateUSMUpgradeInProgressFlag(BaseHook):
