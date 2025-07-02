@@ -34,51 +34,44 @@ def get_sysinv_client():
     return sysinv_client
 
 
-def start_update_of_all_apps(client):
-    try:
-        client.kube_app.update_all()
-        return 0
-    except Exception as e:
-        LOG.error(f"ERROR: {e}")
-        return 1
-
-
 def log_progress(
     max_attempts,
     currently_attempt,
     status,
     failed_apps=[],
     updated_apps=[],
-    error_msg=None
+    error_msg=None,
+    action='update'
 ):
-    attempt_msg = f"Update checking {currently_attempt + 1}/{max_attempts}:"
+
+    attempt_msg = f"{action.capitalize()} checking {currently_attempt + 1}/{max_attempts}"
     interval_msg = f"Checking again in {PROGRESS_CHECK_INTERVAL_IN_SECONDS} second(s)."
 
     status_to_msg = {
-        IN_PROGRESS_STATUS: f'{attempt_msg}: Application updates still in progress. {interval_msg}',
-        FAILED_STATUS: f'{attempt_msg}: The application update process failed',
-        COMPLETED_STATUS: f'{attempt_msg}: Application updates successfully finished.',
+        IN_PROGRESS_STATUS: f'{attempt_msg}: Application {action} still in progress. {interval_msg}',
+        FAILED_STATUS: f'{attempt_msg}: The application {action} process failed',
+        COMPLETED_STATUS: f'{attempt_msg}: Application {action} successfully finished.',
         NO_INFO_STATUS: f'{attempt_msg}: No info from the Application Framework regarding \
-            application updates. {interval_msg}',
+            application {action}. {interval_msg}',
         ERROR_STATUS: f'{attempt_msg} failed with error: {error_msg}',
-        TIMEOUT_STATUS: f'{attempt_msg}: Application updates failed due to a timeout. \
+        TIMEOUT_STATUS: f'{attempt_msg}: Application {action} failed due to a timeout. \
             For more details, check the sysinv logs at /var/log/sysinv.log'
     }
 
     apps_msg = ''
 
     if updated_apps and status == IN_PROGRESS_STATUS:
-        apps_msg += f"Updated apps up to now: {', '.join(updated_apps)}."
+        apps_msg += f"{action.capitalize()}d apps up to now: {', '.join(updated_apps)}."
     elif updated_apps and status == COMPLETED_STATUS:
-        apps_msg += f"Updated apps: {', '.join(updated_apps)}."
+        apps_msg += f"{action.capitalize()}d apps: {', '.join(updated_apps)}."
 
     if failed_apps:
-        apps_msg += f"The following apps did not update correctly and require manual \
+        apps_msg += f"The following apps did not {action} correctly and require manual \
             intervention: {', '.join(failed_apps)}."
 
     progress_log = status_to_msg[status]
 
-    if status in ('failed', 'timeout', 'error'):
+    if status in (FAILED_STATUS, ERROR_STATUS, TIMEOUT_STATUS):
         LOG.error(progress_log)
         if apps_msg:
             LOG.info(apps_msg)
@@ -89,7 +82,7 @@ def log_progress(
         LOG.info(apps_msg)
 
 
-def check_apps_update_progress(client):
+def check_apps_update_progress(client, action='update'):
     max_attempts = int(TIMEOUT_LIMIT_IN_MINUTES*60 / PROGRESS_CHECK_INTERVAL_IN_SECONDS)
     currently_attempt = 0
     while currently_attempt < max_attempts:
@@ -104,7 +97,8 @@ def check_apps_update_progress(client):
                 currently_attempt,
                 status,
                 response['failed_apps'],
-                response['updated_apps']
+                response['updated_apps'],
+                action=action
             )
             if status == IN_PROGRESS_STATUS:
                 sleep(PROGRESS_CHECK_INTERVAL_IN_SECONDS)
@@ -120,7 +114,8 @@ def check_apps_update_progress(client):
                 max_attempts,
                 currently_attempt,
                 ERROR_STATUS,
-                error_msg=e
+                error_msg=e,
+                action=action
             )
             sleep(PROGRESS_CHECK_INTERVAL_IN_SECONDS)
             currently_attempt += 1
@@ -130,15 +125,31 @@ def check_apps_update_progress(client):
 
 def main():
     action = sys.argv[3]
-    if action == 'activate':
+    if action in ('activate', 'activate-rollback'):
         configure_logging()
-        client = get_sysinv_client()
-        start_update_of_all_apps(client)
-        sleep(5)
-        update_operation_result = check_apps_update_progress(client)
-        if update_operation_result:
-            return 0
-        return 1
+        try:
+            client = get_sysinv_client()
+            update_operation_result = False
+            if action == 'activate':
+                client.kube_app.update_all()
+                sleep(5)
+                update_operation_result = check_apps_update_progress(client)
+            elif action == 'activate-rollback':
+                if client.kube_app.get_all_apps_by_status('apply-failed'):
+                    LOG.error(
+                        "One or more applications are in 'apply-failed' status."
+                        "Manual intervention is required."
+                    )
+                    return 1
+                client.kube_app.rollback_all_apps()
+                sleep(5)
+                update_operation_result = check_apps_update_progress(client, 'revert')
+            if update_operation_result:
+                return 0
+            return 1
+        except Exception as e:
+            LOG.error(e)
+            return 1
 
 
 if __name__ == "__main__":
