@@ -75,6 +75,11 @@ class BaseHook(object):
                 LOG.exception("Error enabling %s: %s" % (service, str(e)))
                 raise
 
+    @staticmethod
+    def get_new_deploy_path(relative_path):
+        path = os.path.join(BaseHook.TO_RELEASE_OSTREE_DIR, relative_path.lstrip('/'))
+        return path
+
 
 class UsmInitHook(BaseHook):
     """
@@ -94,6 +99,57 @@ class UsmInitHook(BaseHook):
         self.enable_service("usm-initialize.service")
         LOG.info("Enabled usm-initialize.service on next reboot")
         self._enable_controller_services()
+
+
+class EtcMerger(BaseHook):
+    """
+    This is to perform customized etc merging
+    This hook runs when deploying N+1 load. After ostree etc merge.
+    This hook copies etc config files from <n+1 deploy>/{USM_ETC_FILE_PATH}
+    to new merged etc directory. This ensures an etc config file can be forcefully
+    overwritten by the new file from deployment.
+    """
+
+    USM_ETC_FILE_PATH = "/usr/share/starlingx/usm/etc/"
+
+    def __init__(self, attrs):
+        super().__init__(attrs)
+        self._major_release = None
+        self._action = None
+        self._from_release = None
+
+        if "major_release" in attrs:
+            self._major_release = attrs.get("major_release")
+        if "from_release" in attrs:
+            self._from_release = attrs.get("from_release")
+        if "to_release" in attrs:
+            self._to_release = attrs.get("to_release")
+        if "hook_action" in attrs:
+            self._action = attrs.get("hook_action")
+
+    def copy_files(self):
+        def iterate_etc_files(path):
+            for root, _, files in os.walk(path):
+                for file in files:
+                    yield os.path.join(root, file)
+
+        new_deploy_etc_file_path = self.get_new_deploy_path(self.USM_ETC_FILE_PATH)
+        for source_file in iterate_etc_files(new_deploy_etc_file_path):
+            destination_file = os.path.join('/etc', os.path.relpath(source_file,
+                                            new_deploy_etc_file_path))
+            try:
+                LOG.info(f"Replacing {destination_file} with {source_file}")
+                shutil.copyfile(source_file, destination_file)
+            except FileNotFoundError:
+                # imposible?
+                LOG.error(f"copy file {source_file} not found")
+            except Exception:
+                LOG.exception(f"Fail to replace file {destination_file} with {source_file}")
+                raise
+
+    def run(self):
+        LOG.info("Running EtcMerger hook")
+        self.copy_files()
 
 
 class EnableNewServicesHook(BaseHook):
@@ -489,7 +545,7 @@ class DeleteControllerFeedRemoteHook(BaseHook):
 
 
 # TODO(heitormatsui): remove after stx-10 -> stx-11 upgrade
-class EtcMergeHook(BaseHook):
+class FixedEtcMergeHook(BaseHook):
     """
     This hook ensures some specified files from to-release are
     kept in the deployed host instead of the 3-way merge version
@@ -1108,13 +1164,14 @@ class HookManager(object):
     AGENT_HOOKS = {
         MAJOR_RELEASE_UPGRADE: [
             CreateUSMUpgradeInProgressFlag,
+            EtcMerger,
             CopyPxeFilesHook,
             ReconfigureKernelHook,
             UpdateKernelParametersHook,
             UpdateGrubConfigHook,
             EnableNewServicesHook,
             UpdateSyslogConfig,
-            EtcMergeHook,
+            FixedEtcMergeHook,
             FixShadowPasswordlessChar,
             FixPSQLPermissionHook,
             DeleteControllerFeedRemoteHook,
@@ -1130,7 +1187,7 @@ class HookManager(object):
             UpdateGrubConfigHook,
             RestartKubeApiServer,
             RevertSyslogConfig,
-            EtcMergeHook,
+            FixedEtcMergeHook,
             FixPSQLPermissionHook,
             DeleteControllerFeedRemoteHook,
             RevertUmaskHook,
