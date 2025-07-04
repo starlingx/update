@@ -7,17 +7,19 @@ SPDX-License-Identifier: Apache-2.0
 """
 
 import argparse
+import configparser
 import contextlib
-from datetime import datetime
-from datetime import timezone
 import json
 import logging
-from packaging import version
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
+
+from datetime import datetime
+from datetime import timezone
+from packaging import version
+from pathlib import Path
 
 LOG = logging.getLogger("main_logger")
 
@@ -26,6 +28,9 @@ class LVMSnapshot:
     ATTRIBUTES = ["lv_time", "lv_snapshot_invalid"]
     SEPARATOR = ","
     CREATE_DATE_MASK = "%Y-%m-%d %H:%M:%S %z"
+    SOFTWARE_JSON_SNAPSHOT = "rootdirs/opt/software/software.json"
+    SOFTWARE_JSON_CURRENT = "/opt/software/software.json"
+    VIM_CONFIG = "/etc/nfv/vim/config.ini"
 
     def __init__(self, vg_name, lv_name, lv_size=None):
         self._vg_name = vg_name
@@ -146,10 +151,36 @@ class LVMSnapshot:
         valid_state = "invalid" not in attributes[1].lower()
         return datetime.strptime(create_date, self.CREATE_DATE_MASK), valid_state
 
+    # TODO(sshathee) Delete this function and use the one in utils file.
+    # Currently lvm snapshot is executed from feed repo where utils file
+    # is not copied.
+    @staticmethod
+    def get_major_release_version(sw_release_version):
+        """
+        Get the major release for a given software version
+        """
+        if not sw_release_version:
+            return None
+        else:
+            try:
+                separator = '.'
+                separated_string = sw_release_version.split(separator)
+                major_version = separated_string[0] + separator + separated_string[1]
+                return major_version
+            except Exception:
+                return None
+
+    @staticmethod
+    def read_file(file_path):
+        """
+        Read a json file and return its parsed content
+        """
+        with open(file_path, "r") as fp:
+            content = json.loads(fp.read())
+        return content
+
 
 class VarSnapshot(LVMSnapshot):
-    SOFTWARE_JSON_SNAPSHOT = "rootdirs/opt/software/software.json"
-    SOFTWARE_JSON_CURRENT = "/opt/software/software.json"
 
     def restore(self):
         """
@@ -163,8 +194,7 @@ class VarSnapshot(LVMSnapshot):
                 software_json = Path(mount_dir) / self.SOFTWARE_JSON_SNAPSHOT
                 shutil.copy2(self.SOFTWARE_JSON_CURRENT, software_json)
                 LOG.info("Copied current deployment to %s", software_json)
-                with open(software_json, "r") as fp:
-                    content = json.loads(fp.read())
+                content = self.read_file(software_json)
                 deploy_host = content.get("deploy_host")
                 for host in deploy_host:
                     host["state"] = "rollback-deployed"
@@ -181,6 +211,79 @@ class VarSnapshot(LVMSnapshot):
                 LOG.info("Deployment data updated")
         except Exception as e:
             LOG.error("Failure updating %s: %s", software_json, str(e))
+            raise
+        super().restore()
+
+
+class PlatformSnapshot(LVMSnapshot):
+
+    def restore(self):
+        """
+        Override default restore behavior for platform-lv; which has
+        the following specific scenarios to treat on restore:
+        - VIM DB in snapshot needs to mounted and replaced with active
+        DB otherwise during unlock it will be restored with the pre-deploy
+        start content incorrectly
+        """
+        try:
+            content = self.read_file(self.SOFTWARE_JSON_CURRENT)
+            deploy = content.get("deploy")
+            d = deploy[0]
+            from_release = self.get_major_release_version(d["from_release"])
+            to_release = self.get_major_release_version(d["to_release"])
+
+            vim_db = "/opt/platform/nfv/vim/%s" % from_release
+            vim_db_snapshot = "nfv/vim/%s" % to_release
+            db_dump = tempfile.NamedTemporaryFile(dir="/tmp", prefix="dump")
+            config = configparser.ConfigParser()
+
+            self.run_command(["nfv-vim-manage",
+                              "db-dump-data",
+                              "-d",
+                              vim_db,
+                              "-f",
+                              db_dump.name])
+            with open(db_dump.name, "r") as fp:
+                content = json.loads(fp.read())
+                # Check if no strategy present, it indicates snapshot
+                # restore done through USM, no need to restore VIM DB
+                if not content["tables"]["sw_updates"]:
+                    LOG.info("Empty sw_updates table, snapshot restored with USM")
+                    return
+
+            mount_dir = tempfile.mkdtemp(prefix=f"{self._lv_name}-", dir="/tmp")
+            self.run_command(["/usr/bin/mount",
+                              "-t",
+                              "ext4",
+                              self.get_dev_path(),
+                              mount_dir])
+            LOG.info("Mounted %s under %s", self._name, mount_dir)
+
+            vim_db_snap = Path(mount_dir) / vim_db_snapshot
+            # Empty contents of snapshot vim db directory
+            shutil.rmtree(vim_db_snap, ignore_errors=True)
+            vim_db_snap.mkdir()
+
+            self.run_command(["nfv-vim-manage",
+                              "db-load-data",
+                              "-d",
+                              vim_db_snap,
+                              "-f",
+                              db_dump.name])
+            db_dump.close()
+
+            # Update config file with new vim db
+            config.read(self.VIM_CONFIG)
+            config.set("database", "database_dir", str(vim_db_snap))
+            with open(self.VIM_CONFIG, "w") as fp:
+                config.write(fp)
+
+            # Restart vim to take new db file
+            self.run_command(["sm-restart-safe", "service", "vim"])
+            LOG.info("VIM restarted successfully")
+
+        except Exception as e:
+            LOG.error("Failure updating VIM snapshot db: %s", str(e))
             raise
         super().restore()
 
@@ -225,9 +328,16 @@ class LVMSnapshotManager:
         override the default snapshot behavior must inherit the base
         snapshot class and include a condition in this method
         """
+
+        # TODO(sshathee) Define a constant variable for var-lv which
+        # is used in multiple places. Currently lvm snapshot is executed
+        # from feed repo where constants file is not copied.
+
         # specific snapshot instances
         if lv_name == "var-lv":
             return VarSnapshot(self.vg_name, lv_name)
+        elif lv_name == "platform-lv":
+            return PlatformSnapshot(self.vg_name, lv_name)
         # otherwise create a generic instance
         return LVMSnapshot(self.vg_name, lv_name)
 
