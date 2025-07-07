@@ -16,13 +16,17 @@
 #
 
 import logging as LOG
-import socket
 import subprocess
 import sys
 import os
 import tempfile
 import time
 import yaml
+
+from oslo_config import cfg
+from oslo_context import context as mycontext
+from six.moves import configparser
+from sysinv.conductor import rpcapiproxy as conductor_rpcapi
 
 SUCCESS = 0
 ERROR = 1
@@ -32,6 +36,9 @@ CONFIG_DIR_PREFIX = '/opt/platform/config/'
 PORTIERIS_BACKUP_FILENAME = 'portieris_backup.yml'
 PORTIERIS_WEBHOOK_CRD = 'mutatingwebhookconfigurations image-admission-config'
 KUBE_PORT_UPDATED_FLAG = '/etc/platform/.upgrade_kube_apiserver_port_updated'
+
+CONF = cfg.CONF
+SYSINV_CONFIG_FILE = '/etc/sysinv/sysinv.conf'
 
 
 class ServiceParametersApplier(object):
@@ -76,14 +83,13 @@ class ServiceParametersApplier(object):
     def __wait_kube_apiserver_ready(self):
         LOG.info("Waiting kube-apiserver PID to restart")
         for _ in range(0, 300):
-            time.sleep(2)
-            current_pid = self.__get_kube_apiserver_pid()
             if check_kube_apiserver_port_updated():
-                if current_pid == -1:
-                    continue
-                elif current_pid != self.initial_kube_apiserver_pid:
+                current_pid = self.__get_kube_apiserver_pid()
+                if (current_pid != self.initial_kube_apiserver_pid and
+                        current_pid != -1):
                     LOG.info("kube-apiserver PID is restarted!")
                     return
+            time.sleep(2)
         else:
             LOG.error("Timeout restarting kube-apiserver.")
             sys.exit(ERROR)
@@ -164,6 +170,11 @@ class ServiceParametersApplier(object):
         self.__wait_kube_apiserver_ready()
 
     def rollback(self):
+        # Perform service parameter apply and wait kube-apiserver restart
+        self.__register_kube_apiserver_pid()
+        self.__service_parameter_apply()
+        self.__wait_kube_apiserver_ready()
+        # Restore portieris webhook
         self.__restore_portieris_webhook()
 
 
@@ -171,22 +182,59 @@ def check_kube_apiserver_port_updated():
     return os.path.exists(KUBE_PORT_UPDATED_FLAG)
 
 
-def reconfigure_haproxy(sw_version):
-    """Reconfigure haproxy using puppet manifest."""
+def get_conductor_rpc_bind_ip():
+    ini_str = '[DEFAULT]\n' + open(SYSINV_CONFIG_FILE, 'r').read()
+    config_applied = configparser.RawConfigParser()
+    config_applied.read_string(ini_str)
 
-    manifest_file = '/tmp/haproxy_upgrade.pp'
-    with open(manifest_file, 'w') as file:
-        file.write('classes:\n- platform::haproxy::runtime\n')
+    conductor_bind_ip = None
+    if config_applied.has_option('DEFAULT', 'rpc_zeromq_conductor_bind_ip'):
+        conductor_bind_ip = \
+            config_applied.get('DEFAULT', 'rpc_zeromq_conductor_bind_ip')
+    return conductor_bind_ip
 
-    cmd = [
-        "/usr/local/bin/puppet-manifest-apply.sh",
-        "/opt/platform/puppet/%s/hieradata" % sw_version,
-        socket.gethostname(),
-        'controller',
-        'runtime',
-        manifest_file
-    ]
-    subprocess.check_call(cmd)
+
+def create_kube_apiserver_port_rollback_flag_rpc():
+    CONF.rpc_zeromq_conductor_bind_ip = get_conductor_rpc_bind_ip()
+    context = mycontext.get_admin_context()
+    rpcapi = conductor_rpcapi.ConductorAPI(topic=conductor_rpcapi.MANAGER_TOPIC)
+    rpcapi.flag_k8s_port_update_rollback(context)
+
+
+def wait_kube_apiserver_port_update(desired_status):
+    LOG.info("Wait kube-apiserver port update finish.")
+    retries = 60
+    sleep = 3
+    for _ in range(0, retries):
+        if check_kube_apiserver_port_updated() == desired_status:
+            LOG.info("kube-apiserver port update status: %s" %
+                     str(desired_status))
+            return
+        time.sleep(sleep)
+    msg = "The port for kube-apiserver was not updated in the allotted time."
+    raise Exception(msg)
+
+
+def check_conductor_restarted():
+    output = subprocess.check_output('/usr/bin/sm-dump', shell=True)
+    for line in output.splitlines():
+        if 'sysinv-conductor' in line.decode('utf-8'):
+            if line.decode('utf-8').count('enabled-active') == 2:
+                return True
+            break
+    return False
+
+
+def wait_conductor_restarted():
+    retries = 30
+    sleep = 3
+    for _ in range(0, retries):
+        if check_conductor_restarted():
+            LOG.info("Sysinv-conductor is enabled-active")
+            return True
+        time.sleep(sleep)
+    LOG.error("Sysinv-conductor not restarted in expected time")
+    return False
 
 
 def main():
@@ -227,9 +275,20 @@ def main():
             if action == "activate" and from_release == "24.09":
                 if not check_kube_apiserver_port_updated():
                     ServiceParametersApplier(from_release).apply()
-                    reconfigure_haproxy(to_release)
+                    wait_kube_apiserver_port_update(True)
+                    if not wait_conductor_restarted():
+                        # No point in retrying without sysinv-conductor
+                        LOG.error("Conductor is unhealthy, check sysinv logs")
+                        return ERROR
             elif action == "activate-rollback" and to_release == "24.09":
-                ServiceParametersApplier(to_release).rollback()
+                if check_kube_apiserver_port_updated():
+                    create_kube_apiserver_port_rollback_flag_rpc()
+                    ServiceParametersApplier(to_release).rollback()
+                    wait_kube_apiserver_port_update(False)
+                    if not wait_conductor_restarted():
+                        # No point in retrying without sysinv-conductor
+                        LOG.error("Conductor is unhealthy, check sysinv logs")
+                        return ERROR
             else:
                 LOG.info("Nothing to do. "
                          "Skipping K8s service parameter apply.")
