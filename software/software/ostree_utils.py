@@ -428,6 +428,13 @@ def create_deployment(ref=None):
         LOG.info(info_msg)
         raise OSTreeCommandFail(msg)
 
+    boot_cmd = ["grub-editenv", "/boot/efi/EFI/BOOT/boot.env", "set", "default=0"]
+    try:
+        subprocess.run(boot_cmd, check=True, text=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        LOG.info("Failed to update default grub entry to 0: %s", e.stderr)
+        raise
+
 
 def fetch_pending_deployment():
     """
@@ -491,7 +498,7 @@ def mount_new_deployment(deployment_dir):
                 LOG.info(msg)
 
 
-def delete_older_deployments():
+def delete_older_deployments(delete_pending=False):
     """
     Delete all older deployments after a reboot to save space
     """
@@ -521,6 +528,8 @@ def delete_older_deployments():
     delete_deployments = False
     deployments_to_delete = []
     for index, deployment in enumerate(output.stdout.strip().split("\n")):
+        if delete_pending and "pending" in deployment:
+            deployments_to_delete.append(index)
         if delete_deployments and "rollback" not in deployment:
             deployments_to_delete.append(index)
         if "*" in deployment:
