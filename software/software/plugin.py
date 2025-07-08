@@ -9,7 +9,6 @@ from packaging.version import Version
 import re
 import os
 import tempfile
-import shutil
 import subprocess
 
 from software import constants
@@ -41,18 +40,12 @@ class DeployPluginRunner(object):
             self._source_repo = f"/var/www/pages/feed/rel-{sw_version}/ostree_repo"
             if constants.SW_VERSION != sw_version:
                 # create temp directory to pull and run usm-plugin from N+1 release
-                self._temp_plugin_path = os.path.join(tempfile.mkdtemp(prefix="usm-plugin"))
+                self._temp_plugin_path = os.path.join(tempfile.mkdtemp(prefix="usm-plugin", dir="/tmp"))
                 self._bin_path = os.path.join(self._temp_plugin_path, "upgrade.d")
             else:
                 self._bin_path = USM_PLUGIN_PATH
 
         self._env = None
-
-    def __del__(self):
-        if self._temp_plugin_path:
-            shutil.rmtree(self._temp_plugin_path, ignore_errors=True)
-            if os.path.isdir(self._temp_plugin_path):
-                LOG.warning(f"Temporary directory {self._temp_plugin_path} could not be deleted")
 
     @staticmethod
     def get_higher_version(deploy):
@@ -84,6 +77,7 @@ class DeployPluginRunner(object):
     def set_execution_context(self, context):
         self._env["from_release"] = self._deploy.get("from_release")
         self._env["to_release"] = self._deploy.get("to_release")
+        self._env["plugin_path"] = self.plugin_path
 
         for k, v in context:
             if k in self._env:
@@ -99,9 +93,8 @@ class DeployPluginRunner(object):
                            f"--subpath=/usr/local/share/upgrade.d {constants.OSTREE_REF} " + \
                            f"{self._bin_path}"
             try:
-                res = subprocess.run(checkout_cmd, check=True, shell=True, stderr=subprocess.STDOUT)
+                subprocess.run(checkout_cmd, check=True, shell=True, stderr=subprocess.STDOUT)
                 LOG.info(f"Checkout deploy plugins to {self._bin_path} completed successfully")
-                LOG.info(f"{res.stdout}")
             except subprocess.CalledProcessError as e:
                 LOG.error(f"Failed to checkout deploy plugins {checkout_cmd}. Error output:")
                 LOG.error(f"{e.output}")
