@@ -107,6 +107,7 @@ from software.sysinv_utils import are_all_hosts_unlocked_and_online
 from software.sysinv_utils import get_system_info
 from software.sysinv_utils import get_oot_drivers
 from software.sysinv_utils import trigger_evaluate_apps_reapply
+from software.sysinv_utils import trigger_vim_host_audit
 
 from software.db.api import get_instance
 
@@ -1081,6 +1082,40 @@ class PatchController(PatchService):
         else:
             self._update_state_to_peer()
 
+    def _notify_vim_on_state_change(self, target_state):
+        """Notify VIM of state change.
+
+        This method will notify VIM when one of the following state changes is made:
+        - start-done
+        - start-failed
+        - activate-done
+        - activate-failed
+        - activate-rollback-done
+        - activate-rollback-failed
+
+        If new async states are added they should be added here.
+
+        Args:
+            target_state: The new deployment state to notify VIM about
+        """
+
+        if self.pre_bootstrap:
+            return
+
+        if target_state not in [
+            DEPLOY_STATES.START_DONE,
+            DEPLOY_STATES.START_FAILED,
+            DEPLOY_STATES.ACTIVATE_DONE,
+            DEPLOY_STATES.ACTIVATE_FAILED,
+            DEPLOY_STATES.ACTIVATE_ROLLBACK_DONE,
+            DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED,
+        ]:
+            return
+
+        # Get local hostname
+        LOG.info("Notifying VIM of state change: %s", target_state)
+        trigger_vim_host_audit(socket.gethostname())
+
     def register_deploy_state_change_listeners(self):
         # data sync listener
         DeployState.register_event_listener(self._state_changed_sync)
@@ -1089,6 +1124,10 @@ class PatchController(PatchService):
         DeployHostState.register_event_listener(DeployState.host_deploy_updated)
         DeployState.register_event_listener(ReleaseState.deploy_updated)
         DeployState.register_event_listener(self.create_clean_up_deployment_alarm)
+
+        # VIM notifications
+        DeployState.register_event_listener(self._notify_vim_on_state_change)
+        # TODO(jkraitbe): Add host-deploy when that becomes async
 
     @property
     def release_collection(self):
