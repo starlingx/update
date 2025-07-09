@@ -14,6 +14,8 @@ SPDX-License-Identifier: Apache-2.0
 #       2. This module needs to be compatible with both N+1 and N-1
 #          python environments
 #####################################################################
+from abc import ABC
+from abc import abstractmethod
 import configparser
 import filecmp
 import glob
@@ -29,6 +31,7 @@ import psycopg2
 
 import software.constants as constants
 import software.utils as utils
+
 
 log_format = ('%(asctime)s: ' + '[%(process)s]: '
               '%(filename)s(%(lineno)s): %(levelname)s: %(message)s')
@@ -915,6 +918,159 @@ class ReconfigureCephMonHook(BaseHook):
                 LOG.info("ceph-mon: skipping reconfiguration, system_mode is not simplex")
 
 
+class AbstractSysctlFlagHook(BaseHook, ABC):
+    """
+    Abstract base class for managing CIS benchmark sysctl flags on the kernel.
+    """
+
+    def __init__(self, attrs):
+        super().__init__()
+        # This property must be implemented by derived classes
+        self._parameters_to_set = None
+
+    @property
+    @abstractmethod
+    def parameters_to_set(self):
+        pass
+
+    @abstractmethod
+    def run(self):
+        pass
+
+    def _set_sysctl_param(self, config_file: str, param_name: str, param_value: int, lines: list):
+        """
+        Helper function to set or update a specific sysctl parameter in the list of lines.
+        Handles commented-out lines by uncommenting and updating them.
+        Returns True if the line was found/updated, False otherwise (meaning it needs to be added).
+        """
+        setting_to_set = f"{param_name} = {param_value}"
+        setting_pattern = re.compile(rf"^\s*#?\s*{re.escape(param_name)}\s*=")
+
+        updated_in_place = False
+        for i, line in enumerate(lines):
+            if setting_pattern.match(line):
+                # If the line is already exactly what we want (uncommented and correct value)
+                if line.strip() == setting_to_set:
+                    LOG.info(f"'{param_name}' already set to '{param_value}' in {config_file}")
+                else:
+                    # If it's a matching line but needs updating or uncommenting
+                    lines[i] = setting_to_set + '\n'
+                    LOG.info(f"Updated '{param_name}' to '{param_value}' (uncommented if necessary) in {config_file}")
+                updated_in_place = True
+                break
+
+        return updated_in_place
+
+    def _configure_sysctl_parameters(self, ostree_dir):
+        """
+        Configures multiple sysctl parameters in /etc/sysctl.conf
+        and applies the changes using sysctl -p.
+        Handles commented-out lines by uncommenting and updating them.
+        Uses the parameters defined by the derived class's 'parameters_to_set' property.
+        """
+        config_file = os.path.normpath(ostree_dir + "/etc/sysctl.conf")
+
+        if self.parameters_to_set is None:
+            LOG.error("Derived class must define 'parameters_to_set' property.")
+            return
+
+        try:
+            if not os.path.exists(config_file):
+                LOG.error(f"Error: {config_file} not found. Please ensure the file exists.")
+                return
+
+            with open(config_file, 'r') as f:
+                lines = f.readlines()
+
+            new_lines = list(lines)
+
+            for param_name, param_value in self.parameters_to_set.items():
+                param_found_and_updated = self._set_sysctl_param(
+                    config_file, param_name, param_value, new_lines
+                )
+
+                if not param_found_and_updated:
+                    setting_to_add = f"{param_name} = {param_value}"
+                    # Ensure we don't add extra blank lines if the file already ends with one
+                    if new_lines and not new_lines[-1].strip():
+                        new_lines.append(setting_to_add + '\n')
+                    else:
+                        new_lines.append('\n' + setting_to_add + '\n')
+                    LOG.info(f"Added '{setting_to_add}' to {config_file}")
+
+            if new_lines != lines:  # Simple check if content has changed
+                with open(config_file, 'w') as f:
+                    f.writelines(new_lines)
+                LOG.debug(f"Successfully modified {config_file}")
+            else:
+                LOG.debug(f"No changes detected for {config_file}. Skipping file write.")
+
+            LOG.info(f"Applying sysctl changes from {config_file}...")
+            result = subprocess.run(['sudo', 'sysctl', '-p', config_file],
+                                    capture_output=True, text=True, check=True)
+            if result.stderr:
+                LOG.error("sysctl -p errors:")
+                LOG.error(result.stderr)
+            LOG.info("sysctl changes applied successfully.")
+
+        except FileNotFoundError:
+            LOG.error(f"Error: Could not find the file {config_file}.")
+        except PermissionError:
+            LOG.error(f"Error: Permission denied for {config_file}. Please run with sufficient permissions.")
+        except subprocess.CalledProcessError as e:
+            LOG.error(f"Error applying sysctl changes: {e}")
+            LOG.error(f"Command: {e.cmd}")
+            LOG.error(f"Return Code: {e.returncode}")
+            LOG.error(f"Stdout: {e.stdout}")
+            LOG.error(f"Stderr: {e.stderr}")
+        except Exception as e:
+            LOG.error(f"An unexpected error occurred: {e}", exc_info=True)
+
+
+class CISSysctlFlagHookUpgrade(AbstractSysctlFlagHook):
+    """
+    Hook to upgrade CIS benchmark sysctl flags to their hardened values.
+    """
+    @property
+    def parameters_to_set(self):
+        if self._parameters_to_set is None:
+            self._parameters_to_set = {
+                "net.ipv4.icmp_echo_ignore_broadcasts": 1,
+                "net.ipv4.tcp_syncookies": 1,
+                "net.ipv4.conf.all.rp_filter": 1,
+                "net.ipv4.conf.default.rp_filter": 1,
+                "net.ipv4.conf.all.accept_source_route": 0
+            }
+        return self._parameters_to_set
+
+    def run(self):
+        LOG.info("Starting CIS Sysctl Flag Upgrade...")
+        self._configure_sysctl_parameters(self.TO_RELEASE_OSTREE_DIR)
+        LOG.debug("CIS Sysctl Flag Upgrade finished.")
+
+
+class CISSysctlFlagHookRollback(AbstractSysctlFlagHook):
+    """
+    Hook to rollback CIS benchmark sysctl flags to their original values.
+    """
+    @property
+    def parameters_to_set(self):
+        if self._parameters_to_set is None:
+            self._parameters_to_set = {
+                "net.ipv4.icmp_echo_ignore_broadcasts": 1,
+                "net.ipv4.tcp_syncookies": 1,
+                "net.ipv4.conf.all.rp_filter": 0,
+                "net.ipv4.conf.default.rp_filter": 0,
+                "net.ipv4.conf.all.accept_source_route": 0
+            }
+        return self._parameters_to_set
+
+    def run(self):
+        LOG.info("Starting CIS Sysctl Flag Rollback...")
+        self._configure_sysctl_parameters(self.FROM_RELEASE_OSTREE_DIR)
+        LOG.debug("CIS Sysctl Flag Rollback finished.")
+
+
 class HookManager(object):
     """
     Object to manage the execution of agent hooks
@@ -939,6 +1095,7 @@ class HookManager(object):
             DeleteControllerFeedRemoteHook,
             RestartKubeApiServer,
             ReconfigureCephMonHook,
+            CISSysctlFlagHookUpgrade,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
@@ -955,6 +1112,7 @@ class HookManager(object):
             RevertCrtPermissionsHook,
             LogPermissionRestorerHook,
             ReconfigureCephMonHook,
+            CISSysctlFlagHookRollback,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
