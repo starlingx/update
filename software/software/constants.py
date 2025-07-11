@@ -84,6 +84,8 @@ PATCH_AGENT_STATE_INSTALL_REJECTED = "install-rejected"
 
 # Patch
 CHECKOUT_FOLDER = "checked_out_commit"
+APPLY = "apply"
+REMOVE = "remove"
 
 # Feed
 DEBIAN_RELEASE = "bullseye"

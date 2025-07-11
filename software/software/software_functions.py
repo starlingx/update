@@ -15,6 +15,7 @@ import os
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -344,6 +345,8 @@ class ReleaseData(object):
                     "summary",
                     "description",
                     "install_instructions",
+                    "pre_start",
+                    "post_start",
                     "pre_install",
                     "post_install",
                     "warnings",
@@ -679,12 +682,11 @@ class PatchFile(object):
 
         # Check if conditional scripts are inside the patch
         # If yes then add them to signature checklist
-        if "semantics.tar" in [f.name for f in tar.getmembers()]:
-            filelist.append("semantics.tar")
-        if "pre-install.sh" in [f.name for f in tar.getmembers()]:
-            filelist.append("pre-install.sh")
-        if "post-install.sh" in [f.name for f in tar.getmembers()]:
-            filelist.append("post-install.sh")
+        tar_names = {f.name for f in tar.getmembers()}
+        scripts = ["semantics.tar", "pre-start.sh", "post-start.sh", "pre-install.sh", "post-install.sh"]
+        for script in scripts:
+            if script in tar_names:
+                filelist.append(script)
 
         for f in filelist:
             tar.extract(f, path=dest)
@@ -907,20 +909,14 @@ class PatchFile(object):
 
             if not os.path.exists(root_scripts_dir):
                 os.makedirs(root_scripts_dir)
-            if thispatch.metadata[patch_id].get("pre_install"):
-                pre_install_script_name = thispatch.metadata[patch_id]["pre_install"]
-                shutil.move(os.path.join(tmpdir, pre_install_script_name),
-                            "%s/%s_%s" % (root_scripts_dir, patch_id, pre_install_script_name))
-            if thispatch.metadata[patch_id].get("post_install"):
-                post_install_script_name = thispatch.metadata[patch_id]["post_install"]
-                shutil.move(os.path.join(tmpdir, post_install_script_name),
-                            "%s/%s_%s" % (root_scripts_dir, patch_id, post_install_script_name))
-
-            activate_scripts = thispatch.metadata[patch_id].get("activation_scripts")
-            if activate_scripts:
-                for script in activate_scripts:
-                    shutil.move(os.path.join(tmpdir, script),
-                                "%s/%s_%s" % (root_scripts_dir, patch_id, script))
+            # start, install and activate scripts
+            scripts = ["pre_start", "post_start", "pre_install", "post_install", "activation_scripts"]
+            for script in scripts:
+                script_name = thispatch.metadata[patch_id].get(script)
+                if script_name:
+                    dest_path = os.path.join(root_scripts_dir, f"{patch_id}_{script_name}")
+                    shutil.move(os.path.join(tmpdir, script_name), dest_path)
+                    os.chmod(dest_path, os.stat(dest_path).st_mode | stat.S_IXUSR)
 
         except tarfile.TarError as te:
             error_msg = "Extract software failed %s" % str(te)
