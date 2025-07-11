@@ -14,6 +14,7 @@ import socket
 import subprocess
 import sys
 import time
+from packaging import version
 
 import software.ostree_utils as ostree_utils
 from software.software_functions import configure_logging
@@ -26,6 +27,7 @@ from software.exceptions import OSTreeCommandFail
 import software.utils as utils
 import software.messages as messages
 import software.constants as constants
+import software.deploy_utils as deploy_utils
 
 from tsconfig.tsconfig import http_port
 from tsconfig.tsconfig import install_uuid
@@ -378,6 +380,7 @@ class SoftwareMessageDeployDeleteCleanupReq(messages.PatchMessage):
         success_ostree_undeploy_from_release = ostree_utils.delete_older_deployments(
             delete_pending=True)
 
+        deploy_utils.delete_etc_backup()
         cleanup_results = [
             (success_ostree_remote_cleanup, "cleaning temporary refs/remotes"),
             (success_ostree_remote_update, "updating default remote"),
@@ -615,6 +618,9 @@ class PatchAgent(PatchService):
                 # when in major release deployment, if hooks failed in a previous deploy
                 # host attempt, a flag is created so that their execution is reattempted here
                 if major_release and os.path.exists(run_hooks_flag):
+                    additional_data.update({'from_commit_id': active_commit_id,
+                                            'to_commit_id': commit_id})
+
                     LOG.info("Major release deployment %s flag found. "
                              "Running hooks." % run_hooks_flag)
                     try:
@@ -698,6 +704,11 @@ class PatchAgent(PatchService):
                 ostree_utils.pull_ostree_from_remote(remote=remote)
 
                 self.query(major_release=major_release)  # Updates following self variables
+
+                if major_release and version.Version(major_release) > version.Version(constants.SW_VERSION):
+                    # no backup for rollback
+                    deploy_utils.backup_etc(commit_id)
+
                 if self.latest_feed_commit:
                     # If latest_feed_commit is not null, the node can check the deployment health
                     if self.latest_sysroot_commit == self.latest_feed_commit:
