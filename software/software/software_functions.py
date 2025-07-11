@@ -680,10 +680,16 @@ class PatchFile(object):
         # Filelist used for signature validation and verification
         filelist = ["metadata.tar", "software.tar"]
 
-        # Check if conditional scripts are inside the patch
+        # Check if conditional files are inside the patch
         # If yes then add them to signature checklist
         tar_names = {f.name for f in tar.getmembers()}
-        scripts = ["semantics.tar", "pre-start.sh", "post-start.sh", "pre-install.sh", "post-install.sh"]
+        scripts = [
+            "semantics.tar",
+            "extra.tar",
+            "pre-start.sh",
+            "post-start.sh",
+            "pre-install.sh",
+            "post-install.sh"]
         for script in scripts:
             if script in tar_names:
                 filelist.append(script)
@@ -894,8 +900,8 @@ class PatchFile(object):
                     LOG.error(msg)
                     raise ReleaseMismatchFailure(error=msg)
 
-            patch_sw_version = utils.get_major_release_version(
-                thispatch.metadata[patch_id]["sw_version"])
+            patch_sw_release = thispatch.metadata[patch_id]["sw_version"]
+            patch_sw_version = utils.get_major_release_version(patch_sw_release)
             abs_ostree_tar_dir = package_dir[patch_sw_version]
             if not os.path.exists(abs_ostree_tar_dir):
                 os.makedirs(abs_ostree_tar_dir)
@@ -917,6 +923,15 @@ class PatchFile(object):
                     dest_path = os.path.join(root_scripts_dir, f"{patch_id}_{script_name}")
                     shutil.move(os.path.join(tmpdir, script_name), dest_path)
                     os.chmod(dest_path, os.stat(dest_path).st_mode | stat.S_IXUSR)
+
+            # Copy extra folder if exists
+            extra_origin = os.path.join(tmpdir, "extra.tar")
+            if tarfile.is_tarfile(extra_origin):
+                patch_dir = "%s/rel-%s" % (constants.SOFTWARE_STORAGE_DIR, patch_sw_release)
+                if not os.path.exists(patch_dir):
+                    os.makedirs(patch_dir)
+                shutil.move(extra_origin, patch_dir)
+                LOG.info("extra.tar copied to %s" % patch_dir)
 
         except tarfile.TarError as te:
             error_msg = "Extract software failed %s" % str(te)
@@ -1031,14 +1046,20 @@ class PatchFile(object):
                                               sw_release,
                                               package_list)
 
+            # Extract extra.tar if it is present
+            patch_dir = "%s/rel-%s" % (constants.SOFTWARE_STORAGE_DIR, sw_release)
+            extra_tar = "%s/extra.tar" % patch_dir
+            if tarfile.is_tarfile(extra_tar):
+                tar = tarfile.open(extra_tar)
+                tar.extractall(path=patch_dir)
+                os.remove(extra_tar)
+
         except tarfile.TarError:
-            msg = "Failed to extract the ostree tarball for %s" \
-                  % sw_version
+            msg = "Failed to extract tarball for %s" % sw_release
             LOG.exception(msg)
             raise OSTreeTarFail(msg)
         except OSError as e:
-            msg = "Failed to scan %s for Debian packages. Error: %s" \
-                  % (package_repo_dir, e.errno)
+            msg = "Error: %s" % e
             LOG.exception(msg)
             raise OSTreeTarFail(msg)
         finally:
