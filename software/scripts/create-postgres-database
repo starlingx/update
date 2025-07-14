@@ -1,0 +1,146 @@
+#!/usr/bin/python3
+#
+# Copyright (c) 2023-2025 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+#
+# This script is used create a 2nd instance of postgres
+# on deploy start step of an upgrade. It needs a port
+# number as parameter that should be different from the
+# default postgres port value.
+#
+
+import configparser
+import grp
+import logging
+import os
+import pwd
+import shutil
+import subprocess
+import sys
+
+import upgrade_utils
+
+LOG = logging.getLogger('main_logger')
+
+class PostgresDatabase:
+    DEFAULT_POSTGRESQL_PORT = 5432
+    POSTGRESQL_PATH = "/var/lib/postgresql"
+    POSTGRESQL_RUNTIME = "/var/run/postgresql"
+    BUILD_INFO_FILE = "/etc/build.info"
+
+    def __init__(self, port):
+        # get postgres uid and gid
+        self._uid = pwd.getpwnam("postgres").pw_uid
+        self._gid = grp.getgrnam("postgres").gr_gid
+
+        # set database port
+        if port == self.DEFAULT_POSTGRESQL_PORT:
+            LOG.error(f"Port number should be different from the "
+                      f"default {self.DEFAULT_POSTGRESQL_PORT}")
+            raise
+        self._port = port
+
+        # set postgres bin dir
+        try:
+            process = subprocess.run(["pg_config", "--bindir"], check=True,
+                                     text=True, capture_output=True)
+            self._postgres_bin_dir = process.stdout.strip()
+        except subprocess.CalledProcessError as e:
+            LOG.error(f"Error getting postgres bindir: {str(e)}")
+            raise
+
+        # get sw_version
+        try:
+            cp = configparser.ConfigParser()
+            default_section = configparser.DEFAULTSECT
+            with open(self.BUILD_INFO_FILE, "r") as fp:
+                cp.read_string(f"[{default_section}]\n" + fp.read())
+                self._sw_version = cp.get(default_section, "SW_VERSION").strip('"')
+        except Exception as e:
+            LOG.error(f"Error getting SW_VERSION: {str(e)}")
+            raise
+
+        # set postgres data dir
+        self._postgres_data_dir = os.path.join(self.POSTGRESQL_PATH, self._sw_version)
+
+    def run(self):
+        # create postgres data directory
+        try:
+            shutil.rmtree(self._postgres_data_dir, ignore_errors=True)
+            os.makedirs(self._postgres_data_dir, mode=0o700, exist_ok=True)
+            os.chown(self._postgres_data_dir, uid=self._uid, gid=self._gid)
+        except Exception as e:
+            LOG.error(f"Error setting up postgres data directory: {str(e)}")
+            return 1
+        LOG.info(f"Created postgres data directory {self._postgres_data_dir}")
+
+        # initialize postgres instance
+        try:
+            cmd = ["sudo", "-u", "postgres", os.path.join(self._postgres_bin_dir, "initdb"),
+                   "-D", self._postgres_data_dir]
+            subprocess.run(cmd, check=True, text=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            LOG.error(f"Failed to initialize the postgres database: {str(e.stderr)}")
+            return 1
+        LOG.info("Initialized new postgres database instance")
+
+        # set password encryption
+        try:
+            cmd = ["sed", "-i", "s/^#\?password_encryption.*/password_encryption = 'scram-sha-256'/",
+                   os.path.join(self._postgres_data_dir, "postgresql.conf")]
+            subprocess.run(cmd, check=True, text=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            LOG.error(f"Failed to set password encryption method: {str(e.stderr)}")
+            return 1
+        LOG.info("Database password encryption changed")
+
+        # create postgres runtime directory
+        try:
+            os.makedirs(self.POSTGRESQL_RUNTIME, exist_ok=True)
+            os.chown(self.POSTGRESQL_RUNTIME, uid=self._uid, gid=self._gid)
+        except Exception as e:
+            LOG.error(f"Error setting up postgres runtime directory: {str(e)}")
+            return 1
+        LOG.info(f"Created postgres runtime directory {self.POSTGRESQL_RUNTIME}")
+
+        # start postgres instance
+        try:
+            cmd = ["sudo", "-u", "postgres", os.path.join(self._postgres_bin_dir, "pg_ctl"), "-D",
+                       self._postgres_data_dir, "-o", f"-F -p {self._port}", "start"]
+            subprocess.run(cmd, check=True)  # somehow capture_output hangs up the command
+        except subprocess.CalledProcessError as e:
+            LOG.error(f"Failed to start postgres database: {str(e)}")
+            return 1
+        LOG.info(f"Started new postgres database instance on port {self._port}")
+
+        return 0
+
+
+if __name__ == "__main__":
+    upgrade_utils.configure_logging("/var/log/software.log", log_level=logging.INFO)
+
+    port = None
+    error = False
+    for arg in range(1, len(sys.argv)):
+        if arg == 1:
+            try:
+                port = int(sys.argv[arg])
+            except ValueError:
+                error = True
+
+    if port is None:
+        usage_msg = f"usage: {sys.argv[0]} <port>"
+        print(usage_msg)
+        LOG.error(usage_msg)
+        sys.exit(1)
+
+    if error:
+        error_msg = f"Invalid port: {port}"
+        print(error_msg)
+        LOG.error(error_msg)
+        sys.exit(1)
+
+    postgres_database = PostgresDatabase(port)
+    sys.exit(postgres_database.run())

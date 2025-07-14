@@ -25,6 +25,7 @@ from lxml import etree as ElementTree
 from xml.dom import minidom
 
 import software.apt_utils as apt_utils
+import software.config as cfg
 from software.db.api import get_instance
 from software.release_verify import verify_files
 from software.release_verify import cert_type_all
@@ -84,11 +85,8 @@ def configure_logging(logtofile=True, level=logging.INFO):
     if logtofile:
         my_exec = os.path.basename(sys.argv[0])
 
-        log_format = '%(asctime)s: ' \
-                     + my_exec + '[%(process)s:%(thread)d]: ' \
-                     + '%(filename)s(%(lineno)s): ' \
-                     + '%(levelname)s: %(message)s'
-
+        log_format = cfg.logging_default_format_string
+        log_format = log_format.replace('%(exec)s', my_exec)
         formatter = logging.Formatter(log_format, datefmt="%FT%T")
 
         LOG.setLevel(level)
@@ -96,16 +94,13 @@ def configure_logging(logtofile=True, level=logging.INFO):
         main_log_handler.setFormatter(formatter)
         LOG.addHandler(main_log_handler)
 
-        try:
-            os.chmod(logfile, 0o640)
-        except Exception:
-            pass
-
         auditLOG.setLevel(level)
         api_log_handler = logging.FileHandler(apilogfile)
         api_log_handler.setFormatter(formatter)
         auditLOG.addHandler(api_log_handler)
+
         try:
+            os.chmod(logfile, 0o640)
             os.chmod(apilogfile, 0o640)
         except Exception:
             pass
@@ -379,6 +374,11 @@ class ReleaseData(object):
         if release_sw_version not in package_dir:
             package_dir[release_sw_version] = "%s/%s" % (root_package_dir, release_sw_version)
             repo_dir[release_sw_version] = "%s/rel-%s" % (repo_root_dir, release_sw_version)
+
+        self.metadata[release_id]["preinstalled_patches"] = []
+        for req in root.findall("preinstalled_patches"):
+            for patch_id in req.findall("id"):
+                self.metadata[release_id]["preinstalled_patches"].append(patch_id.text)
 
         self.metadata[release_id]["requires"] = []
         for req in root.findall("requires"):
@@ -1443,31 +1443,6 @@ def is_deployment_in_progress():
     return len(deploys) > 0
 
 
-def set_host_target_load(hostname, major_release):
-    """
-    Set target_load on the sysinv db for a host during deploy
-    host for major release deployment. This action is needed
-    so that sysinv behaves correctly when the host is unlocked
-    and after it reboots running the new software load.
-
-    :param hostname: host being deployed
-    :param major_release: target major release
-    TODO(heitormatsui): delete this function once sysinv upgrade tables are deprecated
-    """
-    load_query = "select id from loads where software_version = '%s'" % major_release
-    host_query = "select id from i_host where hostname = '%s'" % hostname
-    update_query = ("update host_upgrade set software_load = (%s), target_load = (%s) "
-                    "where forihostid = (%s)") % (load_query, load_query, host_query)
-    cmd = "sudo -u postgres psql -d sysinv -c \"%s\"" % update_query
-    try:
-        subprocess.check_call(cmd, shell=True)
-        LOG.info("Host %s target_load set to %s" % (hostname, major_release))
-    except subprocess.CalledProcessError as e:
-        LOG.exception("Error setting target_load to %s for %s: %s" % (
-            major_release, hostname, str(e)))
-        raise
-
-
 def deploy_host_validations(hostname, is_major_release: bool, rollback: bool = False):
     """
     Check the conditions below:
@@ -1583,10 +1558,32 @@ def clean_up_deployment_data(major_release):
         os.path.join(constants.POSTGRES_PATH, constants.UPGRADE),
         os.path.join(constants.POSTGRES_PATH, major_release),
         os.path.join(constants.RABBIT_PATH, major_release),
-        os.path.join(constants.ETCD_PATH, major_release),
     ]
     for folder in upgrade_folders:
         shutil.rmtree(folder, ignore_errors=True)
+
+    # etcd has different cleanup procedure:
+    # - remove the to-release symlink
+    # - rename from-release directory to to-release
+    # - restart etcd process
+    etcd_from_path = os.path.join(constants.ETCD_PATH, major_release)
+    etcd_to_path = os.path.join(constants.ETCD_PATH, SW_VERSION)
+    if utils.compare_release_version(SW_VERSION, major_release):
+        if os.path.islink(etcd_to_path):
+            os.unlink(etcd_to_path)
+            LOG.info("Removed %s symlink", etcd_to_path)
+        os.rename(etcd_from_path, etcd_to_path)
+        LOG.info("Renamed %s directory to %s", etcd_from_path, etcd_to_path)
+        try:
+            subprocess.run(["/usr/bin/sm-restart-safe", "service", "etcd"], check=True)
+            LOG.info("Restarted etcd service")
+        except subprocess.CalledProcessError as e:
+            LOG.error("Error restarting etcd: %s", str(e))
+    # on rollback, only the symlink needs to be removed
+    else:
+        if os.path.islink(etcd_from_path):
+            os.unlink(etcd_from_path)
+            LOG.info("Removed %s symlink", etcd_from_path)
 
 
 def remove_major_release_deployment_flags():
@@ -1610,20 +1607,18 @@ def remove_major_release_deployment_flags():
     return success
 
 
-def run_deploy_clean_up_script(release):
+def run_remove_temporary_data_script(release):
     """
-    Runs the deploy-cleanup script for the given release.
+    Runs the remove-temporary-data script for the given release.
 
     :param release: Release to be cleaned.
     """
-    cmd_path = utils.get_software_deploy_script(release, constants.DEPLOY_CLEANUP_SCRIPT)
-    if (os.path.exists(f"{constants.STAGING_DIR}/{constants.OSTREE_REPO}") and
-            os.path.exists(constants.ROOT_DIR)):
+    cmd_path = utils.get_software_deploy_script(release, constants.REMOVE_TEMPORARY_DATA_SCRIPT)
+    if os.path.exists(constants.ROOT_DIR):
         try:
-            subprocess.check_output([cmd_path, f"{constants.STAGING_DIR}/{constants.OSTREE_REPO}",
-                                     constants.ROOT_DIR, "all"], stderr=subprocess.STDOUT)
+            subprocess.check_output([cmd_path, constants.ROOT_DIR], stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
-            LOG.exception("Error running deploy-cleanup script: %s" % str(e))
+            LOG.exception("Error running remove-temporary-data script: %s" % str(e))
             raise
 
 
@@ -1714,3 +1709,11 @@ def execute_agent_hooks(software_version, additional_data=None):
     except Exception as e:
         LOG.exception("Error running agent hooks: %s" % str(e))
         raise
+
+
+def to_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() == 'true'
+    return False

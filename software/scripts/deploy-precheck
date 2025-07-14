@@ -15,8 +15,7 @@ Run platform upgrade deploy precheck as a standalone executable
 import argparse
 import base64
 import json
-import logging as LOG
-import os
+import logging
 import re
 import requests
 import subprocess
@@ -29,20 +28,16 @@ from tsconfig.tsconfig import SW_VERSION
 import upgrade_utils
 
 
-# TODO(heitormatsui) keep updated for every release
-SUPPORTED_K8S_VERSIONS = [
-    "v1.24.4",
-    "v1.25.3",
-    "v1.26.1",
-    "v1.27.5",
-    "v1.28.4",
-    "v1.29.2",
-]
-
 RC_SUCCESS = 0
 RC_UNHEALTHY = 3
 STATE_AVAILABLE = 'available'
 STATE_DEPLOYED = 'deployed'
+SYSTEM_MODE_SIMPLEX = "simplex"
+# the space needed is derived from the sum of snapshot sizes
+# defined in lvm_snapshot.LvmSnapshotManager.LOGICAL_VOLUMES
+FREE_SPACE_NEEDED_LVM_SNAPSHOTS_GIB = 24
+
+LOG = logging.getLogger('main_logger')
 
 class HealthCheck(object):
     """This class represents a general health check object
@@ -161,8 +156,12 @@ class HealthCheck(object):
 
 
 class UpgradeHealthCheck(HealthCheck):
-    """This class represents a upgrade-specific health check object
+    """This class represents an upgrade-specific health check object
     that verifies if system is in a valid state for upgrade"""
+
+    def __init__(self, config):
+        super().__init__(config)
+        self._ostree_feed_path = f"/var/www/pages/feed/rel-{self._major_release}"
 
     # TODO(heitormatsui): switch from using upgrade metadata xml to
     #  the new USM metadata format
@@ -176,7 +175,7 @@ class UpgradeHealthCheck(HealthCheck):
         supported_releases = dict()
 
         # Parse upgrade metadata file for supported upgrade paths
-        root = ElementTree.parse("/var/www/pages/feed/rel-%s/upgrades/metadata.xml" % self._major_release)
+        root = ElementTree.parse(f"{self._ostree_feed_path}/upgrades/metadata.xml")
         upgrade_root = root.find("supported_upgrades").findall("upgrade")
         for upgrade in upgrade_root:
             version = upgrade.find("version")
@@ -196,11 +195,29 @@ class UpgradeHealthCheck(HealthCheck):
                 return True
         return False
 
-    def _check_kube_version(self, supported_versions):
+    def _get_supported_k8s_versions(self):
+        supported_versions = []
+        # TODO(heitormatsui): is this the most appropriate way
+        #  to fetch valid k8s versions for a given release?
+        cmd = ["ostree", f"--repo={self._ostree_feed_path}/ostree_repo",
+               "ls", "starlingx", "/usr/local/kubernetes"]
+        try:
+            proc = subprocess.run(cmd, check=True, text=True, capture_output=True)
+            for line in proc.stdout.strip().split("\n"):
+                match = re.match(r"^.*/kubernetes/([\d.]+)", line)
+                if match:
+                    supported_versions.append(f"v{match.group(1)}")
+        except subprocess.CalledProcessError as e:
+            return []
+        return supported_versions
+
+    def _check_kube_version(self):
         """
         Check if active k8s version is in a list of supported versions
         :param supported_versions: list of supported k8s versions
-        :return: boolean indicating success/failure and active k8s version
+        :return: boolean indicating success/failure,
+                 active k8s version,
+                 list of supported k8s versions
         """
         kube_versions = self._sysinv_client.kube_version.list()
         active_version = None
@@ -208,8 +225,31 @@ class UpgradeHealthCheck(HealthCheck):
             if kv.state == "active":
                 active_version = kv.version
                 break
+        supported_versions = self._get_supported_k8s_versions()
         success = active_version in supported_versions
-        return success, active_version
+        return success, active_version, supported_versions
+
+    @staticmethod
+    def _check_system_simplex():
+        system_mode = upgrade_utils.get_platform_conf("system_mode")
+        return system_mode == SYSTEM_MODE_SIMPLEX
+
+    @staticmethod
+    def _check_free_space_for_snapshots():
+        success = True
+        available_gib = upgrade_utils.get_available_gib_in_vg()
+        if available_gib < FREE_SPACE_NEEDED_LVM_SNAPSHOTS_GIB:
+            success = False
+            msg = (("Insufficient free space on cgts-vg to create snapshot\n"
+                    "   Current free space is %.2fGiB but %.2fGiB is needed")
+                   % (available_gib, FREE_SPACE_NEEDED_LVM_SNAPSHOTS_GIB))
+            return success, msg
+        return success, None
+
+    def _check_snapshot_option(self):
+        options = json.loads(self._config.get("options", {}))
+        snapshot = options.get("snapshot", False)
+        return upgrade_utils.to_bool(snapshot)
 
     def run_health_check(self):
         """Run specific upgrade health checks"""
@@ -218,7 +258,7 @@ class UpgradeHealthCheck(HealthCheck):
         output = ""
 
         # check if k8s version is valid
-        success, active_version = self._check_kube_version(SUPPORTED_K8S_VERSIONS)
+        success, active_version, supported_versions = self._check_kube_version()
         output += 'Active kubernetes version [%s] is a valid supported version: [%s]\n' \
                   % (active_version, HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
 
@@ -226,11 +266,14 @@ class UpgradeHealthCheck(HealthCheck):
             output += ('-> Failed to get version info. Upgrade kubernetes to one of the '
                        'supported versions [%s] and ensure that the kubernetes version '
                        'information is available in the kubeadm configmap.\n'
-                       'See "system kube-version-list"\n' % ", ".join(SUPPORTED_K8S_VERSIONS))
+                       'See "system kube-version-list"\n' % ", ".join(supported_versions))
+        elif not supported_versions:
+            output += ('-> Failed to get supported kubernetes version list from the to-release '
+                       f'feed in {self._ostree_feed_path}/ostree_repo\n')
         elif not success:
             output += ('-> Upgrade active kubernetes version [%s] to one of the '
                        'supported versions [%s]. See "system kube-version-list"\n' %
-                       (active_version, ", ".join(SUPPORTED_K8S_VERSIONS)))
+                       (active_version, ", ".join(supported_versions)))
         health_ok = health_ok and success
 
         # TODO(heitormatsui) Do we need the following check on USM?
@@ -263,7 +306,7 @@ class UpgradeHealthCheck(HealthCheck):
 
         if not success:
             LOG.error("system-local-ca's private key is either not RSA or not valid.")
-            output += 'Platform Issuer: [%s]\n' % (HealthCheck.FAIL_MSG)
+            output += 'Platform Issuer: [%s]\n' % HealthCheck.FAIL_MSG
             output += ('-> Platform Issuer (system-local-ca) TLS private key is not valid. '
                        'Only RSA keys are supported.\n'
                        '   Please perform the \'Update system-local-ca or Migrate Platform '
@@ -273,15 +316,6 @@ class UpgradeHealthCheck(HealthCheck):
         else:
             LOG.info("system-local-ca has a valid private key.")
         health_ok = health_ok and success
-
-        # run health check for 22.12, if is the case, and return.
-        # Otherwise, continue with the rest of the prechecks
-        # TODO(ShawnLi): remove this once upgrade from 22.12 is deprecated
-        if SW_VERSION == '22.12':
-            success, output_2212 = self.run_health_check_in_from_release()
-            health_ok = health_ok and success
-            output += output_2212
-            return health_ok, output
 
         # check if it is a valid upgrade path
         success, active_release, required_patches = self._check_valid_upgrade_path()
@@ -299,31 +333,20 @@ class UpgradeHealthCheck(HealthCheck):
                 % ', '.join(missing_patches)
         health_ok = health_ok and success
 
-        return health_ok, output
+        # check for LVM snapshot health checks
+        use_lvm_snapshot = self._check_snapshot_option()
+        if use_lvm_snapshot:
+            success = self._check_system_simplex()
+            output += '(LVM snapshots) System is AIO-SX: [%s]\n' \
+                       % (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
+            health_ok = health_ok and success
 
-    def run_health_check_in_from_release(self):
-        """
-        Run the health check in 22.12 release environment
-        :return: tuple (success, output)
-        """
-
-        health_ok = True
-        output = ""
-
-        success, active_release, required_patches = self._check_valid_upgrade_path()
-        output += 'Valid upgrade path from release %s to %s: [%s]\n' \
-                  % (active_release, self._major_release,
-                     HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
-        health_ok = health_ok and success
-
-        # check if required patches are deployed
-        success, missing_patches = self._check_required_patches(required_patches)
-        output += 'Required patches are applied: [%s]\n' \
-                  % (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
-        if not success:
-            output += '-> Patches not applied: [%s]\n' \
-                % ', '.join(missing_patches)
-        health_ok = health_ok and success
+            success, msg = self._check_free_space_for_snapshots()
+            output += '(LVM snapshots) Disk space available: [%s]\n' \
+                       % (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
+            if not success:
+                output += "-> %s" % msg
+            health_ok = health_ok and success
 
         return health_ok, output
 
@@ -430,6 +453,8 @@ def parse_config(args=None):
     parser.add_argument("--patch",
                         help="Set precheck to run against a patch release",
                         action="store_true")
+    parser.add_argument("--options",
+                        help="Additional parameters in key=value format.")
     parser.add_argument("--releases",
                         help="Releases",
                         default="[]")
@@ -472,5 +497,5 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    upgrade_utils.configure_logging("/var/log/software.log", log_level=LOG.INFO)
+    upgrade_utils.configure_logging("/var/log/software.log", log_level=logging.INFO)
     sys.exit(main())

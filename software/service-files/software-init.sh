@@ -39,29 +39,6 @@ function LOG_TO_FILE {
     echo "`date "+%FT%T.%3N"`: $NAME: $*" >> $logfile
 }
 
-function check_for_rr_software_update {
-    if [ -f ${node_is_software_updated_rr_file} ]; then
-        if [ ! -f ${software_updated_during_init_file} ]; then
-            echo
-            echo "Node has had its software updated and requires an immediate reboot."
-            echo
-            LOG_TO_FILE "Node has had its software updated, with reboot-required flag set. Rebooting"
-            touch ${software_updated_during_init_file}
-            /sbin/reboot
-        else
-            echo
-            echo "Node has had its software updated during init a second consecutive time. Skipping reboot due to possible error"
-            echo
-            LOG_TO_FILE "Node has had its software updated during init a second consecutive time. Skipping reboot due to possible error"
-            touch ${software_install_failed_file}
-            rm -f ${software_updated_during_init_file}
-            exit 1
-        fi
-    else
-        rm -f ${software_updated_during_init_file}
-    fi
-}
-
 function check_install_uuid {
     # Check whether our installed load matches the active controller
     CONTROLLER_UUID=`curl -sf http://controller:${http_port}/feed/rel-${SW_VERSION}/install_uuid`
@@ -123,6 +100,12 @@ if [ ${FOUND} -eq 0 ]; then
     exit 1
 fi
 
+# skip the service execution if booting in the rollback deployment
+if grep -q "ostree=/ostree/2" /proc/cmdline; then
+    LOG_TO_FILE "System is booted from rollback deployment. Skipping execution..."
+    exit 0
+fi
+
 RC=0
 case "$1" in
     start)
@@ -158,7 +141,6 @@ case "$1" in
             LOG_TO_FILE "***** Finished software operation *****"
         fi
 
-        check_for_rr_software_update
         ;;
     stop)
         # Nothing to do here

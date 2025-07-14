@@ -163,6 +163,10 @@ class SWRelease(object):
         return self._get_by_key('prepatched_iso') == "Y"
 
     @property
+    def preinstalled_patches(self):
+        return self._get_by_key('preinstalled_patches') or []
+
+    @property
     def requires_release_ids(self):
         return self._get_by_key('requires') or []
 
@@ -264,6 +268,7 @@ class SWRelease(object):
                 "warnings": self.warnings,
                 "reboot_required": self.reboot_required,
                 "prepatched_iso": self.prepatched_iso,
+                "preinstalled_patches": self.preinstalled_patches[:],
                 "requires": self.requires_release_ids[:],
                 "packages": self.packages[:],
                 "activation_scripts": self.activation_scripts[:]}
@@ -301,7 +306,7 @@ class SWReleaseCollection(object):
         return self.get_release_by_id(rel_id)
 
     def get_release_by_commit_id(self, commit_id):
-        for _, sw_release in self._sw_releases:
+        for _, sw_release in self._sw_releases.items():
             if sw_release.commit_id == commit_id:
                 return sw_release
         return None

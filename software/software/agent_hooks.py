@@ -14,6 +14,8 @@ SPDX-License-Identifier: Apache-2.0
 #       2. This module needs to be compatible with both N+1 and N-1
 #          python environments
 #####################################################################
+from abc import ABC
+from abc import abstractmethod
 import configparser
 import filecmp
 import glob
@@ -23,6 +25,13 @@ from packaging import version
 import re
 import shutil
 import subprocess
+from ipaddress import ip_address
+from ipaddress import IPv6Address
+import psycopg2
+
+import software.constants as constants
+import software.utils as utils
+
 
 log_format = ('%(asctime)s: ' + '[%(process)s]: '
               '%(filename)s(%(lineno)s): %(levelname)s: %(message)s')
@@ -32,13 +41,17 @@ LOG.basicConfig(filename="/var/log/software.log",
 
 class BaseHook(object):
     """Base Hook object"""
+    # directories
     TO_RELEASE_OSTREE_DIR = "/ostree/1"
     FROM_RELEASE_OSTREE_DIR = "/ostree/2"
     SYSTEMD_LIB_DIR = "/lib/systemd/system"
     SYSTEMD_ETC_DIR = "%s/etc/systemd/system/multi-user.target.wants" % TO_RELEASE_OSTREE_DIR
-    CONTROLLER = "controller"
     PLATFORM_CONF_PATH = "/etc/platform/"
     PLATFORM_CONF_FILE = os.path.join(PLATFORM_CONF_PATH, "platform.conf")
+
+    # keywords
+    CONTROLLER = "controller"
+    SIMPLEX = "simplex"
 
     def __init__(self, attrs=None):
         pass
@@ -180,13 +193,14 @@ class UpdateKernelParametersHook(BaseHook):
     """
     Update the kernel parameters
     isolcpus=<cpu_range> ==> isolcpus=nohz,domain,managed_irq,<cpu_range>
+    '' ==> rcutree.kthread_prio=21 (default value if not set)
     """
     def __init__(self, attrs):
         super().__init__()
 
-    def read_isolcpus_kernel_parameters(self):
+    def read_kernel_parameters(self) -> str:
+        kernel_params = ''
 
-        isolcpus = ''
         try:
             BOOT_ENV = "/boot/efi/EFI/BOOT/boot.env"
             cmd = f'grub-editenv {BOOT_ENV} list'
@@ -197,28 +211,27 @@ class UpdateKernelParametersHook(BaseHook):
             LOG.exception(msg)
             raise
 
-        kernel_params = ''
         for line in output.split('\n'):
             if line.startswith('kernel_params='):
                 kernel_params = line[len('kernel_params='):]
                 break
 
+        return kernel_params
+
+    def read_isolcpus(self, kernel_params: str) -> str:
+        isolcpus = ''
         for param in kernel_params.split():
             if param.startswith('isolcpus='):
                 isolcpus = param
                 break
-
         return isolcpus
 
-    def run(self):
-        """Execute the hook"""
-        try:
-            # Get the isolcpus cpu range
-            isolcpus = self.read_isolcpus_kernel_parameters()
-            if not isolcpus:
-                # do nothing 'isolcpus' kernel parameter not configured
-                return
+    def update_isolcpus(self, isolcpus: str) -> None:
+        if not isolcpus:
+            LOG.info("Do nothing. Kernel param 'isolcpus' is not configured.")
+            return
 
+        try:
             _, val = isolcpus.split("=")
             isolcpus_ranges = []  # only numeric values
             isolcpus_prefix = ['nohz', 'domain', 'managed_irq']
@@ -243,7 +256,7 @@ class UpdateKernelParametersHook(BaseHook):
             cmd = f"python /usr/local/bin/puppet-update-grub-env.py --add-kernelparams isolcpus={isolcpus_prefix}"
             subprocess.run(cmd, shell=True, check=True, capture_output=True)
 
-            LOG.info("Successfully updated kernel parameter isolcpus=%s", isolcpus_prefix)
+            LOG.info(f"Successfully updated kernel parameter isolcpus={isolcpus_prefix}")
 
         except subprocess.CalledProcessError as e:
             msg = ("Failed to run puppet-update-grub-env.py: rc=%s, output=%s"
@@ -251,10 +264,56 @@ class UpdateKernelParametersHook(BaseHook):
             LOG.exception(msg)
         except Exception as e:
             err = str(e)
-            msg = f"Failed to update isolcpus kernel paramater. Error = {err}"
+            msg = f"Failed to update isolcpus kernel parameter. Error = {err}"
             LOG.exception(msg)
 
-        return
+    def read_kthread_prio(self, kernel_params: str) -> str:
+        kthread_prio = ''
+        for param in kernel_params.split():
+            if param.startswith('rcutree.kthread_prio='):
+                kthread_prio = param
+                break
+        return kthread_prio
+
+    def add_kthread_prio_if_not_set(self, kthread_prio: str) -> None:
+        if kthread_prio:
+            LOG.info(f"Do nothing. Kernel param '{kthread_prio}' is already set.")
+            return
+
+        lowlatency = 'lowlatency' in self.get_platform_conf("subfunction")
+        if not lowlatency:
+            LOG.info("Standard kernel 'rcutree.kthread_prio' will not be set.")
+            return
+
+        # if lowlatency kernel and not previously set, use default value
+        default_kthread_prio = 'rcutree.kthread_prio=21'
+        try:
+            LOG.info(f"Adding kernel parameter '{default_kthread_prio}'")
+
+            # add 'rcutree.kthread_prio' kernel parameter
+            cmd = f"python /usr/local/bin/puppet-update-grub-env.py --add-kernelparams {default_kthread_prio}"
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+
+            LOG.info(f"Successfully added kernel parameter '{default_kthread_prio}'")
+
+        except subprocess.CalledProcessError as e:
+            msg = ("Failed to run puppet-update-grub-env.py: rc=%s, output=%s"
+                   % (e.returncode, e.stderr.decode("utf-8")))
+            LOG.exception(msg)
+        except Exception as e:
+            err = str(e)
+            msg = f"Failed to update {default_kthread_prio} kernel parameter. Error = {err}"
+            LOG.exception(msg)
+
+    def run(self):
+        """Execute the hook"""
+        kernel_params = self.read_kernel_parameters()
+
+        isolcpus = self.read_isolcpus(kernel_params)
+        self.update_isolcpus(isolcpus)
+
+        kthread_prio = self.read_kthread_prio(kernel_params)
+        self.add_kthread_prio_if_not_set(kthread_prio)
 
 
 class ReconfigureKernelHook(BaseHook):
@@ -296,8 +355,11 @@ class ReconfigureKernelHook(BaseHook):
             else:
                 # Explicitly update /boot/1/kernel.env using the
                 # /usr/local/bin/puppet-update-grub-env.py utility
-                LOG.info("Updating /boot/1/kernel.env to:%s", desired_kernel)
-                cmd = "python /usr/local/bin/puppet-update-grub-env.py --set-kernel %s" % desired_kernel
+                boot_index = 1
+                LOG.info("Updating /boot/%s/kernel.env to: %s", boot_index, desired_kernel)
+                cmd = ("python %s/usr/local/bin/puppet-update-grub-env.py "
+                       "--set-kernel %s --boot-index %s") % (self.TO_RELEASE_OSTREE_DIR,
+                                                             desired_kernel, boot_index)
                 subprocess.run(cmd, shell=True, check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             msg = ("Failed to run puppet-update-grub-env.py: rc=%s, output=%s"
@@ -306,6 +368,39 @@ class ReconfigureKernelHook(BaseHook):
         except Exception as e:
             msg = "Failed to manually update /boot/1/kernel.env. Err=%s" % str(e)
             LOG.exception(msg)
+
+
+class UpdateGrubConfigHook(BaseHook):
+    """
+    Get the grub.cfg.stx file from the to-release files
+    and replace the grub.cfg on /boot contents with it;
+    this approach works both for forward and rollback paths
+    """
+    BOOT_GRUB_CFG = "/boot/efi/EFI/BOOT/grub.cfg"
+
+    def run(self):
+        to_release_grub_cfg = os.path.join(self.TO_RELEASE_OSTREE_DIR,
+                                           "var/pxeboot/pxelinux.cfg.files/grub.cfg.stx")
+        if os.path.isfile(to_release_grub_cfg):
+            # replace boot grub.cfg for the new file
+            LOG.info("Copying %s into %s", to_release_grub_cfg, self.BOOT_GRUB_CFG)
+            shutil.copy2(to_release_grub_cfg, self.BOOT_GRUB_CFG)
+        else:
+            LOG.warning("No %s file present in to-release filesystem",
+                        os.path.basename(to_release_grub_cfg))
+
+        system_mode = self.get_platform_conf("system_mode")
+        try:
+            LOG.info(f"Updating system_mode={system_mode} in boot.env")
+            cmd = [
+                os.path.join(self.TO_RELEASE_OSTREE_DIR,
+                             "usr/local/bin/puppet-update-grub-env.py"),
+                "--set-boot-variable",
+                f"system_mode={system_mode}",
+            ]
+            subprocess.run(cmd, check=True, text=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            LOG.error("Failed to update system_mode in boot.env: %s", e.stderr)
 
 
 class CreateUSMUpgradeInProgressFlag(BaseHook):
@@ -323,11 +418,11 @@ class CreateUSMUpgradeInProgressFlag(BaseHook):
 
 class RestartKubeApiServer(BaseHook):
     """
-    Restart the kube-apiserver after the host rollback to
-    resolve issues with the pods that are pending
-    or show errors with kubectl exec following a host-swact
-    on controller-1. This action ensures all pods run correctly
-    and enables successful exec operations.
+    Restart the kube-apiserver after the host rollback/upgrade to
+    resolve issues with the pods that are pending or show errors
+    with kubectl exec following a host-swact on controller-1.
+    This action ensures all pods run correctly and enables
+    successful exec operations.
     """
     def __init__(self, attrs):
         super().__init__()
@@ -353,6 +448,632 @@ class RestartKubeApiServer(BaseHook):
                     cmd, e.stdout.decode('utf-8'), e.stderr.decode('utf-8')))
 
 
+class DeleteControllerFeedRemoteHook(BaseHook):
+    """
+    This hook deletes the controller-feed ostree remote for non-controller
+    hosts, so that the remote is recreated pointing to the to-release feed
+    after a successful deployment with the to-release ostree commit-id
+    """
+    OSTREE_AUX_REMOTE = "controller-feed"
+
+    def run(self):
+        nodetype = self.get_platform_conf("nodetype")
+        if nodetype != self.CONTROLLER:
+            cmd = ["ostree", "remote", "delete", self.OSTREE_AUX_REMOTE]
+            try:
+                subprocess.run(cmd, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                LOG.info("Deleted ostree %s remote" % self.OSTREE_AUX_REMOTE)
+            except subprocess.CalledProcessError as e:
+                LOG.exception("Error deleting %s remote: %s" % (self.OSTREE_AUX_REMOTE, e.stdout))
+                raise
+        else:
+            LOG.info("Host nodetype is %s, no ostree remote to delete" % self.CONTROLLER)
+
+
+# TODO(heitormatsui): remove after stx-10 -> stx-11 upgrade
+class EtcMergeHook(BaseHook):
+    """
+    This hook ensures some specified files from to-release are
+    kept in the deployed host instead of the 3-way merge version
+    of the file
+    """
+    FILES = [
+        "passwd",
+        "group",
+        "syslog-ng/syslog-ng.conf",
+    ]
+
+    def run(self):
+        for file in self.FILES:
+            src = os.path.normpath(self.TO_RELEASE_OSTREE_DIR + "/usr/etc/" + file)
+            dst = os.path.normpath(self.TO_RELEASE_OSTREE_DIR + "/etc/" + file)
+            shutil.copy2(src, dst)
+            LOG.info("Copied %s to %s" % (src, dst))
+
+
+# TODO(heitormatsui): remove after stx-10 -> stx-11 upgrade
+class FixPSQLPermissionHook(BaseHook):
+    """
+    This hook fix postgres related files/directories permissions
+     due to differences in uids and gids between releases
+    """
+    SSL_DIR = "/etc/ssl/private"
+
+    def fix_cert_dir(self):
+        try:
+            cmd = ["grep", "ssl-cert", f"{self.TO_RELEASE_OSTREE_DIR}/usr/etc/group"]
+            output = subprocess.run(cmd, text=True, check=True, stdout=subprocess.PIPE)
+            gid = int(output.stdout.strip().split(":")[2])
+            os.chown(f"{self.TO_RELEASE_OSTREE_DIR}/{self.SSL_DIR}", uid=0, gid=gid)
+            LOG.info("Fixed %s directory ownership to 0:%s" % (self.SSL_DIR, gid))
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Error fixing %s directory ownership: %s" % (self.SSL_DIR, str(e)))
+            raise
+
+    def run(self):
+        self.fix_cert_dir()
+
+
+class UpdateSyslogConfig(BaseHook):
+    """
+    This class updates the syslog configuration by:
+    1. Removing all lines containing `d_sm` from `/etc/syslog-ng/syslog-ng.conf`.
+    2. Replacing lines containing `f_local3` with `# Facility code local3 is assigned to Service Management`.
+    """
+
+    def __init__(self, attrs):
+        super().__init__()
+        self._config_path = self.TO_RELEASE_OSTREE_DIR + "/etc/syslog-ng/syslog-ng.conf"
+        self._backup_path = f"{self._config_path}.bak"
+
+    def _backup_syslog_config(self):
+        """Create a backup of the syslog configuration file."""
+        try:
+            subprocess.check_call(['cp', self._config_path, self._backup_path])
+            LOG.info("Backup created at %s", self._backup_path)
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Failed to create backup: %s", str(e))
+            raise
+
+    def _remove_and_replace_lines(self):
+        """Use `sed` to remove lines containing `d_sm` and replace lines containing `f_local3`."""
+        try:
+            # Use sed to remove lines containing 'd_sm' and replace 'f_local3' with a comment
+            cmd = [
+                "sed", "-i",
+                "-e", "/d_sm/d",  # Remove lines containing 'd_sm'
+                "-e", "s|.*f_local3.*|# Facility code local3 is assigned to Service Management|g",  # Replace lines with 'f_local3'
+                self._config_path
+            ]
+            subprocess.check_call(cmd)
+            LOG.info("Updated %s by removing lines with `d_sm` and replacing `f_local3` lines", self._config_path)
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Failed to update %s using sed: %s", self._config_path, str(e))
+            raise
+
+    def _reload_syslog_service(self):
+        """Reload the syslog-ng service to apply changes."""
+        try:
+            subprocess.check_call(['systemctl', 'reload', 'syslog-ng'])
+            LOG.info("Syslog-ng service reloaded successfully.")
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Failed to reload syslog-ng service: %s", str(e))
+            raise
+
+    def run(self):
+        """Execute the update process."""
+        try:
+            LOG.info("Starting syslog configuration update.")
+            self._backup_syslog_config()
+            self._remove_and_replace_lines()
+            self._reload_syslog_service()
+            LOG.info("Syslog configuration update completed.")
+        except Exception as e:
+            LOG.error("Syslog configuration update failed: %s", str(e))
+
+
+class RevertSyslogConfig(UpdateSyslogConfig):
+    """
+    This class reverts changes made to the syslog configuration by:
+    1. Restoring the backup of `/etc/syslog-ng/syslog-ng.conf` created by UpdateSyslogConfig.
+    2. Reloading the syslog-ng service to apply the restored configuration.
+    """
+
+    def _restore_backup(self):
+        """Restore the syslog configuration from the backup."""
+        try:
+            if os.path.exists(self._backup_path):
+                subprocess.check_call(['cp', self._backup_path, self._config_path])
+                LOG.info("Restored %s from backup at %s", self._config_path, self._backup_path)
+            else:
+                raise FileNotFoundError(f"Backup file {self._backup_path} not found.")
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Failed to restore the backup: %s", str(e))
+            raise
+        except FileNotFoundError as e:
+            LOG.error(str(e))
+            raise
+
+    def _reload_syslog_service(self):
+        """Reload the syslog-ng service to apply changes."""
+        try:
+            subprocess.check_call(['systemctl', 'reload', 'syslog-ng'])
+            LOG.info("Syslog-ng service reloaded successfully.")
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Failed to reload syslog-ng service: %s", str(e))
+            raise
+
+    def run(self):
+        """Execute the revert process."""
+        try:
+            LOG.info("Starting syslog configuration revert.")
+            self._restore_backup()
+            self._reload_syslog_service()
+            LOG.info("Syslog configuration revert completed.")
+        except Exception as e:
+            LOG.error("Syslog configuration revert failed: %s", str(e))
+
+
+class RevertUmaskHook(BaseHook):
+    """
+    Reverts the umask setting during a MAJOR_RELEASE_ROLLBACK event by
+    removing 'umask 027' from /root/.bashrc and /root/.bash_profile.
+    """
+    def __init__(self, attrs):
+        super().__init__()
+
+    def run(self):
+        try:
+            self._remove_umask_setting("/root/.bashrc")
+            self._remove_umask_setting("/root/.bash_profile")
+            LOG.info("Successfully reverted umask settings during rollback.")
+        except Exception as e:
+            LOG.exception("Failed to revert umask settings: %s", str(e))
+
+    def _remove_umask_setting(self, filepath):
+        if not os.path.exists(filepath):
+            LOG.warning("File not found: %s", filepath)
+            return
+        try:
+            cmd = f"/bin/sed -i '/^\\s*umask\\s\\+027\\s*$/d' {filepath}"
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+            LOG.info("Removed 'umask 027' from %s", filepath)
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Error updating %s: %s", filepath, e.stderr.decode("utf-8"))
+
+
+class FixShadowPasswordlessChar(BaseHook):
+    """
+    This hook modifies the shadow file by replacing the 'x' placeholder
+    with '*' for specific users.
+    """
+    USERS_TO_UPDATE = [
+        "nova", "neutron", "ceilometer", "sysinv", "snmpd",
+        "fm", "libvirt", "ironic", "www", "keystone"
+    ]
+
+    def run(self):
+        shadow = os.path.normpath(self.TO_RELEASE_OSTREE_DIR + "/etc/shadow")
+        try:
+            with open(shadow, "r") as file:
+                lines = file.readlines()
+
+                updated_lines = []
+                for line in lines:
+                    parts = line.split(":")
+                    if len(parts) > 1 and parts[0] in self.USERS_TO_UPDATE and parts[1] == "x":
+                        parts[1] = "*"
+                    updated_lines.append(":".join(parts))
+
+            with open(shadow, "w") as file:
+                file.writelines(updated_lines)
+
+            LOG.info("Replaced 'x' entries in the password field with '*' in %s", shadow)
+        except Exception as e:
+            LOG.exception("Error processing shadow file: %s", str(e))
+            raise
+
+
+class RevertCrtPermissionsHook(BaseHook):
+    """
+    This hook resets the permissions of .crt files in /etc/kubernetes/pki
+    to 0644
+    """
+
+    PKI_DIR = "/etc/kubernetes/pki"
+
+    def revert_crt_permissions(self):
+        target_dir = os.path.join(
+            self.TO_RELEASE_OSTREE_DIR, self.PKI_DIR.lstrip("/")
+        )
+
+        if not os.path.isdir(target_dir):
+            LOG.warning("Directory does not exist: %s" % target_dir)
+            return
+
+        for root, _, files in os.walk(target_dir):
+            for f in files:
+                if f.endswith(".crt"):
+                    filepath = os.path.join(root, f)
+                    try:
+                        os.chmod(filepath, 0o644)
+                        LOG.info("Set permission 0644 on %s", filepath)
+                    except Exception as e:
+                        LOG.exception(
+                            "Failed to set permission on %s: %s",
+                            filepath,
+                            str(e)
+                        )
+                        raise
+
+    def run(self):
+        self.revert_crt_permissions()
+
+
+class LogPermissionRestorerHook(BaseHook):
+    """
+    This hook restores file permissions under /var/log
+    from a backup file, and resets /etc/cron* configs using TO_RELEASE_OSTREE_DIR.
+    """
+
+    BACKUP_FILE_RELATIVE_PATH = "/var/log/.permission.txt"
+
+    def restore_log_permissions(self):
+        """Restore file permissions from the backup file."""
+        backup_file = self.BACKUP_FILE_RELATIVE_PATH
+
+        if not os.path.isfile(backup_file):
+            LOG.info("Backup file '%s' not found. Exiting...", backup_file)
+            return False
+
+        success = True
+        with open(backup_file, "r") as file:
+            for line in file:
+                parts = line.strip().split(" ", 1)
+                if len(parts) != 2:
+                    continue
+                perm, file_path = parts
+                if os.path.isfile(file_path):
+                    try:
+                        os.chmod(file_path, int(perm, 8))
+                        LOG.info("Restored permissions %s for %s", perm, file_path)
+                    except OSError as e:
+                        LOG.exception(
+                            "Failed to restore permissions for %s: %s", file_path, e
+                        )
+                        success = False
+                else:
+                    LOG.info("File %s not found, skipping...", file_path)
+
+        if success:
+            LOG.info("Permissions restored successfully. Proceeding to delete backup.")
+            self.delete_backup()
+
+        return success
+
+    def delete_backup(self):
+        """Delete the backup file if restoration was successful."""
+        try:
+            os.remove(self.BACKUP_FILE_RELATIVE_PATH)
+            LOG.info(
+                "Backup file '%s' deleted successfully.", self.BACKUP_FILE_RELATIVE_PATH
+            )
+        except OSError as e:
+            LOG.exception("Failed to delete backup file: %s", e)
+
+    def restore_cron_permissions(self):
+        """
+        Restore /etc/cron* permissions and delete cron.allow/at.allow files
+        in the TO_RELEASE_OSTREE_DIR (next boot image).
+        """
+        cron_files = {
+            "/etc/crontab": 0o644,
+            "/etc/cron.d": 0o755,
+            "/etc/cron.hourly": 0o755,
+            "/etc/cron.daily": 0o755,
+            "/etc/cron.weekly": 0o755,
+            "/etc/cron.monthly": 0o755,
+        }
+
+        for path, perm in cron_files.items():
+            full_path = os.path.join(self.TO_RELEASE_OSTREE_DIR, path.lstrip("/"))
+            if os.path.exists(full_path):
+                try:
+                    os.chmod(full_path, perm)
+                    LOG.info("Restored permissions %o for %s", perm, full_path)
+                except OSError as e:
+                    LOG.exception("Failed to set permissions for %s: %s", full_path, e)
+            else:
+                LOG.warning("%s not found, skipping permission restore", full_path)
+
+        for path in ["/etc/cron.allow", "/etc/at.allow"]:
+            full_path = os.path.join(self.TO_RELEASE_OSTREE_DIR, path.lstrip("/"))
+            try:
+                if os.path.exists(full_path):
+                    os.remove(full_path)
+                    LOG.info("Deleted file: %s", full_path)
+                else:
+                    LOG.info("File %s not found, skipping delete", full_path)
+            except OSError as e:
+                LOG.exception("Failed to delete file %s: %s", full_path, e)
+
+    def run(self):
+        self.restore_log_permissions()
+        self.restore_cron_permissions()
+
+
+class ReconfigureCephMonHook(BaseHook):
+    """
+    Reconfigure ceph-mon with the mgmt floating address
+    """
+    def __init__(self, attrs):
+        super().__init__(attrs)
+        self._to_release = None
+        if "to_release" in attrs:
+            self._to_release = attrs.get("to_release")
+
+    def connect_postgres_db(self):
+        DEFAULT_POSTGRES_PORT = 5432
+        username, password = self.get_db_credentials()
+        conn = psycopg2.connect("dbname=sysinv user=%s password=%s \
+                                host=localhost port=%s"
+                                % (username, password, DEFAULT_POSTGRES_PORT))
+        return conn
+
+    def get_db_credentials(self):
+        cp = configparser.ConfigParser()
+        cp.read('/etc/sysinv/sysinv.conf')
+        conn_string = cp['database']['connection']
+        match = re.match(r'postgresql\+psycopg2://([^:]+):([^@]+)@', conn_string)
+        if match:
+            username = match.group(1)
+            password = match.group(2)
+            return username, password
+        else:
+            raise Exception("Failed to get database credentials from sysinv.conf")
+
+    def db_query_one(self, query):
+        try:
+            conn = self.connect_postgres_db()
+            with conn.cursor() as cursor:
+                cursor.execute(query)
+                result = cursor.fetchone()
+                return result[0] if result else None
+        except Exception as e:
+            LOG.exception("Error executing query: %s" % e)
+            raise
+        finally:
+            conn.close()
+
+    def is_ceph_configured(self):
+        query = (
+            "SELECT state FROM storage_backend WHERE backend = 'ceph';"
+        )
+        res = self.db_query_one(query)
+        return res and res == 'configured'
+
+    def get_fsid(self):
+        cp = configparser.ConfigParser()
+        cp.read("/etc/ceph/ceph.conf")
+        return cp["global"]["fsid"]
+
+    def get_mon_ip(self):
+        hosts_path = ""
+        host = ""
+        if self._to_release == "25.09":
+            hosts_path = "/etc/hosts"
+            host = "controller"
+        elif self._to_release == "24.09":
+            hosts_path = "/opt/platform/config/24.09/hosts"
+            host = "controller-0"
+        with open(hosts_path) as f:
+            lines = f.readlines()
+            for line in lines:
+                fields = line.split()
+                if fields[1] == host:
+                    ip = fields[0]
+                    if isinstance(ip_address(ip), IPv6Address):
+                        ip = f"[{ip}]"
+                    return ip
+        return None
+
+    def run(self):
+        # Handle both upgrade to 25.09 and rollback to 24.09
+        if self._to_release == "24.09" or self._to_release == "25.09":
+            system_type = utils.get_platform_conf("system_type")
+            system_mode = utils.get_platform_conf("system_mode")
+            if (system_type == constants.SYSTEM_TYPE_ALL_IN_ONE and
+                    system_mode == constants.SYSTEM_MODE_SIMPLEX):
+                if not self.is_ceph_configured():
+                    LOG.info("ceph-mon: skipping reconfiguration, bare metal ceph not configured")
+                    return
+                fsid = self.get_fsid()
+                mon_name = "controller-0"
+                mon_ip = self.get_mon_ip()
+                if not fsid or not mon_ip:
+                    LOG.exception("Invalid fsid or mon_ip")
+                    raise ValueError("Invalid params")
+                LOG.info("ceph-mon: using fsid=%s, mon_name=%s, mon_ip=%s" % (fsid, mon_name, mon_ip))
+
+                cmds = [
+                    ["rm", "-f", "/etc/pmon.d/ceph.conf"],
+                    ["/etc/init.d/ceph", "stop", "mon"],
+                    ["ceph-mon", "--name", f"mon.{mon_name}", "--extract-monmap", f"/tmp/mon-{mon_name}.map"],
+                    ["monmaptool", "--rm", f"{mon_name}", f"/tmp/mon-{mon_name}.map"],
+                    ["monmaptool", "--add", f"{mon_name}", f"{mon_ip}:6789", f"/tmp/mon-{mon_name}.map"],
+                    ["monmaptool", "--fsid", f"{fsid}", f"/tmp/mon-{mon_name}.map"],
+                    ["ceph-mon", "--name", f"mon.{mon_name}", "--inject-monmap", f"/tmp/mon-{mon_name}.map"],
+                    ["/etc/init.d/ceph", "start", "mon"],
+                    ["ln", "-s", "/etc/ceph/ceph.conf.pmon", "/etc/pmon.d/ceph.conf"],
+                ]
+                if self._to_release == "24.09":
+                    cmds.append(["ceph", "mon", "enable-msgr2"])
+
+                try:
+                    for cmd in cmds:
+                        LOG.info("ceph-mon: exec: '%s'" % ' '.join(cmd))
+                        subprocess.check_call(cmd, timeout=8)
+                    LOG.info("ceph-mon: reconfiguration finished")
+                except subprocess.CalledProcessError as e:
+                    LOG.exception("ceph-mon: failed executing the command '%s': %s" % (' '.join(cmd), str(e)))
+                    raise
+            else:
+                LOG.info("ceph-mon: skipping reconfiguration, system_mode is not simplex")
+
+
+class AbstractSysctlFlagHook(BaseHook, ABC):
+    """
+    Abstract base class for managing CIS benchmark sysctl flags on the kernel.
+    """
+
+    def __init__(self, attrs):
+        super().__init__()
+        # This property must be implemented by derived classes
+        self._parameters_to_set = None
+
+    @property
+    @abstractmethod
+    def parameters_to_set(self):
+        pass
+
+    @abstractmethod
+    def run(self):
+        pass
+
+    def _set_sysctl_param(self, config_file: str, param_name: str, param_value: int, lines: list):
+        """
+        Helper function to set or update a specific sysctl parameter in the list of lines.
+        Handles commented-out lines by uncommenting and updating them.
+        Returns True if the line was found/updated, False otherwise (meaning it needs to be added).
+        """
+        setting_to_set = f"{param_name} = {param_value}"
+        setting_pattern = re.compile(rf"^\s*#?\s*{re.escape(param_name)}\s*=")
+
+        updated_in_place = False
+        for i, line in enumerate(lines):
+            if setting_pattern.match(line):
+                # If the line is already exactly what we want (uncommented and correct value)
+                if line.strip() == setting_to_set:
+                    LOG.info(f"'{param_name}' already set to '{param_value}' in {config_file}")
+                else:
+                    # If it's a matching line but needs updating or uncommenting
+                    lines[i] = setting_to_set + '\n'
+                    LOG.info(f"Updated '{param_name}' to '{param_value}' (uncommented if necessary) in {config_file}")
+                updated_in_place = True
+                break
+
+        return updated_in_place
+
+    def _configure_sysctl_parameters(self, ostree_dir):
+        """
+        Configures multiple sysctl parameters in /etc/sysctl.conf
+        and applies the changes using sysctl -p.
+        Handles commented-out lines by uncommenting and updating them.
+        Uses the parameters defined by the derived class's 'parameters_to_set' property.
+        """
+        config_file = os.path.normpath(ostree_dir + "/etc/sysctl.conf")
+
+        if self.parameters_to_set is None:
+            LOG.error("Derived class must define 'parameters_to_set' property.")
+            return
+
+        try:
+            if not os.path.exists(config_file):
+                LOG.error(f"Error: {config_file} not found. Please ensure the file exists.")
+                return
+
+            with open(config_file, 'r') as f:
+                lines = f.readlines()
+
+            new_lines = list(lines)
+
+            for param_name, param_value in self.parameters_to_set.items():
+                param_found_and_updated = self._set_sysctl_param(
+                    config_file, param_name, param_value, new_lines
+                )
+
+                if not param_found_and_updated:
+                    setting_to_add = f"{param_name} = {param_value}"
+                    # Ensure we don't add extra blank lines if the file already ends with one
+                    if new_lines and not new_lines[-1].strip():
+                        new_lines.append(setting_to_add + '\n')
+                    else:
+                        new_lines.append('\n' + setting_to_add + '\n')
+                    LOG.info(f"Added '{setting_to_add}' to {config_file}")
+
+            if new_lines != lines:  # Simple check if content has changed
+                with open(config_file, 'w') as f:
+                    f.writelines(new_lines)
+                LOG.debug(f"Successfully modified {config_file}")
+            else:
+                LOG.debug(f"No changes detected for {config_file}. Skipping file write.")
+
+            LOG.info(f"Applying sysctl changes from {config_file}...")
+            result = subprocess.run(['sudo', 'sysctl', '-p', config_file],
+                                    capture_output=True, text=True, check=True)
+            if result.stderr:
+                LOG.error("sysctl -p errors:")
+                LOG.error(result.stderr)
+            LOG.info("sysctl changes applied successfully.")
+
+        except FileNotFoundError:
+            LOG.error(f"Error: Could not find the file {config_file}.")
+        except PermissionError:
+            LOG.error(f"Error: Permission denied for {config_file}. Please run with sufficient permissions.")
+        except subprocess.CalledProcessError as e:
+            LOG.error(f"Error applying sysctl changes: {e}")
+            LOG.error(f"Command: {e.cmd}")
+            LOG.error(f"Return Code: {e.returncode}")
+            LOG.error(f"Stdout: {e.stdout}")
+            LOG.error(f"Stderr: {e.stderr}")
+        except Exception as e:
+            LOG.error(f"An unexpected error occurred: {e}", exc_info=True)
+
+
+class CISSysctlFlagHookUpgrade(AbstractSysctlFlagHook):
+    """
+    Hook to upgrade CIS benchmark sysctl flags to their hardened values.
+    """
+    @property
+    def parameters_to_set(self):
+        if self._parameters_to_set is None:
+            self._parameters_to_set = {
+                "net.ipv4.icmp_echo_ignore_broadcasts": 1,
+                "net.ipv4.tcp_syncookies": 1,
+                "net.ipv4.conf.all.rp_filter": 1,
+                "net.ipv4.conf.default.rp_filter": 1,
+                "net.ipv4.conf.all.accept_source_route": 0
+            }
+        return self._parameters_to_set
+
+    def run(self):
+        LOG.info("Starting CIS Sysctl Flag Upgrade...")
+        self._configure_sysctl_parameters(self.TO_RELEASE_OSTREE_DIR)
+        LOG.debug("CIS Sysctl Flag Upgrade finished.")
+
+
+class CISSysctlFlagHookRollback(AbstractSysctlFlagHook):
+    """
+    Hook to rollback CIS benchmark sysctl flags to their original values.
+    """
+    @property
+    def parameters_to_set(self):
+        if self._parameters_to_set is None:
+            self._parameters_to_set = {
+                "net.ipv4.icmp_echo_ignore_broadcasts": 1,
+                "net.ipv4.tcp_syncookies": 1,
+                "net.ipv4.conf.all.rp_filter": 0,
+                "net.ipv4.conf.default.rp_filter": 0,
+                "net.ipv4.conf.all.accept_source_route": 0
+            }
+        return self._parameters_to_set
+
+    def run(self):
+        LOG.info("Starting CIS Sysctl Flag Rollback...")
+        self._configure_sysctl_parameters(self.FROM_RELEASE_OSTREE_DIR)
+        LOG.debug("CIS Sysctl Flag Rollback finished.")
+
+
 class HookManager(object):
     """
     Object to manage the execution of agent hooks
@@ -368,14 +1089,33 @@ class HookManager(object):
             CopyPxeFilesHook,
             ReconfigureKernelHook,
             UpdateKernelParametersHook,
+            UpdateGrubConfigHook,
             EnableNewServicesHook,
+            UpdateSyslogConfig,
+            EtcMergeHook,
+            FixShadowPasswordlessChar,
+            FixPSQLPermissionHook,
+            DeleteControllerFeedRemoteHook,
+            RestartKubeApiServer,
+            ReconfigureCephMonHook,
+            CISSysctlFlagHookUpgrade,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
         ],
         MAJOR_RELEASE_ROLLBACK: [
             ReconfigureKernelHook,
+            UpdateGrubConfigHook,
             RestartKubeApiServer,
+            RevertSyslogConfig,
+            EtcMergeHook,
+            FixPSQLPermissionHook,
+            DeleteControllerFeedRemoteHook,
+            RevertUmaskHook,
+            RevertCrtPermissionsHook,
+            LogPermissionRestorerHook,
+            ReconfigureCephMonHook,
+            CISSysctlFlagHookRollback,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,

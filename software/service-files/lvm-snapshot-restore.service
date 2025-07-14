@@ -1,0 +1,14 @@
+[Unit]
+Description=Restore LVM Snapshots
+DefaultDependencies=no
+After=systemd-udev-settle.service local-fs.target var-log.mount
+Before=software.service controllerconfig.service
+
+[Service]
+Type=oneshot
+ExecStart=/etc/init.d/lvm-snapshot-restore
+TimeoutStartSec=300
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -107,6 +107,18 @@ def update_host_sw_version(hostname, sw_version):
         raise
 
 
+def trigger_vim_host_audit(hostname):
+    """Trigger for the sysinv function vim_host_audit."""
+    token, endpoint = utils.get_endpoints_token()
+    sysinv_client = get_sysinv_client(token=token, endpoint=endpoint)
+    try:
+        host = sysinv_client.ihost.get(hostname)
+        sysinv_client.ihost.vim_host_audit(host.uuid)
+    except Exception as err:
+        LOG.error("Failed to trigger VIM host audit for %s: %s", hostname, err)
+        raise
+
+
 def get_service_parameter(service=None, section=None, name=None):
     """return a list of dictionaries with keys
        uuid, service, section, name, personality, resource, value

@@ -63,6 +63,11 @@ def do_host_list(cc, args):
            default=None,
            required=False,
            help='Run precheck against a subcloud')
+@utils.arg('-o',
+           '--options',
+           action='append',
+           required=False,
+           help='Additional parameters in key=value format.')
 def do_precheck(cc, args):
     """Verify whether prerequisites for installing the software deployment are satisfied"""
     resp, data = cc.deploy.precheck(args)
@@ -86,6 +91,11 @@ def do_precheck(cc, args):
            action='store_true',
            required=False,
            help='Allow bypassing non-critical checks')
+@utils.arg('-o',
+           '--options',
+           action='append',
+           required=False,
+           help='Additional parameters in key=value format.')
 def do_start(cc, args):
     """Start the software deployment"""
     resp, data = cc.deploy.start(args)

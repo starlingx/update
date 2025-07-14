@@ -12,6 +12,7 @@ sys.modules['osprofiler'] = None
 import configparser
 import gc
 import json
+import logging
 import os
 from packaging import version
 import re
@@ -32,12 +33,16 @@ from fm_api import constants as fm_constants
 from oslo_config import cfg as oslo_cfg
 
 import software.apt_utils as apt_utils
+import software.lvm_snapshot as lvm_snapshot
 import software.ostree_utils as ostree_utils
 from software.api import app
 from software.authapi import app as auth_app
+from software.constants import CONTROLLER_0_HOSTNAME
+from software.constants import CONTROLLER_1_HOSTNAME
 from software.constants import INSTALL_LOCAL_FLAG
-from software.states import DEPLOY_STATES
 from software.states import DEPLOY_HOST_STATES
+from software.states import DEPLOY_STATES
+from software.states import INTERRUPTION_RECOVERY_STATES
 from software.base import PatchService
 from software.dc_utils import get_subcloud_groupby_version
 from software.deploy_state import require_deploy_state
@@ -59,6 +64,7 @@ from software.exceptions import HostAgentUnreachable
 from software.exceptions import HostIpNotFound
 from software.exceptions import MaxReleaseExceeded
 from software.exceptions import ServiceParameterNotFound
+from software.plugin import DeployPluginRunner
 from software.release_data import reload_release_data
 from software.release_data import get_SWReleaseCollection
 from software.software_functions import collect_current_load_for_hosts
@@ -78,17 +84,17 @@ from software.software_functions import PatchFile
 from software.software_functions import package_dir
 from software.software_functions import repo_dir
 from software.software_functions import root_scripts_dir
-from software.software_functions import set_host_target_load
 from software.software_functions import SW_VERSION
-from software.software_functions import LOG
 from software.software_functions import audit_log_info
 from software.software_functions import repo_root_dir
 from software.software_functions import is_deploy_state_in_sync
 from software.software_functions import is_deployment_in_progress
 from software.software_functions import get_release_from_patch
 from software.software_functions import clean_up_deployment_data
-from software.software_functions import run_deploy_clean_up_script
+from software.software_functions import run_remove_temporary_data_script
+from software.software_functions import to_bool
 from software.release_state import ReleaseState
+from software.utilities.deploy_set_failed import start_set_fail
 from software.deploy_host_state import DeployHostState
 from software.deploy_state import DeployState
 from software.release_verify import verify_files
@@ -101,6 +107,7 @@ from software.sysinv_utils import are_all_hosts_unlocked_and_online
 from software.sysinv_utils import get_system_info
 from software.sysinv_utils import get_oot_drivers
 from software.sysinv_utils import trigger_evaluate_apps_reapply
+from software.sysinv_utils import trigger_vim_host_audit
 
 from software.db.api import get_instance
 
@@ -115,6 +122,8 @@ import xml.etree.ElementTree as ET
 
 CONF = oslo_cfg.CONF
 
+LOG = logging.getLogger('main_logger')
+
 pidfile_path = "/var/run/patch_controller.pid"
 
 sc = None
@@ -127,6 +136,7 @@ insvc_patch_restart_controller = "/run/software/.restart.software-controller"
 ETC_HOSTS_FILE_PATH = "/etc/hosts"
 ETC_HOSTS_BACKUP_FILE_PATH = "/etc/hosts.patchbak"
 PATCH_MIGRATION_SCRIPT_DIR = "/etc/update.d"
+SOFTWARE_LOG_FILE = "/var/log/software.log"
 
 stale_hosts = []
 pending_queries = []
@@ -598,9 +608,36 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
         # Nothing to add, so just call the super class
         messages.PatchMessage.encode(self)
 
+    def _set_host_install_completed(self, host):
+        global sc
+
+        sc.hosts_lock.acquire()
+        try:
+            host.install_status = self.status
+            host.install_pending = False
+            host.install_reject_reason = self.reject_reason
+        finally:
+            sc.hosts_lock.release()
+
     def handle(self, sock, addr):
         LOG.info("Handling install resp from %s", addr[0])
         global sc
+
+        ip = addr[0]
+        sc.hosts_lock.acquire()
+        try:
+            # NOTE(bqian) seems like trying to tolerate a failure situation
+            # that a host is directed to install a patch but during the installation
+            # software-controller-daemon gets restarted
+            # should remove the sc.hosts which is in memory volatile storage and replaced with
+            # permanent deploy-host entity
+            if ip not in sc.hosts:
+                sc.hosts[ip] = AgentNeighbour(ip)
+
+            host = sc.hosts[ip]
+            hostname = host.hostname
+        finally:
+            sc.hosts_lock.release()
 
         dbapi = get_instance()
         deploy = dbapi.get_deploy_all()
@@ -609,50 +646,39 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
             return
         deploy = deploy[0]
 
-        sc.hosts_lock.acquire()
-        try:
-            # NOTE(bqian) seems like trying to tolerate a failure situation
-            # that a host is directed to install a patch but during the installation
-            # software-controller-daemon gets restarted
-            # should remove the sc.hosts which is in memory volatile storage and replaced with
-            # permanent deploy-host entity
-            ip = addr[0]
-            if ip not in sc.hosts:
-                sc.hosts[ip] = AgentNeighbour(ip)
-
-            sc.hosts[ip].install_status = self.status
-            sc.hosts[ip].install_pending = False
-            sc.hosts[ip].install_reject_reason = self.reject_reason
-            hostname = sc.hosts[ip].hostname
-        finally:
-            sc.hosts_lock.release()
-
+        success = False
         deploy_host_state = DeployHostState(hostname)
-        if self.status:
-            deploying = ReleaseState(release_state=states.DEPLOYING)
-            if deploying.is_major_release_deployment():
-                # For major release deployment, update sysinv ihost.sw_version
-                # so that right manifest can be generated.
-                sw_version = utils.get_major_release_version(deploy.get("to_release"))
-                msg = f"Update {hostname} to {sw_version}"
-                LOG.info(msg)
-                try:
-                    update_host_sw_version(hostname, sw_version)
-                except Exception:
-                    # Failed a step, fail the host deploy for reattempt
-                    deploy_host_state.deploy_failed()
-                    return
 
-            deploy_host_state.deployed()
-            if self.reboot_required:
-                sc.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_SUCCESS_RR,
+        try:
+            if self.status:
+                deploying = ReleaseState(release_state=states.DEPLOYING)
+                if deploying.is_major_release_deployment():
+                    # For major release deployment, update sysinv ihost.sw_version
+                    # so that right manifest can be generated.
+                    sw_version = utils.get_major_release_version(deploy.get("to_release"))
+                    msg = f"Update {hostname} to {sw_version}"
+                    LOG.info(msg)
+                    try:
+                        update_host_sw_version(hostname, sw_version)
+                    except Exception:
+                        # Failed a step, fail the host deploy for reattempt
+                        return
+
+                success = True
+        finally:
+            if success:
+                deploy_host_state.deployed()
+                if self.reboot_required:
+                    sc.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_SUCCESS_RR,
+                                             fm_constants.FM_ALARM_STATE_SET,
+                                             "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, hostname))
+            else:
+                deploy_host_state.deploy_failed()
+                sc.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_FAILURE,
                                          fm_constants.FM_ALARM_STATE_SET,
                                          "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, hostname))
-        else:
-            deploy_host_state.deploy_failed()
-            sc.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_FAILURE,
-                                     fm_constants.FM_ALARM_STATE_SET,
-                                     "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, hostname))
+
+            self._set_host_install_completed(host)
 
     def send(self, sock):  # pylint: disable=unused-argument
         LOG.error("Should not get here")
@@ -996,6 +1022,7 @@ class PatchController(PatchService):
 
         self.hosts = {}
         self.controller_neighbours = {}
+        self.host_mgmt_ip = []
 
         self.db_api_instance = get_instance()
 
@@ -1055,6 +1082,40 @@ class PatchController(PatchService):
         else:
             self._update_state_to_peer()
 
+    def _notify_vim_on_state_change(self, target_state):
+        """Notify VIM of state change.
+
+        This method will notify VIM when one of the following state changes is made:
+        - start-done
+        - start-failed
+        - activate-done
+        - activate-failed
+        - activate-rollback-done
+        - activate-rollback-failed
+
+        If new async states are added they should be added here.
+
+        Args:
+            target_state: The new deployment state to notify VIM about
+        """
+
+        if self.pre_bootstrap:
+            return
+
+        if target_state not in [
+            DEPLOY_STATES.START_DONE,
+            DEPLOY_STATES.START_FAILED,
+            DEPLOY_STATES.ACTIVATE_DONE,
+            DEPLOY_STATES.ACTIVATE_FAILED,
+            DEPLOY_STATES.ACTIVATE_ROLLBACK_DONE,
+            DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED,
+        ]:
+            return
+
+        # Get local hostname
+        LOG.info("Notifying VIM of state change: %s", target_state)
+        trigger_vim_host_audit(socket.gethostname())
+
     def register_deploy_state_change_listeners(self):
         # data sync listener
         DeployState.register_event_listener(self._state_changed_sync)
@@ -1063,6 +1124,10 @@ class PatchController(PatchService):
         DeployHostState.register_event_listener(DeployState.host_deploy_updated)
         DeployState.register_event_listener(ReleaseState.deploy_updated)
         DeployState.register_event_listener(self.create_clean_up_deployment_alarm)
+
+        # VIM notifications
+        DeployState.register_event_listener(self._notify_vim_on_state_change)
+        # TODO(jkraitbe): Add host-deploy when that becomes async
 
     @property
     def release_collection(self):
@@ -1233,12 +1298,13 @@ class PatchController(PatchService):
         self.patch_op_counter += 1
         self.write_state_file()
 
-    def get_release_dependency_list(self, release_id):
+    def get_release_dependency_list(self, release_id, preinstalled_patches=None):
         """
         Returns a list of software releases that are required by this release.
         Example: If R5 requires R4 and R1, R4 requires R3 and R1, R3 requires R1
                  then for input param release_id='R5', it will return ['R4', 'R1', 'R3']
         :param release: The software release ID
+        :param preinstalled_patches: A list containing all pre installed patches
         """
 
         def get_dependencies(release_id, visited):
@@ -1252,29 +1318,14 @@ class PatchController(PatchService):
                 if req_release not in visited:
                     visited.add(req_release)
                     dependencies.append(req_release)
-                    dependencies.extend(get_dependencies(req_release, visited))
+                    if req_release not in preinstalled_patches:
+                        dependencies.extend(get_dependencies(req_release, visited))
             return dependencies
 
+        if preinstalled_patches is None:
+            preinstalled_patches = []
+
         return get_dependencies(release_id, set())
-
-    def get_release_required_by_list(self, release_id):
-        """
-        Returns a list of software releases that require this release.
-        Example: If R3 requires R2 and R2 requires R1,
-                 then for input param release_id='R1', it will return ['R3', 'R2']
-        :param release_id: The software release id
-        """
-
-        def get_required_by(release_id, visited):
-            required_by_list = []
-            for req_release in self.release_collection.iterate_releases():
-                if release_id in req_release.requires_release_ids and req_release.id not in visited:
-                    visited.add(req_release.id)
-                    required_by_list.append(req_release.id)
-                    required_by_list.extend(get_required_by(req_release.id, visited))
-            return required_by_list
-
-        return get_required_by(release_id, set())
 
     def get_ostree_tar_filename(self, patch_sw_version, patch_id):
         '''
@@ -1374,7 +1425,6 @@ class PatchController(PatchService):
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         if os.path.isfile(INSTALL_LOCAL_FLAG) and delete:
-            # Remove install local flag if enabled
             if os.path.isfile(INSTALL_LOCAL_FLAG):
                 try:
                     os.remove(INSTALL_LOCAL_FLAG)
@@ -1440,23 +1490,23 @@ class PatchController(PatchService):
                                     stderr=subprocess.STDOUT, check=True, text=True)
             return (result.stdout, None) if result.returncode == 0 else (None, result.stdout)
 
-        # Check if usm_load_import script exists in the iso
-        has_usm_load_import_script = os.path.isfile(os.path.join(
-            iso_mount_dir, 'upgrades', 'software-deploy', constants.USM_LOAD_IMPORT_SCRIPT))
+        # Check if major-release-upload script exists in the iso
+        has_release_upload_script = os.path.isfile(os.path.join(
+            iso_mount_dir, 'upgrades', 'software-deploy', constants.MAJOR_RELEASE_UPLOAD_SCRIPT))
 
-        if has_usm_load_import_script:
-            # usm_load_import script is found. This iso supports upgrade from USM
+        if has_release_upload_script:
+            # major-release-upload script is found. This iso supports upgrade from USM
             try:
                 # Copy iso /upgrades/software-deploy/ to /opt/software/rel-<rel>/bin/
                 to_release_bin_dir = os.path.join(
                     constants.SOFTWARE_STORAGE_DIR, ("rel-%s" % to_release), "bin")
                 if os.path.exists(to_release_bin_dir):
                     shutil.rmtree(to_release_bin_dir)
-                shutil.copytree(os.path.join(iso_mount_dir, "upgrades",
-                                constants.SOFTWARE_DEPLOY_FOLDER), to_release_bin_dir)
+                shutil.copytree(os.path.join(iso_mount_dir, "upgrades", constants.SOFTWARE_DEPLOY_FOLDER),
+                                to_release_bin_dir, symlinks=True)
 
-                # Run usm_load_import script
-                import_script = os.path.join(to_release_bin_dir, constants.USM_LOAD_IMPORT_SCRIPT)
+                # Run major-release-upload script
+                import_script = os.path.join(to_release_bin_dir, constants.MAJOR_RELEASE_UPLOAD_SCRIPT)
                 load_import_cmd = [
                     str(import_script),
                     f"--from-release={from_release}",
@@ -1487,14 +1537,14 @@ class PatchController(PatchService):
                 LOG.exception("Error occurred while running load import: %s", str(e))
                 raise
 
-        # At this step, usm_load_import script is not found in the iso
-        # Therefore, we run the local usm_load_import script which supports importing the N-1 iso
+        # At this step, major-release-upload script is not found in the iso
+        # Therefore, we run the local major-release-upload script which supports importing the N-1 iso
         # that doesn't support USM feature.
         # This is the special case where *only* DC system controller can import this iso
         # TODO(ShawnLi): remove the code below when this special case is not supported
         try:
             local_import_script = os.path.join(
-                "/usr/sbin/software-deploy/", constants.USM_LOAD_IMPORT_SCRIPT)
+                "/usr/sbin/software-deploy/", constants.MAJOR_RELEASE_UPLOAD_SCRIPT)
 
             load_import_cmd = [local_import_script,
                                "--from-release=%s" % from_release,
@@ -1635,7 +1685,7 @@ class PatchController(PatchService):
             if SW_VERSION not in supported_versions:
                 raise UpgradeNotSupported("Current release %s not supported to upgrade to %s"
                                           % (SW_VERSION, to_release))
-            # Run usm_load_import script
+            # Run major-release-upload script
             LOG.info("Starting load import from %s", upgrade_files[constants.ISO_EXTENSION])
             return self._run_load_import(from_release, to_release, iso_mount_dir, upgrade_files)
         except Exception as e:
@@ -1961,43 +2011,63 @@ class PatchController(PatchService):
         :return: List of releases in the order for applying
         """
 
-        release_dependencies = self.get_release_dependency_list(release_id)
-        release_dependencies.append(release_id)
-
         deployed_releases_id = []
+        preinstalled_patches = []
         for rel in self.release_collection.iterate_releases():
             if rel.state == states.DEPLOYED:
                 deployed_releases_id.append(rel.id)
 
+            if rel.prepatched_iso:
+                preinstalled_patches = rel.preinstalled_patches
+
+        release_dependencies = self.get_release_dependency_list(release_id, preinstalled_patches)
+        release_dependencies.append(release_id)
+
         # filter release_dependencies to include only releases
         # that matches the major running release version
-        # and remove all releases already deployed
+        # and remove all releases already deployed, including prepatched
         to_apply_releases = [
             rel_id for rel_id in release_dependencies
-            if f"-{running_release_sw_version}." in rel_id and rel_id not in deployed_releases_id
+            if f"-{running_release_sw_version}." in rel_id and
+            rel_id not in deployed_releases_id + preinstalled_patches
         ]
 
         to_apply_releases.sort()
         return to_apply_releases
 
-    def release_remove_order(self, release_id, running_release_sw_version):
+    def release_remove_order(self, target_release_id, running_release_id, running_release_sw_version):
         """
-        Determines the order of releases for removing.
-        :param release_id: The removing release id
+        Determines the order of releases for removing based on the feed commit order.
+        :param target_release_id: The target release id
+        :param running_release_id: The running release id
         :param running_release_sw_version: The running release major version
         :return: List of releases in the order for removing
         """
 
         # if removing release is not from the major running version, cannot remove it
-        if f"-{running_release_sw_version}." not in release_id:
+        if f"-{running_release_sw_version}." not in target_release_id:
             return []
 
-        to_remove_releases = self.get_release_required_by_list(release_id)
-        # The specified release will not be removed
-        if release_id in to_remove_releases:
-            to_remove_releases.remove(release_id)
+        releases = list(self.release_collection.iterate_releases_by_state(states.DEPLOYED))
+        release_map = {release.id: release for release in releases}
 
-        to_remove_releases.sort(reverse=True)
+        to_remove_releases = []
+        current = running_release_id
+
+        while current != target_release_id:
+            to_remove_releases.append(current)
+            current_release = release_map.get(current)
+            if not current_release:
+                error = f"Release {current} not found in releases map"
+                raise SoftwareServiceError(error=error)
+
+            next_release = next((r for r in releases if r.commit_id == current_release.base_commit_id), None)
+            if not next_release:
+                error = f"Release with commit id {current_release.base_commit_id} not found"
+                raise SoftwareServiceError(error=error)
+
+            current = next_release.id
+
         return to_remove_releases
 
     def reset_feed_commit(self, release):
@@ -2626,6 +2696,39 @@ class PatchController(PatchService):
         finally:
             self.socket_lock.release()
 
+    def _sanitize_extra_options(self, value):
+        """
+        Make sure value have only allowed characters.
+        """
+        # Only letters, numbers, space, -, and _ are allowed.
+        if not re.match(r'^[\w\s\-]+$', value):
+            msg_error = f"Invalid value: '{value}'."
+            raise SoftwareServiceError(msg_error)
+        return value
+
+    def _parse_and_sanitize_extra_options(self, options_list):
+        """
+        Validate, sanitize and convert a 'key=value' to dictionary.
+        """
+
+        for item in options_list:
+            if item.count('=') != 1:
+                msg_error = f"Invalid format: '{item}'. Expected format is key=value"
+                raise SoftwareServiceError(msg_error)
+
+        options = {}
+        for item in options_list:
+            key, value = item.split('=', 1)
+            key = self._sanitize_extra_options(key.strip())
+            value = self._sanitize_extra_options(value.strip())
+
+            if key in constants.RESERVED_WORDS_SET:
+                msg_error = f"{key} is a reserved word and can't be used."
+                raise SoftwareServiceError(msg_error)
+
+            options[key] = value
+        return options
+
     def _release_basic_checks(self, deployment):
         """
         Does basic sanity checks on the release data
@@ -2647,7 +2750,8 @@ class PatchController(PatchService):
         return release
 
     def _deploy_precheck(self, release_version: str, force: bool = False,
-                         region_name: typing.Optional[str] = None, patch: bool = False) -> dict:
+                         region_name: typing.Optional[str] = None, patch: bool = False,
+                         **kwargs) -> dict:
         """
         Verify if system satisfy the requisites to upgrade to a specified deployment.
         :param release_version: full release name, e.g. starlingx-MM.mm.pp
@@ -2711,20 +2815,29 @@ class PatchController(PatchService):
             self._save_precheck_result(release_version, healthy=False)
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-        # TODO(heitormatsui) if different region was passed as parameter then
-        #  need to discover the subcloud auth_url to pass to precheck script
-        # TODO(jvazhapp) the region_name will not be 'RegionOne' (for standalone
-        #  clouds or subcloud)
-        if region_name != "RegionOne":
-            pass
-
         # Get releases info required for precheck
         releases = self.software_release_query_cached()
+
+        preinstalled_patches = []
+        for release in releases:
+            if release['prepatched_iso']:
+                preinstalled_patches = release.get('preinstalled_patches', [])
+                break
+
         for release in releases:
             keys_to_delete = ['packages', 'summary', 'description',
                               'install_instructions', 'warnings', 'component']
             for key in keys_to_delete:
                 del release[key]
+
+            # remove patch from requires if present in preinstalled_patches
+            if preinstalled_patches:
+                requires = release.get('requires', [])
+                common = set(requires) & set(preinstalled_patches)
+                if common:
+                    release['requires'] = [id for id in requires if id not in common]
+                    LOG.info("Removed %s from %s requires list, since these are prepatched"
+                             % (common, release['release_id']))
 
         cmd = [precheck_script,
                "--auth_url=%s" % auth_url,
@@ -2735,6 +2848,7 @@ class PatchController(PatchService):
                "--project_domain_name=%s" % project_domain_name,
                "--region_name=%s" % region_name,
                "--releases=%s" % json.dumps(releases),
+               "--options=%s" % json.dumps(kwargs.get("options", {})),
                "--deploy_in_progress=%s" % json.dumps(deploy_in_progress)]
         if force:
             cmd.append("--force")
@@ -2760,7 +2874,23 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error, system_healthy=system_healthy)
 
-    def software_deploy_precheck_api(self, deployment: str, force: bool = False, region_name=None) -> dict:
+    def _get_release_additional_info(self, release):
+        """
+        Get additional information related to release in precheck api.
+        :return: dict with release info.
+        """
+        release_info = {}
+        running_release = self.release_collection.running_release
+
+        release_info["major_release"] = utils.is_upgrade_deploy(SW_VERSION, release.sw_release)
+        release_info["reboot_required"] = release.reboot_required
+        release_info["prepatched_iso"] = release.prepatched_iso
+        release_info["apply_operation"] = release > running_release
+
+        return release_info
+
+    def software_deploy_precheck_api(self, deployment: str, force: bool = False, region_name=None,
+                                     **kwargs) -> dict:
         """
         Verify if system satisfy the requisites to upgrade to a specified deployment.
         :param deployment: full release name, e.g. starlingx-MM.mm.pp
@@ -2776,8 +2906,9 @@ class PatchController(PatchService):
         if not is_patch and socket.gethostname() != constants.CONTROLLER_0_HOSTNAME:
             raise SoftwareServiceError(f"Deploy precheck for major releases needs to be executed in"
                                        f" {constants.CONTROLLER_0_HOSTNAME} host.")
-
-        ret = self._deploy_precheck(release_version, force, region_name, is_patch)
+        if kwargs.get("options"):
+            kwargs["options"] = self._parse_and_sanitize_extra_options(kwargs.get("options"))
+        ret = self._deploy_precheck(release_version, force, region_name, is_patch, **kwargs)
         if ret:
             if ret.get("system_healthy") is None:
                 ret["error"] = "Fail to perform deploy precheck. Internal error has occurred.\n" + \
@@ -2785,9 +2916,11 @@ class PatchController(PatchService):
             elif not ret.get("system_healthy"):
                 ret["error"] = "The following issues have been detected, which prevent " \
                                "deploying %s\n" % deployment + ret.get("info")
+        release_info = self._get_release_additional_info(release)
+        ret.update(release_info)
         return ret
 
-    def _deploy_upgrade_start(self, to_release, commit_id):
+    def _deploy_upgrade_start(self, to_release, commit_id, **kwargs):
         LOG.info("start deploy upgrade to %s from %s" % (to_release, SW_VERSION))
         deploy_script_name = constants.DEPLOY_START_SCRIPT
         cmd_path = utils.get_software_deploy_script(to_release, deploy_script_name)
@@ -2808,6 +2941,7 @@ class PatchController(PatchService):
                              feed]
 
         upgrade_start_cmd.append(commit_id if commit_id is not None else 0)
+        upgrade_start_cmd.append(json.dumps(kwargs.get("options")) if kwargs.get("options") is not None else "")
         # pass in keystone auth through environment variables
         # OS_AUTH_URL, OS_USERNAME, OS_PASSWORD, OS_PROJECT_NAME, OS_USER_DOMAIN_NAME,
         # OS_PROJECT_DOMAIN_NAME, OS_REGION_NAME are in env variables.
@@ -2824,7 +2958,7 @@ class PatchController(PatchService):
 
         try:
             LOG.info("starting subprocess %s" % ' '.join(upgrade_start_cmd))
-            subprocess.Popen(' '.join(upgrade_start_cmd), start_new_session=True, shell=True, env=env)
+            subprocess.Popen(upgrade_start_cmd, start_new_session=True, shell=False, env=env)
             LOG.info("subprocess started")
             return True
         except subprocess.SubprocessError as e:
@@ -2924,15 +3058,31 @@ class PatchController(PatchService):
                     msg = "Failed to delete patch script %s. Reason: %s" % (script_path, e)
                     LOG.error(msg)
 
-    def install_releases_thread(self, deployment_list, feed_repo, running_release):
+    def cleanup_old_releases(self, target_commit, all_commits):
+        index = 0
+        to_delete_releases = []
+
+        while index < len(all_commits) and target_commit != all_commits[index]:
+            to_delete_release = self.release_collection.get_release_by_commit_id(all_commits[index])
+            if to_delete_release:
+                to_delete_releases.append(to_delete_release.id)
+                LOG.info("Deleting %s not used after prestage" % to_delete_release.id)
+            index += 1
+
+        # Delete metadata and all associated release files
+        self.software_release_delete_api(to_delete_releases)
+
+    def install_releases_thread(self, deployment_list, feed_repo, upgrade=False, **kwargs):
         """
         In a separated thread.
         Install the debian packages, create the commit and update the metadata.
+        IF it's an upgrade, also run the upgrade script
         """
         def run():
             LOG.info("Installing releases on repo: %s" % feed_repo)
 
             try:
+                deploy_sw_version = None
                 for release_id in deployment_list:
                     msg = "Starting deployment for: %s" % release_id
                     LOG.info(msg)
@@ -2941,12 +3091,25 @@ class PatchController(PatchService):
                     deploy_release = self._release_basic_checks(release_id)
                     self.copy_patch_activate_scripts(release_id, deploy_release.activation_scripts)
 
-                    all_commits = ostree_utils.get_all_feed_commits(running_release.sw_version)
-                    if deploy_release.commit_id in all_commits:
+                    deploy_sw_version = deploy_release.sw_version
+
+                    all_commits = ostree_utils.get_all_feed_commits(deploy_release.sw_version)
+                    latest_commit = all_commits[0]
+                    target_commit = deploy_release.commit_id
+                    if target_commit in all_commits:
                         # This case is for node with prestaged data where ostree
                         # commits have been pulled from system controller
                         LOG.info("Commit %s already exists in feed repo for release %s"
                                  % (deploy_release.commit_id, release_id))
+
+                        # If this is the last deployment, and it is not the latest commit in feed
+                        # delete the commits until reach this, and delete metadatas
+                        if release_id == deployment_list[-1] and target_commit != latest_commit:
+                            self.cleanup_old_releases(target_commit, all_commits)
+
+                            # Reset feed to last deployment release
+                            self.reset_feed_commit(deploy_release)
+
                         continue
 
                     packages = [pkg.split("_")[0] for pkg in deploy_release.packages]
@@ -2955,8 +3118,6 @@ class PatchController(PatchService):
                         LOG.error(msg)
                         raise MetadataFail(msg)
 
-                    # commit consistency check
-                    latest_commit = all_commits[0]
                     # Install debian package through apt-ostree
                     try:
                         apt_utils.run_install(
@@ -2970,7 +3131,8 @@ class PatchController(PatchService):
                         raise APTOSTreeCommandFail(msg)
 
                     # Get the latest commit after performing "apt-ostree install".
-                    self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
+                    self.latest_feed_commit = \
+                        ostree_utils.get_feed_latest_commit(deploy_release.sw_version)
 
                     deploystate = deploy_release.state
                     metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[deploystate]
@@ -2986,7 +3148,8 @@ class PatchController(PatchService):
                     with self.hosts_lock:
                         self.interim_state[release_id] = list(self.hosts)
 
-                    self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
+                    self.latest_feed_commit = \
+                        ostree_utils.get_feed_latest_commit(deploy_release.sw_version)
 
                     # Update metadata
                     tree = ET.parse(metadata_file)
@@ -3009,18 +3172,30 @@ class PatchController(PatchService):
 
                     LOG.info("Latest feed commit: %s added to metadata file" % self.latest_feed_commit)
 
+                # In prepatched add tombstone
+                ostree_utils.add_tombstone_commit_if_prepatched(constants.OSTREE_REF, feed_repo)
+
                 # Update the feed ostree summary
                 ostree_utils.update_repo_summary_file(feed_repo)
-                self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
-
-                # move the deploy state to start-done
-                deploy_state = DeployState.get_instance()
-                deploy_state.start_done(self.latest_feed_commit)
-
-                LOG.info("Finished releases %s deploy start" % deployment_list)
+                self.latest_feed_commit = ostree_utils.get_feed_latest_commit(deploy_sw_version)
 
                 self.send_latest_feed_commit_to_agent()
                 self.software_sync()
+
+                if upgrade:
+                    base_deployment = deployment_list[0]
+                    base_release = self._release_basic_checks(base_deployment)
+                    upgrade_commit_id = base_release.commit_id
+                    if self._deploy_upgrade_start(base_release.sw_release, upgrade_commit_id, **kwargs):
+                        LOG.info("Finished releases %s deploy start" % deployment_list)
+                    else:
+                        raise ValueError("_deploy_upgrade_start failed")
+                else:
+                    # move the deploy state to start-done
+                    deploy_state = DeployState.get_instance()
+                    deploy_state.start_done(self.latest_feed_commit)
+                    LOG.info("Finished releases %s deploy start" % deployment_list)
+
             except Exception as e:
                 msg = "Deploy start applying failed: %s" % str(e)
                 LOG.exception(msg)
@@ -3038,9 +3213,9 @@ class PatchController(PatchService):
         thread = threading.Thread(target=run)
         thread.start()
 
-    def _precheck_before_start(self, deployment, release_version, is_patch, force=False):
+    def _precheck_before_start(self, deployment, release_version, is_patch, force=False, **kwargs):
         LOG.info("Running deploy precheck.")
-        precheck_result = self._deploy_precheck(release_version, force=force, patch=is_patch)
+        precheck_result = self._deploy_precheck(release_version, patch=is_patch, force=force, **kwargs)
         if precheck_result.get('system_healthy') is None:
             precheck_result["error"] = (
                 f"Fail to perform deploy precheck. Internal error has occurred.\n"
@@ -3069,7 +3244,7 @@ class PatchController(PatchService):
         with open(precheck_result_file, "w") as f:
             json.dump({"healthy": healthy, "timestamp": time.time()}, f)
 
-    def _should_run_precheck_prior_deploy_start(self, release_version, force, is_patch):
+    def _should_run_precheck_prior_deploy_start(self, release_version, force, is_patch, **kwargs):
         # there is not precheck script in this state
         if self.pre_bootstrap:
             return False
@@ -3081,6 +3256,9 @@ class PatchController(PatchService):
         file_path = self._get_precheck_result_file_path(release_version)
         if not os.path.isfile(file_path):
             LOG.info("The precheck result file %s does not exist." % file_path)
+            return True
+
+        if kwargs:
             return True
 
         with open(file_path) as f:
@@ -3095,8 +3273,7 @@ class PatchController(PatchService):
     @require_deploy_state([None],
                           "There is already a deployment in progress ({state.value}). "
                           "Please complete/delete the current deployment.")
-    def software_deploy_start_api(
-            self, deployment: str, force: bool, **kwargs) -> dict:
+    def software_deploy_start_api(self, deployment: str, force: bool, **kwargs) -> dict:
         """
         to start deploy of a specified release.
         The operation implies deploying all undeployed dependency releases of
@@ -3138,39 +3315,19 @@ class PatchController(PatchService):
                 LOG.warning("Using unknown hostname for local install: %s", hostname)
 
         to_release = deploy_release.sw_release
-
-        if self._should_run_precheck_prior_deploy_start(to_release, force, is_patch):
+        if kwargs.get("options"):
+            kwargs["options"] = self._parse_and_sanitize_extra_options(kwargs.get("options"))
+        if self._should_run_precheck_prior_deploy_start(to_release, force, is_patch, **kwargs):
             LOG.info("Executing software deploy precheck prior to software deploy start")
             if precheck_result := self._precheck_before_start(
                 deployment,
                 to_release,
                 is_patch=is_patch,
-                force=force
+                force=force,
+                **kwargs
             ):
                 return precheck_result
         self._safe_remove_precheck_result_file(to_release)
-
-        if not is_patch:
-            # TODO(bqian) remove default latest commit when a commit-id is built into GA metadata
-            if commit_id is None:
-                commit_id = ostree_utils.get_feed_latest_commit(deploy_sw_version)
-
-            if self._deploy_upgrade_start(to_release, commit_id):
-                collect_current_load_for_hosts(deploy_sw_version)
-                create_deploy_hosts()
-
-                release_state = ReleaseState(release_ids=[deploy_release.id])
-                release_state.start_deploy()
-                deploy_state = DeployState.get_instance()
-                deploy_state.start(running_release, to_release, feed_repo, commit_id, deploy_release.reboot_required)
-
-                msg_info += "%s is now starting, await for the states: " \
-                            "[deploy-start-done | deploy-start-failed] in " \
-                            "'software deploy show'\n" % deployment
-            else:
-                msg_error = "Deployment for %s failed to start" % deployment
-
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         # Patch operation: 'deploy release' major version equals 'running release' major version (MM.mm)
 
@@ -3198,7 +3355,7 @@ class PatchController(PatchService):
         # If current running release is R4 and command issued is "software deploy start R2"
         # operation is "remove" with order [R4, R3]
         if operation == "apply":
-            deployment_list = self.release_apply_order(deployment, running_release.sw_version)
+            deployment_list = self.release_apply_order(deployment, deploy_sw_version)
 
             collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
             create_deploy_hosts(hostname=hostname)
@@ -3236,10 +3393,16 @@ class PatchController(PatchService):
             # Setting deploy state to start, so that it can transition to start-done or start-failed
             deploy_state = DeployState.get_instance()
             to_release = to_deploy_release.sw_release
-            deploy_state.start(running_release, to_release, feed_repo, None, reboot_required)
+            if is_patch:
+                deploy_state.start(running_release, to_release, feed_repo, None, reboot_required)
+            else:
+                deploy_state.start(running_release, to_release, feed_repo, commit_id,
+                                   reboot_required, **kwargs)
 
             # Start applying the releases
-            self.install_releases_thread(deployment_list, feed_repo, running_release)
+            upgrade = not is_patch
+            self.install_releases_thread(deployment_list, feed_repo, upgrade, **kwargs)
+
             msg_info += "%s is now starting, await for the states: " \
                         "[deploy-start-done | deploy-start-failed] in " \
                         "'software deploy show'\n" % deployment_list
@@ -3247,7 +3410,7 @@ class PatchController(PatchService):
         elif operation == "remove":
             collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
             create_deploy_hosts(hostname=hostname)
-            deployment_list = self.release_remove_order(deployment, running_release.sw_version)
+            deployment_list = self.release_remove_order(deployment, running_release.id, running_release.sw_version)
 
             msg = "Deploy start order for remove operation: %s" % ",".join(deployment_list)
             LOG.info(msg)
@@ -3412,6 +3575,16 @@ class PatchController(PatchService):
                 tree = ET.tostring(root)
                 outfile.write(tree)
 
+    def execute_delete_actions(self):
+        deploy = self.db_api_instance.get_current_deploy()
+        to_release = deploy.get("to_release")
+        from_release = deploy.get("from_release")
+
+        delete_cmd = f"/usr/bin/software-deploy-delete {from_release} {to_release} --is_major_release"
+
+        runner = DeployPluginRunner(deploy)
+        runner.execute(delete_cmd)
+
     @require_deploy_state([DEPLOY_STATES.HOST_ROLLBACK_DONE, DEPLOY_STATES.COMPLETED, DEPLOY_STATES.START_DONE,
                            DEPLOY_STATES.START_FAILED],
                           "Deploy must be in the following states to be able to delete: %s, %s, %s, %s" % (
@@ -3463,7 +3636,7 @@ class PatchController(PatchService):
         if is_major_release and self.hostname != constants.CONTROLLER_0_HOSTNAME:
             raise SoftwareServiceError("Deploy delete can only be performed on controller-0.")
 
-        if DEPLOY_STATES.COMPLETED == deploy_state_instance.get_deploy_state():
+        if DEPLOY_STATES.COMPLETED == deploy_state:
             if is_applying:
                 major_release = utils.get_major_release_version(from_release)
                 # In case of a major release deployment set all the releases related to from_release to unavailable
@@ -3480,12 +3653,14 @@ class PatchController(PatchService):
                 removing_release_state = ReleaseState(release_state=states.REMOVING)
                 removing_release_state.available()
 
-        elif DEPLOY_STATES.HOST_ROLLBACK_DONE == deploy_state_instance.get_deploy_state():
+        elif DEPLOY_STATES.HOST_ROLLBACK_DONE == deploy_state:
             major_release = utils.get_major_release_version(from_release)
             release_state = ReleaseState(release_state=states.DEPLOYING)
             release_state.available()
 
-        elif deploy_state_instance.get_deploy_state() in [DEPLOY_STATES.START_DONE, DEPLOY_STATES.START_FAILED]:
+        elif deploy_state in [DEPLOY_STATES.START_DONE, DEPLOY_STATES.START_FAILED]:
+            # TODO(bqian), this check is redundant. there should be no host deployed/deploying
+            # when deploy in START_DONE or START_FAILED states
             hosts_states = []
             for host in self.db_api_instance.get_deploy_host():
                 hosts_states.append(host.get("state"))
@@ -3499,7 +3674,8 @@ class PatchController(PatchService):
 
                 if is_major_release:
                     try:
-                        run_deploy_clean_up_script(to_release)
+                        # TODO(bqian) Move below function to a delete action
+                        run_remove_temporary_data_script(to_release)
                     except subprocess.CalledProcessError as e:
                         msg_error = "Failed to delete deploy"
                         LOG.error("%s: %s" % (msg_error, e))
@@ -3521,22 +3697,29 @@ class PatchController(PatchService):
 
         if os.path.isfile(INSTALL_LOCAL_FLAG):
             # Remove install local flag if enabled
-            if os.path.isfile(INSTALL_LOCAL_FLAG):
-                try:
-                    os.remove(INSTALL_LOCAL_FLAG)
-                except Exception:
-                    msg_error = "Failed to clear install-local mode flag"
-                    LOG.error(msg_error)
-                    raise SoftwareServiceError(msg_error)
-                LOG.info("Software deployment in local installation mode is stopped")
+            try:
+                os.remove(INSTALL_LOCAL_FLAG)
+            except Exception:
+                msg_error = "Failed to clear install-local mode flag"
+                LOG.error(msg_error)
+                raise SoftwareServiceError(msg_error)
+            LOG.info("Software deployment in local installation mode is stopped")
 
         if is_major_release:
+            if SW_VERSION == major_release:
+                msg_error = (
+                    f"Deploy {major_release} can't be deleted as it is still the"
+                    "current running software.An error may have occurred during the deploy.")
+                LOG.error(msg_error)
+                raise SoftwareServiceError(msg_error)
+
+            # TODO(bqian) Move below function to a delete action
             clean_up_deployment_data(major_release)
 
             # Send message to agents cleanup their ostree environment
             # if the deployment has completed or rolled-back successfully
             finished_deploy_states = [DEPLOY_STATES.COMPLETED, DEPLOY_STATES.HOST_ROLLBACK_DONE]
-            if deploy_state_instance.get_deploy_state() in finished_deploy_states:
+            if deploy_state in finished_deploy_states:
                 cleanup_req = SoftwareMessageDeployDeleteCleanupReq()
                 cleanup_req.major_release = utils.get_major_release_version(to_release)
                 cleanup_req.encode()
@@ -3547,12 +3730,19 @@ class PatchController(PatchService):
             self.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_CLEANUP_DEPLOYMENT_DATA,
                                        fm_constants.FM_ALARM_STATE_CLEAR,
                                        "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, constants.CONTROLLER_FLOATING_HOSTNAME))
+
+            # execute deploy delete plugins
+            # NOTE(bqian) implement for major release deploy delete only as deleting action
+            # for patching is undefined, i.e, in the case of patch is applied, both from and
+            # to releases are applied.
+            self.execute_delete_actions()
         else:
             self.delete_all_patch_activate_scripts()
 
         msg_info += "Deploy deleted with success"
         self.db_api_instance.delete_deploy_host_all()
         self.db_api_instance.delete_deploy()
+
         LOG.info("Deploy is deleted")
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
@@ -3611,6 +3801,7 @@ class PatchController(PatchService):
             activate_cmd.append('--is_major_release')
 
         env = os.environ.copy()
+        env["ANSIBLE_LOG_PATH"] = SOFTWARE_LOG_FILE
         if not self.pre_bootstrap:
             token, endpoint = utils.get_endpoints_token()
             env["OS_AUTH_TOKEN"] = token
@@ -3748,12 +3939,35 @@ class PatchController(PatchService):
 
         token, endpoint = utils.get_endpoints_token()
         env = os.environ.copy()
+        env["ANSIBLE_LOG_PATH"] = SOFTWARE_LOG_FILE
         env["OS_AUTH_TOKEN"] = token
         env["SYSTEM_URL"] = re.sub('/v[1,9]$', '', endpoint)  # remove ending /v1
 
         env["IGNORE_ERRORS"] = self.ignore_errors
         upgrade_activate_rollback_cmd = [
             "source", "/etc/platform/openrc;", cmd_path, from_release, to_release]
+
+        # check if LVM snapshots are enabled and try to restore them
+        # TODO(heitormatsui): we don't really need to verify the system mode
+        #  as LVM snapshots will only be allowed if the system is AIO-SX
+        system_mode = utils.get_platform_conf("system_mode")
+        if system_mode == constants.SYSTEM_MODE_SIMPLEX:
+            deploy = self.db_api_instance.get_deploy_all()[0]
+            options = deploy.get("options", {})
+            enabled_lvm_snapshots = to_bool(options.get("snapshot"))
+            if enabled_lvm_snapshots:
+                LOG.info("LVM snapshots are enabled")
+                manager = lvm_snapshot.LVMSnapshotManager()
+                success = manager.restore_snapshots()
+                if success:
+                    LOG.info("LVM snapshots were restored, upgrade scripts with "
+                             "action=activate-rollback will be skipped")
+                    deploy_state = DeployState.get_instance()
+                    deploy_state.activate_rollback_done()
+                    return
+                else:
+                    LOG.warning("Failure restoring LVM snapshots, falling back "
+                                "to standard activate-rollback procedure")
 
         try:
             LOG.info("starting subprocess %s" % ' '.join(upgrade_activate_rollback_cmd))
@@ -3806,10 +4020,26 @@ class PatchController(PatchService):
     def software_deploy_show_api(self, from_release=None, to_release=None):
         # Retrieve deploy state from db
         if from_release and to_release:
-            return self.db_api_instance.get_deploy(from_release, to_release)
+            deploy_data = self.db_api_instance.get_deploy(from_release, to_release)
+            if not deploy_data:
+                return deploy_data
+            release_deployment = deploy_data["to_release"]
         else:
             # Retrieve deploy state from db in list format
-            return self.db_api_instance.get_deploy_all()
+            deploy_data = self.db_api_instance.get_deploy_all()
+            if not deploy_data:
+                return deploy_data
+            release_deployment = deploy_data[0]["to_release"]
+
+        release_id = self.release_collection.get_release_id_by_sw_release(release_deployment)
+        release = self._release_basic_checks(release_id)
+        release_info = self._get_release_additional_info(release)
+
+        if isinstance(deploy_data, list):
+            deploy_data[0].update(release_info)
+        else:
+            deploy_data.update(release_info)
+        return deploy_data
 
     def _deploy_host(self, hostname, force, async_req=False, rollback=False):
         msg_info = ""
@@ -3898,7 +4128,6 @@ class PatchController(PatchService):
             msg_info += msg + "\n"
             LOG.info(msg)
             try:
-                set_host_target_load(hostname, major_release)
                 copy_pxeboot_update_file(major_release, rollback=rollback)
                 copy_pxeboot_cfg_files(major_release)
             except Exception:
@@ -4360,6 +4589,42 @@ class PatchController(PatchService):
 
         return None
 
+    def is_host_active_controller(self):
+        """
+        Check if current host is active controller by checking if floating ip is assigned
+        to the host
+        :return: True if it is active controller, False otherwise
+        """
+        if not os.path.exists(INITIAL_CONFIG_COMPLETE_FLAG):
+            return False
+
+        floating_mgmt_ip = utils.gethostbyname(constants.CONTROLLER_FLOATING_HOSTNAME)
+        if not floating_mgmt_ip:
+            return False
+
+        ip_family = utils.get_management_family()
+        mgmt_iface = cfg.get_mgmt_iface()
+
+        host_mgmt_ip_list = utils.get_iface_ip(mgmt_iface, ip_family)
+        return floating_mgmt_ip in host_mgmt_ip_list if host_mgmt_ip_list else False
+
+    def set_interruption_fail_state(self):
+        """
+        Set the host failed state after an interruption based on current deployment state
+        """
+        upgrade_status = self.get_software_upgrade()
+        if self.is_host_active_controller() and os.path.exists(INITIAL_CONFIG_COMPLETE_FLAG) and upgrade_status:
+
+            if upgrade_status.get('state') == DEPLOY_STATES.HOST.value and not is_simplex():
+                to_fail_hostname = CONTROLLER_0_HOSTNAME if self.hostname == CONTROLLER_1_HOSTNAME else \
+                    CONTROLLER_1_HOSTNAME
+                # In DX, when it is in deploy-host state, we can only set the standby controller to fail
+                start_set_fail(True, to_fail_hostname)
+
+            elif upgrade_status.get('state') in INTERRUPTION_RECOVERY_STATES:
+                # The deployment was interrupted. We need to update the deployment state first
+                start_set_fail(True, self.hostname)
+
 
 class PatchControllerApiThread(threading.Thread):
     def __init__(self):
@@ -4505,6 +4770,12 @@ class PatchControllerMainThread(threading.Thread):
 
         sc.ignore_errors = os.environ.get('IGNORE_ERRORS', 'False')
         LOG.info("IGNORE_ERRORS execution flag is set: %s", sc.ignore_errors)
+
+        LOG.info("software-controller-daemon is starting")
+
+        LOG.info("%s is active controller: %s", sc.hostname, sc.is_host_active_controller())
+
+        sc.set_interruption_fail_state()
 
         try:
             if sc.pre_bootstrap and cfg.get_mgmt_ip():
@@ -4798,9 +5069,9 @@ def main():
         default_config_files=['/etc/software/software.conf', ]
     )
 
-    configure_logging()
-
     cfg.read_config()
+
+    configure_logging()
 
     # daemon.pidlockfile.write_pid_to_pidfile(pidfile_path)
 

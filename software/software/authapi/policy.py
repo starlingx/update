@@ -14,7 +14,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-# Copyright (c) 2023 Wind River Systems, Inc.
+# Copyright (c) 2023,2025 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -24,15 +24,8 @@
 from oslo_config import cfg
 from oslo_policy import policy
 
+from software.authapi import policies as controller_policies
 
-base_rules = [
-    policy.RuleDefault('admin_in_system_projects',
-                       'role:admin and (project_name:admin or ' +
-                       'project_name:services)',
-                       description='Admin user in system projects.'),
-    policy.RuleDefault('default', 'rule:admin_in_system_projects',
-                       description='Default rule.'),
-]
 
 CONF = cfg.CONF
 _ENFORCER = None
@@ -69,7 +62,7 @@ def init(policy_file=None, rules=None,
                                     default_rule=default_rule,
                                     use_conf=use_conf,
                                     overwrite=overwrite)
-        _ENFORCER.register_defaults(base_rules)
+        _ENFORCER.register_defaults(controller_policies.list_rules())
     return _ENFORCER
 
 

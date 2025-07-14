@@ -52,7 +52,7 @@ DC_VAULT_LOADS_DIR = "%s/loads" % DC_VAULT_DIR
 # Certificate
 ENABLE_DEV_CERTIFICATE_PATCH_IDENTIFIER = 'ENABLE_DEV_CERTIFICATE'
 
-# Software path's
+# Software paths
 SOFTWARE_STORAGE_DIR = "/opt/software"
 SOFTWARE_CONFIG_FILE_LOCAL = "/etc/software/software.conf"
 SOFTWARE_DEPLOY_FOLDER = "software-deploy"
@@ -66,9 +66,9 @@ RC_UNHEALTHY = 3
 # Script names
 DEPLOY_PRECHECK_SCRIPT = "deploy-precheck"
 UPGRADE_UTILS_SCRIPT = "upgrade_utils.py"
-DEPLOY_START_SCRIPT = "software-deploy-start"
-DEPLOY_CLEANUP_SCRIPT = "deploy-cleanup"
-USM_LOAD_IMPORT_SCRIPT = "usm_load_import"
+DEPLOY_START_SCRIPT = "deploy-start"
+REMOVE_TEMPORARY_DATA_SCRIPT = "remove-temporary-data"
+MAJOR_RELEASE_UPLOAD_SCRIPT = "major-release-upload"
 PATCH_SCRIPTS_STAGING_DIR = "/var/www/pages/updates/software-scripts"
 
 # Status
@@ -231,3 +231,17 @@ MAX_OSTREE_DEPLOY_RETRIES = 5
 
 # Precheck timeout
 PRECHECK_RESULT_VALID_PERIOD = 300
+
+# Logging
+LOG_DEFAULT_FORMAT = ('%(asctime)s.%(msecs)03d USM - %(exec)s [%(process)s:%(thread)d]: '
+                      '%(filename)s(%(lineno)s): %(levelname)s: %(message)s')
+SOFTWARE_API_SUPPRESS_PATTERNS = [
+    r"GET /v1/deploy/software_upgrade",
+]
+
+# Reserved_words
+RESERVED_WORDS_SET = {"OS_AUTH_TOKEN", "OS_AUTH_TYPE", "OS_AUTH_URL", "OS_ENDPOINT_TYPE", "OS_IDENTITY_API_VERSION",
+                      "OS_INTERFACE", "OS_PASSWORD", "OS_PROJECT_DOMAIN_ID", "OS_PROJECT_DOMAIN_NAME", "OS_PROJECT_ID",
+                      "OS_PROJECT_NAME", "OS_REGION_NAME", "OS_SERVICE_TOKEN", "OS_USERNAME", "OS_USER_DOMAIN_NAME",
+                      "OS_SERVICE_TYPE", "OS_TENANT_ID", "OS_TENANT_NAME", "OS_USER_DOMAIN_ID", "SYSTEM_API_VERSION",
+                      "SYSTEM_URL"}

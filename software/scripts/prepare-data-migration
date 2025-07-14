@@ -12,7 +12,7 @@
 Run platform upgrade prep data migration as a standalone executable
 """
 
-import logging as LOG
+import logging
 import os
 import shutil
 import subprocess
@@ -30,6 +30,7 @@ RABBIT_PATH = '/var/lib/rabbitmq'
 KUBERNETES_CONF_PATH = "/etc/kubernetes"
 KUBERNETES_ADMIN_CONF_FILE = "admin.conf"
 
+LOG = logging.getLogger('main_logger')
 
 class DataMigration(object):
 
@@ -156,11 +157,14 @@ class DataMigration(object):
         etcd_to_dir = os.path.join(ETCD_PATH, self.to_release)
         etcd_from_dir = os.path.join(ETCD_PATH, self.from_release)
 
-        shutil.rmtree(etcd_to_dir, ignore_errors=True)
+        if os.path.islink(etcd_to_dir):
+            os.unlink(etcd_to_dir)
+        elif os.path.isdir(etcd_to_dir):
+            shutil.rmtree(etcd_to_dir, ignore_errors=True)
 
         try:
-            shutil.copytree(etcd_from_dir, etcd_to_dir)
-            LOG.info("Copied etcd from %s to %s completed", etcd_from_dir, etcd_to_dir)
+            os.symlink(etcd_from_dir, etcd_to_dir, target_is_directory=True)
+            LOG.info("Symlink etcd from %s to %s completed", etcd_from_dir, etcd_to_dir)
         except Exception as e:
             LOG.exception("Failed to copy etcd from %s to %s. Error: %s.",
                           etcd_from_dir, etcd_to_dir, e.output)
@@ -335,5 +339,5 @@ def main(sys_argv):
 
 
 if __name__ == "__main__":
-    upgrade_utils.configure_logging("/var/log/software.log", log_level=LOG.INFO)
+    upgrade_utils.configure_logging("/var/log/software.log", log_level=logging.INFO)
     sys.exit(main(sys.argv))

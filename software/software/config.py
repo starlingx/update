@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023 Wind River Systems, Inc.
+Copyright (c) 2023-2025 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -25,6 +25,7 @@ alt_postgresql_port = 0
 mgmt_if = None
 nodetype = None
 package_feed = None
+logging_default_format_string = None
 platform_conf_mtime = 0
 software_conf_mtime = 0
 software_conf = constants.SOFTWARE_CONFIG_FILE_LOCAL
@@ -98,8 +99,9 @@ def read_config():
     global agent_port
     global alt_postgresql_port
     global package_feed
+    global logging_default_format_string
 
-    config = configparser.ConfigParser(defaults)
+    config = configparser.ConfigParser(defaults, interpolation=None)
 
     config.read(software_conf)
     software_conf_mtime = os.stat(software_conf).st_mtime
@@ -113,6 +115,8 @@ def read_config():
     agent_port = config.getint('runtime', 'agent_port')
     alt_postgresql_port = config.getint('runtime', 'alt_postgresql_port')
     package_feed = config.get("runtime", "package_feed")
+    logging_default_format_string = config.get("DEFAULT", "logging_default_format_string",
+                                               fallback=constants.LOG_DEFAULT_FORMAT)
 
     # The platform.conf file has no section headers, which causes problems
     # for ConfigParser. So we'll fake it out.

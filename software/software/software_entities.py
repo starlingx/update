@@ -137,7 +137,7 @@ class Deploy(ABC):
 
     @abstractmethod
     def create(self, from_release: str, to_release: str, feed_repo: str,
-               commit_id: str, reboot_required: bool, state: DEPLOY_STATES):
+               commit_id: str, reboot_required: bool, state: DEPLOY_STATES, **kwargs):
         """
         Create a new deployment entry.
 
@@ -245,15 +245,16 @@ class DeployHosts(ABC):
 
 
 class DeployHandler(Deploy):
-    def create(self, from_release, to_release, feed_repo, commit_id, reboot_required, state=DEPLOY_STATES.START):
+    def create(self, from_release, to_release, feed_repo, commit_id, reboot_required,
+               state=DEPLOY_STATES.START, **kwargs):
         """
         Create a new deployment with given from and to release version
-        :param from_release: The current release version.
-        :param to_release: The target release version.
+        :param from_release: The current release version
+        :param to_release: The target release version
         :param feed_repo: ostree repo feed path
         :param commit_id: commit-id to deploy
-        :param reboot_required: If is required to do host reboot.
-        :param state: The state of the deployment.
+        :param reboot_required: If is required to do host reboot
+        :param state: The state of the deployment
         """
         super().create(from_release, to_release, feed_repo, commit_id, reboot_required, state)
         deploy = self.query(from_release, to_release)
@@ -265,7 +266,8 @@ class DeployHandler(Deploy):
             "feed_repo": feed_repo,
             "commit_id": commit_id,
             "reboot_required": reboot_required,
-            "state": state.value
+            "state": state.value,
+            "options": kwargs.get("options", {})
         }
 
         try:

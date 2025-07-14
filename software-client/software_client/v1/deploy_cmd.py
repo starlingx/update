@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2013-2024 Wind River Systems, Inc.
+# Copyright (c) 2013-2025 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -43,6 +43,6 @@ def enhance_parser(parser, subparsers, cmd_mapper):
 
     for command_module in DEPLOY_COMMAND_MODULES:
         utils.define_commands_from_module(subparsers, command_module,
-                                          deploy_cmds, UN_RESTRICTED_COMMANDS)
+                                          deploy_cmds, UN_RESTRICTED_COMMANDS, cmd_area='deploy')
 
     cmd_mapper.update({f"deploy {k}": v for k, v in deploy_cmds.items()})

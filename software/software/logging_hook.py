@@ -1,12 +1,15 @@
 """
-Copyright (c) 2024 Wind River Systems, Inc.
+Copyright (c) 2024-2025 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
 
-from pecan import hooks
 import logging
+import re
+
+from pecan import hooks
+from software.constants import SOFTWARE_API_SUPPRESS_PATTERNS
 
 logger = None
 
@@ -20,6 +23,8 @@ def get_logger():
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     handler.setFormatter(formatter)
     handler.setLevel(logging.DEBUG)
+    custom_filter = CustomSoftwareApiLogFilter(suppress_patterns=SOFTWARE_API_SUPPRESS_PATTERNS)
+    logger.addFilter(custom_filter)
     logger.addHandler(handler)
     logger.setLevel(logging.DEBUG)
     return logger
@@ -52,3 +57,20 @@ class LoggingHook(hooks.PecanHook):
             self.logger.error(msg)
         else:
             self.logger.info(msg)
+
+
+class CustomSoftwareApiLogFilter(logging.Filter):
+    def __init__(self, suppress_patterns=None, name=''):
+        super().__init__(name)
+        self.suppress_patterns = suppress_patterns
+
+    def filter(self, record):
+
+        message = record.getMessage()
+
+        # Check if any of the patterns match the message
+        for pattern in self.suppress_patterns:
+            if re.search(pattern, message):
+                return False  # Suppress if pattern matches
+
+        return True  # Allow the message

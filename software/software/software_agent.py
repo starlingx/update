@@ -18,8 +18,8 @@ import time
 import software.ostree_utils as ostree_utils
 from software.software_functions import configure_logging
 from software.software_functions import execute_agent_hooks
-from software.software_functions import remove_major_release_deployment_flags
 from software.software_functions import LOG
+from software.software_functions import remove_major_release_deployment_flags
 import software.config as cfg
 from software.base import PatchService
 from software.exceptions import OSTreeCommandFail
@@ -362,38 +362,35 @@ class SoftwareMessageDeployDeleteCleanupReq(messages.PatchMessage):
 
     def handle(self, sock, addr):
         LOG.info("Handling deploy delete cleanup request, major_release=%s" % self.major_release)
-        success_cleanup = ostree_utils.delete_temporary_refs_and_remotes()
+
+        # remove temporary remote and ref created during the upgrade process
+        success_ostree_remote_cleanup = ostree_utils.delete_temporary_refs_and_remotes()
+
+        # update the default remote 'debian' to point to the to-release feed
         nodetype = utils.get_platform_conf("nodetype")
-        success_update = ostree_utils.add_ostree_remote(self.major_release, nodetype,
-                                                        replace_default_remote=True)
-        success_flags = remove_major_release_deployment_flags()
-        success_undeploy = ostree_utils.undeploy_inactive_deployments()
+        success_ostree_remote_update = ostree_utils.add_ostree_remote(
+            self.major_release, nodetype, replace_default_remote=True)
 
-        if success_cleanup:
-            LOG.info("Success cleaning temporary refs/remotes.")
-        else:
-            LOG.error("Failure cleaning temporary refs/remotes. "
-                      "Please do the cleanup manually.")
+        # remove the local upgrade flags created for the upgrade process
+        success_remove_upgrade_flags = remove_major_release_deployment_flags()
 
-        if success_update:
-            LOG.info("Success updating default remote.")
-        else:
-            LOG.error("Failure updating default remote. "
-                      "Please update '%s' remote manually." % constants.OSTREE_REMOTE)
+        # undeploy the from-release ostree deployment to free sysroot disk space
+        success_ostree_undeploy_from_release = ostree_utils.delete_older_deployments(
+            delete_pending=True)
 
-        if success_flags:
-            LOG.info("Success removing local major release deployment flags.")
-        else:
-            LOG.error("Failure removing major release deployment flags. "
-                      "Please remove them manually.")
+        cleanup_results = [
+            (success_ostree_remote_cleanup, "cleaning temporary refs/remotes"),
+            (success_ostree_remote_update, "updating default remote"),
+            (success_remove_upgrade_flags, "removing local upgrade flags"),
+            (success_ostree_undeploy_from_release, "undeploying from-release ostree deployment"),
+        ]
+        for result, log_msg in cleanup_results:
+            if result not in [None, False]:
+                LOG.info("Success %s" % log_msg)
+            else:
+                LOG.error("Failure %s, manual cleanup is required" % log_msg)
+        success = all(x not in [None, False] for x, _ in cleanup_results)
 
-        if success_undeploy:
-            LOG.info("Success undeploying from-release deployment.")
-        else:
-            LOG.error("Failure undeploying from-release deployment. "
-                      "Please remove it manually using 'ostree admin undeploy' command.")
-
-        success = success_cleanup and success_update
         resp = SoftwareMessageDeployDeleteCleanupResp()
         resp.success = success
         resp.send(sock, addr)
@@ -1027,9 +1024,9 @@ class PatchAgent(PatchService):
 def main():
     global pa
 
-    configure_logging()
-
     cfg.read_config()
+
+    configure_logging()
 
     pa = PatchAgent()
     if os.path.isfile(constants.INSTALL_LOCAL_FLAG):

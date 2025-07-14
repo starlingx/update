@@ -35,9 +35,11 @@ class SoftwareAPI:
         self.deploy_handler = DeployHandler()
         self.deploy_host_handler = DeployHostHandler()
 
-    def create_deploy(self, from_release, to_release, feed_repo, commit_id, reboot_required: bool):
+    def create_deploy(self, from_release, to_release, feed_repo,
+                      commit_id, reboot_required: bool, **kwargs):
         self.begin_update()
-        self.deploy_handler.create(from_release, to_release, feed_repo, commit_id, reboot_required)
+        self.deploy_handler.create(from_release, to_release, feed_repo,
+                                   commit_id, reboot_required, **kwargs)
         self.end_update()
 
     def get_deploy(self, from_release, to_release):
