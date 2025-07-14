@@ -3,9 +3,11 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# This script runs ceph mon enable-msgr2 on activate
+# This script runs ceph mon enable-msgr2 on activate for upgrade
+# and delete for rollback.
 # This is necessary because ceph-mon is being reconfigured
-# during agent-hooks run and cannot be enabled there
+# during agent-hooks run and msgr2 can only be enabled after
+# host unlock.
 #
 
 NAME=$(basename "$0")
@@ -24,16 +26,17 @@ function log {
 log "ceph-mon: enable ceph-mon msgr2"\
     "from $FROM_RELEASE to $TO_RELEASE with action $ACTION"
 
-if [[ "${ACTION}" == "activate" ]]; then
+if [[ "$ACTION" == "activate" && "$FROM_RELEASE" == "24.09" ]] || [[ "$ACTION" == "delete"  && "$TO_RELEASE" == "24.09" ]]; then
     source /etc/platform/platform.conf
     if [[ "${system_mode}" == "simplex" ]]; then
         if [[ -f /etc/platform/.node_ceph_configured ]]; then
-            log "ceph-mon: enabling msgr2"
             timeout 30 ceph mon enable-msgr2
             status=$?
             if [ ${status} != 0 ]; then
                 log "ceph-mon: 'timeout 30 ceph mon enable-msgr2' command failed with exit status ${RC}"
                 exit 1
+            else
+                log "ceph-mon: enabling msgr2 succeeded"
             fi
         else
             log "ceph-mon: no actions required, bare metal ceph not configured"
