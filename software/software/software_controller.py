@@ -90,7 +90,6 @@ from software.software_functions import repo_root_dir
 from software.software_functions import is_deploy_state_in_sync
 from software.software_functions import is_deployment_in_progress
 from software.software_functions import get_release_from_patch
-from software.software_functions import clean_up_deployment_data
 from software.software_functions import run_remove_temporary_data_script
 from software.software_functions import to_bool
 from software.release_state import ReleaseState
@@ -3745,9 +3744,6 @@ class PatchController(PatchService):
                     "current running software.An error may have occurred during the deploy.")
                 LOG.error(msg_error)
                 raise SoftwareServiceError(msg_error)
-
-            # TODO(bqian) Move below function to a delete action
-            clean_up_deployment_data(major_release)
 
             # Send message to agents cleanup their ostree environment
             # if the deployment has completed or rolled-back successfully

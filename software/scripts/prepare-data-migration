@@ -26,6 +26,7 @@ DISTRIBUTED_CLOUD_ROLE_SYSTEMCONTROLLER = 'systemcontroller'
 SERVICE_TYPE_IDENTITY = 'identity'
 PLATFORM_PATH = "/opt/platform"
 ETCD_PATH = '/opt/etcd'
+ETCD_DIR_NAME = 'db'
 RABBIT_PATH = '/var/lib/rabbitmq'
 KUBERNETES_CONF_PATH = "/etc/kubernetes"
 KUBERNETES_ADMIN_CONF_FILE = "admin.conf"
@@ -154,20 +155,19 @@ class DataMigration(object):
         """
         Copy etcd from N to N+1 in /opt/etcd/
         """
-        etcd_to_dir = os.path.join(ETCD_PATH, self.to_release)
+        # TODO(lbonatti) Remove this symlink when stx11 become N release.
+        etcd_to_dir = os.path.join(ETCD_PATH, ETCD_DIR_NAME)
         etcd_from_dir = os.path.join(ETCD_PATH, self.from_release)
-
         if os.path.islink(etcd_to_dir):
             os.unlink(etcd_to_dir)
         elif os.path.isdir(etcd_to_dir):
             shutil.rmtree(etcd_to_dir, ignore_errors=True)
-
         try:
-            os.symlink(etcd_from_dir, etcd_to_dir, target_is_directory=True)
-            LOG.info("Symlink etcd from %s to %s completed", etcd_from_dir, etcd_to_dir)
+            subprocess.run(['cp', '-al', etcd_from_dir, etcd_to_dir], check=True)
+            LOG.info("Hardlink etcd files from %s to %s completed", etcd_from_dir, etcd_to_dir)
         except Exception as e:
-            LOG.exception("Failed to copy etcd from %s to %s. Error: %s.",
-                          etcd_from_dir, etcd_to_dir, e.output)
+            LOG.exception("Failed to hardlink etcd files from %s to %s. Error: %s.",
+                          etcd_from_dir, etcd_to_dir, e)
             raise
 
     def copy_kubernetes_conf(self):
@@ -312,6 +312,7 @@ def main(sys_argv):
         # running N+1, during the swact back to controller-0. This solution will
         # present some problems when we do upgrade etcd, so further development
         # will be required at that time.
+        # TODO(lbonatti) Remove this export_etcd when stx11 become N release
         data_migration.export_etcd()
 
         # Copy /etc/kubernetes/admin.conf to $rootdir/usr/etc/kubernetes/

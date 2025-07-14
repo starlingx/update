@@ -111,6 +111,7 @@ STAGING_DIR = "/sysroot/upgrade"
 ROOT_DIR = "%s/sysroot" % STAGING_DIR
 
 ETCD_PATH = "/opt/etcd"
+ETCD_DIR_NAME = "db"
 PLATFORM_PATH = "/opt/platform"
 PLAYBOOKS_PATH = "/usr/share/ansible/stx-ansible/playbooks"
 POSTGRES_PATH = "/var/lib/postgresql"
