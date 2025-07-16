@@ -926,7 +926,7 @@ class PatchFile(object):
 
             # Copy extra folder if exists
             extra_origin = os.path.join(tmpdir, "extra.tar")
-            if tarfile.is_tarfile(extra_origin):
+            if os.path.exists(extra_origin):
                 patch_dir = "%s/rel-%s" % (constants.SOFTWARE_STORAGE_DIR, patch_sw_release)
                 if not os.path.exists(patch_dir):
                     os.makedirs(patch_dir)
@@ -1049,7 +1049,7 @@ class PatchFile(object):
             # Extract extra.tar if it is present
             patch_dir = "%s/rel-%s" % (constants.SOFTWARE_STORAGE_DIR, sw_release)
             extra_tar = "%s/extra.tar" % patch_dir
-            if tarfile.is_tarfile(extra_tar):
+            if os.path.exists(extra_tar) and tarfile.is_tarfile(extra_tar):
                 tar = tarfile.open(extra_tar)
                 tar.extractall(path=patch_dir)
                 os.remove(extra_tar)
