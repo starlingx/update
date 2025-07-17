@@ -847,7 +847,12 @@ class ReconfigureCephMonHook(BaseHook):
 
     def is_ceph_configured(self):
         query = (
-            "SELECT state FROM storage_backend WHERE backend = 'ceph';"
+            "SELECT storage_backend.state "
+            "FROM storage_backend "
+            "JOIN storage_ceph "
+            "ON storage_ceph.id = storage_backend.id "
+            "WHERE storage_backend.backend = 'ceph' "
+            "AND storage_ceph.network = 'mgmt';"
         )
         res = self.db_query_one(query)
         return res and res == 'configured'
@@ -885,7 +890,7 @@ class ReconfigureCephMonHook(BaseHook):
             if (system_type == constants.SYSTEM_TYPE_ALL_IN_ONE and
                     system_mode == constants.SYSTEM_MODE_SIMPLEX):
                 if not self.is_ceph_configured():
-                    LOG.info("ceph-mon: skipping reconfiguration, bare metal ceph not configured")
+                    LOG.info("ceph-mon: skipping reconfiguration, bare metal ceph not configured for mgmt")
                     return
                 fsid = self.get_fsid()
                 mon_name = "controller-0"
@@ -906,8 +911,6 @@ class ReconfigureCephMonHook(BaseHook):
                     ["/etc/init.d/ceph", "start", "mon"],
                     ["ln", "-s", "/etc/ceph/ceph.conf.pmon", "/etc/pmon.d/ceph.conf"],
                 ]
-                if self._to_release == "24.09":
-                    cmds.append(["ceph", "mon", "enable-msgr2"])
 
                 try:
                     for cmd in cmds:
