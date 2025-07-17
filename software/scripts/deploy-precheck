@@ -85,12 +85,12 @@ class HealthCheck(object):
 
     # TODO(heitormatsui): implement patch precheck targeted against USM
     #  and implement patch precheck for subcloud
-    def _check_required_patches_state(self, required_patches, patch_health_check=False):
+    def _check_required_patches_state(self, required_patches, allow_available=False):
         """
-        Check if the required patches are in 'deployed' state, if patch_health_check is
+        Check if the required patches are in 'deployed' state, if allow_available is
         True, the required_patches can be in 'available' state as well.
         :param required_patches: list of patches to be checked
-        :param patch_health_check: boolean if is a patch or upgrage health check
+        :param allow_available: boolean if allow available patches
         :return: boolean indicating success/failure and list of patches
                  that are not in the 'deployed' or 'available' state
         """
@@ -99,7 +99,7 @@ class HealthCheck(object):
         releases_in_allowed_states = []
         for release in json.loads(releases):
             if release['state'] == STATE_DEPLOYED or \
-                (patch_health_check and release['state'] == STATE_AVAILABLE):
+                (allow_available and release['state'] == STATE_AVAILABLE):
                 releases_in_allowed_states.append(release)
 
         allowed_patches = [release['release_id'] for release in releases_in_allowed_states]
@@ -407,15 +407,24 @@ class PatchHealthCheck(HealthCheck):
         """Run specific patch health checks"""
         health_ok = True
         output = ""
+        allow_available_patches = True
+        states_required = "deployed or available"
 
         # check required patches for target release
         required_patches = self._get_required_patches()
-        success, missing_patches = self._check_required_patches_state(required_patches, True)
-        output += 'Required patches are deployed or available: [%s]\n' \
-                  % (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
+
+        # 24.09.300 patch requires all previous patches to be deployed
+        # Except in subclouds, there prestage allows apply all patches in one shot
+        if self._target_release == "24.09.300" and upgrade_utils.get_distributed_cloud_role()  != 'subcloud':
+            allow_available_patches = False
+            states_required = "deployed"
+
+        success, missing_patches = self._check_required_patches_state(required_patches, allow_available_patches)
+        output += 'Required patches are %s: [%s]\n' \
+                  % (states_required, (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG))
         if not success:
-            output += '-> Patches not deployed or available: [%s]\n' \
-                % ', '.join(missing_patches)
+            output += '-> Patches not %s: [%s]\n' \
+                % (states_required, ', '.join(missing_patches))
         health_ok = health_ok and success
 
         return health_ok, output
