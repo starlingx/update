@@ -1071,6 +1071,10 @@ class PatchController(PatchService):
         else:
             self.write_state_file()
 
+        # Create patch activation scripts folder
+        if not os.path.exists(PATCH_MIGRATION_SCRIPT_DIR):
+            os.makedirs(PATCH_MIGRATION_SCRIPT_DIR, 0o755)
+
         self.register_deploy_state_change_listeners()
 
     def _state_changed_sync(self, *args):  # pylint: disable=unused-argument
@@ -3010,9 +3014,6 @@ class PatchController(PatchService):
         """Copy patch activate scripts to /etc/update.d"""
 
         try:
-            if not os.path.exists(PATCH_MIGRATION_SCRIPT_DIR):
-                os.makedirs(PATCH_MIGRATION_SCRIPT_DIR, 0o755)
-
             existing_scripts = list(os.listdir(PATCH_MIGRATION_SCRIPT_DIR))
 
             for script in activate_scripts_list:
