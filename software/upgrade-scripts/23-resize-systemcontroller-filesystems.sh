@@ -86,7 +86,7 @@ function resize_platform_controllerfs {
         log "Retry $RETRY of $RESIZE_CHECK_MAX_RETRIES, checking if platform filesystem is resized and available..."
         OUTPUT=$(system controllerfs-list --column name --column size --column state | grep platform)
         _CURRENT_PLATFORM_SIZE=$(echo $OUTPUT | awk '{ print $4; }')
-        _CURRENT_PLATFORM_STATE=$(echo $OUTPUT | awk '{ print $6; }')
+        _CURRENT_PLATFORM_STATE=$(echo $OUTPUT | awk -F"'" '{ print $4 }')
         log "Current platform fs size/state: ${_CURRENT_PLATFORM_SIZE}/${_CURRENT_PLATFORM_STATE}"
         if [[ ($_CURRENT_PLATFORM_SIZE -eq $EXPANDED_PLATFORM_SIZE) && ($_CURRENT_PLATFORM_STATE == "available") ]]; then
             return 0
