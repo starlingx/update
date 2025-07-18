@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 
+from software.utilities.constants import SW_VERSION
 from software import constants
 from software import utils
 from software.utilities.utils import configure_logging
@@ -54,7 +55,7 @@ def main():
         try:
             major_release = utils.get_major_release_version(from_release)
             clean_up_deployment_data(major_release)
-            remove_etcd_hardlink_folder(major_release, from_release)
+            remove_etcd_hardlink_folder(from_major_release)
         except Exception as e:
             LOG.exception("Error: {}".format(e))
             res = 1
@@ -80,14 +81,16 @@ def clean_up_deployment_data(major_release):
         shutil.rmtree(folder, ignore_errors=True)
 
 
-def remove_etcd_hardlink_folder(major_release, from_release):
+def remove_etcd_hardlink_folder(from_release):
     # etcd has different cleanup procedure:
     # - remove the to-release symlink
     # - rename from-release directory to to-release
     # - restart etcd process
-    etcd_from_path = os.path.join(constants.ETCD_PATH, major_release)
+    etcd_from_path = os.path.join(constants.ETCD_PATH, from_release)
     etcd_db_path = os.path.join(constants.ETCD_PATH, ETCD_DIR_NAME)
-    if from_release == '24.09':
+
+    # Check if the current version "SW_VERSION" is higher than the from_release.
+    if utils.compare_release_version(SW_VERSION, from_release) and from_release == '24.09':
         if os.path.exists(etcd_from_path):
             shutil.rmtree(etcd_from_path)
             LOG.info("Removed %s folder.", etcd_from_path)
