@@ -16,6 +16,7 @@ import argparse
 import base64
 import json
 import logging
+import os
 import re
 import requests
 import subprocess
@@ -23,7 +24,6 @@ import sys
 import tempfile
 
 from lxml import etree as ElementTree
-from tsconfig.tsconfig import SW_VERSION
 
 import upgrade_utils
 
@@ -36,6 +36,7 @@ SYSTEM_MODE_SIMPLEX = "simplex"
 # the space needed is derived from the sum of snapshot sizes
 # defined in lvm_snapshot.LvmSnapshotManager.LOGICAL_VOLUMES
 FREE_SPACE_NEEDED_LVM_SNAPSHOTS_GIB = 24
+INITIAL_CONFIG_COMPLETE_FLAG = "/etc/platform/.initial_config_complete"
 
 LOG = logging.getLogger('main_logger')
 
@@ -52,12 +53,12 @@ class HealthCheck(object):
         # get target release from script directory location
         self._target_release = re.match("^.*/rel-(\d\d.\d\d.\d+)/", __file__).group(1)
         self._major_release = self._target_release.rsplit(".", 1)[0]
-
-        # get sysinv token, endpoint and client
-        self._sysinv_token, self._sysinv_endpoint = \
-            upgrade_utils.get_token_endpoint(config, service_type="platform")
-        self._sysinv_client = upgrade_utils.get_sysinv_client(self._sysinv_token,
-                                                              self._sysinv_endpoint)
+        if not self._config.get("pre_bootstrap"):
+            # get sysinv token, endpoint and client
+            self._sysinv_token, self._sysinv_endpoint = \
+                upgrade_utils.get_token_endpoint(config, service_type="platform")
+            self._sysinv_client = upgrade_utils.get_sysinv_client(self._sysinv_token,
+                                                                  self._sysinv_endpoint)
 
     def _check_license(self, version):
         """
@@ -121,16 +122,20 @@ class HealthCheck(object):
                              "280.005", # subcloud peer group managed with lower priority
                              "900.201", # Software upgrade auto apply in progress
                              ]
-        api_cmd = self._sysinv_endpoint + "/health/kube-upgrade"
+        # Don't call api if pre bootstrap scenario
+        if not self._config.get("pre_bootstrap"):
+            api_cmd = self._sysinv_endpoint + "/health/kube-upgrade"
 
-        if force:
-            api_cmd += '/relaxed'
+            if force:
+                api_cmd += '/relaxed'
 
-        if alarm_ignore_list:
-            api_cmd += f'?alarm_ignore_list={alarm_ignore_list}'
+            if alarm_ignore_list:
+                api_cmd += f'?alarm_ignore_list={alarm_ignore_list}'
 
-        method = 'GET'
-        output = upgrade_utils.call_api(self._sysinv_token, method, api_cmd)
+            method = 'GET'
+            output = upgrade_utils.call_api(self._sysinv_token, method, api_cmd)
+        else:
+            output = 'System Health:\n'
 
         # check hosts are patch current
         deploy_in_progress = self._config.get("deploy_in_progress", "{}")
@@ -430,6 +435,10 @@ class PatchHealthCheck(HealthCheck):
         return health_ok, output
 
 
+def set_pre_bootstrap_info(config):
+    config["pre_bootstrap"] = (not os.path.exists(INITIAL_CONFIG_COMPLETE_FLAG))
+
+
 def parse_config(args=None):
     """Parse the parameters passed to the script"""
     parser = argparse.ArgumentParser(description="Run health checks to verify if the system "
@@ -480,8 +489,7 @@ def main(argv=None):
     config = parse_config(argv)
     patch_release = config.get("patch", False)
 
-    health_ok = True
-    output = ""
+    set_pre_bootstrap_info(config)
 
     if patch_release:
         health_check = PatchHealthCheck(config)
