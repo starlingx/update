@@ -7,8 +7,8 @@
 
 operation="apply"
 
-if [[ "$1" == "--operation" && -n "$2" ]]; then
-    operation="$2"
+if [[ "$1" == --operation=* ]]; then
+    operation="${1#*=}"
 fi
 
 echo "### Start of pre-start script ###"
