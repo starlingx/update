@@ -41,7 +41,7 @@ if [[ "$operation" == "apply" ]]; then
     echo "Checking if commit with checksum ${extra_checksum} already exists in feed, if yes, quit"
     if ostree log starlingx --repo="$ostree_feed_repo" | grep -q "$extra_checksum"; then
         echo "Commit already present in feed, exiting"
-        exit 1
+        exit 0
     fi
 
     # Get commit message
