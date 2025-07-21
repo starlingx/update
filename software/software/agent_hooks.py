@@ -29,10 +29,6 @@ from ipaddress import ip_address
 from ipaddress import IPv6Address
 import psycopg2
 
-import software.constants as constants
-import software.utils as utils
-
-
 log_format = ('%(asctime)s: ' + '[%(process)s]: '
               '%(filename)s(%(lineno)s): %(levelname)s: %(message)s')
 LOG.basicConfig(filename="/var/log/software.log",
@@ -877,24 +873,21 @@ class ReconfigureCephMonHook(BaseHook):
                 fields = line.split()
                 if fields[1] == host:
                     ip = fields[0]
-                    if isinstance(ip_address(ip), IPv6Address):
-                        ip = f"[{ip}]"
-                    return ip
+                    mon_ip = f"[{ip}]" if isinstance(ip_address(ip), IPv6Address) else ip
+                    return mon_ip, ip
         return None
 
     def run(self):
         # Handle both upgrade to 25.09 and rollback to 24.09
         if self._to_release == "24.09" or self._to_release == "25.09":
-            system_type = utils.get_platform_conf("system_type")
-            system_mode = utils.get_platform_conf("system_mode")
-            if (system_type == constants.SYSTEM_TYPE_ALL_IN_ONE and
-                    system_mode == constants.SYSTEM_MODE_SIMPLEX):
+            system_mode = self.get_platform_conf("system_mode")
+            if (system_mode == self.SIMPLEX):
                 if not self.is_ceph_configured():
                     LOG.info("ceph-mon: skipping reconfiguration, bare metal ceph not configured for mgmt")
                     return
                 fsid = self.get_fsid()
                 mon_name = "controller-0"
-                mon_ip = self.get_mon_ip()
+                mon_ip, ip = self.get_mon_ip()
                 if not fsid or not mon_ip:
                     LOG.exception("Invalid fsid or mon_ip")
                     raise ValueError("Invalid params")
@@ -911,6 +904,10 @@ class ReconfigureCephMonHook(BaseHook):
                     ["/etc/init.d/ceph", "start", "mon"],
                     ["ln", "-s", "/etc/ceph/ceph.conf.pmon", "/etc/pmon.d/ceph.conf"],
                 ]
+                if self._to_release == "24.09":
+                    # For /etc/init.d/ceph start mon to work during rollback, need to add mon_ip temporarily
+                    # to the loopback. This will corrected permanently after host unlock and reboot.
+                    cmds.insert(0, ["ip", "address", "replace", f"{ip}", "dev", "lo"])
 
                 try:
                     for cmd in cmds:

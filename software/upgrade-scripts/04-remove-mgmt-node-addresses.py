@@ -15,6 +15,7 @@
 #
 
 import logging
+import subprocess
 import sys
 
 from packaging import version
@@ -55,8 +56,8 @@ def main():
     res = 0
     to_release_version = version.Version(to_release)
     target_version = version.Version("25.09")
-    if action == 'migrate' and to_release_version == target_version:
-        if get_system_mode() == "simplex":
+    if get_system_mode() == "simplex":
+        if action == 'migrate' and to_release_version == target_version:
             try:
                 conn = psycopg2.connect("dbname=sysinv user=postgres port=%s"
                                         % postgres_port)
@@ -65,6 +66,8 @@ def main():
             except Exception as e:
                 LOG.exception("Error: {}".format(e))
                 res = 1
+        elif action == 'activate' and to_release_version == target_version:
+            restart_services_bound_to_controller0_address()
     return res
 
 
@@ -138,6 +141,21 @@ def db_update(conn, query):
     with conn.cursor() as cur:
         cur.execute(query)
     conn.commit()
+
+
+def restart_services_bound_to_controller0_address():
+    services = (
+        'sm-api',
+        'fm-api',
+    )
+    for service in services:
+        LOG.info(f"Restarting {service}...")
+        try:
+            subprocess.run(['systemctl', 'restart', service], check=True, timeout=15)
+        except subprocess.TimeoutExpired:
+            LOG.error(f"Restarting {service} timed out.")
+        except subprocess.CalledProcessError as e:
+            LOG.error(f"Restarting {service} failed: {e.stderr}")
 
 
 def get_system_mode():
