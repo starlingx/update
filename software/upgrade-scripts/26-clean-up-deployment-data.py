@@ -49,11 +49,14 @@ def main():
     res = 0
     from_major_release = utils.get_major_release_version(from_release)
     to_major_release = utils.get_major_release_version(to_release)
+    if utils.compare_release_version(SW_VERSION, from_release):
+        major_release = from_major_release
+    else:
+        major_release = to_major_release
     # Check delete action, upgrade and rollback scenario.
     if action == 'delete' and (to_major_release == '25.09' or (from_major_release == '25.09'
                                                                and to_major_release == '24.09')):
         try:
-            major_release = utils.get_major_release_version(from_release)
             clean_up_deployment_data(major_release)
             remove_etcd_hardlink_folder(from_major_release)
         except Exception as e:
