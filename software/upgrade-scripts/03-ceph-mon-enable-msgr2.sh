@@ -17,6 +17,11 @@ FROM_RELEASE=$1
 TO_RELEASE=$2
 ACTION=$3
 
+FROM_RELEASE_ARR=(${FROM_RELEASE//./ })
+FROM_RELEASE_MAJOR=${FROM_RELEASE_ARR[0]}
+TO_RELEASE_ARR=(${TO_RELEASE//./ })
+TO_RELEASE_MAJOR=${TO_RELEASE_ARR[0]}
+
 SOFTWARE_LOG_PATH="/var/log/software.log"
 
 function log {
@@ -26,7 +31,8 @@ function log {
 log "ceph-mon: enable ceph-mon msgr2"\
     "from $FROM_RELEASE to $TO_RELEASE with action $ACTION"
 
-if [[ "$ACTION" == "activate" && "$FROM_RELEASE" == "24.09" ]] || [[ "$ACTION" == "delete"  && "$TO_RELEASE" == "24.09" ]]; then
+if [[ "$ACTION" == "activate" && ${TO_RELEASE_MAJOR} -eq 25 ]] || \
+   [[ "$ACTION" == "delete"  && ${TO_RELEASE_MAJOR} -eq 24 ]]; then
     source /etc/platform/platform.conf
     if [[ "${system_mode}" == "simplex" ]]; then
         if [[ -f /etc/platform/.node_ceph_configured ]]; then
