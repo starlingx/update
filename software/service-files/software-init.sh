@@ -80,7 +80,15 @@ fi
 # If the management interface is bonded, it may take some time
 # before communications can be properly setup.
 # Allow up to $DELAY_SEC seconds to reach controller.
-DELAY_SEC=120
+
+if [ "${system_mode}" = "simplex" ]; then
+    # Make the delay for simplex systems smaller.
+    # There is no active controller during reboot.
+    DELAY_SEC=10
+else
+    DELAY_SEC=120
+fi
+
 START=`date +%s`
 FOUND=0
 while [ $(date +%s) -lt $(( ${START} + ${DELAY_SEC} )) ]; do
