@@ -163,10 +163,10 @@ class DataMigration(object):
         elif os.path.isdir(etcd_to_dir):
             shutil.rmtree(etcd_to_dir, ignore_errors=True)
         try:
-            subprocess.run(['cp', '-al', etcd_from_dir, etcd_to_dir], check=True)
-            LOG.info("Hardlink etcd files from %s to %s completed", etcd_from_dir, etcd_to_dir)
+            os.symlink(etcd_from_dir, etcd_to_dir, target_is_directory=True)
+            LOG.info("Symlink etcd from %s to %s completed", etcd_from_dir, etcd_to_dir)
         except Exception as e:
-            LOG.exception("Failed to hardlink etcd files from %s to %s. Error: %s.",
+            LOG.exception("Failed to copy etcd from %s to %s. Error: %s.",
                           etcd_from_dir, etcd_to_dir, e)
             raise
 

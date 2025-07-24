@@ -20,6 +20,8 @@ from software.utilities.utils import configure_logging
 
 LOG = logging.getLogger('main_logger')
 ETCD_DIR_NAME = 'db'
+UPGRADE_FLAG_NAME = '.upgrade'
+ROLLBACK_FLAG_NAME = '.rollback'
 
 
 def main():
@@ -58,7 +60,7 @@ def main():
                                                                and to_major_release == '24.09')):
         try:
             clean_up_deployment_data(major_release)
-            remove_etcd_hardlink_folder(from_major_release)
+            create_etcd_flag(from_major_release)
         except Exception as e:
             LOG.exception("Error: {}".format(e))
             res = 1
@@ -85,29 +87,27 @@ def clean_up_deployment_data(major_release):
         LOG.info("Folder %s removed with success.", folder)
 
 
-def remove_etcd_hardlink_folder(from_release):
-    # etcd has different cleanup procedure:
-    # - remove the to-release symlink
-    # - rename from-release directory to to-release
-    # - restart etcd process
-    etcd_from_path = os.path.join(constants.ETCD_PATH, from_release)
-    etcd_db_path = os.path.join(constants.ETCD_PATH, ETCD_DIR_NAME)
+def restart_etcd_service():
+    try:
+        subprocess.run(["/usr/bin/sm-restart-safe", "service", "etcd"], check=True)
+        LOG.info("Restarted etcd service")
+    except subprocess.CalledProcessError as e:
+        LOG.error("Error restarting etcd: %s", str(e))
 
-    # Check if the current version "SW_VERSION" is higher than the from_release.
+
+def create_etcd_flag(from_release):
+    """
+    Creates the right flag accordingly to upgrade or rollback
+    """
     if utils.compare_release_version(SW_VERSION, from_release) and from_release == '24.09':
-        if os.path.exists(etcd_from_path):
-            shutil.rmtree(etcd_from_path)
-            LOG.info("Removed %s folder.", etcd_from_path)
-        try:
-            subprocess.run(["/usr/bin/sm-restart-safe", "service", "etcd"], check=True)
-            LOG.info("Restarted etcd service")
-        except subprocess.CalledProcessError as e:
-            LOG.error("Error restarting etcd: %s", str(e))
-    # on rollback, remove db folder if it exists
+        etcd_upgrade_flag_path = os.path.join(constants.ETCD_PATH, UPGRADE_FLAG_NAME)
+        subprocess.run(["touch", etcd_upgrade_flag_path], check=True)
+        LOG.info("Flag %s created.", etcd_upgrade_flag_path)
     else:
-        if os.path.exists(etcd_db_path):
-            shutil.rmtree(etcd_db_path)
-            LOG.info("Removed %s hardlink", etcd_db_path)
+        etcd_rollback_flag_path = os.path.join(constants.ETCD_PATH, ROLLBACK_FLAG_NAME)
+        subprocess.run(["touch", etcd_rollback_flag_path], check=True)
+        LOG.info("Flag %s created.", etcd_rollback_flag_path)
+    restart_etcd_service()
 
 
 if __name__ == "__main__":
