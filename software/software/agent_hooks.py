@@ -321,6 +321,12 @@ class ReconfigureKernelHook(BaseHook):
     """
     def __init__(self, attrs):
         super().__init__()
+        self._from_release = None
+        self._to_release = None
+        if "from_release" in attrs:
+            self._from_release = attrs.get("from_release")
+        if "to_release" in attrs:
+            self._to_release = attrs.get("to_release")
 
     def run(self):
         """Execute the hook"""
@@ -349,21 +355,26 @@ class ReconfigureKernelHook(BaseHook):
             if desired_kernel is None:  # This should never happen
                 LOG.warning("Unable to find a valid kernel under /boot/1")
             else:
+                deployment_dir = self.TO_RELEASE_OSTREE_DIR
+                if version.Version(self._from_release) >= version.Version(self._to_release):
+                    deployment_dir = self.FROM_RELEASE_OSTREE_DIR
                 # Explicitly update /boot/1/kernel.env using the
                 # /usr/local/bin/puppet-update-grub-env.py utility
                 boot_index = 1
                 LOG.info("Updating /boot/%s/kernel.env to: %s", boot_index, desired_kernel)
                 cmd = ("python %s/usr/local/bin/puppet-update-grub-env.py "
-                       "--set-kernel %s --boot-index %s") % (self.TO_RELEASE_OSTREE_DIR,
+                       "--set-kernel %s --boot-index %s") % (deployment_dir,
                                                              desired_kernel, boot_index)
                 subprocess.run(cmd, shell=True, check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             msg = ("Failed to run puppet-update-grub-env.py: rc=%s, output=%s"
                    % (e.returncode, e.stderr.decode("utf-8")))
             LOG.exception(msg)
+            raise
         except Exception as e:
             msg = "Failed to manually update /boot/1/kernel.env. Err=%s" % str(e)
             LOG.exception(msg)
+            raise
 
 
 class UpdateGrubConfigHook(BaseHook):
@@ -373,6 +384,15 @@ class UpdateGrubConfigHook(BaseHook):
     this approach works both for forward and rollback paths
     """
     BOOT_GRUB_CFG = "/boot/efi/EFI/BOOT/grub.cfg"
+
+    def __init__(self, attrs):
+        super().__init__(attrs)
+        self._from_release = None
+        self._to_release = None
+        if "from_release" in attrs:
+            self._from_release = attrs.get("from_release")
+        if "to_release" in attrs:
+            self._to_release = attrs.get("to_release")
 
     def run(self):
         to_release_grub_cfg = os.path.join(self.TO_RELEASE_OSTREE_DIR,
@@ -385,12 +405,14 @@ class UpdateGrubConfigHook(BaseHook):
             LOG.warning("No %s file present in to-release filesystem",
                         os.path.basename(to_release_grub_cfg))
 
+        deployment_dir = self.TO_RELEASE_OSTREE_DIR
+        if version.Version(self._from_release) >= version.Version(self._to_release):
+            deployment_dir = self.FROM_RELEASE_OSTREE_DIR
         system_mode = self.get_platform_conf("system_mode")
         try:
             LOG.info(f"Updating system_mode={system_mode} in boot.env")
             cmd = [
-                os.path.join(self.TO_RELEASE_OSTREE_DIR,
-                             "usr/local/bin/puppet-update-grub-env.py"),
+                os.path.join(deployment_dir, "usr/local/bin/puppet-update-grub-env.py"),
                 "--set-boot-variable",
                 f"system_mode={system_mode}",
             ]
