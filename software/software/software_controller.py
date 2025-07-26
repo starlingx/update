@@ -1249,6 +1249,15 @@ class PatchController(PatchService):
                     list_of_dirs = dir_names.stdout.decode("utf-8").rstrip().split()
 
                     for rel_dir in list_of_dirs:
+
+                        # todo(lvieira): Filtered out the sync of N-1 feed folders.
+                        # Recheck this if in the future a N-1 patch apply will be
+                        # supported in the system controller.
+                        rel_version = rel_dir.split("rel-")[-1]
+                        if rel_version < SW_VERSION:
+                            LOG.info("Skip syncing %s inactive release", rel_dir)
+                            continue
+
                         feed_repo = "%s/%s/ostree_repo/" % (constants.FEED_OSTREE_BASE_DIR, rel_dir)
                         if not os.path.isdir(feed_repo):
                             LOG.info("Skipping feed dir %s", feed_repo)
@@ -1279,6 +1288,9 @@ class PatchController(PatchService):
 
         except subprocess.CalledProcessError as e:
             LOG.error("Failed during controllers sync tasks: %s", e.output)
+            return False
+        except Exception as e:
+            LOG.error("Exception while syncing controllers: %s", e)
             return False
 
         self.read_state_file()
