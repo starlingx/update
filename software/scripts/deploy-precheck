@@ -419,8 +419,7 @@ class PatchHealthCheck(HealthCheck):
         required_patches = self._get_required_patches()
 
         # 24.09.300 patch requires all previous patches to be deployed
-        # Except in subclouds, there prestage allows apply all patches in one shot
-        if self._target_release == "24.09.300" and upgrade_utils.get_distributed_cloud_role()  != 'subcloud':
+        if self._target_release == "24.09.300":
             allow_available_patches = False
             states_required = "deployed"
 
