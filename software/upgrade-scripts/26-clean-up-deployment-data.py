@@ -49,10 +49,10 @@ def main():
     res = 0
     from_major_release = utils.get_major_release_version(from_release)
     to_major_release = utils.get_major_release_version(to_release)
-    if utils.compare_release_version(SW_VERSION, from_release):
-        major_release = from_major_release
-    else:
+    if SW_VERSION == from_major_release:
         major_release = to_major_release
+    else:
+        major_release = from_major_release
     # Check delete action, upgrade and rollback scenario.
     if action == 'delete' and (to_major_release == '25.09' or (from_major_release == '25.09'
                                                                and to_major_release == '24.09')):
@@ -82,6 +82,7 @@ def clean_up_deployment_data(major_release):
     ]
     for folder in upgrade_folders:
         shutil.rmtree(folder, ignore_errors=True)
+        LOG.info("Folder %s removed with success.", folder)
 
 
 def remove_etcd_hardlink_folder(from_release):
