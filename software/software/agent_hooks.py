@@ -49,8 +49,14 @@ class BaseHook(object):
     CONTROLLER = "controller"
     SIMPLEX = "simplex"
 
-    def __init__(self, attrs=None):
-        pass
+    def __init__(self, attrs):
+        self._major_release = attrs.get("major_release")
+        self._from_release = attrs.get("from_release")
+        self._to_release = attrs.get("to_release")
+        self._action = attrs.get("hook_action")
+        self._additional_data = attrs.get("additional_data") or {}
+        self._to_commit_id = self._additional_data.get("to_commit_id")
+        self._from_commit_id = self._additional_data.get("from_commit_id")
 
     def run(self):
         pass
@@ -62,6 +68,17 @@ class BaseHook(object):
             cp = configparser.ConfigParser()
             cp.read_string(f"[{default}]\n" + fp.read())
         return cp[default][key]
+
+    def get_etc_backup_path(self, commit_id=None):
+        ETC_BACKUP_PATH = '/sysroot/upgrade/deploy-%s'
+        if commit_id is None:
+            commit_id = '*'
+        return ETC_BACKUP_PATH % commit_id
+
+    def get_etc_backup(self):
+        if self._to_commit_id:
+            return self.get_etc_backup_path(self._to_commit_id)
+        return None
 
     def enable_service(self, service):
         src = "%s/%s" % (self.SYSTEMD_LIB_DIR, service)
@@ -202,12 +219,6 @@ class CopyPxeFilesHook(BaseHook):
     release upload, but only to the host where it is uploaded, so
     this post hook is needed to copy the files to other hosts.
     """
-    def __init__(self, attrs):
-        super().__init__()
-        self._to_release = None
-        if "to_release" in attrs:
-            self._to_release = attrs.get("to_release")
-
     def run(self):
         """Execute the hook"""
         nodetype = self.get_platform_conf("nodetype")
@@ -247,9 +258,6 @@ class UpdateKernelParametersHook(BaseHook):
     isolcpus=<cpu_range> ==> isolcpus=nohz,domain,managed_irq,<cpu_range>
     '' ==> rcutree.kthread_prio=21 (default value if not set)
     """
-    def __init__(self, attrs):
-        super().__init__()
-
     def read_kernel_parameters(self) -> str:
         kernel_params = ''
 
@@ -375,15 +383,6 @@ class ReconfigureKernelHook(BaseHook):
     or standard) persists after the host is unlocked and reboots running
     N+1 release.
     """
-    def __init__(self, attrs):
-        super().__init__()
-        self._from_release = None
-        self._to_release = None
-        if "from_release" in attrs:
-            self._from_release = attrs.get("from_release")
-        if "to_release" in attrs:
-            self._to_release = attrs.get("to_release")
-
     def run(self):
         """Execute the hook"""
         try:
@@ -441,15 +440,6 @@ class UpdateGrubConfigHook(BaseHook):
     """
     BOOT_GRUB_CFG = "/boot/efi/EFI/BOOT/grub.cfg"
 
-    def __init__(self, attrs):
-        super().__init__(attrs)
-        self._from_release = None
-        self._to_release = None
-        if "from_release" in attrs:
-            self._from_release = attrs.get("from_release")
-        if "to_release" in attrs:
-            self._to_release = attrs.get("to_release")
-
     def run(self):
         to_release_grub_cfg = os.path.join(self.TO_RELEASE_OSTREE_DIR,
                                            "var/pxeboot/pxelinux.cfg.files/grub.cfg.stx")
@@ -481,9 +471,6 @@ class CreateUSMUpgradeInProgressFlag(BaseHook):
     USM_UPGRADE_IN_PROGRESS_FLAG = os.path.join(BaseHook.PLATFORM_CONF_PATH,
                                                 ".usm_upgrade_in_progress")
 
-    def __init__(self, attrs):
-        super().__init__(attrs)
-
     def run(self):
         flag_file = "%s/%s" % (self.TO_RELEASE_OSTREE_DIR, self.USM_UPGRADE_IN_PROGRESS_FLAG)
         with open(flag_file, "w") as _:
@@ -498,9 +485,6 @@ class RestartKubeApiServer(BaseHook):
     This action ensures all pods run correctly and enables
     successful exec operations.
     """
-    def __init__(self, attrs):
-        super().__init__()
-
     def run(self):
         nodetype = self.get_platform_conf("nodetype")
         if nodetype == self.CONTROLLER:
@@ -596,7 +580,7 @@ class UpdateSyslogConfig(BaseHook):
     """
 
     def __init__(self, attrs):
-        super().__init__()
+        super().__init__(attrs)
         self._config_path = self.TO_RELEASE_OSTREE_DIR + "/etc/syslog-ng/syslog-ng.conf"
         self._backup_path = f"{self._config_path}.bak"
 
@@ -693,9 +677,6 @@ class RevertUmaskHook(BaseHook):
     Reverts the umask setting during a MAJOR_RELEASE_ROLLBACK event by
     removing 'umask 027' from /root/.bashrc and /root/.bash_profile.
     """
-    def __init__(self, attrs):
-        super().__init__()
-
     def run(self):
         try:
             self._remove_umask_setting("/root/.bashrc")
@@ -880,12 +861,6 @@ class ReconfigureCephMonHook(BaseHook):
     """
     Reconfigure ceph-mon with the mgmt floating address
     """
-    def __init__(self, attrs):
-        super().__init__(attrs)
-        self._to_release = None
-        if "to_release" in attrs:
-            self._to_release = attrs.get("to_release")
-
     def connect_postgres_db(self):
         DEFAULT_POSTGRES_PORT = 5432
         username, password = self.get_db_credentials()
@@ -1005,7 +980,7 @@ class AbstractSysctlFlagHook(BaseHook, ABC):
     """
 
     def __init__(self, attrs):
-        super().__init__()
+        super(AbstractSysctlFlagHook, self).__init__(attrs)
         # This property must be implemented by derived classes
         self._parameters_to_set = None
 
