@@ -3163,7 +3163,8 @@ class PatchController(PatchService):
                             feed_repo,
                             deploy_release.sw_version,
                             deploy_release.sw_release,
-                            packages)
+                            packages,
+                            self.pre_bootstrap)
                     except APTOSTreeCommandFail:
                         msg = "Failed to install Debian packages."
                         LOG.exception(msg)

@@ -106,7 +106,7 @@ def component_remove(pkg_feed_dir, component):
         raise APTOSTreeCommandFail(msg)
 
 
-def run_install(repo_dir, sw_version, sw_release, packages):
+def run_install(repo_dir, sw_version, sw_release, packages, pre_bootstrap=False):
     """
     Run Debian package upgrade.
 
@@ -117,8 +117,13 @@ def run_install(repo_dir, sw_version, sw_release, packages):
     """
     LOG.info("Running apt-ostree install")
 
-    package_feed = "http://controller:8080/updates/debian/rel-%s/ %s %s" \
-        % (sw_version, constants.DEBIAN_RELEASE, sw_release)
+    if pre_bootstrap:
+        package_feed = "file:///var/www/pages/updates/debian/rel-%s/ %s %s" \
+            % (sw_version, constants.DEBIAN_RELEASE, sw_release)
+    else:
+        package_feed = "http://controller:8080/updates/debian/rel-%s/ %s %s" \
+            % (sw_version, constants.DEBIAN_RELEASE, sw_release)
+
     packages = " ".join(packages)
 
     try:
