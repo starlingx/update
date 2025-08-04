@@ -4502,14 +4502,11 @@ class PatchController(PatchService):
             # Do not create in case of patch release.
             if not is_major_release:
                 return
-            deploy = self.db_api_instance.get_current_deploy()
-            release_version = deploy.get('from_release')
             reason_text = constants.SOFTWARE_ALARMS[fm_constants.FM_ALARM_ID_USM_CLEANUP_DEPLOYMENT_DATA]["reason_text"]
-            new_reason_text = reason_text % (target_state.value, release_version)
             self.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_CLEANUP_DEPLOYMENT_DATA,
                                        fm_constants.FM_ALARM_STATE_SET,
                                        "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, constants.CONTROLLER_FLOATING_HOSTNAME),
-                                       reason_text=new_reason_text)
+                                       reason_text=reason_text)
 
     def handle_deploy_state_sync(self):
         """
