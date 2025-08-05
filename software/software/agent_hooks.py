@@ -18,6 +18,7 @@ from abc import ABC
 from abc import abstractmethod
 import configparser
 import filecmp
+import fileinput
 import glob
 import logging as LOG
 import os
@@ -857,7 +858,7 @@ class LogPermissionRestorerHook(BaseHook):
         self.restore_cron_permissions()
 
 
-class ReconfigureCephMonHook(BaseHook):
+class FixSimplexAddressesHook(BaseHook):
     """
     Reconfigure ceph-mon with the mgmt floating address
     """
@@ -935,16 +936,30 @@ class ReconfigureCephMonHook(BaseHook):
         if self._to_release == "24.09" or self._to_release == "25.09":
             system_mode = self.get_platform_conf("system_mode")
             if (system_mode == self.SIMPLEX):
+                mon_ip, ip = self.get_mon_ip()
+
+                # fix dnsmasq.addn_hosts until sysinv conductor fixes it definitely
+                if self._to_release == "25.09":
+                    LOG.info("fix-sx-addr: fixing dnsmasq.addn_hosts")
+                    addn_hosts = "/opt/platform/config/25.09/dnsmasq.addn_hosts"
+                    for line in fileinput.input(files=addn_hosts, inplace=True):
+                        cols = line.split()
+                        if "controller-0.internal" in cols[1]:
+                            line = line.replace(cols[0], ip)
+                        elif "controller-1.internal" in cols[1]:
+                            continue
+                        print(line, end="")
+
                 if not self.is_ceph_configured():
-                    LOG.info("ceph-mon: skipping reconfiguration, bare metal ceph not configured for mgmt")
+                    LOG.info("fix-sx-addr: skipping ceph mon reconfig, bare metal ceph not configured for mgmt")
                     return
+
                 fsid = self.get_fsid()
                 mon_name = "controller-0"
-                mon_ip, ip = self.get_mon_ip()
                 if not fsid or not mon_ip:
                     LOG.exception("Invalid fsid or mon_ip")
                     raise ValueError("Invalid params")
-                LOG.info("ceph-mon: using fsid=%s, mon_name=%s, mon_ip=%s" % (fsid, mon_name, mon_ip))
+                LOG.info("fix-sx-addr: ceph mon: using fsid=%s, mon_name=%s, mon_ip=%s" % (fsid, mon_name, mon_ip))
 
                 cmds = [
                     ["rm", "-f", "/etc/pmon.d/ceph.conf"],
@@ -964,14 +979,14 @@ class ReconfigureCephMonHook(BaseHook):
 
                 try:
                     for cmd in cmds:
-                        LOG.info("ceph-mon: exec: '%s'" % ' '.join(cmd))
-                        subprocess.check_call(cmd, timeout=8)
-                    LOG.info("ceph-mon: reconfiguration finished")
+                        LOG.info("fix-sx-addr: exec: '%s'" % ' '.join(cmd))
+                        subprocess.check_call(cmd, timeout=60)
+                    LOG.info("fix-sx-addr: reconfiguration finished")
                 except subprocess.CalledProcessError as e:
-                    LOG.exception("ceph-mon: failed executing the command '%s': %s" % (' '.join(cmd), str(e)))
+                    LOG.exception("fix-sx-addr: failed executing the command '%s': %s" % (' '.join(cmd), str(e)))
                     raise
             else:
-                LOG.info("ceph-mon: skipping reconfiguration, system_mode is not simplex")
+                LOG.info("fix-sx-addr: skipping reconfiguration, system_mode is not simplex")
 
 
 class AbstractSysctlFlagHook(BaseHook, ABC):
@@ -1151,7 +1166,7 @@ class HookManager(object):
             FixPSQLPermissionHook,
             DeleteControllerFeedRemoteHook,
             RestartKubeApiServer,
-            ReconfigureCephMonHook,
+            FixSimplexAddressesHook,
             CISSysctlFlagHookUpgrade,
             # enable usm-initialize service for next
             # reboot only if everything else is done
@@ -1168,7 +1183,7 @@ class HookManager(object):
             RevertUmaskHook,
             RevertCrtPermissionsHook,
             LogPermissionRestorerHook,
-            ReconfigureCephMonHook,
+            FixSimplexAddressesHook,
             CISSysctlFlagHookRollback,
             # enable usm-initialize service for next
             # reboot only if everything else is done
