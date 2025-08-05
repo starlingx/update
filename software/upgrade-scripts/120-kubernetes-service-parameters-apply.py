@@ -125,6 +125,13 @@ def create_kube_apiserver_port_rollback_flag_rpc():
     rpcapi.flag_k8s_port_update_rollback(context)
 
 
+def run_kubernetes_health_audit_rpc():
+    CONF.rpc_zeromq_conductor_bind_ip = get_conductor_rpc_bind_ip()
+    context = mycontext.get_admin_context()
+    rpcapi = conductor_rpcapi.ConductorAPI(topic=conductor_rpcapi.MANAGER_TOPIC)
+    rpcapi.run_kubernetes_health_audit(context)
+
+
 def wait_kube_apiserver_port_update(desired_status):
     LOG.info("Wait kube-apiserver port update finish.")
     retries = 60
@@ -205,6 +212,7 @@ def main():
                         LOG.error("K8s is unhealthy, aborting. "
                                   "Please check logs.")
                         return ERROR
+                    run_kubernetes_health_audit_rpc()
             elif action == "activate-rollback" and to_release == "24.09":
                 if check_kube_apiserver_port_updated():
                     create_kube_apiserver_port_rollback_flag_rpc()
@@ -219,6 +227,7 @@ def main():
                         LOG.error("K8s is unhealthy, aborting. "
                                   "Please check logs.")
                         return ERROR
+                    run_kubernetes_health_audit_rpc()
             else:
                 LOG.info("Nothing to do. "
                          "Skipping K8s service parameter apply.")
