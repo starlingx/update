@@ -2813,7 +2813,7 @@ class PatchController(PatchService):
 
         # parse local config file to pass parameters to precheck script
         try:
-            cp = configparser.ConfigParser()
+            cp = configparser.ConfigParser(interpolation=None)
             cp.read(constants.SOFTWARE_CONFIG_FILE_LOCAL)
             ks_section = dict(cp["keystone_authtoken"]) if cp.has_section("keystone_authtoken") else {}
             auth_url = ks_section.get("auth_url")
