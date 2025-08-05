@@ -205,7 +205,7 @@ SOFTWARE_ALARMS = {
     fm_constants.FM_ALARM_ID_USM_CLEANUP_DEPLOYMENT_DATA: {
         "entity_type_id": fm_constants.FM_ENTITY_TYPE_HOST,
         "severity": fm_constants.FM_ALARM_SEVERITY_WARNING,
-        "reason_text": "Deploy in %s state, delete deployment to clean up the remaining %s deployment data",
+        "reason_text": "Deployment finished, delete to clean up the remaining deployment data",
         "alarm_type": fm_constants.FM_ALARM_TYPE_11,
         "probable_cause": fm_constants.ALARM_PROBABLE_CAUSE_65,
         "proposed_repair_action": "Delete deployment",
