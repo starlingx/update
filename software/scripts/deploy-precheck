@@ -3,7 +3,7 @@
 #
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 #
-# Copyright (c) 2023-2024 Wind River Systems, Inc.
+# Copyright (c) 2023-2025 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -32,6 +32,7 @@ RC_SUCCESS = 0
 RC_UNHEALTHY = 3
 STATE_AVAILABLE = 'available'
 STATE_DEPLOYED = 'deployed'
+STATE_UNAVAILABLE = 'unavailable'
 SYSTEM_MODE_SIMPLEX = "simplex"
 # the space needed is derived from the sum of snapshot sizes
 # defined in lvm_snapshot.LvmSnapshotManager.LOGICAL_VOLUMES
@@ -88,18 +89,19 @@ class HealthCheck(object):
     #  and implement patch precheck for subcloud
     def _check_required_patches_state(self, required_patches, allow_available=False):
         """
-        Check if the required patches are in 'deployed' state, if allow_available is
-        True, the required_patches can be in 'available' state as well.
+        Check if the required patches are in 'deployed' or 'unavailable' state,
+        if allow_available is True, the required_patches can be in 'available' state as well.
         :param required_patches: list of patches to be checked
         :param allow_available: boolean if allow available patches
         :return: boolean indicating success/failure and list of patches
-                 that are not in the 'deployed' or 'available' state
+                 that are not in the 'deployed', 'unavailable' or 'available' state
         """
         success = True
         releases = self._config.get("releases", "")
         releases_in_allowed_states = []
         for release in json.loads(releases):
             if release['state'] == STATE_DEPLOYED or \
+                release['state'] == STATE_UNAVAILABLE or \
                 (allow_available and release['state'] == STATE_AVAILABLE):
                 releases_in_allowed_states.append(release)
 
@@ -413,7 +415,7 @@ class PatchHealthCheck(HealthCheck):
         health_ok = True
         output = ""
         allow_available_patches = True
-        states_required = "deployed or available"
+        states_required = "deployed, unavailable or available"
 
         # check required patches for target release
         required_patches = self._get_required_patches()
@@ -421,7 +423,7 @@ class PatchHealthCheck(HealthCheck):
         # 24.09.300 patch requires all previous patches to be deployed
         if self._target_release == "24.09.300":
             allow_available_patches = False
-            states_required = "deployed"
+            states_required = "deployed or unavailable"
 
         success, missing_patches = self._check_required_patches_state(required_patches, allow_available_patches)
         output += 'Required patches are %s: [%s]\n' \

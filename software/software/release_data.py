@@ -1,7 +1,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# Copyright (c) 2024 Wind River Systems, Inc.
+# Copyright (c) 2024-2025 Wind River Systems, Inc.
 #
 
 import os
@@ -299,9 +299,10 @@ class SWReleaseCollection(object):
     @property
     def running_release(self):
         latest = None
-        for rel in self.iterate_releases_by_state(states.DEPLOYED):
-            if latest is None or rel.version_obj > latest.version_obj:
-                latest = rel
+        for state in (states.DEPLOYED, states.UNAVAILABLE):
+            for rel in self.iterate_releases_by_state(state):
+                if latest is None or rel.version_obj > latest.version_obj:
+                    latest = rel
 
         return latest
 

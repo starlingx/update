@@ -222,6 +222,8 @@ COMMIT_TAG = "commit"
 COMMIT1_TAG = "commit1"
 NUMBER_OF_COMMITS_TAG = "number_of_commits"
 OSTREE_TAG = "ostree"
+PREPATCHED_ISO_TAG = "prepatched_iso"
+REQUIRES_TAG = "requires"
 
 # Flags
 INSTALL_LOCAL_FLAG = "/opt/software/.install_local"

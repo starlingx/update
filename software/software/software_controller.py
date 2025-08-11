@@ -2019,11 +2019,11 @@ class PatchController(PatchService):
         :return: List of releases in the order for applying
         """
 
-        deployed_releases_id = []
+        deployed_or_unavailable_releases_id = []
         preinstalled_patches = []
         for rel in self.release_collection.iterate_releases():
-            if rel.state == states.DEPLOYED:
-                deployed_releases_id.append(rel.id)
+            if rel.state == states.DEPLOYED or rel.state == states.UNAVAILABLE:
+                deployed_or_unavailable_releases_id.append(rel.id)
 
             if rel.prepatched_iso:
                 preinstalled_patches = rel.preinstalled_patches
@@ -2037,7 +2037,7 @@ class PatchController(PatchService):
         to_apply_releases = [
             rel_id for rel_id in release_dependencies
             if f"-{running_release_sw_version}." in rel_id and
-            rel_id not in deployed_releases_id + preinstalled_patches
+            rel_id not in deployed_or_unavailable_releases_id + preinstalled_patches
         ]
 
         to_apply_releases.sort()
@@ -3451,6 +3451,12 @@ class PatchController(PatchService):
                         "'software deploy show'\n" % deployment_list
 
         elif operation == constants.REMOVE:
+            if deploy_release.state == states.UNAVAILABLE:
+                msg = "Cannot go back to an unavailable release"
+                LOG.error(msg)
+                msg_error += msg + "\n"
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
             collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
             create_deploy_hosts(hostname=hostname)
             deployment_list = self.release_remove_order(deployment, running_release.id, running_release.sw_version)
@@ -3478,8 +3484,8 @@ class PatchController(PatchService):
                         LOG.error(msg)
                         msg_error += msg + "\n"
                         unremovable_verification = False
-                elif release.state == states.COMMITTED:
-                    msg = "Release %s is committed and cannot be removed" % release_id
+                elif release.state == states.COMMITTED or release.state == states.UNAVAILABLE:
+                    msg = "Release %s is %s and cannot be removed" % (release_id, release.state)
                     LOG.error(msg)
                     msg_error += msg + "\n"
                     unremovable_verification = False
@@ -3698,6 +3704,47 @@ class PatchController(PatchService):
                         if release.sw_version == major_release:
                             unavailable_releases.append(release.id)
                     ReleaseState(release_ids=unavailable_releases).replaced()
+                else:
+                    # After deploy a patch, delete previous unavailable releases
+                    # from current major release, if they exist (subcloud prestage case)
+                    unavailable_releases = list(self.release_collection.iterate_releases_by_state(states.UNAVAILABLE))
+                    if unavailable_releases:
+                        for unavailable in unavailable_releases:
+                            if unavailable.sw_version == major_release:
+                                LOG.info("Deleting unavailable %s from current major release" % unavailable.id)
+
+                                try:
+                                    os.remove("%s/%s-metadata.xml" % (states.UNAVAILABLE_DIR, unavailable.id))
+                                except OSError:
+                                    LOG.error("Error when deleting %s metadata")
+
+                        reload_release_data()
+
+                        # Change the lowest deployed release metadata to prepatched
+                        # Applied releases are all from current major release wich commits are deployed in sysroot
+                        applied_releases_states = {states.DEPLOYED, states.DEPLOYING, states.COMMITTED}
+                        for release in self.release_collection.iterate_releases():
+                            if release.sw_version == major_release and release.state in applied_releases_states:
+                                LOG.info("Changing %s metadata to prepatched" % release.id)
+
+                                metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[release.state]
+                                metadata_file = "%s/%s-metadata.xml" % (metadata_dir, release.id)
+
+                                tree = ET.parse(metadata_file)
+                                root = tree.getroot()
+
+                                self.add_text_tag_to_xml(root, constants.PREPATCHED_ISO_TAG, "Y")
+                                requires_tag = root.find(constants.REQUIRES_TAG)
+                                if requires_tag is not None:
+                                    root.remove(requires_tag)
+
+                                ET.indent(tree, '  ')
+                                with open(metadata_file, "wb") as outfile:
+                                    tree = ET.tostring(root)
+                                    outfile.write(tree)
+
+                                # Run just for the first (lowest) release
+                                break
 
                 # Set deploying releases to deployed state.
                 deploying_release_state.deploy_completed()
