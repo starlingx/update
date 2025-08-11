@@ -37,8 +37,6 @@ import software.lvm_snapshot as lvm_snapshot
 import software.ostree_utils as ostree_utils
 from software.api import app
 from software.authapi import app as auth_app
-from software.constants import CONTROLLER_0_HOSTNAME
-from software.constants import CONTROLLER_1_HOSTNAME
 from software.constants import INSTALL_LOCAL_FLAG
 from software.states import DEPLOY_HOST_STATES
 from software.states import DEPLOY_STATES
@@ -93,7 +91,6 @@ from software.software_functions import get_release_from_patch
 from software.software_functions import run_remove_temporary_data_script
 from software.software_functions import to_bool
 from software.release_state import ReleaseState
-from software.utilities.deploy_set_failed import start_set_fail
 from software.deploy_host_state import DeployHostState
 from software.deploy_state import DeployState
 from software.release_verify import verify_files
@@ -4705,18 +4702,28 @@ class PatchController(PatchService):
         """
         Set the host failed state after an interruption based on current deployment state
         """
-        upgrade_status = self.get_software_upgrade()
-        if self.is_host_active_controller() and os.path.exists(INITIAL_CONFIG_COMPLETE_FLAG) and upgrade_status:
-
-            if upgrade_status.get('state') == DEPLOY_STATES.HOST.value and not is_simplex():
-                to_fail_hostname = CONTROLLER_0_HOSTNAME if self.hostname == CONTROLLER_1_HOSTNAME else \
-                    CONTROLLER_1_HOSTNAME
-                # In DX, when it is in deploy-host state, we can only set the standby controller to fail
-                start_set_fail(True, to_fail_hostname)
-
-            elif upgrade_status.get('state') in INTERRUPTION_RECOVERY_STATES:
-                # The deployment was interrupted. We need to update the deployment state first
-                start_set_fail(True, self.hostname)
+        deploy = DeployState.get_instance()
+        deploy_state = deploy.get_deploy_state()
+        if (self.is_host_active_controller() and
+                os.path.exists(INITIAL_CONFIG_COMPLETE_FLAG) and
+                deploy_state in INTERRUPTION_RECOVERY_STATES):
+            LOG.info("Failing stale deployment in '%s' state", deploy_state.value)
+            if deploy_state == DEPLOY_STATES.START:
+                deploy.start_failed()
+            elif deploy_state == DEPLOY_STATES.ACTIVATE:
+                deploy.activate_failed()
+            elif deploy_state == DEPLOY_STATES.ACTIVATE_ROLLBACK:
+                deploy.activate_rollback_failed()
+            elif deploy_state in [DEPLOY_STATES.HOST, DEPLOY_STATES.HOST_ROLLBACK]:
+                for host in self.db_api_instance.get_deploy_host():
+                    hostname = host["hostname"]
+                    deploy_host = DeployHostState(hostname)
+                    if deploy_host.get_deploy_host_state() in [
+                        DEPLOY_HOST_STATES.DEPLOYING,
+                        DEPLOY_HOST_STATES.ROLLBACK_DEPLOYING
+                    ]:
+                        LOG.info("Failing stale host deployment for %s", hostname)
+                        deploy_host.deploy_failed()
 
 
 class PatchControllerApiThread(threading.Thread):
