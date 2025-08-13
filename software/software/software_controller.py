@@ -4205,9 +4205,10 @@ class PatchController(PatchService):
         LOG.info(msg)
         audit_log_info(msg)
 
-        if not is_major_release and self.allow_insvc_patching:
-            LOG.info("Allowing in-service patching")
-            force = True
+        if not is_major_release:
+            if self.allow_insvc_patching:
+                LOG.info("Allowing in-service patching")
+                force = True
             self.copy_install_scripts()
 
         # Check if there is a major release deployment in progress
