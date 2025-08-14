@@ -1499,87 +1499,53 @@ class PatchController(PatchService):
         has_release_upload_script = os.path.isfile(os.path.join(
             iso_mount_dir, 'upgrades', 'software-deploy', constants.MAJOR_RELEASE_UPLOAD_SCRIPT))
 
-        if has_release_upload_script:
-            # major-release-upload script is found. This iso supports upgrade from USM
-            try:
-                # Copy iso /upgrades/software-deploy/ to /opt/software/rel-<rel>/bin/
-                to_release_bin_dir = os.path.join(
-                    constants.SOFTWARE_STORAGE_DIR, ("rel-%s" % to_release), "bin")
-                if os.path.exists(to_release_bin_dir):
-                    shutil.rmtree(to_release_bin_dir)
-                shutil.copytree(os.path.join(iso_mount_dir, "upgrades", constants.SOFTWARE_DEPLOY_FOLDER),
-                                to_release_bin_dir, symlinks=True)
+        # stx 10 and 11 iso contains either usm_load_import or major-release-upload script
+        # The usm_load_import script only exists in stx 10 iso which is uploaded as N-1 load for DC
+        # TODO(ShawnLi) remove usm_load_import support when the support stx 10 as N-1 load is dropped
+        import_script_filename = constants.MAJOR_RELEASE_UPLOAD_SCRIPT if has_release_upload_script \
+            else constants.USM_LOAD_IMPORT_SCRIPT
 
-                # Run major-release-upload script
-                import_script = os.path.join(to_release_bin_dir, constants.MAJOR_RELEASE_UPLOAD_SCRIPT)
-                load_import_cmd = [
-                    str(import_script),
-                    f"--from-release={from_release}",
-                    f"--to-release={to_release}",
-                    f"--iso-dir={iso_mount_dir}"
-                ]
-
-                load_import_info, load_import_error = run_script_command(load_import_cmd)
-                local_info += load_import_info or ""
-                local_error += load_import_error or ""
-
-                # Copy metadata.xml to /opt/software/rel-<rel>/
-                to_file = os.path.join(constants.SOFTWARE_STORAGE_DIR,
-                                       ("rel-%s" % to_release), "metadata.xml")
-                metadata_file = os.path.join(iso_mount_dir, "upgrades", "metadata.xml")
-                shutil.copyfile(metadata_file, to_file)
-
-                # Update the release metadata
-                # metadata files have been copied over to the metadata/available directory
-                reload_release_data()
-                LOG.info("Updated release metadata for %s", to_release)
-
-                release_meta_info = self.get_release_meta_info(iso_mount_dir, upgrade_files)
-
-                return local_info, local_warning, local_error, release_meta_info
-
-            except Exception as e:
-                LOG.exception("Error occurred while running load import: %s", str(e))
-                raise
-
-        # At this step, major-release-upload script is not found in the iso
-        # Therefore, we run the local major-release-upload script which supports importing the N-1 iso
-        # that doesn't support USM feature.
-        # This is the special case where *only* DC system controller can import this iso
-        # TODO(ShawnLi): remove the code below when this special case is not supported
+        # major-release-upload script is found. This iso supports upgrade from USM
         try:
-            local_import_script = os.path.join(
-                "/usr/sbin/software-deploy/", constants.MAJOR_RELEASE_UPLOAD_SCRIPT)
+            # Copy iso /upgrades/software-deploy/ to /opt/software/rel-<rel>/bin/
+            to_release_bin_dir = os.path.join(
+                constants.SOFTWARE_STORAGE_DIR, ("rel-%s" % to_release), "bin")
+            if os.path.exists(to_release_bin_dir):
+                shutil.rmtree(to_release_bin_dir)
+            shutil.copytree(
+                os.path.join(iso_mount_dir, "upgrades", constants.SOFTWARE_DEPLOY_FOLDER),
+                to_release_bin_dir, symlinks=True)
 
-            load_import_cmd = [local_import_script,
-                               "--from-release=%s" % from_release,
-                               "--to-release=%s" % to_release,
-                               "--iso-dir=%s" % iso_mount_dir,
-                               "--is-usm-iso=False"]
+            # Run major-release-upload script
+            import_script = os.path.join(to_release_bin_dir, import_script_filename)
+            load_import_cmd = [
+                str(import_script),
+                f"--from-release={from_release}",
+                f"--to-release={to_release}",
+                f"--iso-dir={iso_mount_dir}"
+            ]
 
             load_import_info, load_import_error = run_script_command(load_import_cmd)
             local_info += load_import_info or ""
             local_error += load_import_error or ""
+
+            # Copy metadata.xml to /opt/software/rel-<rel>/
+            to_file = os.path.join(constants.SOFTWARE_STORAGE_DIR,
+                                   ("rel-%s" % to_release), "metadata.xml")
+            metadata_file = os.path.join(iso_mount_dir, "upgrades", "metadata.xml")
+            shutil.copyfile(metadata_file, to_file)
 
             # Update the release metadata
             # metadata files have been copied over to the metadata/available directory
             reload_release_data()
             LOG.info("Updated release metadata for %s", to_release)
 
-            release_meta_info = {
-                os.path.basename(upgrade_files[constants.ISO_EXTENSION]): {
-                    "id": constants.RELEASE_GA_NAME % to_release,
-                    "sw_release": to_release,
-                },
-                os.path.basename(upgrade_files[constants.SIG_EXTENSION]): {
-                    "id": None,
-                    "sw_release": None,
-                }
-            }
+            release_meta_info = self.get_release_meta_info(iso_mount_dir, upgrade_files)
+
             return local_info, local_warning, local_error, release_meta_info
 
         except Exception as e:
-            LOG.exception("Error occurred while running local load import script: %s", str(e))
+            LOG.exception("Error occurred while running load import: %s", str(e))
             raise
 
     def get_release_meta_info(self, iso_mount_dir, upgrade_files) -> dict:
