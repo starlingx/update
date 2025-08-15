@@ -114,10 +114,9 @@ class DeployPluginRunner(object):
         plugin_cmd = ' '.join(["source", "/etc/platform/openrc;", cmd])
 
         try:
-            LOG.info("Starting subprocess %s" % plugin_cmd)
-            process = subprocess.Popen(plugin_cmd, start_new_session=True, shell=True, env=self._env)
-            LOG.info("Subprocess started")
-            process.wait()
+            LOG.info("starting subprocess %s" % plugin_cmd)
+            subprocess.Popen(plugin_cmd, start_new_session=True, shell=True, env=self._env)
+            LOG.info("subprocess started")
         except subprocess.CalledProcessError as e:
             LOG.error("Failed to start command: %s. Error %s" % (plugin_cmd, e))
             raise
