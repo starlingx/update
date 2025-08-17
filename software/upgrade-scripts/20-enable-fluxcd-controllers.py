@@ -40,7 +40,7 @@ def main():
             print("Invalid option %s." % sys.argv[arg])
             return 1
         arg += 1
-    configure_logging()
+    configure_logging(LOG)
 
     if action == 'activate' and from_release >= '21.12':
         LOG.info("%s invoked with from_release = %s to_release = %s "

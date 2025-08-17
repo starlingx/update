@@ -32,7 +32,7 @@ PCI_CLASS = "pci-sriov"
 DEFAULT_POSTGRES_PORT = "5432"
 LOG = logging.getLogger('main_logger')
 
-configure_logging()
+configure_logging(LOG)
 
 
 def get_db_credentials():

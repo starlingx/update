@@ -5,7 +5,7 @@
 #
 import argparse
 
-from oslo_log import log
+import logging as log
 
 from software.states import DEPLOY_STATES
 from software.utilities.update_deploy_state import update_deploy_state
@@ -50,7 +50,7 @@ def do_activate(from_release, to_release, is_major_release):
 
 def activate():
     # this is the entry point to start activate
-    configure_logging()
+    configure_logging(LOG)
     parser = argparse.ArgumentParser(add_help=False)
 
     parser.add_argument("from_release",

@@ -843,7 +843,7 @@ def upgrade_controller(from_release, to_release, target_port):
 
 def migrate():
     # this is the entry point to start data migration
-    configure_logging()
+    configure_logging(LOG)
     parser = argparse.ArgumentParser(add_help=False)
 
     parser.add_argument("from_release",

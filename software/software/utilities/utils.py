@@ -42,7 +42,7 @@ ACTION_ACTIVATE_ROLLBACK = "activate-rollback"
 ACTION_DELETE = "delete"
 
 
-def configure_logging():
+def configure_logging(logger):
     cfg.read_config()
 
     my_exec = os.path.basename(sys.argv[0])
@@ -51,10 +51,10 @@ def configure_logging():
     log_format = log_format.replace('%(exec)s', my_exec)
     formatter = logging.Formatter(log_format, datefmt="%FT%T")
 
-    LOG.setLevel(logging.INFO)
+    logger.setLevel(logging.INFO)
     main_log_handler = logging.FileHandler(SOFTWARE_LOG_FILE)
     main_log_handler.setFormatter(formatter)
-    LOG.addHandler(main_log_handler)
+    logger.addHandler(main_log_handler)
 
 
 def get_migration_scripts(migration_script_dir):
