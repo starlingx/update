@@ -126,7 +126,7 @@ def check_apps_update_progress(client, action='update'):
 def main():
     action = sys.argv[3]
     if action in ('activate', 'activate-rollback'):
-        configure_logging()
+        configure_logging(LOG)
         try:
             client = get_sysinv_client()
             update_operation_result = False

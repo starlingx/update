@@ -503,5 +503,5 @@ def main():
 
 if __name__ == "__main__":
     import upgrade_utils  # pylint: disable=E0401
-    upgrade_utils.configure_logging('/var/log/software.log', log_level=logging.INFO)
+    upgrade_utils.configure_logging('/var/log/software.log', LOG, log_level=logging.INFO)
     sys.exit(main())

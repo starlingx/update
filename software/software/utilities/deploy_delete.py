@@ -44,7 +44,7 @@ def do_deploy_delete(from_release, to_release, plugin_path, is_major_release):
 
 def deploy_delete():
     # this is the entry point to deploy delete plugin
-    utils.configure_logging()
+    utils.configure_logging(LOG)
     parser = argparse.ArgumentParser(add_help=False)
 
     plugin_path = os.environ.get('plugin_path')
