@@ -857,7 +857,7 @@ class PatchFile(object):
         error_msg = None
 
         abs_patch = os.path.abspath(patch)
-        abs_metadata_dir = os.path.abspath(metadata_dir)
+
         # Create a temporary working directory
         tmpdir = tempfile.mkdtemp(prefix="patch_")
 
@@ -877,10 +877,11 @@ class PatchFile(object):
                 msg = "Unable to extract patch ID"
                 raise ReleaseValidationFailure(error=msg)
 
+            patch_sw_release = thispatch.metadata[patch_id]["sw_version"]
+            patch_sw_version = utils.get_major_release_version(patch_sw_release)
+
             if not metadata_only and base_pkgdata is not None:
                 # Run version validation tests first
-                patch_sw_version = utils.get_major_release_version(
-                    thispatch.metadata[patch_id]["sw_version"])
                 if utils.compare_release_version(constants.LOWEST_MAJOR_RELEASE_FOR_PATCH_SUPPORT,
                                                  patch_sw_version):
                     msg = "Software patching is supported starting from release %s and later" % (
@@ -888,7 +889,8 @@ class PatchFile(object):
                     LOG.exception(msg)
                     raise ReleaseValidationFailure(error=msg)
                 if not base_pkgdata.check_release(patch_sw_version):
-                    msg = "Software version %s for release %s is not installed" % (patch_sw_version, patch_id)
+                    msg = "Software version %s for release %s is not installed" % (
+                        patch_sw_version, patch_id)
                     LOG.exception(msg)
                     raise ReleaseValidationFailure(error=msg)
 
@@ -900,8 +902,10 @@ class PatchFile(object):
                     LOG.error(msg)
                     raise ReleaseMismatchFailure(error=msg)
 
-            patch_sw_release = thispatch.metadata[patch_id]["sw_version"]
-            patch_sw_version = utils.get_major_release_version(patch_sw_release)
+            metadata_dir = states.UNAVAILABLE_DIR if utils.compare_release_version(
+                SW_VERSION, patch_sw_version) else states.AVAILABLE_DIR
+            abs_metadata_dir = os.path.abspath(metadata_dir)
+
             abs_ostree_tar_dir = package_dir[patch_sw_version]
             if not os.path.exists(abs_ostree_tar_dir):
                 os.makedirs(abs_ostree_tar_dir)
