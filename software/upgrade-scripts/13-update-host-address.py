@@ -39,7 +39,7 @@ def main():
             return 1
         arg += 1
 
-    configure_logging(LOG)
+    configure_logging()
 
     res = 0
     LOG.info("%s invoked from_release = %s to_release = %s action = %s"

@@ -40,7 +40,7 @@ def do_activate_rollback(from_release, to_release):
 
 def activate_rollback():
     # this is the entry point to start activate-rollback
-    configure_logging(LOG)
+    configure_logging()
     parser = argparse.ArgumentParser(add_help=False)
 
     parser.add_argument("from_release",

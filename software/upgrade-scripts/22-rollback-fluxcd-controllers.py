@@ -243,7 +243,7 @@ def main():
             print(f"Invalid option {sys.argv[arg]}")
             return 1
         arg += 1
-    configure_logging(LOG)
+    configure_logging()
 
     LOG.info("%s invoked with from_release %s to_release %s and action %s",
              sys.argv[0], from_release, to_release, action)
