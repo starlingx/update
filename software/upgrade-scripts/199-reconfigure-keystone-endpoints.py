@@ -58,7 +58,7 @@ def main():
             return 1
         arg += 1
 
-    configure_logging(LOG)
+    configure_logging()
 
     # Activate
     if action == 'activate':

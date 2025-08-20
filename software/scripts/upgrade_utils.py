@@ -178,7 +178,7 @@ def get_system_info(sysinv_client):
     return system_info.system_type, system_info.system_mode
 
 
-def configure_logging(filename, logger, log_level=logging.INFO):
+def configure_logging(filename, log_level=logging.INFO):
     read_log_config()
 
     my_exec = os.path.basename(sys.argv[0])
@@ -187,10 +187,10 @@ def configure_logging(filename, logger, log_level=logging.INFO):
     log_format = log_format.replace('%(exec)s', my_exec)
     formatter = logging.Formatter(log_format, datefmt="%FT%T")
 
-    logger.setLevel(log_level)
+    LOG.setLevel(log_level)
     main_log_handler = logging.FileHandler(filename)
     main_log_handler.setFormatter(formatter)
-    logger.addHandler(main_log_handler)
+    LOG.addHandler(main_log_handler)
 
 
 def get_platform_conf(key):

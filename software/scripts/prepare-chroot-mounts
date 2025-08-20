@@ -110,7 +110,7 @@ class ChrootMounts:
 
 
 if __name__ == "__main__":
-    upgrade_utils.configure_logging("/var/log/software.log", LOG, log_level=logging.INFO)
+    upgrade_utils.configure_logging("/var/log/software.log", log_level=logging.INFO)
 
     checkout_dir = None
     operation = None

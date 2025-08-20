@@ -40,7 +40,7 @@ def main():
             return 1
         arg += 1
 
-    configure_logging(LOG)
+    configure_logging()
 
     if action in ["activate", "activate-rollback"]:
         try:

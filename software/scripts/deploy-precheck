@@ -515,5 +515,5 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    upgrade_utils.configure_logging("/var/log/software.log", LOG, log_level=logging.INFO)
+    upgrade_utils.configure_logging("/var/log/software.log", log_level=logging.INFO)
     sys.exit(main())
