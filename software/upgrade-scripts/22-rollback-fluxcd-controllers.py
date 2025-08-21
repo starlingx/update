@@ -222,6 +222,30 @@ def rollback_fluxcd_controllers(revision):
     LOG.info("Flux release successfully rolled back")
 
 
+# Workaround for portieris issue when helm-controller is restarting
+@test_k8s_health
+def wait_helm_controller_pod_ready():
+    """ Wait for helm-controller pod to be Ready
+    """
+
+    LOG.info("Waiting for helm-controller pod to be Ready")
+
+    try:
+        subprocess.run(
+            ["kubectl", "wait", "--for=condition=Ready", "pods",
+             "-l", "app=helm-controller",
+             "-n", RELEASE_NAMESPACE,
+             "--timeout=60s",
+             "--kubeconfig", KUBECONFIG],
+            check=True
+        )
+    except Exception as e:
+        # Warning and proceeding with the rollback, as the issue might be fixed by it
+        LOG.warning(f"Error waiting for helm-controller pod to be Ready: {e}")
+    else:
+        LOG.info("helm-controller pod is Ready. Proceeding.")
+
+
 def main():
 
     action = None
@@ -264,6 +288,7 @@ def main():
 
                 if target_revision:
                     delete_incompatible_crd()
+                    wait_helm_controller_pod_ready()
                     rollback_fluxcd_controllers(target_revision)
                 else:
                     LOG.error("Version %s is not available in revision history", previous_version)
