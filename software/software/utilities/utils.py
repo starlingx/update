@@ -51,10 +51,12 @@ def configure_logging():
     log_format = log_format.replace('%(exec)s', my_exec)
     formatter = logging.Formatter(log_format, datefmt="%FT%T")
 
-    LOG.setLevel(logging.INFO)
+    root_logger = logging.getLogger()
+
+    root_logger.setLevel(logging.INFO)
     main_log_handler = logging.FileHandler(SOFTWARE_LOG_FILE)
     main_log_handler.setFormatter(formatter)
-    LOG.addHandler(main_log_handler)
+    root_logger.addHandler(main_log_handler)
 
 
 def get_migration_scripts(migration_script_dir):
