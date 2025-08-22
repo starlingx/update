@@ -187,10 +187,12 @@ def configure_logging(filename, log_level=logging.INFO):
     log_format = log_format.replace('%(exec)s', my_exec)
     formatter = logging.Formatter(log_format, datefmt="%FT%T")
 
-    LOG.setLevel(log_level)
+    root_logger = logging.getLogger()
+
+    root_logger.setLevel(log_level)
     main_log_handler = logging.FileHandler(filename)
     main_log_handler.setFormatter(formatter)
-    LOG.addHandler(main_log_handler)
+    root_logger.addHandler(main_log_handler)
 
 
 def get_platform_conf(key):
