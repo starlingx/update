@@ -3,9 +3,9 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# This script updates the node IP addresses in sysinv DB tables. Only admin
-# network entries and only AIO-SX systems will be updated with the following
-# actions:
+# This script updates the node IP addresses in sysinv DB tables. Only network
+# entries with node addresses and only AIO-SX systems will be updated with the
+# following actions:
 # - address_pools: update controller0_address_id and controller1_address_id
 #                  to None
 # - addresses: update floating address IPv4 and IPv6 entries' interface_id
@@ -55,12 +55,12 @@ def main():
     res = 0
     to_release_version = version.Version(to_release)
     target_version = version.Version("25.09")
-    if action == 'migrate' and to_release_version == target_version:
-        if get_system_mode() == "simplex":
+    if get_system_mode() == "simplex":
+        if action == 'migrate' and to_release_version == target_version:
             try:
                 conn = psycopg2.connect("dbname=sysinv user=postgres port=%s"
                                         % postgres_port)
-                del_admin_node_addresses(conn)
+                del_node_addresses(conn)
                 conn.close()
             except Exception as e:
                 LOG.exception("Error: {}".format(e))
@@ -68,7 +68,19 @@ def main():
     return res
 
 
-def del_admin_node_addresses(conn):
+def del_node_addresses(conn):
+    net_types = (
+        'mgmt',
+        'admin',
+        'cluster-host',
+        'storage',
+    )
+
+    for net_type in net_types:
+        del_node_addresses_from_db(conn, net_type)
+
+
+def del_node_addresses_from_db(conn, net_type):
     query = (
         "SELECT address_pools.id,controller0_address_id,controller1_address_id"
         ",floating_address_id "
@@ -76,10 +88,10 @@ def del_admin_node_addresses(conn):
         "JOIN network_addresspools ON address_pools.id "
         "= network_addresspools.address_pool_id "
         "JOIN networks ON network_addresspools.network_id = networks.id "
-        "WHERE networks.type = 'admin';"
+        f"WHERE networks.type = '{net_type}';"
     )
     res1 = db_query(conn, query)
-    LOG.info("Number of address_pools entries found: %s" % len(res1))
+    LOG.info("%s: Number of address_pools entries found: %s" % (net_type, len(res1)))
 
     controller0_ids = ",".join([str(e[1]) for e in res1 if e[1]])
     if not controller0_ids:
@@ -93,15 +105,15 @@ def del_admin_node_addresses(conn):
     )
     res2 = db_query(conn, query)
     c0_interface_ids = tuple([e[0] for e in res2])
-    LOG.info("interface_id found in addresses: %s" % (c0_interface_ids,))
+    LOG.info("%s: interface_id found in addresses: %s" % (net_type, (c0_interface_ids,)))
 
     idx = 0
     for entry in res1:
         address_pools_id = entry[0]
         node_ids = entry[1:3]
         floating_id = entry[3]
-        LOG.info("Found admin controller-0 and controller-1 IDs = %s"
-                 % (node_ids,))
+        LOG.info("%s: Found controller-0 and controller-1 IDs = %s"
+                 % (net_type, (node_ids,)))
         query = (
             "UPDATE address_pools "
             "SET controller0_address_id = NULL, controller1_address_id = NULL "
@@ -121,8 +133,8 @@ def del_admin_node_addresses(conn):
         db_update(conn, query)
         idx += 1
 
-    LOG.info("Admin addresses deleted from address_pools and addresses tables "
-             "with success")
+    LOG.info("%s: node addresses deleted from address_pools and addresses tables "
+             "with success" % net_type)
 
 
 def db_query(conn, query):

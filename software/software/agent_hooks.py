@@ -860,8 +860,13 @@ class LogPermissionRestorerHook(BaseHook):
 
 class FixSimplexAddressesHook(BaseHook):
     """
-    Reconfigure ceph-mon with the mgmt floating address
+    Reconfigure services using the node address with the floating address
     """
+
+    def __init__(self, attrs):
+        super().__init__(attrs)
+        self.hosts = {}
+
     def connect_postgres_db(self):
         DEFAULT_POSTGRES_PORT = 5432
         username, password = self.get_db_credentials()
@@ -895,97 +900,138 @@ class FixSimplexAddressesHook(BaseHook):
         finally:
             conn.close()
 
-    def is_ceph_configured(self):
+    def get_ceph_config(self):
         query = (
-            "SELECT storage_backend.state "
+            "SELECT storage_ceph.network "
             "FROM storage_backend "
             "JOIN storage_ceph "
             "ON storage_ceph.id = storage_backend.id "
-            "WHERE storage_backend.backend = 'ceph' "
-            "AND storage_ceph.network = 'mgmt';"
+            "WHERE storage_backend.backend = 'ceph';"
         )
         res = self.db_query_one(query)
-        return res and res == 'configured'
+        return res
 
     def get_fsid(self):
         cp = configparser.ConfigParser()
         cp.read("/etc/ceph/ceph.conf")
         return cp["global"]["fsid"]
 
-    def get_mon_ip(self):
+    def get_mon_ip(self, ip):
+        return f"[{ip}]" if isinstance(ip_address(ip), IPv6Address) else ip
+
+    def read_hosts(self):
         hosts_path = ""
-        host = ""
+        self.hosts = {}
         if self._to_release == "25.09":
             hosts_path = "/etc/hosts"
-            host = "controller"
         elif self._to_release == "24.09":
             hosts_path = "/opt/platform/config/24.09/hosts"
-            host = "controller-0"
         with open(hosts_path) as f:
             lines = f.readlines()
             for line in lines:
+                if line[0] == '#':
+                    continue
                 fields = line.split()
-                if fields[1] == host:
-                    ip = fields[0]
-                    mon_ip = f"[{ip}]" if isinstance(ip_address(ip), IPv6Address) else ip
-                    return mon_ip, ip
-        return None
+                self.hosts[fields[1]] = fields[0]
+
+    def fix_dnsmasq_config(self):
+        if self._to_release == "25.09":
+            LOG.info("fix-sx-addr: dnsmasq: fixing dnsmasq.addn_hosts")
+            mgmt_f_ip = self.hosts['controller']
+            addn_hosts = "/opt/platform/config/25.09/dnsmasq.addn_hosts"
+            for line in fileinput.input(files=addn_hosts, inplace=True):
+                cols = line.split()
+                if "controller-0.internal" in cols[1]:
+                    line = line.replace(cols[0], mgmt_f_ip)
+                elif "controller-1.internal" in cols[1]:
+                    continue
+                print(line, end="")
+
+    def fix_k8s_config(self):
+        if self._to_release == "25.09":
+            LOG.info("fix-sx-addr: k8s: fixing config files")
+            c0_ip = self.hosts['controller-0-cluster-host']
+            f_ip = self.hosts['controller-cluster-host']
+            base = self.TO_RELEASE_OSTREE_DIR + "/etc/kubernetes/"
+            config_files = (
+                f"{base}calico.yaml",
+                f"{base}manifests/kube-apiserver.yaml",
+                f"{base}controller-manager.conf",
+                f"{base}scheduler.conf",
+                f"{base}kubeadm.yaml",
+            )
+            for line in fileinput.input(files=config_files, inplace=True):
+                if c0_ip in line:
+                    line = line.replace(c0_ip, f_ip)
+                print(line, end="")
+
+    def fix_ceph_mon_config(self):
+        ceph_net = self.get_ceph_config()
+        if not ceph_net:
+            LOG.info("fix-sx-addr: ceph mon: skipping, bare metal ceph not configured")
+            return
+
+        LOG.info("fix-sx-addr: ceph mon: fixing config")
+        ip = None
+        if (self._to_release == "25.09"):
+            if ceph_net == 'mgmt':
+                ip = self.hosts['controller']
+            elif ceph_net == 'cluster-host':
+                ip = self.hosts['controller-cluster-host']
+        elif (self._to_release == "24.09"):
+            if ceph_net == 'mgmt':
+                ip = self.hosts['controller-0']
+            elif ceph_net == 'cluster-host':
+                ip = self.hosts['controller-0-cluster-host']
+
+        if not ip:
+            LOG.error("fix-sx-addr: ceph mon: could not find the IP address")
+            return
+
+        fsid = self.get_fsid()
+        mon_ip = self.get_mon_ip(ip)
+        mon_name = "controller-0"
+        if not fsid:
+            LOG.exception("Invalid fsid")
+            raise ValueError("Invalid params")
+        LOG.info("fix-sx-addr: ceph mon: using fsid=%s, mon_name=%s, mon_ip=%s" % (fsid, mon_name, mon_ip))
+
+        cmds = [
+            ["rm", "-f", "/etc/pmon.d/ceph.conf"],
+            ["/etc/init.d/ceph", "stop", "mon"],
+            ["ceph-mon", "--name", f"mon.{mon_name}", "--extract-monmap", f"/tmp/mon-{mon_name}.map"],
+            ["monmaptool", "--rm", f"{mon_name}", f"/tmp/mon-{mon_name}.map"],
+            ["monmaptool", "--addv", f"{mon_name}",
+                f"[v2:{mon_ip}:3300/0,v1:{mon_ip}:6789/0]", f"/tmp/mon-{mon_name}.map"],
+            ["monmaptool", "--fsid", f"{fsid}", f"/tmp/mon-{mon_name}.map"],
+            ["ceph-mon", "--name", f"mon.{mon_name}", "--inject-monmap", f"/tmp/mon-{mon_name}.map"],
+            ["/etc/init.d/ceph", "start", "mon"],
+            ["ln", "-s", "/etc/ceph/ceph.conf.pmon", "/etc/pmon.d/ceph.conf"],
+        ]
+        if self._to_release == "24.09":
+            # For /etc/init.d/ceph start mon to work during rollback, need to add mon_ip temporarily
+            # to the loopback. This will corrected permanently after host unlock and reboot.
+            cmds.insert(0, ["ip", "address", "replace", f"{ip}", "dev", "lo"])
+
+        try:
+            for cmd in cmds:
+                LOG.info("fix-sx-addr: exec: '%s'" % ' '.join(cmd))
+                subprocess.check_call(cmd, timeout=60)
+            LOG.info("fix-sx-addr: reconfiguration finished")
+        except subprocess.CalledProcessError as e:
+            LOG.exception("fix-sx-addr: failed executing the command '%s': %s" % (' '.join(cmd), str(e)))
+            raise
 
     def run(self):
         # Handle both upgrade to 25.09 and rollback to 24.09
         if self._to_release == "24.09" or self._to_release == "25.09":
             system_mode = self.get_platform_conf("system_mode")
             if (system_mode == self.SIMPLEX):
-                mon_ip, ip = self.get_mon_ip()
-
-                # fix dnsmasq.addn_hosts until sysinv conductor fixes it definitely
-                if self._to_release == "25.09":
-                    LOG.info("fix-sx-addr: fixing dnsmasq.addn_hosts")
-                    addn_hosts = "/opt/platform/config/25.09/dnsmasq.addn_hosts"
-                    for line in fileinput.input(files=addn_hosts, inplace=True):
-                        cols = line.split()
-                        if "controller-0.internal" in cols[1]:
-                            line = line.replace(cols[0], ip)
-                        elif "controller-1.internal" in cols[1]:
-                            continue
-                        print(line, end="")
-
-                if not self.is_ceph_configured():
-                    LOG.info("fix-sx-addr: skipping ceph mon reconfig, bare metal ceph not configured for mgmt")
-                    return
-
-                fsid = self.get_fsid()
-                mon_name = "controller-0"
-                if not fsid or not mon_ip:
-                    LOG.exception("Invalid fsid or mon_ip")
-                    raise ValueError("Invalid params")
-                LOG.info("fix-sx-addr: ceph mon: using fsid=%s, mon_name=%s, mon_ip=%s" % (fsid, mon_name, mon_ip))
-
-                cmds = [
-                    ["rm", "-f", "/etc/pmon.d/ceph.conf"],
-                    ["/etc/init.d/ceph", "stop", "mon"],
-                    ["ceph-mon", "--name", f"mon.{mon_name}", "--extract-monmap", f"/tmp/mon-{mon_name}.map"],
-                    ["monmaptool", "--rm", f"{mon_name}", f"/tmp/mon-{mon_name}.map"],
-                    ["monmaptool", "--addv", f"{mon_name}",
-                     f"[v2:{mon_ip}:3300/0,v1:{mon_ip}:6789/0]", f"/tmp/mon-{mon_name}.map"],
-                    ["monmaptool", "--fsid", f"{fsid}", f"/tmp/mon-{mon_name}.map"],
-                    ["ceph-mon", "--name", f"mon.{mon_name}", "--inject-monmap", f"/tmp/mon-{mon_name}.map"],
-                    ["/etc/init.d/ceph", "start", "mon"],
-                    ["ln", "-s", "/etc/ceph/ceph.conf.pmon", "/etc/pmon.d/ceph.conf"],
-                ]
-                if self._to_release == "24.09":
-                    # For /etc/init.d/ceph start mon to work during rollback, need to add mon_ip temporarily
-                    # to the loopback. This will corrected permanently after host unlock and reboot.
-                    cmds.insert(0, ["ip", "address", "replace", f"{ip}", "dev", "lo"])
-
-                try:
-                    for cmd in cmds:
-                        LOG.info("fix-sx-addr: exec: '%s'" % ' '.join(cmd))
-                        subprocess.check_call(cmd, timeout=60)
-                    LOG.info("fix-sx-addr: reconfiguration finished")
-                except subprocess.CalledProcessError as e:
-                    LOG.exception("fix-sx-addr: failed executing the command '%s': %s" % (' '.join(cmd), str(e)))
-                    raise
+                LOG.info("fix-sx-addr: starting IP address reconfiguration for simplex")
+                self.read_hosts()
+                self.fix_dnsmasq_config()
+                self.fix_k8s_config()
+                self.fix_ceph_mon_config()
             else:
                 LOG.info("fix-sx-addr: skipping reconfiguration, system_mode is not simplex")
 
