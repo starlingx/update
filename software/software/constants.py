@@ -251,3 +251,11 @@ RESERVED_WORDS_SET = {"OS_AUTH_TOKEN", "OS_AUTH_TYPE", "OS_AUTH_URL", "OS_ENDPOI
                       "OS_PROJECT_NAME", "OS_REGION_NAME", "OS_SERVICE_TOKEN", "OS_USERNAME", "OS_USER_DOMAIN_NAME",
                       "OS_SERVICE_TYPE", "OS_TENANT_ID", "OS_TENANT_NAME", "OS_USER_DOMAIN_ID", "SYSTEM_API_VERSION",
                       "SYSTEM_URL"}
+
+# Puppet lock
+LOCKFILE = "/var/lock/.puppet.applyscript.lock"
+LOCK_TIMEOUT = 60  # seconds
+
+# etc merge
+OUT_FORMAT = "'%i %n'"
+RSYNC_DELETING_FLAG = "*deleting   "

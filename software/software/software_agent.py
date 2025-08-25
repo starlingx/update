@@ -767,30 +767,57 @@ class PatchAgent(PatchService):
                 if verbose_to_stdout:
                     print("This node has been patched.")
 
-                if os.path.exists(node_is_software_updated_rr_file):
-                    LOG.info("Reboot is required. Skipping patch-scripts")
-                elif disallow_insvc_patch:
-                    LOG.info("Disallowing patch-scripts. Treating as reboot-required")
-                    setflag(node_is_software_updated_rr_file)
-                else:
-                    LOG.info("Mounting the new deployment")
-                    try:
-                        pending_deployment = ostree_utils.fetch_pending_deployment()
-                        deployment_dir = constants.OSTREE_BASE_DEPLOYMENT_DIR + pending_deployment
-                        setflag(mount_pending_file)
-                        ostree_utils.mount_new_deployment(deployment_dir)
-                        clearflag(mount_pending_file)
-                        LOG.info("Running post-install patch-scripts")
-                        subprocess.check_output([run_install_software_scripts_cmd, "postinstall"],
-                                                stderr=subprocess.STDOUT)
+                previous_etc = ostree_utils.get_bind_mount_etc()
+                pending_deployment = ostree_utils.fetch_pending_deployment()
+                deployment_dir = constants.OSTREE_BASE_DEPLOYMENT_DIR + pending_deployment
 
-                        # Clear the node_is_patched flag, since we've handled it in-service
-                        clearflag(node_is_patched_file)
-                        self.node_is_patched = False
-                    except subprocess.CalledProcessError as e:
-                        LOG.exception("Failed to execute post-install scripts.")
-                        LOG.error("Command output: %s", e.output)
+                if previous_etc:
+                    LOG.info("Applying on top of an inservice patch")
+                    pending_etc = deployment_dir + "/etc"
+                    pending_usr_etc = deployment_dir + "/usr/etc"
+                    previous_usr_etc = previous_etc.replace("/etc", "/usr/etc")
+
+                    try:
+                        deploy_utils.acquire_etc_lock()
+                        ostree_utils.do_etc_merge(pending_etc, pending_usr_etc,
+                                                  previous_etc, previous_usr_etc)
+                    except OSTreeCommandFail as e:
+                        LOG.exception("Failed to redo etc merge")
+                        LOG.error("Command output: %s", e)
                         success = False
+                    except Exception as e:
+                        LOG.exception("Unknown exception while redoing /etc merge")
+                        LOG.error("Errot output: %s", e)
+                        success = False
+                    finally:
+                        try:
+                            deploy_utils.release_etc_lock()
+                        except Exception as e:
+                            LOG.exception("Exception while unlocking /etc: %s" % e)
+
+                if success:
+                    if os.path.exists(node_is_software_updated_rr_file):
+                        LOG.info("Reboot is required. Skipping patch-scripts")
+                    elif disallow_insvc_patch:
+                        LOG.info("Disallowing patch-scripts. Treating as reboot-required")
+                        setflag(node_is_software_updated_rr_file)
+                    else:
+                        LOG.info("Mounting the new deployment")
+                        try:
+                            setflag(mount_pending_file)
+                            ostree_utils.mount_new_deployment(deployment_dir)
+                            clearflag(mount_pending_file)
+                            LOG.info("Running post-install patch-scripts")
+                            subprocess.check_output([run_install_software_scripts_cmd, "postinstall"],
+                                                    stderr=subprocess.STDOUT)
+
+                            # Clear the node_is_patched flag, since we've handled it in-service
+                            clearflag(node_is_patched_file)
+                            self.node_is_patched = False
+                        except subprocess.CalledProcessError as e:
+                            LOG.exception("Failed to execute post-install scripts.")
+                            LOG.error("Command output: %s", e.output)
+                            success = False
 
         # Clear the in-service patch dirs
         if os.path.exists(insvc_software_scripts):
