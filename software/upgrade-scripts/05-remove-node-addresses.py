@@ -74,6 +74,7 @@ def del_node_addresses(conn):
         'admin',
         'cluster-host',
         'storage',
+        'pxeboot',
     )
 
     for net_type in net_types:
@@ -120,12 +121,15 @@ def del_node_addresses_from_db(conn, net_type):
             "WHERE id = %s;" % address_pools_id
         )
         db_update(conn, query)
-        query = (
-            "UPDATE addresses "
-            "SET interface_id = %s "
-            "WHERE id = %s;" % (c0_interface_ids[idx], floating_id)
-        )
-        db_update(conn, query)
+        if c0_interface_ids[idx] is None:
+            LOG.info("Skipping update with no c0_interface_id")
+        else:
+            query = (
+                "UPDATE addresses "
+                "SET interface_id = %s "
+                "WHERE id = %s;" % (c0_interface_ids[idx], floating_id)
+            )
+            db_update(conn, query)
         query = (
             "DELETE FROM addresses "
             "WHERE id IN %s;" % (node_ids,)
