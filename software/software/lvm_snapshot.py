@@ -17,7 +17,8 @@ import sys
 import tempfile
 
 from datetime import datetime
-from datetime import timezone
+from ipaddress import IPv6Address
+
 from packaging import version
 from pathlib import Path
 
@@ -93,7 +94,7 @@ class LVMSnapshot:
         """
         mount_dir = tempfile.mkdtemp(prefix=f"{self._lv_name}-", dir="/tmp")
         try:
-            self.run_command(["/usr/bin/mount", self.get_dev_path(), mount_dir])
+            self.run_command(["/usr/bin/mount", "-t", "ext4", self.get_dev_path(), mount_dir])
             LOG.info("Mounted %s under %s", self._name, mount_dir)
             yield mount_dir
         except Exception as e:
@@ -181,14 +182,7 @@ class LVMSnapshot:
 
 
 class VarSnapshot(LVMSnapshot):
-
-    def restore(self):
-        """
-        Override default restore behavior for var-lv; which has
-        the following specific scenarios to treat on restore:
-        - software.json needs to be updated to the current status, otherwise
-          will be restored with the pre-deploy start content incorrectly
-        """
+    def _update_deployment_data(self):
         try:
             with self.mount() as mount_dir:
                 software_json = Path(mount_dir) / self.SOFTWARE_JSON_SNAPSHOT
@@ -212,19 +206,20 @@ class VarSnapshot(LVMSnapshot):
         except Exception as e:
             LOG.error("Failure updating %s: %s", software_json, str(e))
             raise
+
+    def restore(self):
+        """
+        Override default restore behavior for var-lv; which has
+        the following specific scenarios to treat on restore:
+        - software.json needs to be updated to the current status, otherwise
+          will be restored with the pre-deploy start content incorrectly
+        """
+        self._update_deployment_data()
         super().restore()
 
 
 class PlatformSnapshot(LVMSnapshot):
-
-    def restore(self):
-        """
-        Override default restore behavior for platform-lv; which has
-        the following specific scenarios to treat on restore:
-        - VIM DB in snapshot needs to mounted and replaced with active
-        DB otherwise during unlock it will be restored with the pre-deploy
-        start content incorrectly
-        """
+    def _replace_vim_db(self):
         try:
             content = self.read_file(self.SOFTWARE_JSON_CURRENT)
             deploy = content.get("deploy")
@@ -285,6 +280,79 @@ class PlatformSnapshot(LVMSnapshot):
         except Exception as e:
             LOG.error("Failure updating VIM snapshot db: %s", str(e))
             raise
+
+    # TODO(heitormatsui): remove this function and its call after stx10 -> stx-11 upgrade
+    def _restore_ceph_mon_configuration(self):
+        content = self.read_file(self.SOFTWARE_JSON_CURRENT)
+        deploy = content.get("deploy")[0]
+        from_release = self.get_major_release_version(deploy["from_release"])
+        state = deploy["state"]
+
+        if from_release == "24.09":
+            if state == "activate-rollback":
+                LOG.info("Not in auto-recovery mode, skipping ceph-mon reconfiguration")
+                return
+
+            ceph_configured_flags = ["/etc/platform/.node_ceph_configured",
+                                     "/etc/platform/.node_rook_configured"]
+            if all(not Path(flag).exists() for flag in ceph_configured_flags):
+                LOG.info("No ceph backend configured, skipping ceph-mon reconfiguration")
+                return
+
+            try:
+                # get from-release controller-0 IP
+                mon_name = "controller-0"
+                mon_ip = None
+                with self.mount() as mount_dir:
+                    with open(Path(mount_dir) / "config" / from_release / "hosts", "r") as hosts_file:
+                        for line in hosts_file.readlines():
+                            content = line.strip().split()
+                            if content[1] == mon_name:
+                                mon_ip = f"[{content[0]}]" if isinstance(mon_ip, IPv6Address) else content[0]
+                                break
+
+                # get fsid
+                cp = configparser.ConfigParser()
+                cp.read("/etc/ceph/ceph.conf")
+                fsid = cp["global"]["fsid"]
+
+                # restore ceph-mon parameters to the from-release values
+                if any(not x for x in [mon_ip, fsid]):
+                    LOG.error("Failure getting ceph-mon attributes")
+                    raise ValueError("Invalid values: mon_ip=%s fsid=%s" % (mon_ip, fsid))
+                LOG.info("Retrieved ceph-mon parameters: mon_ip=%s fsid=%s" % (mon_ip, fsid))
+
+                cmds = [
+                    ["rm", "-f", "/etc/pmon.d/ceph.conf"],
+                    ["ceph-mon", "--name", f"mon.{mon_name}", "--extract-monmap", f"/tmp/mon-{mon_name}.map"],
+                    ["monmaptool", "--rm", f"{mon_name}", f"/tmp/mon-{mon_name}.map"],
+                    ["monmaptool", "--addv", f"{mon_name}",
+                     f"[v2:{mon_ip}:3300/0,v1:{mon_ip}:6789/0]", f"/tmp/mon-{mon_name}.map"],
+                    ["monmaptool", "--fsid", f"{fsid}", f"/tmp/mon-{mon_name}.map"],
+                    ["ceph-mon", "--name", f"mon.{mon_name}", "--inject-monmap", f"/tmp/mon-{mon_name}.map"],
+                    ["ln", "-s", "/etc/ceph/ceph.conf.pmon", "/etc/pmon.d/ceph.conf"],
+                ]
+                for cmd in cmds:
+                    self.run_command(cmd)
+                LOG.info("Restored ceph-mon parameters to %s values" % from_release)
+            except Exception as e:
+                LOG.error("Failure while reverting ceph-mon config: %s", str(e))
+                raise
+
+    def restore(self):
+        """
+        Override default restore behavior for platform-lv; which has
+        the following specific scenarios to treat on restore:
+        - VIM DB in snapshot needs to mounted and replaced with active
+        DB otherwise during unlock it will be restored with the pre-deploy
+        start content incorrectly
+        - Restore ceph-mon configuration on stx-10 to stx-11 upgrade, due
+        to the subnet range reduction that is applied on the upgrade path,
+        but only on the auto-recovery scenario (on the standard rollback
+        an agent hook will do the job)
+        """
+        self._replace_vim_db()
+        self._restore_ceph_mon_configuration()
         super().restore()
 
 
@@ -378,12 +446,11 @@ class LVMSnapshotManager:
             snapshot.restore()
         LOG.info("Snapshots restored, reboot is needed to apply the changes")
 
-    def restore_snapshots(self, force=False):
+    def restore_snapshots(self):
         """
         Restore snapshots, but only after doing sanity checks:
         - If all expected snapshots exists
         - If snapshots are valid (if a snapshot reaches it's maximum size it is invalidated)
-        - If snapshots haven't expired (a snapshot expire if it is older than a determined period)
         """
         # check for snapshot existence
         # TODO(heitormatsui) optimize by calling one single command and check all
@@ -400,18 +467,12 @@ class LVMSnapshotManager:
             return False
 
         # check for invalid or expired snapshots
-        now = datetime.now(tz=timezone.utc)
-        expired_snapshots = []
         invalid_snapshots = []
         for snapshot in snapshots:
-            create_date, valid_state = snapshot.get_attributes()
-            age = (now - create_date).seconds
+            _, valid_state = snapshot.get_attributes()
             if valid_state is False:
                 LOG.error("Snapshot %s is invalid", snapshot.name)
                 invalid_snapshots.append(snapshot.name)
-            elif age > self.SNAPSHOT_EXPIRE_TIME:
-                LOG.error("Snapshot %s is expired, age: %s seconds", snapshot.name, age)
-                expired_snapshots.append(snapshot.name)
             else:
                 LOG.info("Snapshot %s can be used", snapshot.name)
 
@@ -419,15 +480,6 @@ class LVMSnapshotManager:
             LOG.error("Cannot proceed with snapshot restore, "
                       "invalid snapshots: %s", invalid_snapshots)
             return False
-
-        if expired_snapshots:
-            if force:
-                LOG.warning("Force restore requested, allowing to proceed with "
-                            "expired snapshots: %s", expired_snapshots)
-            else:
-                LOG.error("Cannot proceed with snapshot restore, "
-                          "expired snapshots: %s", expired_snapshots)
-                return False
 
         # restore snapshots
         LOG.info("All snapshots validated")
