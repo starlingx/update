@@ -37,6 +37,7 @@ SYSTEM_MODE_SIMPLEX = "simplex"
 # the space needed is derived from the sum of snapshot sizes
 # defined in lvm_snapshot.LvmSnapshotManager.LOGICAL_VOLUMES
 FREE_SPACE_NEEDED_LVM_SNAPSHOTS_GIB = 24
+DOCKER_FS_MINIMUM_REQUIRED_SIZE_GIB = 40
 INITIAL_CONFIG_COMPLETE_FLAG = "/etc/platform/.initial_config_complete"
 
 LOG = logging.getLogger('main_logger')
@@ -340,6 +341,15 @@ class UpgradeHealthCheck(HealthCheck):
                 % ', '.join(missing_patches)
         health_ok = health_ok and success
 
+        # check if docker filesystem satisfies the minimum required size
+        success, docker_output = self._check_docker_fs_size()
+        output += 'Docker filesystem in controllers satisfies the required size of %sGB: [%s]\n' \
+                  % (DOCKER_FS_MINIMUM_REQUIRED_SIZE_GIB,
+                     HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
+        if not success:
+            output += 'Use "system host-fs-modify" to resize accordingly:\n' + docker_output
+        health_ok = health_ok and success
+
         # check for LVM snapshot health checks
         use_lvm_snapshot = self._check_snapshot_option()
         if use_lvm_snapshot:
@@ -393,6 +403,26 @@ class UpgradeHealthCheck(HealthCheck):
             LOG.error("Could not retrieve system-local-ca private key.")
             return False
         return upgrade_utils.is_tls_key_rsa(base64.b64decode(key_b64).decode('utf-8'))
+
+    def _check_docker_fs_size(self):
+        controllers = {}
+        # get each controller id
+        hosts = self._sysinv_client.ihost.list()
+        for host in hosts:
+            if "controller" in host.hostname:
+                controllers[host.hostname] = host.uuid
+        # check docker fs size for each controller
+        success = True
+        output = ""
+        for controller in controllers:
+            host_filesystems = self._sysinv_client.host_fs.list(controllers[controller])
+            for fs in host_filesystems:
+                if fs.name == "docker":
+                    if fs.size < DOCKER_FS_MINIMUM_REQUIRED_SIZE_GIB:
+                        success = False
+                        output += f"-> {controller}: docker={fs.size}GB\n"
+                    break
+        return success, output
 
 
 class PatchHealthCheck(HealthCheck):
