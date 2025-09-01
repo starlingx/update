@@ -23,6 +23,7 @@ COMPLETED_STATUS = 'completed'
 NO_INFO_STATUS = 'no_info'
 ERROR_STATUS = 'error'
 TIMEOUT_STATUS = 'timeout'
+REVERT_ACTION = 'revert'
 
 
 def get_sysinv_client():
@@ -58,12 +59,13 @@ def log_progress(
             For more details, check the sysinv logs at /var/log/sysinv.log'
     }
 
+    verb = 'Reverted' if action == REVERT_ACTION else 'Updated'
     apps_msg = ''
 
     if updated_apps and status == IN_PROGRESS_STATUS:
-        apps_msg += f"{action.capitalize()}d apps up to now: {', '.join(updated_apps)}."
+        apps_msg += f"{verb} apps up to now: {', '.join(updated_apps)}."
     elif updated_apps and status == COMPLETED_STATUS:
-        apps_msg += f"{action.capitalize()}d apps: {', '.join(updated_apps)}."
+        apps_msg += f"{verb} apps: {', '.join(updated_apps)}."
 
     if failed_apps:
         apps_msg += f"The following apps did not {action} correctly and require manual \
@@ -143,7 +145,7 @@ def main():
                     return 1
                 client.kube_app.rollback_all_apps()
                 sleep(5)
-                update_operation_result = check_apps_update_progress(client, 'revert')
+                update_operation_result = check_apps_update_progress(client, REVERT_ACTION)
             if update_operation_result:
                 return 0
             return 1
