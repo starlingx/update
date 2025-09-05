@@ -4721,14 +4721,18 @@ class PatchControllerApiThread(threading.Thread):
                 app.VersionSelectorApplication(),
                 server_class=server_class)
 
-            self.wsgi.socket.settimeout(api_socket_timeout)
+            self.wsgi.timeout = api_socket_timeout
             global keep_running
-            while keep_running:
-                self.wsgi.handle_request()
-
-                if thread_death.is_set():
-                    LOG.info("%s exits as thread death is detected.", self.name)
-                    return
+            while keep_running and not thread_death.is_set():
+                try:
+                    self.wsgi.handle_request()
+                except socket.timeout:
+                    # Idle timeout: just loop to re-check keep_running/thread_death
+                    pass
+                except Exception as ex:
+                    LOG.exception("%s: error during request processing: %s", self.name, ex)
+                    thread_death.set()
+                    break
 
                 # Call garbage collect after wsgi request is handled,
                 # to ensure any open file handles are closed in the case
@@ -4736,8 +4740,15 @@ class PatchControllerApiThread(threading.Thread):
                 gc.collect()
         except Exception as ex:
             # Log all exceptions
-            LOG.exception("%s: error occurred during request processing: %s" % (self.name, str(ex)))
+            LOG.exception("%s: error: %s" % (self.name, str(ex)))
             thread_death.set()
+        finally:
+            if self.wsgi:
+                try:
+                    # release the port immediately after the thread exits
+                    self.wsgi.server_close()
+                except Exception:
+                    pass
 
     def kill(self):
         # Must run from other thread
@@ -4755,12 +4766,16 @@ class PatchControllerAuthApiThread(threading.Thread):
 
     def run(self):
         global thread_death
+        global keep_running
         host = CONF.auth_api_bind_ip
         if host is None:
             host = utils.get_versioned_address_all()
         try:
             # Can only launch authenticated server post-config
             while not os.path.exists(VOLATILE_CONTROLLER_CONFIG_COMPLETE):
+                if thread_death.is_set() or not keep_running:
+                    LOG.info("%s exiting before config complete (shutdown signaled).", self.name)
+                    return
                 LOG.info("Authorized API: Waiting for controller config complete.")
                 time.sleep(5)
 
@@ -4781,16 +4796,18 @@ class PatchControllerAuthApiThread(threading.Thread):
                 auth_app.VersionSelectorApplication(),
                 server_class=server_class)
 
-            # self.wsgi.serve_forever()
-            self.wsgi.socket.settimeout(api_socket_timeout)
+            self.wsgi.timeout = api_socket_timeout
 
-            global keep_running
-            while keep_running:
-                self.wsgi.handle_request()
-
-                if thread_death.is_set():
-                    LOG.info("%s exits as thread death is detected.", self.name)
-                    return
+            while keep_running and not thread_death.is_set():
+                try:
+                    self.wsgi.handle_request()
+                except socket.timeout:
+                    # Idle timeout: just loop to re-check keep_running/thread_death
+                    pass
+                except Exception as ex:
+                    LOG.exception("%s: error during request processing: %s", self.name, ex)
+                    thread_death.set()
+                    break
 
                 # Call garbage collect after wsgi request is handled,
                 # to ensure any open file handles are closed in the case
@@ -4798,8 +4815,15 @@ class PatchControllerAuthApiThread(threading.Thread):
                 gc.collect()
         except Exception as ex:
             # Log all exceptions
-            LOG.exception("%s: error occurred during request processing: %s" % (self.name, str(ex)))
+            LOG.exception("%s: error: %s" % (self.name, str(ex)))
             thread_death.set()
+        finally:
+            if self.wsgi:
+                try:
+                    # release the port immediately after the thread exits
+                    self.wsgi.server_close()
+                except Exception:
+                    pass
 
     def kill(self):
         # Must run from other thread
@@ -4898,6 +4922,7 @@ class PatchControllerMainThread(threading.Thread):
                     global keep_running
                     keep_running = False
                     os.remove(insvc_patch_restart_controller)
+                    thread_death.set()
                     return
 
                 # If bootstrap is completed re-initialize sockets
