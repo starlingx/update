@@ -1074,6 +1074,17 @@ class PatchController(PatchService):
 
         self.register_deploy_state_change_listeners()
 
+        # TODO(lvieira) solution for 24.09 upgrade enabler
+        self._detect_flag_and_set_to_activate_done()
+
+    def _detect_flag_and_set_to_activate_done(self):
+        ACTIVATE_DONE_FLAG = "/run/software/.activate-done.flag"
+
+        if os.path.isfile(ACTIVATE_DONE_FLAG):
+            os.remove(ACTIVATE_DONE_FLAG)
+            deploy_state = DeployState.get_instance()
+            deploy_state.activate_done()
+
     def _state_changed_sync(self, *args):  # pylint: disable=unused-argument
         if is_simplex():
             # ensure the in-sync state for SX
