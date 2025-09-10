@@ -3395,6 +3395,8 @@ class PatchController(PatchService):
             collect_current_load_for_hosts(to_deploy_release.sw_version, hostname=hostname)
             release_state = ReleaseState(release_ids=deployment_list)
             release_state.start_deploy()
+            # Sync release state with neighbour
+            self.software_sync()
 
             # Setting deploy state to start, so that it can transition to start-done or start-failed
             deploy_state = DeployState.get_instance()
