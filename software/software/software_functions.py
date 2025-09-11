@@ -919,14 +919,19 @@ class PatchFile(object):
 
             if not os.path.exists(root_scripts_dir):
                 os.makedirs(root_scripts_dir)
-            # start, install and activate scripts
-            scripts = ["pre_start", "post_start", "pre_install", "post_install", "activation_scripts"]
-            for script in scripts:
+            # start and install scripts
+            for script in constants.PATCH_SCRIPTS:
                 script_name = thispatch.metadata[patch_id].get(script)
                 if script_name:
                     dest_path = os.path.join(root_scripts_dir, f"{patch_id}_{script_name}")
                     shutil.move(os.path.join(tmpdir, script_name), dest_path)
                     os.chmod(dest_path, os.stat(dest_path).st_mode | stat.S_IXUSR)
+
+            activate_scripts = thispatch.metadata[patch_id].get(constants.ACTIVATION_SCRIPTS)
+            if activate_scripts:
+                for script in activate_scripts:
+                    shutil.move(os.path.join(tmpdir, script),
+                                "%s/%s_%s" % (root_scripts_dir, patch_id, script))
 
             # Copy extra folder if exists
             extra_origin = os.path.join(tmpdir, "extra.tar")
