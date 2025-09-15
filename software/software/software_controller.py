@@ -2158,7 +2158,7 @@ class PatchController(PatchService):
             PatchFile.delete_versioned_directory(release.sw_release)
 
             # Delete N-1 load on system controller
-            if is_system_controller():
+            if is_system_controller() and release_sw_version < SW_VERSION:
                 self._clean_up_inactive_load_import(release_sw_version)
 
             try:
