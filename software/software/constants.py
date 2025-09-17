@@ -105,6 +105,8 @@ OSTREE_AUX_REMOTE_PATH = "/ostree/repo"
 OSTREE_HISTORY_NOT_FETCHED = "<< History beyond this commit not fetched >>"
 OSTREE_REPO = 'ostree_repo'
 SYSROOT_OSTREE_REF = "debian:starlingx"
+OSTREE_CONFIG = "config"
+OSTREE_GPG_VERIFY = "gpg-verify"
 
 # Sysroot
 SYSROOT_OSTREE = "/sysroot/ostree/repo"

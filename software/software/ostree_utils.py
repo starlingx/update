@@ -75,23 +75,23 @@ def get_ostree_latest_commit(ostree_ref, repo_path):
     return latest_commit
 
 
-def add_gpg_verify_false():
+def add_gpg_verify_false(repo_path=constants.SYSROOT_OSTREE):
     # TODO(mmachado): remove once gpg is enabled
     # Modify the ostree configuration to disable gpg-verify
-    try:
-        command = """
-        # Check if gpg-verify=false is at the end of the file and adds it if not
-        if ! tail -n 1 /sysroot/ostree/repo/config | grep -q '^gpg-verify=false$'; then
-            echo "gpg-verify=false" >> /sysroot/ostree/repo/config
-        fi
-        """
-        subprocess.run(command, shell=True, check=True)
+    config_path = os.path.join(repo_path, constants.OSTREE_CONFIG)
+    if os.path.exists(config_path):
+        config = configparser.ConfigParser()
+        config.read(config_path)
 
-    except subprocess.CalledProcessError as e:
-        msg = "Failed to modify ostree config to disable GPG verification"
-        err_msg = "Command Error: return code: %s, Output: %s" \
-            % (e.returncode, e.stderr.decode("utf-8") if e.stderr else "No error message")
-        LOG.exception(err_msg)
+        for section in config.sections():
+            if section.startswith("remote ") and \
+               constants.OSTREE_GPG_VERIFY not in config[section]:
+                config[section][constants.OSTREE_GPG_VERIFY] = "false"
+
+        with open(config_path, 'w') as file:
+            config.write(file, space_around_delimiters=False)
+    else:
+        msg = f"Ostree config file: {config_path} does not exist"
         raise OSTreeCommandFail(msg)
 
 
