@@ -3787,6 +3787,8 @@ class PatchController(PatchService):
                 self.socket_lock.acquire()
                 cleanup_req.send(self.sock_out)
                 self.socket_lock.release()
+                deploy_state_update_req = SoftwareMessageDeployStateUpdate()
+                deploy_state_update_req.send(self.sock_out)
 
             self.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_CLEANUP_DEPLOYMENT_DATA,
                                        fm_constants.FM_ALARM_STATE_CLEAR,
