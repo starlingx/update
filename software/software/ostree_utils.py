@@ -21,6 +21,7 @@ from gi.repository import Gio
 from gi.repository import GLib
 from gi.repository import OSTree  # pylint: disable=E0611
 
+from pathlib import Path
 from software import constants
 from software.exceptions import OSTreeCommandFail
 from tsconfig.tsconfig import subfunctions
@@ -437,6 +438,134 @@ def create_deployment(ref=None):
     except subprocess.CalledProcessError as e:
         LOG.info("Failed to update default grub entry to 0: %s", e.stderr)
         raise
+
+
+def get_bind_mount_etc():
+    """
+    Return the path of the folder mounted in /etc
+    Return None if no mount exists
+    """
+
+    source_path = None
+    try:
+        output = sh.findmnt("/etc", "-n", "-o", "SOURCE")
+        output = output.stdout.decode("utf-8")
+
+        if output:
+            match = re.search(r'\[(.*?)\]', output)
+            if match:
+                source_path = match.group(1)
+                info_msg = "Find /etc source bind mount: %s" % source_path
+                LOG.info(info_msg)
+    except sh.ErrorReturnCode:
+        LOG.info("No /etc bind mount found")
+
+    return source_path
+
+
+def do_etc_merge(new_etc, new_usr_etc, old_etc, old_usr_etc):
+    """
+    Performs a 3-way merge of /etc during an OSTree deployment switch by syncing
+    new /usr/etc to new /etc, then applying admin changes (additions, modifications,
+    deletions) detected by comparing old /etc to old /usr/etc. This ensures that
+    local configuration changes are preserved across upgrades. Make sure to grab an
+    etc lock before running this function (e.g. deploy_utils.acquire_etc_lock())
+    Raises OSTreeCommandFail on failure.
+    """
+
+    LOG.info("Starting /etc 3-way merge")
+
+    # 1) Sync new deployment /usr/etc -> new deployment /etc
+    LOG.info("Syncing new deployment /etc with new deployment /usr/etc")
+    cmd = "rsync -aHAX --delete --checksum %s/ %s/" % (new_usr_etc, new_etc)
+    try:
+        subprocess.run(cmd, shell=True, check=True, text=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Fail to sync new deployment /etc with new deployment /usr/etc"
+        info_msg = "Error: %s: return code: %s , Output: %s" \
+            % (cmd, e.returncode, e.stderr)
+        LOG.error(info_msg)
+        raise OSTreeCommandFail(msg)
+
+    # 2) Get diffs between old /etc and old /usr/etc, and apply in new /etc
+    # 2.a) Get diff between old /etc and old /usr/etc
+    LOG.info("Getting diff between old /usr/etc and old /etc")
+
+    cmd = "rsync -ai --delete --dry-run --checksum --out-format=%s %s/ %s/" \
+        % (constants.OUT_FORMAT, old_etc, old_usr_etc)
+    diff_old_usr_etc_and_old_etc = None
+    try:
+        diff_proc = subprocess.run(cmd, shell=True, check=True, text=True, capture_output=True)
+        diff_old_usr_etc_and_old_etc = diff_proc.stdout
+    except subprocess.CalledProcessError as e:
+        msg = "Fail to get diff between old /usr/etc and old /etc"
+        info_msg = "Error: %s: return code: %s , Output: %s" \
+            % (cmd, e.returncode, e.stderr)
+        LOG.error(info_msg)
+        raise OSTreeCommandFail(msg)
+
+    if not diff_old_usr_etc_and_old_etc:
+        LOG.info("No differences found. 3-way merge done.")
+        return
+
+    lines = [ln for ln in diff_old_usr_etc_and_old_etc.splitlines() if ln.strip()]
+
+    # 2.b) Admin deletions: lines starting with '*deleting   '
+    LOG.info("Getting admin deletions in the old deployment")
+    deletions = []
+    start = len(constants.RSYNC_DELETING_FLAG)
+    for ln in lines:
+        if ln.startswith(constants.RSYNC_DELETING_FLAG):
+            deletions.append(ln[start:].rstrip("\n"))
+
+    if deletions:
+        LOG.info("Applying admin deletions to the new deployment /etc")
+        for rel in deletions:
+            target = Path(os.path.join(new_etc, rel))
+            if not os.path.lexists(str(target)):
+                continue
+            try:
+                if target.is_dir() and not target.is_symlink():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink(missing_ok=True)
+            except Exception as e:
+                msg = "Fail to delete %s under %s" % (rel, new_etc)
+                info_msg = "Warning: %s: Output: %s" % (msg, e)
+                LOG.warning(info_msg)
+    else:
+        LOG.info("No admin deletions detected")
+
+    # 2.c) Admin changes (modifications/additions).
+    LOG.info("Getting admin changes (modifications and additions) in the old deployment")
+    changes = bytearray()
+    timestamp_only_pattern = re.compile(r'\.t.{6}')
+    for ln in lines:
+        if ln.startswith(constants.RSYNC_DELETING_FLAG):
+            continue
+        if timestamp_only_pattern.search(ln):
+            continue
+
+        path = ln.split(None, 1)[1].rstrip("\n")
+        if path:
+            changes.extend(path.encode("utf-8"))
+            changes.extend(b"\n")
+
+    if changes:
+        LOG.info("Applying admin changes to the new deployment /etc")
+        cmd = "rsync -aHAX --files-from=- %s/ %s/" % (old_etc, new_etc)
+        try:
+            subprocess.run(cmd, input=changes, shell=True, check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            msg = "Fail apply admin changes to the new deployment /etc"
+            info_msg = "Error: %s: return code: %s , Output: %s" \
+                % (cmd, e.returncode, e.stderr.decode("utf-8"))
+            LOG.error(info_msg)
+            raise OSTreeCommandFail(msg)
+    else:
+        LOG.info("No admin changes detected")
+
+    LOG.info("3-way merge done")
 
 
 def fetch_pending_deployment():
