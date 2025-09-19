@@ -1038,6 +1038,10 @@ class PatchFile(object):
             package_list = []
             list_size = 25  # Number of files per group
 
+            # Initialize apt-ostree if does not exist
+            if not os.path.exists(package_repo_dir):
+                apt_utils.initialize_apt_ostree(package_repo_dir)
+
             for deb in deb_dir:
                 deb_path = os.path.join(tmpdir, deb.name)
                 msg = "Adding package to upload list: %s" % deb_path
