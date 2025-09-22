@@ -807,6 +807,40 @@ class SoftwareMessageDeployStateUpdateAck(messages.PatchMessage):
         sock.sendto(str.encode(message), (sc.controller_address, cfg.controller_port))
 
 
+class SoftwareMessageReleaseStateUpdate(messages.PatchMessage):
+    def __init__(self):
+        messages.PatchMessage.__init__(self, messages.PATCHMSG_RELEASE_STATE_UPDATE)
+
+    def encode(self):
+        # Nothing to add to the message, so just call the super class
+        messages.PatchMessage.encode(self)
+
+    def handle(self, sock, addr):
+        global sc
+        host = addr[0]
+        if host == cfg.get_mgmt_ip():
+            # update from localhost, ignore
+            return
+
+        host_url = utils.ip_to_url(host)
+        try:
+            output = subprocess.check_output(["rsync",
+                                              "-acv",
+                                              "--delete",
+                                              "rsync://%s/software/metadata/" % host_url,
+                                              "%s/" % constants.SOFTWARE_METADATA_STORAGE_DIR],
+                                             stderr=subprocess.STDOUT)
+            LOG.info("Synced metadata dir via rsync: %s", output)
+        except subprocess.CalledProcessError as e:
+            LOG.error("Failed to rsync: %s", e.output)
+
+    def send(self, sock):
+        global sc
+        self.encode()
+        message = json.dumps(self.message)
+        sock.sendto(str.encode(message), (sc.controller_address, cfg.controller_port))
+
+
 class SWMessageDeployStateChanged(messages.PatchMessage):
     def __init__(self):
         messages.PatchMessage.__init__(self, messages.PATCHMSG_DEPLOY_STATE_CHANGED)
@@ -1082,6 +1116,15 @@ class PatchController(PatchService):
         else:
             self._update_state_to_peer()
 
+    def _release_state_changed_sync(self, *args):  # pylint: disable=unused-argument
+        if not is_simplex():
+            self.socket_lock.acquire()
+            try:
+                state_update_msg = SoftwareMessageReleaseStateUpdate()
+                state_update_msg.send(self.sock_out)
+            finally:
+                self.socket_lock.release()
+
     def _notify_vim_on_state_change(self, target_state):
         """Notify VIM of state change.
 
@@ -1124,6 +1167,7 @@ class PatchController(PatchService):
         DeployHostState.register_event_listener(DeployState.host_deploy_updated)
         DeployState.register_event_listener(ReleaseState.deploy_updated)
         DeployState.register_event_listener(self.create_clean_up_deployment_alarm)
+        ReleaseState.register_event_listener(self._release_state_changed_sync)
 
         # VIM notifications
         DeployState.register_event_listener(self._notify_vim_on_state_change)
@@ -5045,6 +5089,8 @@ class PatchControllerMainThread(threading.Thread):
                             msg = SoftwareMessageDeployDeleteCleanupResp()
                         elif msgdata['msgtype'] == messages.PATCHMSG_CHECK_AGENT_ALIVE_RESP:
                             msg = SoftwareMessageCheckAgentAliveResp()
+                        elif msgdata['msgtype'] == messages.PATCHMSG_RELEASE_STATE_UPDATE:
+                            msg = SoftwareMessageReleaseStateUpdate()
 
                     if msg is None:
                         msg = messages.PatchMessage()
