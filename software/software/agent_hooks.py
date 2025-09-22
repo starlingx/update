@@ -366,15 +366,43 @@ class UpdateKernelParametersHook(BaseHook):
             msg = f"Failed to update {default_kthread_prio} kernel parameter. Error = {err}"
             LOG.exception(msg)
 
+    def remove_kthread_prio(self):
+        kthread_prio = 'rcutree.kthread_prio'
+        try:
+            LOG.info(f"Remove kernel parameter '{kthread_prio}'")
+
+            # remove 'rcutree.kthread_prio' kernel parameter
+            cmd = f"python /usr/local/bin/puppet-update-grub-env.py --remove-kernelparams {kthread_prio}"
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+
+        except subprocess.CalledProcessError as e:
+            msg = ("Failed to run %s: rc=%s, output=%s"
+                   % (cmd, e.returncode, e.stderr.decode("utf-8")))
+            LOG.exception(msg)
+        except Exception as e:
+            err = str(e)
+            msg = f"Failed to remove {kthread_prio} kernel parameter. Error = {err}"
+            LOG.exception(msg)
+        else:
+            LOG.info(f"Successfully remove kernel parameter '{kthread_prio}'")
+
     def run(self):
         """Execute the hook"""
-        kernel_params = self.read_kernel_parameters()
+        if self._action == HookManager.MAJOR_RELEASE_UPGRADE:
+            kernel_params = self.read_kernel_parameters()
 
-        isolcpus = self.read_isolcpus(kernel_params)
-        self.update_isolcpus(isolcpus)
+            isolcpus = self.read_isolcpus(kernel_params)
+            self.update_isolcpus(isolcpus)
 
-        kthread_prio = self.read_kthread_prio(kernel_params)
-        self.add_kthread_prio_if_not_set(kthread_prio)
+            kthread_prio = self.read_kthread_prio(kernel_params)
+            self.add_kthread_prio_if_not_set(kthread_prio)
+        elif self._action == HookManager.MAJOR_RELEASE_ROLLBACK:
+            # when rollback to 24.09, remove kthread_prio kernel parameter
+            # unconditionally
+            # TODO(bqian) remove when 24.09 is no longer a supported from
+            # release.
+            if self._to_release == '24.09':
+                self.remove_kthread_prio()
 
 
 class ReconfigureKernelHook(BaseHook):
@@ -1286,6 +1314,7 @@ class HookManager(object):
         MAJOR_RELEASE_ROLLBACK: [
             ReconfigureKernelHook,
             OOTDriverHook,
+            UpdateKernelParametersHook,
             UpdateGrubConfigHook,
             RestartKubeApiServer,
             RevertSyslogConfig,
@@ -1330,6 +1359,7 @@ class HookManager(object):
 
         # check if the version is greater, i.e. upgrade
         if version.Version(software_version) > version.Version(sw_version):
+            hook_attrs['hook_action'] = HookManager.MAJOR_RELEASE_UPGRADE
             LOG.info("Upgrading from %s to %s, additional_data %s" % (
                      sw_version, software_version, additional_data))
             return HookManager(HookManager.MAJOR_RELEASE_UPGRADE, attrs=hook_attrs)
@@ -1337,4 +1367,5 @@ class HookManager(object):
         # otherwise the operation is a rollback
         LOG.info("Rolling back from %s to %s, additional_data %s" % (
                  sw_version, software_version, additional_data))
+        hook_attrs['hook_action'] = HookManager.MAJOR_RELEASE_ROLLBACK
         return HookManager(HookManager.MAJOR_RELEASE_ROLLBACK, attrs=hook_attrs)
