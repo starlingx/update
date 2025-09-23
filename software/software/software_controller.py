@@ -1573,6 +1573,13 @@ class PatchController(PatchService):
             local_info += load_import_info or ""
             local_error += load_import_error or ""
 
+            # TODO(lvieira): fix when 24.09 is the N-1 load. Remove it in 26.09
+            ostree_feed_repo_path = os.path.join(
+                constants.FEED_OSTREE_BASE_DIR,
+                ("rel-%s" % utils.get_major_release_version(to_release)),
+                constants.OSTREE_REPO)
+            ostree_utils.add_gpg_verify_false(ostree_feed_repo_path)
+
             # Copy metadata.xml to /opt/software/rel-<rel>/
             to_file = os.path.join(constants.SOFTWARE_STORAGE_DIR,
                                    ("rel-%s" % to_release), "metadata.xml")
