@@ -91,6 +91,7 @@ REMOVE = "remove"
 
 # Feed
 DEBIAN_RELEASE = "bullseye"
+DEBIAN_ORIGIN = "updates"
 FEED_DIR = "/var/www/pages/feed/"
 FEED_OSTREE_BASE_DIR = "/var/www/pages/feed"
 FEED_OSTREE_URL = "http://controller:8080/feed"

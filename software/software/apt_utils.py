@@ -13,6 +13,28 @@ from software.exceptions import APTOSTreeCommandFail
 LOG = logging.getLogger('main_logger')
 
 
+def initialize_apt_ostree(feed_dir):
+    """
+    Initialize an apt Debian package archive.
+
+    :param feed_dir: apt package feed directory
+    """
+    try:
+        subprocess.run(
+            ["apt-ostree", "repo", "init",
+             "--feed", str(feed_dir),
+             "--release", constants.DEBIAN_RELEASE,
+             "--origin", constants.DEBIAN_ORIGIN],
+            check=True,
+            capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to initialize apt-ostree repo"
+        info_msg = "\"apt-ostree repo init\" error: return code %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.error(info_msg)
+        raise APTOSTreeCommandFail(msg)
+
+
 def package_list_upload(feed_dir, sw_release, package_list):
     """
     Upload a Debian package to an apt repository.
