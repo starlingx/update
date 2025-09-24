@@ -14,6 +14,7 @@ import logging
 import shutil
 import subprocess
 import sys
+import time
 import tempfile
 
 from datetime import datetime
@@ -219,6 +220,22 @@ class VarSnapshot(LVMSnapshot):
 
 
 class PlatformSnapshot(LVMSnapshot):
+    @staticmethod
+    def _wait_for_vim_ready(timeout=20):
+        end_time = time.time() + timeout
+        while time.time() < end_time:
+            try:
+                subprocess.run(
+                    ["bash", "-c",
+                     "source /etc/platform/openrc; sw-manager sw-deploy-strategy show"],
+                    capture_output=True, timeout=10, check=True
+                )
+                return True
+            except Exception:
+                pass
+            time.sleep(1)
+        return False
+
     def _replace_vim_db(self):
         try:
             content = self.read_file(self.SOFTWARE_JSON_CURRENT)
@@ -276,6 +293,9 @@ class PlatformSnapshot(LVMSnapshot):
             # Restart vim to take new db file
             self.run_command(["sm-restart-safe", "service", "vim"])
             LOG.info("VIM restarted successfully")
+
+            if not self._wait_for_vim_ready(timeout=20):
+                LOG.error("VIM failed to come up within timeout")
 
         except Exception as e:
             LOG.error("Failure updating VIM snapshot db: %s", str(e))
