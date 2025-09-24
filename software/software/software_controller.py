@@ -101,7 +101,7 @@ from software.sysinv_utils import is_system_controller
 from software.sysinv_utils import update_host_sw_version
 from software.sysinv_utils import are_all_hosts_unlocked_and_online
 from software.sysinv_utils import get_system_info
-from software.sysinv_utils import get_oot_drivers
+from software.sysinv_utils import get_backup_oot_drivers
 from software.sysinv_utils import trigger_evaluate_apps_reapply
 from software.sysinv_utils import trigger_vim_host_audit
 
@@ -4250,23 +4250,12 @@ class PatchController(PatchService):
                 deploy_host_state.deploy_failed()
                 raise
 
-            # TODO(bqian) This code below is for upgrading to stx-10. Beside the code is specific for the upgrade
-            # path, the solution is also temporary. Need a better design with smooth support of host deploy with
-            # predetermined parameters
-            impacted_upgrade = ["24.09", "22.12"]
-            if upgrade_release["to_release"] in impacted_upgrade and \
-                    upgrade_release["from_release"] in impacted_upgrade:
-                if rollback:
-                    oot_drivers = ""
-                else:
-                    try:
-                        oot_drivers = get_oot_drivers()
-                    except ServiceParameterNotFound:
-                        # the oot_drivers should be identical to the new default service parameter declare in
-                        # config/controllerconfig/controllerconfig/upgrade-scripts/26-add-service-parameter.py#L52
-                        oot_drivers = "ice,i40e,iavf"
-
-                additional_data.update({"out-of-tree-drivers": oot_drivers})
+            # Update additional_data context with backup oot_drivers key, value
+            try:
+                oot_drivers = get_backup_oot_drivers()
+            except ServiceParameterNotFound:
+                oot_drivers = ""
+            additional_data.update({"backup_oot_drivers_24.09": oot_drivers})
 
         self.hosts_lock.acquire()
         self.hosts[ip].install_pending = True

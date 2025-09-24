@@ -148,9 +148,9 @@ def get_service_parameter(service=None, section=None, name=None):
     return data
 
 
-def get_oot_drivers():
-    # get the value of service parameter out_of_tree_drivers
-    name = "out_of_tree_drivers"
+def get_backup_oot_drivers():
+    # get the value of backup service parameter backup_oot_drivers
+    name = "backup_oot_drivers_24.09"
     res_list = get_service_parameter(name=name)
     if not res_list:
         raise ServiceParameterNotFound(name)

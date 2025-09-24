@@ -1189,6 +1189,69 @@ class CISSysctlFlagHookRollback(AbstractSysctlFlagHook):
         LOG.debug("CIS Sysctl Flag Rollback finished.")
 
 
+class OOTDriverHook(BaseHook):
+    """
+    Hook to manage out-of-tree driver kernel parameters during upgrade/rollback.
+    """
+
+    PARAM_NAME = "out-of-tree-drivers"
+    BACKUP_PARAM_NAME = "backup_oot_drivers_24.09"
+
+    def _remove_kernel_param(self):
+        try:
+            cmd = (
+                "python /usr/local/bin/puppet-update-grub-env.py "
+                f"--remove-kernelparams {self.PARAM_NAME}"
+            )
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+            LOG.info("Removed kernel parameter: %s", self.PARAM_NAME)
+        except subprocess.CalledProcessError as e:
+            LOG.exception(
+                "Failed to remove kernel parameter %s: %s",
+                self.PARAM_NAME, str(e)
+            )
+
+    def _restore_kernel_param(self):
+        oot_drivers = self._additional_data.get(self.BACKUP_PARAM_NAME)
+        if not oot_drivers or oot_drivers.strip() == "":
+            LOG.info(
+                    "No backup value for %s or value is empty. "
+                    "Nothing to restore.",
+                    self.PARAM_NAME
+                    )
+            return
+
+        try:
+            oot_kernel_param_value = f"{self.PARAM_NAME}={oot_drivers}"
+            cmd = (
+                "python /usr/local/bin/puppet-update-grub-env.py "
+                f"--add-kernelparams {oot_kernel_param_value}"
+            )
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+            LOG.info("Restored kernel parameter: %s", oot_kernel_param_value)
+        except subprocess.CalledProcessError as e:
+            LOG.exception(
+                "Failed to restore kernel parameter %s: %s",
+                self.PARAM_NAME, str(e)
+            )
+
+    def run(self):
+        if self._from_release == "24.09":
+            # Upgrade path: remove kernel param
+            self._remove_kernel_param()
+            LOG.info("Upgrade OOTDriverHook completed.")
+
+        elif self._to_release == "24.09":
+            # Rollback path: restore kernel param
+            self._restore_kernel_param()
+            LOG.info("Rollback OOTDriverHook completed.")
+
+        else:
+            LOG.info(
+                "OOTDriverHook: nothing to do for this release transition."
+            )
+
+
 class HookManager(object):
     """
     Object to manage the execution of agent hooks
@@ -1201,6 +1264,7 @@ class HookManager(object):
     AGENT_HOOKS = {
         MAJOR_RELEASE_UPGRADE: [
             CreateUSMUpgradeInProgressFlag,
+            OOTDriverHook,
             EtcMerger,
             CopyPxeFilesHook,
             ReconfigureKernelHook,
@@ -1221,6 +1285,7 @@ class HookManager(object):
         ],
         MAJOR_RELEASE_ROLLBACK: [
             ReconfigureKernelHook,
+            OOTDriverHook,
             UpdateGrubConfigHook,
             RestartKubeApiServer,
             RevertSyslogConfig,
