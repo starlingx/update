@@ -254,6 +254,7 @@ LOG_DEFAULT_FORMAT = ('%(asctime)s.%(msecs)03d USM - %(exec)s [%(process)s:%(thr
 SOFTWARE_API_SUPPRESS_PATTERNS = [
     r"GET /v1/deploy/software_upgrade",
 ]
+SOFTWARE_API_MAX_LENGTH = 200
 
 # Reserved_words
 RESERVED_WORDS_SET = {"OS_AUTH_TOKEN", "OS_AUTH_TYPE", "OS_AUTH_URL", "OS_ENDPOINT_TYPE", "OS_IDENTITY_API_VERSION",

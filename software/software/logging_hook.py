@@ -10,6 +10,7 @@ import re
 
 from pecan import hooks
 from software.constants import SOFTWARE_API_SUPPRESS_PATTERNS
+from software.constants import SOFTWARE_API_MAX_LENGTH
 
 logger = None
 
@@ -47,6 +48,11 @@ class LoggingHook(hooks.PecanHook):
 
     def after(self, state):
         body = state.response.body.decode()
+
+        # Set max character length in log
+        if isinstance(body, str) and len(body) > SOFTWARE_API_MAX_LENGTH:
+            body = f"{body[:SOFTWARE_API_MAX_LENGTH]}..."
+
         msg = f"{state.request.method} {state.request.path}, " \
               f"{state.response.status}, " \
               f"Headers: {state.response.headers}, " \
