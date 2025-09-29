@@ -26,7 +26,7 @@ import threading
 import time
 import typing
 from wsgiref import simple_server
-
+from glob import glob
 from fm_api import fm_api
 from fm_api import constants as fm_constants
 
@@ -2973,9 +2973,22 @@ class PatchController(PatchService):
         major_to_release = utils.get_major_release_version(to_release)
         k8s_ver = get_k8s_ver()
         postgresql_port = str(cfg.alt_postgresql_port)
+
+        # Copy to_release_feed/pxelinux.cfg.files to /var/pxeboot/pxelinux.cfg.files
+        var_pxeboot_dir = "/var/pxeboot"
+        major_to_release_dir = os.path.join(constants.FEED_DIR, "rel-%s/" % major_to_release)
+        pxeboot_cfg_files = glob(os.path.join(
+            major_to_release_dir, 'pxeboot', 'pxelinux.cfg.files',
+            '*' + major_to_release))
+        for pxeboot_cfg_file in pxeboot_cfg_files:
+            if os.path.isfile(pxeboot_cfg_file):
+                shutil.copyfile(pxeboot_cfg_file, os.path.join(var_pxeboot_dir,
+                                                               'pxelinux.cfg.files',
+                                                               os.path.basename(pxeboot_cfg_file)))
+                LOG.info("Copied %s to %s", pxeboot_cfg_file, var_pxeboot_dir)
+
         feed = os.path.join(constants.FEED_DIR,
                             "rel-%s/ostree_repo" % major_to_release)
-
         LOG.info("k8s version %s" % k8s_ver)
         upgrade_start_cmd = [cmd_path, SW_VERSION, major_to_release, k8s_ver, postgresql_port,
                              feed]
