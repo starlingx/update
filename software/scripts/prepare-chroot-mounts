@@ -33,6 +33,7 @@ class ChrootMounts:
     ETC_PATH="/etc"
     PROC_PATH="/proc"
     LOG_PATH="/var/log"
+    RUN_PATH="/run"
 
     def __init__(self, checkout_dir):
         self._mount_points = {  # src:dst
@@ -54,6 +55,8 @@ class ChrootMounts:
                 os.path.normpath(f"{self.TMP_PATH}/{self.PLATFORM_CONF_PATH}"),
             os.path.normpath(f"{checkout_dir}/{self.USR_PATH}/{self.ETC_PATH}"):
                 os.path.normpath(f"{checkout_dir}/{self.ETC_PATH}"),
+            os.path.normpath(f"{self.RUN_PATH}"):
+                os.path.normpath(f"{checkout_dir}/{self.RUN_PATH}"),
         }
 
     def mount(self):
