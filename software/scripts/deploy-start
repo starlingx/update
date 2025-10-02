@@ -57,10 +57,10 @@ class DeployStart:
     def _check_directories(self):
         for directory in [self.SYSROOT_DIR]:
             if os.path.isdir(directory):
-                error_msg = (f"{directory} already exists. Please ensure to "
-                             f"clean up the environment before proceeding")
-                LOG.error(error_msg)
-                raise OSError(error_msg)
+                warning_msg = (f"{directory} already exists. Cleanup will "
+                               "be executed before proceeding")
+                LOG.warning(warning_msg)
+                self._remove_temporary_data()
 
     def _checkout_ostree_repo(self):
         # TODO(bqian) make commit_id mandatory once the commit-id is built to metadata.xml for major releases
