@@ -109,6 +109,7 @@ OSTREE_REPO = 'ostree_repo'
 SYSROOT_OSTREE_REF = "debian:starlingx"
 OSTREE_CONFIG = "config"
 OSTREE_GPG_VERIFY = "gpg-verify"
+OSTREE_ACTIVE_DEPLOYMENT_TAG = "'* '"
 
 # Sysroot
 SYSROOT_OSTREE = "/sysroot/ostree/repo"
@@ -262,3 +263,10 @@ RESERVED_WORDS_SET = {"OS_AUTH_TOKEN", "OS_AUTH_TYPE", "OS_AUTH_URL", "OS_ENDPOI
                       "OS_PROJECT_NAME", "OS_REGION_NAME", "OS_SERVICE_TOKEN", "OS_USERNAME", "OS_USER_DOMAIN_NAME",
                       "OS_SERVICE_TYPE", "OS_TENANT_ID", "OS_TENANT_NAME", "OS_USER_DOMAIN_ID", "SYSTEM_API_VERSION",
                       "SYSTEM_URL"}
+
+# Mount bind
+READ_ONLY_PERMISSION = "ro,noatime"
+READ_WRITE_PERMISSION = "rw,noatime"
+ETC = "/etc"
+USR = "/usr"
+USR_ETC = "/usr/etc"

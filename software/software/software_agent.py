@@ -777,8 +777,10 @@ class PatchAgent(PatchService):
                     try:
                         pending_deployment = ostree_utils.fetch_pending_deployment()
                         deployment_dir = constants.OSTREE_BASE_DEPLOYMENT_DIR + pending_deployment
+                        active_deployment = ostree_utils.fetch_active_deployment()
+                        active_dir = constants.OSTREE_BASE_DEPLOYMENT_DIR + active_deployment
                         setflag(mount_pending_file)
-                        ostree_utils.mount_new_deployment(deployment_dir)
+                        ostree_utils.mount_new_deployment(deployment_dir, active_dir)
                         clearflag(mount_pending_file)
                         LOG.info("Running post-install patch-scripts")
                         subprocess.check_output([run_install_software_scripts_cmd, "postinstall"],

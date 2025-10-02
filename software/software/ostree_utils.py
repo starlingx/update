@@ -462,31 +462,77 @@ def fetch_pending_deployment():
     return pending_deployment
 
 
-def mount_new_deployment(deployment_dir):
+def fetch_active_deployment():
     """
-    Unmount /usr and /etc from the file system and remount it to directory
-    <depoyment_dir>/usr and <depoyment_dir>/etc respectively
-    :param deployment_dir: a path on the filesystem which points to the pending
-    deployment
-     example: /ostree/deploy/debian/deploy/<deployment_id>
+    Fetch the deployment ID of the active deployment
+    :return: The deployment ID of the active deployment
     """
+
+    cmd = "ostree admin status | grep %s | awk '{printf $3}'" % constants.OSTREE_ACTIVE_DEPLOYMENT_TAG
+
     try:
-        new_usr_mount_dir = "%s/usr" % (deployment_dir)
-        new_etc_mount_dir = "%s/etc" % (deployment_dir)
-        sh.mount("--bind", "-o", "ro,noatime", new_usr_mount_dir, "/usr")
-        sh.mount("--bind", "-o", "rw,noatime", new_etc_mount_dir, "/etc")
+        output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to fetch ostree admin status for active deployment."
+        info_msg = "OSTree Admin Status Error: return code: %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.info(info_msg)
+        raise OSTreeCommandFail(msg)
+
+    # Store the output of the above command in a string
+    active_deployment = output.stdout.decode('utf-8')
+
+    return active_deployment
+
+
+def create_bind_mount(source, target, permissions=constants.READ_ONLY_PERMISSION):
+    """
+    Create a bind mount.
+    :param source: The source directory
+    :param target: The directory where the bind will be mounted
+    :param permissions: The access permissions
+    """
+    LOG.info("Creating bind mount from: %s, to: %s, with permissions: %s"
+             % (source, target, permissions))
+
+    try:
+        sh.mount("--bind", "-o", permissions, source, target)
     except sh.ErrorReturnCode:
-        LOG.warning("Mount failed. Retrying to mount /usr and /etc again after 5 secs.")
+        LOG.warning("Mount failed. Retrying to mount %s again after 5 secs." % target)
         time.sleep(5)
         try:
-            sh.mount("--bind", "-o", "ro,noatime", new_usr_mount_dir, "/usr")
-            sh.mount("--bind", "-o", "rw,noatime", new_etc_mount_dir, "/etc")
+            sh.mount("--bind", "-o", permissions, source, target)
         except sh.ErrorReturnCode as e:
-            msg = "Failed to re-mount /usr and /etc."
-            info_msg = "OSTree Deployment Mount Error: Output: %s" \
-                       % (e.stderr.decode("utf-8"))
+            msg = "Failed to re-mount %s" % target
+            info_msg = "OSTree Deployment Mount Error: Output: %s" % (e.stderr.decode("utf-8"))
             LOG.warning(info_msg)
             raise OSTreeCommandFail(msg)
+
+
+def mount_new_deployment(pending_dir, active_dir):
+    """
+    Create the following mounts used by an inservice patch:
+    1) /usr                 -> <pending_dir>/usr
+    2) /etc                 -> <pending_dir>/etc
+    3) <active_dir>/usr/etc -> <pending_dir>/usr/etc
+    4) <active_dir>/etc     -> <pending_dir>/etc
+    Also mounts K8s version files
+    :param pending_dir: a path on the filesystem which points to the pending
+    deployment (e.g.: /ostree/deploy/debian/deploy/<deployment_id>)
+    :param active_dir: a path on the filesystem which points to the active
+    deployment
+    """
+    try:
+        new_usr_mount_dir = "%s%s" % (pending_dir, constants.USR)
+        new_etc_mount_dir = "%s%s" % (pending_dir, constants.ETC)
+        new_usr_etc_mount_dir = "%s%s" % (pending_dir, constants.USR_ETC)
+        act_usr_etc_mount_dir = "%s%s" % (active_dir, constants.USR_ETC)
+        act_etc_mount_dir = "%s%s" % (active_dir, constants.ETC)
+
+        create_bind_mount(new_usr_mount_dir, constants.USR)
+        create_bind_mount(new_etc_mount_dir, constants.ETC, constants.READ_WRITE_PERMISSION)
+        create_bind_mount(new_usr_etc_mount_dir, act_usr_etc_mount_dir)
+        create_bind_mount(new_etc_mount_dir, act_etc_mount_dir)
     finally:
         # Handle the switch from bind mounts to symlinks for K8s versions.
         # Can be removed once the switch is complete.
