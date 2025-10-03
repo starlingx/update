@@ -20,6 +20,7 @@ import configparser
 import filecmp
 import fileinput
 import glob
+import json
 import logging as LOG
 import os
 from packaging import version
@@ -1024,6 +1025,47 @@ class FixSimplexAddressesHook(BaseHook):
             raise ValueError("Invalid params")
         LOG.info("fix-sx-addr: ceph mon: using fsid=%s, mon_name=%s, mon_ip=%s" % (fsid, mon_name, mon_ip))
 
+        # After running 'software deploy host <hostname>' cmd, pods using PVCs may become unusable in the SX environments.
+        # This happens because the IPs in /etc/ceph/ceph.conf and the ConfigMaps
+        # ("rbd-csiplugin-config", "cephfs-csiplugin-config") are not updated with the new Monitor IP.
+        #
+        # The code below fixes this issue by updating both the ConfigMaps with the new Monitor IPs and after that
+        # the /etc/ceph/ceph.conf file is updated as well
+        #
+        # Note: failures in this update will not cause 'software deploy host <hostname>' to be failed, so if
+        # this update is not applied, pods that rely on PVCs will remain unusable once 'software deploy activate'
+        # completes and platform-integ-apps is reapplied.
+        for cm_name in ["rbd-csiplugin-config", "cephfs-csiplugin-config"]:
+            LOG.info("fix-sx-addr: patching mon IP in %s config map" % cm_name)
+            try:
+                cmd = r"kubectl --kubeconfig /etc/kubernetes/admin.conf get cm %s -n kube-system -o jsonpath='{.data.config\.json}'" % cm_name
+                output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
+                output_dict = json.loads(output.stdout)
+
+                if not output_dict or "monitors" not in output_dict[0] or not output_dict[0]["monitors"]:
+                    raise KeyError("The config.json value is in unexpected format.")
+
+                output_dict[0]["monitors"][0] = f"{mon_ip}:6789"
+                data = {
+                    "data": {
+                        "config.json": json.dumps(output_dict)
+                    }
+                }
+                final_json = json.dumps(data)
+
+                cmd = f"kubectl --kubeconfig /etc/kubernetes/admin.conf patch cm {cm_name} -n kube-system --type=merge -p '{final_json}'"
+                subprocess.run(cmd, shell=True, check=True)
+            except json.JSONDecodeError as e:
+                failed_output = output.stdout if 'output' in locals() else "N/A"
+                LOG.warning("fix-sx-addr: failed deconding configmap output '%s': %s" % (' '.join(failed_output), str(e)))
+            except subprocess.CalledProcessError as e:
+                LOG.warning("fix-sx-addr: failed executing the command '%s': %s. stdout: %s - stderr: %s" % (' '.join(cmd),
+                                                                                                             str(e),
+                                                                                                             str(e.stdout),
+                                                                                                             str(e.stderr)))
+            except (KeyError, IndexError) as e:
+                LOG.warning("fix-sx-addr: failed getting configmap info '%s': %s" % (' '.join(output_dict), str(e)))
+
         cmds = [
             ["rm", "-f", "/etc/pmon.d/ceph.conf"],
             ["/etc/init.d/ceph", "stop", "mon"],
@@ -1035,6 +1077,8 @@ class FixSimplexAddressesHook(BaseHook):
             ["ceph-mon", "--name", f"mon.{mon_name}", "--inject-monmap", f"/tmp/mon-{mon_name}.map"],
             ["/etc/init.d/ceph", "start", "mon"],
             ["ln", "-s", "/etc/ceph/ceph.conf.pmon", "/etc/pmon.d/ceph.conf"],
+            ["sed", "-i", rf"s/^\(\s*public_addr\s*=\s*\).*/\1{ip}/", "/etc/ceph/ceph.conf"],
+            ["sed", "-i", rf"s/^\(\s*mon_host\s*=\s*\).*/\1{mon_ip}/", "/etc/ceph/ceph.conf"]
         ]
         if self._to_release == "24.09":
             # For /etc/init.d/ceph start mon to work during rollback, need to add mon_ip temporarily
@@ -1047,7 +1091,10 @@ class FixSimplexAddressesHook(BaseHook):
                 subprocess.check_call(cmd, timeout=60)
             LOG.info("fix-sx-addr: reconfiguration finished")
         except subprocess.CalledProcessError as e:
-            LOG.exception("fix-sx-addr: failed executing the command '%s': %s" % (' '.join(cmd), str(e)))
+            LOG.exception("fix-sx-addr: failed executing the command '%s': %s. stdout: %s - stderr: %s" % (' '.join(cmd),
+                                                                                                           str(e),
+                                                                                                           str(e.stdout),
+                                                                                                           str(e.stderr)))
             raise
 
     def run(self):
@@ -1304,8 +1351,8 @@ class HookManager(object):
             FixShadowPasswordlessChar,
             FixPSQLPermissionHook,
             DeleteControllerFeedRemoteHook,
-            RestartKubeApiServer,
             FixSimplexAddressesHook,
+            RestartKubeApiServer,
             CISSysctlFlagHookUpgrade,
             # enable usm-initialize service for next
             # reboot only if everything else is done
@@ -1316,6 +1363,7 @@ class HookManager(object):
             OOTDriverHook,
             UpdateKernelParametersHook,
             UpdateGrubConfigHook,
+            FixSimplexAddressesHook,
             RestartKubeApiServer,
             RevertSyslogConfig,
             FixedEtcMergeHook,
@@ -1324,7 +1372,6 @@ class HookManager(object):
             RevertUmaskHook,
             RevertCrtPermissionsHook,
             LogPermissionRestorerHook,
-            FixSimplexAddressesHook,
             CISSysctlFlagHookRollback,
             # enable usm-initialize service for next
             # reboot only if everything else is done
