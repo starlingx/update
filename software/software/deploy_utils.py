@@ -4,16 +4,11 @@ Copyright (c) 2025 Wind River Systems, Inc.
 SPDX-License-Identifier: Apache-2.0
 
 """
-import fcntl
 import glob
 import os
 import shutil
-import time
 
 from software.software_functions import LOG
-from software import constants
-
-_lock_file_handle = None
 
 
 def get_etc_backup_path(commit_id=None):
@@ -60,36 +55,3 @@ def delete_etc_backup():
             shutil.rmtree(backup_dir, onerror=log_delete_error)
         except Exception:
             LOG.error(f"Delete backup {backup_dir} failed.")
-
-
-def acquire_etc_lock(lockfile=constants.LOCKFILE, timeout=constants.LOCK_TIMEOUT):
-    """
-    Acquire an exclusive lock on the given lockfile, retrying until successful.
-    """
-    global _lock_file_handle
-    _lock_file_handle = open(lockfile, "w")
-
-    start_time = time.time()
-    while True:
-        try:
-            fcntl.flock(_lock_file_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            LOG.info("/etc lock acquired on %s" % lockfile)
-            break
-        except BlockingIOError:
-            elapsed = time.time() - start_time
-            if elapsed >= timeout:
-                LOG.warning("Failed to get /etc lock after %s seconds. Retrying..." % timeout)
-                start_time = time.time()
-            time.sleep(1)
-
-
-def release_etc_lock():
-    """
-    Release the previously acquired lock.
-    """
-    global _lock_file_handle
-    if _lock_file_handle:
-        fcntl.flock(_lock_file_handle, fcntl.LOCK_UN)
-        _lock_file_handle.close()
-        _lock_file_handle = None
-        LOG.info("/etc lock released")
