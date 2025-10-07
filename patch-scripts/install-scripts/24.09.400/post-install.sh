@@ -35,6 +35,10 @@ not_controller() {
     [[ "$nodetype" != "controller" ]]
 }
 
+is_dc_central_controller() {
+    [[ "$nodetype" == "controller" && "$distributed_cloud_role" == "systemcontroller" ]]
+}
+
 # Check if /etc is a bind mount
 BIND_SOURCE=$(findmnt /etc -n -o SOURCE)
 if [[ -z "$BIND_SOURCE" ]]; then
@@ -51,6 +55,15 @@ fi
 ### Services to restart in all nodes
 # Set flag to restart software-agent
 touch /run/software/.restart.software-agent
+
+### Services to restart in DC's Central Controllers
+if is_dc_central_controller; then
+    sm-restart-safe service dcmanager-manager
+    sm-restart-safe service dcmanager-api
+    sm-restart-safe service dcmanager-orchestrator
+
+    # Do not exit yet.
+fi
 
 ### Services to restart only in the active controller
 if is_active_controller; then
