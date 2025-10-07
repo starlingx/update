@@ -18,6 +18,7 @@ import re
 import shutil
 import socket
 from socket import if_nametoindex as if_nametoindex_func
+import time
 import traceback
 import webob
 
@@ -561,3 +562,20 @@ def get_iface_ip(iface_name: str, ip_family: int = socket.AF_INET) -> list[str]:
     except Exception as e:
         LOG.error("Error getting IP for interface %s: %s", iface_name, str(e))
         return []
+
+
+def interval_task(interval_sec=10, no_run_return=False):
+    def wrap(func):
+        last_run = time.time()
+
+        def exec_op(*args, **kwargs):
+            nonlocal last_run
+            cur_time = time.time()
+            if cur_time - last_run < interval_sec:
+                return no_run_return
+
+            res = func(*args, **kwargs)
+            last_run = cur_time
+            return res
+        return exec_op
+    return wrap

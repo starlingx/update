@@ -59,7 +59,6 @@ from software.exceptions import ReleaseIsoDeleteFailure
 from software.exceptions import SoftwareServiceError
 from software.exceptions import InvalidOperation
 from software.exceptions import HostAgentUnreachable
-from software.exceptions import HostIpNotFound
 from software.exceptions import MaxReleaseExceeded
 from software.exceptions import ServiceParameterNotFound
 from software.plugin import DeployPluginRunner
@@ -472,6 +471,8 @@ class PatchMessageHelloAgentAck(messages.PatchMessage):
 
         sc.hosts_lock.acquire()
         if not addr[0] in sc.hosts:
+            # TODO(bqian) delete below logging in stx12
+            LOG.info(f'{addr[0]} is added to the sc.hosts list')
             sc.hosts[addr[0]] = AgentNeighbour(addr[0])
 
         sc.hosts[addr[0]].rx_ack(self.agent_hostname,
@@ -4184,6 +4185,10 @@ class PatchController(PatchService):
         msg_warning = ""
         msg_error = ""
 
+        deploy_host = self.db_api_instance.get_deploy_host_by_hostname(hostname)
+        if deploy_host is None:
+            raise HostNotFound(hostname)
+
         try:
             ip = utils.gethostbyname(hostname)
         except socket.gaierror:
@@ -4194,7 +4199,14 @@ class PatchController(PatchService):
         # need to review the design
         # ensure ip is in table as in some cases the host is aged out from the hosts table
         if ip not in self.hosts:
-            raise HostIpNotFound(hostname)
+            # NOTE(bqian) the host ip is missing from the hosts list, but deploy should still
+            # be able to continue. get_deploy_host_by_hostname will further verify the host
+            # from a host list provided by hosts inventory.
+            # eventually self maintained hosts list should be obsoleted, replaced with
+            # deploy-host-list provided by hosts inventory. But before that, log a warning
+            # message and create the entity
+            LOG.warning(f'{ip} is added to self.hosts list from deploy-host api')
+            self.hosts[ip] = AgentNeighbour(ip)
 
         # check if host agent is reachable via message
         self.hosts[ip].is_alive = False
@@ -4208,9 +4220,6 @@ class PatchController(PatchService):
             raise HostAgentUnreachable(hostname)
 
         is_major_release = self.check_upgrade_in_progress()
-        deploy_host = self.db_api_instance.get_deploy_host_by_hostname(hostname)
-        if deploy_host is None:
-            raise HostNotFound(hostname)
 
         deploy = self.db_api_instance.get_deploy_all()[0]
         # Determine reboot required from deployment info

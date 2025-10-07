@@ -9,7 +9,6 @@ import subprocess
 from software.tests import base  # pylint: disable=unused-import # noqa: F401
 from software.software_controller import PatchController
 from software.software_controller import AgentNeighbour
-from software.exceptions import HostIpNotFound
 from software.exceptions import HostNotFound
 from software.exceptions import UpgradeNotSupported
 import unittest
@@ -511,17 +510,6 @@ class TestSoftwareController(unittest.TestCase):
         self.assertIn("Host %s not found" % hostname, result['error'])
         self.assertEqual(result['info'], "")
         self.assertEqual(result['warning'], "")
-
-    @patch('software.software_controller.PatchController.__init__', return_value=None)
-    @patch('software.software_controller.utils.gethostbyname', return_value='192.168.1.1')
-    def test_deploy_host_raises_HostIpNotFound(self,
-                                               mock_gethostbyname,  # pylint: disable=unused-argument
-                                               mock_init):  # pylint: disable=unused-argument
-        controller = PatchController()
-        controller.hosts = {}
-
-        with self.assertRaises(HostIpNotFound):
-            controller._deploy_host('test-hostname', force=True)    # pylint: disable=protected-access
 
     @patch('software.software_controller.PatchController.__init__', return_value=None)
     @patch('software.software_controller.utils.gethostbyname', return_value='192.168.1.1')

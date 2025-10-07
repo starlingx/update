@@ -880,6 +880,21 @@ class PatchAgent(PatchService):
             connections.remove(s)
             s.close()
 
+    @utils.interval_task(interval_sec=10)
+    def update_node(self):
+        update = PatchMessageHelloAgentAck()
+        update.send(self.sock_out)
+
+    @staticmethod
+    @utils.interval_task(interval_sec=30)
+    def check_for_restart():
+        # Check for in-service patch restart flag
+        if os.path.exists(insvc_software_restart_agent):
+            # Restart
+            LOG.info("In-service software restart flag detected. Exiting.")
+            os.remove(insvc_software_restart_agent)
+            exit(0)
+
     def run(self):
         # Check if bootstrap stage is completed
         if self.pre_bootstrap and cfg.get_mgmt_ip():
@@ -911,8 +926,7 @@ class PatchAgent(PatchService):
 
         connections = []
 
-        timeout = time.time() + 30.0
-        remaining = 30
+        min_interval_sec = 2
 
         while True:
             if self.pre_bootstrap and cfg.get_mgmt_ip():
@@ -927,18 +941,16 @@ class PatchAgent(PatchService):
             inputs = [self.sock_in, self.listener] + connections
             outputs = []
 
-            rlist, wlist, xlist = select.select(inputs, outputs, inputs, remaining)
-
-            remaining = int(timeout - time.time())
-            if remaining <= 0 or remaining > 30:
-                timeout = time.time() + 30.0
-                remaining = 30
+            rlist, wlist, xlist = select.select(inputs, outputs, inputs, min_interval_sec)
 
             if (len(rlist) == 0 and
                     len(wlist) == 0 and
                     len(xlist) == 0):
                 # Timeout hit
                 self.audit_socket()
+
+                self.check_for_restart()
+                self.update_node()
                 continue
 
             for s in rlist:
@@ -1023,18 +1035,6 @@ class PatchAgent(PatchService):
                 if s in connections:
                     connections.remove(s)
                     s.close()
-
-            # Check for in-service patch restart flag
-            if os.path.exists(insvc_software_restart_agent):
-                # Make sure it's safe to restart, ie. no reqs queued
-                rlist, wlist, xlist = select.select(inputs, outputs, inputs, 0)
-                if (len(rlist) == 0 and
-                        len(wlist) == 0 and
-                        len(xlist) == 0):
-                    # Restart
-                    LOG.info("In-service software restart flag detected. Exiting.")
-                    os.remove(insvc_software_restart_agent)
-                    exit(0)
 
 
 def main():
