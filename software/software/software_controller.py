@@ -4173,6 +4173,9 @@ class PatchController(PatchService):
         release = self._release_basic_checks(release_id)
         release_info = self._get_release_additional_info(release)
 
+        # Removes RR info as it already exists in software.json.
+        release_info.pop('reboot_required')
+
         if isinstance(deploy_data, list):
             deploy_data[0].update(release_info)
         else:
