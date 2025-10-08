@@ -15,9 +15,9 @@
 # automatic cleanup process fails.
 #
 
-import configparser
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -28,18 +28,32 @@ LOG = logging.getLogger('main_logger')
 
 
 class RemoveTemporaryData:
+    SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))  # this script location
+
     def __init__(self, checkout_dir):
         self._checkout_dir = checkout_dir
 
         try:
-            default_section = configparser.DEFAULTSECT
-            cp = configparser.ConfigParser()
-            with open(os.path.join(self._checkout_dir, "usr/etc/build.info"), "r") as fp:
-                cp.read_string(f"[{default_section}]\n" + fp.read())
-                self._sw_version = cp.get(default_section, "SW_VERSION").strip('"')
-        except Exception as e:
-            LOG.error(f"Error getting SW_VERSION: {str(e)}")
+            checkout_usr_etc = os.path.join(self._checkout_dir, "usr/etc")
+            self._sw_version = self.get_sw_version(checkout_usr_etc)
+        except subprocess.CalledProcessError as e:
+            LOG.warning("Attempting to get SW_VERSION it from the script path...")
+            match = re.match(r".*rel-(\d+.\d+)/", self.SCRIPT_DIR)
+            if match is None:
+                LOG.error(f"Failed to get SW_VERSION, won't proceed with the cleanup")
+                raise
+            self._sw_version = match.group(1)
+
+    @staticmethod
+    def get_sw_version(etc_dir="/etc"):
+        try:
+            p = subprocess.run(f"source {etc_dir}/build.info; echo $SW_VERSION",
+                               shell=True, check=True, capture_output=True, text=True)
+            running_sw_version = p.stdout.strip()
+        except subprocess.CalledProcessError as e:
+            LOG.error(f"Error getting SW_VERSION from {etc_dir}: {e.stderr.strip()}")
             raise
+        return running_sw_version
 
     def stop_database(self):
         db_dir = os.path.join(self._checkout_dir, "var/lib/postgresql", self._sw_version)
@@ -98,6 +112,13 @@ class RemoveTemporaryData:
             LOG.info(f"{temp_dir} removed successfully")
 
     def run(self):
+        running_sw_version = self.get_sw_version()
+        if running_sw_version == self._sw_version:
+            LOG.error(f"Cannot proceed with cleanup, running software version "
+                      f"{running_sw_version} is the same as the requested cleanup "
+                      f"version, please remove {self._checkout_dir} manually")
+            return 1
+
         LOG.info("Starting temporary data cleanup...")
         try:
             self.stop_database()
