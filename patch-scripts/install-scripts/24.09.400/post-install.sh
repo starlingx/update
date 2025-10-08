@@ -18,6 +18,7 @@ CREDENTIAL_FILE="/opt/platform/.keyring/24.09/.CREDENTIAL"
 BOOTSTRAP_COMPLETED_FLAG="/etc/platform/.bootstrap_completed"
 INITIAL_CONFIG_COMPLETE_FLAG="/etc/platform/.initial_config_complete"
 RESTART_SERVICES_FLAG="/run/software/.activate.restart-services.flag"
+PUPPET_GRUB_SCRIPT="/usr/local/bin/puppet-update-grub-env.py"
 
 loginfo() {
     echo "$(date "+%FT%T.%3N"): $NAME: $*" >> "$logfile"
@@ -46,6 +47,13 @@ fi
 if [ ! -f "$BOOTSTRAP_COMPLETED_FLAG" ] && [ ! -f "$INITIAL_CONFIG_COMPLETE_FLAG"]; then
     loginfo "Pre-bootstrap, exiting"
     exit "$PATCH_STATUS_OK"
+fi
+
+### Update kernel.env
+if [[ $subfunction =~ "lowlatency" ]]; then
+    $PUPPET_GRUB_SCRIPT --set-kernel-lowlatency
+else
+    $PUPPET_GRUB_SCRIPT --set-kernel-standard
 fi
 
 ### Services to restart in all nodes
