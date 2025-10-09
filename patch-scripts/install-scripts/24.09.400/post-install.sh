@@ -60,6 +60,10 @@ else
     $PUPPET_GRUB_SCRIPT --set-kernel-standard
 fi
 
+### Reload systemd services
+systemctl preset-all --preset-mode=full
+systemctl daemon-reload
+
 ### Services to restart in all nodes
 # Set flag to restart software-agent
 touch /run/software/.restart.software-agent
