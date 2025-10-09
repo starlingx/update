@@ -29,7 +29,10 @@ fi
 # WA to upload the activate script
 echo "Copying activate script"
 if [[ -f "$extra_script" ]]; then
-    cp "$extra_script" "$patch_migration_script_dir"
+    # Ensure the directory exists
+    mkdir -p "$patch_migration_script_dir"
+
+    cp "$extra_script" "${patch_migration_script_dir}/${activate_script_name}"
     chmod +x "${patch_migration_script_dir}/${activate_script_name}"
     echo "Copied ${activate_script_name} to ${patch_migration_script_dir}"
 else
