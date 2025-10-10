@@ -301,6 +301,16 @@ class PlatformSnapshot(LVMSnapshot):
             LOG.error("Failure updating VIM snapshot db: %s", str(e))
             raise
 
+    def get_ceph_config(self):
+        with open("/etc/platform/platform.conf", "r") as f:
+            content = f.read()
+        ceph_network = None
+        for line in content.splitlines():
+            if line.startswith("ceph_network="):
+                ceph_network = line.split("=", 1)[1].strip()
+                break
+        return ceph_network
+
     # TODO(heitormatsui): remove this function and its call after stx10 -> stx-11 upgrade
     def _restore_ceph_mon_configuration(self):
         content = self.read_file(self.SOFTWARE_JSON_CURRENT)
@@ -313,8 +323,12 @@ class PlatformSnapshot(LVMSnapshot):
                 LOG.info("Not in auto-recovery mode, skipping ceph-mon reconfiguration")
                 return
 
-            ceph_configured_flags = ["/etc/platform/.node_ceph_configured",
-                                     "/etc/platform/.node_rook_configured"]
+            ceph_net = self.get_ceph_config()
+            if not ceph_net:
+                LOG.info("Ceph mon configuration: skipping, bare metal ceph not configured")
+                return
+
+            ceph_configured_flags = ["/etc/platform/.node_ceph_configured"]
             if all(not Path(flag).exists() for flag in ceph_configured_flags):
                 LOG.info("No ceph backend configured, skipping ceph-mon reconfiguration")
                 return
@@ -323,11 +337,16 @@ class PlatformSnapshot(LVMSnapshot):
                 # get from-release controller-0 IP
                 mon_name = "controller-0"
                 mon_ip = None
+
+                mon_host_name = mon_name
+                if ceph_net == 'cluster_host':
+                    mon_host_name = "controller-0-cluster-host"
+
                 with self.mount() as mount_dir:
                     with open(Path(mount_dir) / "config" / from_release / "hosts", "r") as hosts_file:
                         for line in hosts_file.readlines():
                             content = line.strip().split()
-                            if content[1] == mon_name:
+                            if content[1] == mon_host_name:
                                 mon_ip = f"[{content[0]}]" if isinstance(mon_ip, IPv6Address) else content[0]
                                 break
 
@@ -340,7 +359,7 @@ class PlatformSnapshot(LVMSnapshot):
                 if any(not x for x in [mon_ip, fsid]):
                     LOG.error("Failure getting ceph-mon attributes")
                     raise ValueError("Invalid values: mon_ip=%s fsid=%s" % (mon_ip, fsid))
-                LOG.info("Retrieved ceph-mon parameters: mon_ip=%s fsid=%s" % (mon_ip, fsid))
+                LOG.info("Retrieved ceph-mon parameters: mon_ip=%s fsid=%s ceph_network=%s" % (mon_ip, fsid, ceph_net))
 
                 cmds = [
                     ["rm", "-f", "/etc/pmon.d/ceph.conf"],
