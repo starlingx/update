@@ -270,6 +270,37 @@ class DataMigration(object):
             LOG.exception("Failed to create rabbitmq directory. Error: %s" % str(e))
             raise
 
+    def disable_rook_ceph_crash_alarms(self):
+        """
+        Disable recent rook ceph crash alarms
+        """
+
+        if not os.path.exists("/etc/platform/.node_rook_configured"):
+            return
+
+        try:
+            # Get the value of warn_recent_interval
+            process = subprocess.run(["/usr/local/bin/ceph", "config", "get", "mgr",
+                                    "mgr/crash/warn_recent_interval"],
+                                    check=True, text=True, capture_output=True)
+
+            # Store the value of mgr/crash/warn_recent_interval to a temporary key
+            if process.stdout:
+                subprocess.run(["/usr/local/bin/ceph", "config-key", "set",
+                                "usm/mgr/crash/warn_recent_interval", process.stdout.strip()],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            # Set the value of warn_recent_interval to 0, disabling the alarm
+            subprocess.check_call(["/usr/local/bin/ceph", "config", "set", "mgr",
+                                   "mgr/crash/warn_recent_interval", "0"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            # Archive any crashes that already exist
+            subprocess.check_call(["/usr/local/bin/ceph", "crash", "archive-all"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            LOG.info("Disabling rook ceph crash alarms completed.")
+        except subprocess.CalledProcessError as cpe:
+            LOG.exception("Failed to disable rook ceph daemon crash alarms. Skipping..\nReturn code: %s. Error: %s.",
+                          cpe.returncode, cpe.output)
 
 def main(sys_argv):
     args = upgrade_utils.parse_arguments(sys_argv)
@@ -330,6 +361,9 @@ def main(sys_argv):
 
         # Create rabbitmq directory
         data_migration.create_rabbitmq_directory()
+
+        # Disable rook ceph recent crash alarms
+        data_migration.disable_rook_ceph_crash_alarms()
 
         LOG.info("Data migration preparation completed successfully.")
 
