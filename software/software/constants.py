@@ -97,6 +97,7 @@ FEED_OSTREE_BASE_DIR = "/var/www/pages/feed"
 FEED_OSTREE_URL = "http://controller:8080/feed"
 PACKAGE_FEED_DIR = "/var/www/pages/updates/debian"
 UPGRADE_FEED_DIR = FEED_DIR
+OSTREE_LOCK = "/run/.ostree_lock"
 
 # Ostree
 OSTREE_BASE_DEPLOYMENT_DIR = "/ostree/deploy/debian/deploy/"

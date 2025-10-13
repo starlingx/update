@@ -1254,6 +1254,7 @@ class PatchController(PatchService):
         # need to think of reattempt to deal w/ the potential failure.
         self.sync_from_nbr(host)
 
+    @ostree_utils.ostree_lock
     def sync_from_nbr(self, host):
         # Sync the software repo
         host_url = utils.ip_to_url(host)
@@ -1265,7 +1266,8 @@ class PatchController(PatchService):
                                               "--exclude", "software.json",
                                               "rsync://%s/software/" % host_url,
                                               "%s/" % constants.SOFTWARE_STORAGE_DIR],
-                                             stderr=subprocess.STDOUT)
+                                             stderr=subprocess.STDOUT,
+                                             text=True)
             LOG.info("Synced to mate software via rsync: %s", output)
         except subprocess.CalledProcessError as e:
             LOG.error("Failed to rsync: %s", e.output)
@@ -1277,10 +1279,11 @@ class PatchController(PatchService):
                                               "--delete",
                                               "rsync://%s/repo/" % host_url,
                                               "%s/" % repo_root_dir],
-                                             stderr=subprocess.STDOUT)
+                                             stderr=subprocess.STDOUT,
+                                             text=True)
             LOG.info("Synced to mate repo via rsync: %s", output)
-        except subprocess.CalledProcessError:
-            LOG.error("Failed to rsync: %s", output)
+        except subprocess.CalledProcessError as e:
+            LOG.error("Failed to rsync: %s", e.output)
             return False
 
         try:
@@ -1322,20 +1325,23 @@ class PatchController(PatchService):
                                                           "--depth=-1",
                                                           "--mirror",
                                                           "starlingx"],
-                                                         stderr=subprocess.STDOUT)
+                                                         stderr=subprocess.STDOUT,
+                                                         text=True)
+                        LOG.info("Synced to mate feed via ostree pull: %s", output)
                         output = subprocess.check_output(["ostree",
                                                           "summary",
                                                           "--update",
                                                           "--repo=%s" % feed_repo],
-                                                         stderr=subprocess.STDOUT)
-                    LOG.info("Synced to mate feed via ostree pull: %s", output)
+                                                         stderr=subprocess.STDOUT,
+                                                         text=True)
 
                     output = subprocess.check_output(["rsync",
                                                       "-acv",
                                                       "--delete",
                                                       "rsync://%s/update_scripts/" % host_url,
                                                       "%s/" % PATCH_MIGRATION_SCRIPT_DIR],
-                                                     stderr=subprocess.STDOUT)
+                                                     stderr=subprocess.STDOUT,
+                                                     text=True)
                     LOG.info("Synced %s folder between controllers: %s"
                              % (PATCH_MIGRATION_SCRIPT_DIR, output))
 
