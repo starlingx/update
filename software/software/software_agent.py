@@ -527,6 +527,7 @@ class PatchAgent(PatchService):
         setflag(patch_failed_file)
         self.state = constants.PATCH_AGENT_STATE_INSTALL_FAILED
 
+    @ostree_utils.ostree_lock
     def query(self, major_release=None):
         """Check current patch state """
         if not self.install_local and not check_install_uuid():

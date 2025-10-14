@@ -6,6 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 """
 import configparser
 import filecmp
+import fcntl
 import glob
 import logging
 import os
@@ -968,3 +969,21 @@ def update_deployment_kernel_env():
         msg = "Failed to manually update /boot/1/kernel.env. Err=%s" % str(e)
         LOG.info(msg)
         raise OSTreeCommandFail(msg)
+
+
+def ostree_lock(func):
+    def wrapper(*args, **kwargs):
+        with open(constants.OSTREE_LOCK, "w+") as fd:
+            # try/except block is used to ensure the lock is always released,
+            # even in the case where an unhandled exception is returned by func
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+                LOG.info("Acquired ostree lock")
+                result = func(*args, **kwargs)
+            except Exception:  # pylint: disable=try-except-raise
+                raise
+            finally:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+                LOG.info("Released ostree lock")
+            return result
+    return wrapper
