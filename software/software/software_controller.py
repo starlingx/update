@@ -770,7 +770,10 @@ class SoftwareMessageDeployStateUpdate(messages.PatchMessage):
         global sc
         self.encode()
         message = json.dumps(self.message)
-        sock.sendto(str.encode(message), (sc.controller_address, cfg.controller_port))
+        try:
+            sock.sendto(str.encode(message), (sc.controller_address, cfg.controller_port))
+        except AttributeError as e:
+            LOG.error("Failed to send message: %s", e)
 
 
 class SoftwareMessageDeployStateUpdateAck(messages.PatchMessage):
