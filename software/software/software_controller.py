@@ -1106,6 +1106,14 @@ class PatchController(PatchService):
         else:
             self.write_state_file()
 
+        # Create metadata directories
+        try:
+            for state_dir in states.DEPLOY_STATE_METADATA_DIR:
+                os.makedirs(state_dir, exist_ok=True)
+        except os.error as e:
+            msg = "Failed to create metadata directories: %s" % str(e)
+            LOG.exception(msg)
+
         # Create patch activation scripts folder
         if not os.path.exists(PATCH_MIGRATION_SCRIPT_DIR):
             os.makedirs(PATCH_MIGRATION_SCRIPT_DIR, 0o755)
@@ -1814,14 +1822,6 @@ class PatchController(PatchService):
         local_warning = ""
         local_error = ""
         upload_patch_info = []
-        try:
-            # Create the directories
-            for state_dir in states.DEPLOY_STATE_METADATA_DIR:
-                os.makedirs(state_dir, exist_ok=True)
-        except os.error:
-            msg = "Failed to create directories"
-            LOG.exception(msg)
-            raise SoftwareFail(msg)
 
         for patch_file in patch_files:
 
