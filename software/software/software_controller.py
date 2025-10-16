@@ -4377,6 +4377,7 @@ class PatchController(PatchService):
 
         if not success:
             deploy_host_state.deploy_failed()
+            raise SoftwareError(msg_error)
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
