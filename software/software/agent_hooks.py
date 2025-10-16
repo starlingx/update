@@ -257,6 +257,9 @@ class UpdateKernelParametersHook(BaseHook):
     isolcpus=<cpu_range> ==> isolcpus=nohz,domain,managed_irq,<cpu_range>
     '' ==> rcutree.kthread_prio=21 (default value if not set)
     """
+
+    PLATFORM_DIR = "/opt/platform"
+
     def read_kernel_parameters(self) -> str:
         kernel_params = ''
 
@@ -384,6 +387,234 @@ class UpdateKernelParametersHook(BaseHook):
         else:
             LOG.info(f"Successfully remove kernel parameter '{kthread_prio}'")
 
+    def read_intel_idle(self, kernel_params: str) -> str:
+        intel_idle = ''
+        for param in kernel_params.split():
+            if param.startswith('intel_idle.max_cstate='):
+                intel_idle = param
+                break
+        return intel_idle
+
+    def check_subfunction_worker(self) -> bool:
+        worker = 'worker' in self.get_platform_conf("subfunction")
+        return worker
+
+    def mount_platform_dir(self):
+        os.makedirs(self.PLATFORM_DIR, exist_ok=True)
+
+        cmd = f"nfs-mount controller-platform-nfs:{self.PLATFORM_DIR} {self.PLATFORM_DIR}"
+
+        try:
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+
+        except subprocess.CalledProcessError as e:
+            msg = ("Failed to run %s: rc=%s, output=%s"
+                   % (cmd, e.returncode, e.stderr.decode("utf-8")))
+            LOG.exception(msg)
+            raise
+
+        except Exception as e:
+            err = str(e)
+            msg = f"Failed to '{cmd}'. Error = {err}"
+            LOG.exception(msg)
+            raise
+
+        else:
+            LOG.info(f"Success to '{cmd}'")
+
+    def umount_platform_dir(self):
+        cmd = f"umount {self.PLATFORM_DIR}"
+
+        try:
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+
+        except subprocess.CalledProcessError as e:
+            msg = ("Failed to run %s: rc=%s, output=%s"
+                   % (cmd, e.returncode, e.stderr.decode("utf-8")))
+            LOG.exception(msg)
+            raise
+
+        except Exception as e:
+            err = str(e)
+            msg = f"Failed to '{cmd}'. Error = {err}"
+            LOG.exception(msg)
+            raise
+
+        LOG.info(f"Success to '{cmd}'")
+
+    def get_hieradata_file(self) -> str:
+        HIERADATA_PATH = f"/opt/platform/puppet/{self._to_release}/hieradata/"
+        HOSTNAME_FILE_PATH = "/etc/hostname"
+
+        try:
+            with open(HOSTNAME_FILE_PATH, 'r') as f:
+                hostname = f.read().strip()
+
+            hieradata_file_name = f"{hostname}.yaml"
+            hieradata_file = os.path.join(HIERADATA_PATH, hieradata_file_name)
+
+            return hieradata_file
+
+        except FileNotFoundError:
+            msg = f"Error: Hostname file not found at {HOSTNAME_FILE_PATH}"
+            LOG.exception(msg)
+            raise
+
+        except Exception as e:
+            err = str(e)
+            msg = f"An unexpected error occurred while reading hostname. Error = {err}"
+            LOG.exception(msg)
+            raise
+
+    def remove_intel_idle_if_set(self, intel_idle: str) -> None:
+        if not intel_idle:
+            LOG.info("Do nothing. Kernel param 'intel_idle.max_cstate' is already not set.")
+            return
+
+        intel_idle_key = 'intel_idle.max_cstate'
+        try:
+            LOG.info(f"Remove kernel parameter '{intel_idle_key}'")
+
+            # remove 'intel_idle.max_cstate' kernel parameter
+            cmd = f"python /usr/local/bin/puppet-update-grub-env.py --remove-kernelparams {intel_idle_key}"
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+
+        except subprocess.CalledProcessError as e:
+            msg = ("Failed to run %s: rc=%s, output=%s"
+                   % (cmd, e.returncode, e.stderr.decode("utf-8")))
+            LOG.exception(msg)
+            raise
+
+        except Exception as e:
+            err = str(e)
+            msg = f"Failed to remove {intel_idle_key} kernel parameter. Error = {err}"
+            LOG.exception(msg)
+            raise
+
+        else:
+            LOG.info(f"Successfully remove kernel parameter '{intel_idle_key}'")
+
+    def check_bios_cstate(self) -> bool:
+        YAML_FILE = self.get_hieradata_file()
+        mount_platform_dir_flag = False
+
+        if not os.path.exists(YAML_FILE):
+            self.mount_platform_dir()
+            mount_platform_dir_flag = True
+
+        cmd = f"sudo grep bios_cstate {YAML_FILE}"
+
+        try:
+            output_bytes = subprocess.check_output(
+                cmd,
+                shell=True,  # Critical for the pipe command
+                stderr=subprocess.STDOUT  # Combine stderr with stdout for easier capture/debugging
+            )
+            output = output_bytes.decode('utf-8').strip()
+
+        except subprocess.CalledProcessError as e:
+            # grep returns a non-zero exit code (1) if it doesn't find a match.
+            err = str(e)
+            msg = f"Command '{cmd}' failed (grep found no match or other issue): {err}"
+            LOG.info(msg)
+            if mount_platform_dir_flag:
+                self.umount_platform_dir()
+            return False
+
+        except Exception as e:
+            # Handle other errors
+            err = str(e)
+            msg = f"Failed to run command '{cmd}' - {err}"
+            LOG.exception(msg)
+            if mount_platform_dir_flag:
+                self.umount_platform_dir()
+            raise
+
+        if mount_platform_dir_flag:
+            self.umount_platform_dir()
+
+        return "true" in output
+
+    def check_power_management(self) -> bool:
+        YAML_FILE = self.get_hieradata_file()
+        mount_platform_dir_flag = False
+
+        if not os.path.exists(YAML_FILE):
+            self.mount_platform_dir()
+            mount_platform_dir_flag = True
+
+        cmd = f"sudo grep power-management {YAML_FILE}"
+
+        try:
+            output_bytes = subprocess.check_output(
+                cmd,
+                shell=True,  # Critical for the pipe command
+                stderr=subprocess.STDOUT  # Combine stderr with stdout for easier capture/debugging
+            )
+            output = output_bytes.decode('utf-8').strip()
+
+        except subprocess.CalledProcessError as e:
+            # grep returns a non-zero exit code (1) if it doesn't find a match.
+            err = str(e)
+            msg = f"Command '{cmd}' failed (grep found no match or other issue): {err}"
+            LOG.info(msg)
+            if mount_platform_dir_flag:
+                self.umount_platform_dir()
+            return False
+
+        except Exception as e:
+            # Handle other errors
+            err = str(e)
+            msg = f"Failed to run command '{cmd}' - {err}"
+            LOG.exception(msg)
+            if mount_platform_dir_flag:
+                self.umount_platform_dir()
+            raise
+
+        if mount_platform_dir_flag:
+            self.umount_platform_dir()
+
+        return "enabled" in output
+
+    def add_intel_idle_if_needed(self):
+        if not self.check_subfunction_worker():
+            LOG.info("Do nothing. The worker personality is not set for this node.")
+            return
+
+        kernel_params = self.read_kernel_parameters()
+        intel_idle = self.read_intel_idle(kernel_params)
+        if intel_idle:
+            LOG.info(f"Do nothing. Kernel param '{intel_idle}' is already set.")
+            return
+
+        bios_cstate = self.check_bios_cstate()
+        power_management = self.check_power_management()
+
+        # Logic replicated from puppet-manifests/src/modules/platform/manifests/compute.pp
+        # to ensure consistent verification for the rollback process.
+        if not power_management and bios_cstate:
+            intel_idle_key = 'intel_idle.max_cstate=0'
+        else:
+            intel_idle_key = ''
+
+        try:
+            if intel_idle_key:
+                LOG.info(f"Adding kernel parameter '{intel_idle_key}'")
+                cmd = f"python /usr/local/bin/puppet-update-grub-env.py --add-kernelparams {intel_idle_key}"
+                subprocess.run(cmd, shell=True, check=True, capture_output=True)
+                LOG.info(f"Successfully added kernel parameter '{intel_idle_key}'")
+            else:
+                LOG.info("Do nothing. Kernel param intel_idle.max_cstate does not need to be set")
+
+        except subprocess.CalledProcessError as e:
+            msg = ("Failed to run puppet-update-grub-env.py: rc=%s, output=%s"
+                   % (e.returncode, e.stderr.decode("utf-8")))
+            LOG.exception(msg)
+        except Exception as e:
+            err = str(e)
+            msg = f"Failed to update {intel_idle_key} kernel parameter. Error = {err}"
+            LOG.exception(msg)
+
     def run(self):
         """Execute the hook"""
         if self._action == HookManager.MAJOR_RELEASE_UPGRADE:
@@ -394,6 +625,14 @@ class UpdateKernelParametersHook(BaseHook):
 
             kthread_prio = self.read_kthread_prio(kernel_params)
             self.add_kthread_prio_if_not_set(kthread_prio)
+
+            intel_idle = self.read_intel_idle(kernel_params)
+            self.remove_intel_idle_if_set(intel_idle)
+        elif self._action == HookManager.MAJOR_RELEASE_ROLLBACK:
+            # TODO(jtognoll): remove when 25.09 is no longer a supported from
+            # release.
+            if self._to_release == '25.09':
+                self.add_intel_idle_if_needed()
 
 
 class ReconfigureKernelHook(BaseHook):
