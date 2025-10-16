@@ -18,6 +18,7 @@ import time
 import tempfile
 
 from datetime import datetime
+from ipaddress import ip_address
 from ipaddress import IPv6Address
 
 from packaging import version
@@ -347,7 +348,7 @@ class PlatformSnapshot(LVMSnapshot):
                         for line in hosts_file.readlines():
                             content = line.strip().split()
                             if content[1] == mon_host_name:
-                                mon_ip = f"[{content[0]}]" if isinstance(mon_ip, IPv6Address) else content[0]
+                                mon_ip = f"[{content[0]}]" if isinstance(ip_address(content[0]), IPv6Address) else content[0]
                                 break
 
                 # get fsid
@@ -372,6 +373,7 @@ class PlatformSnapshot(LVMSnapshot):
                     ["ln", "-s", "/etc/ceph/ceph.conf.pmon", "/etc/pmon.d/ceph.conf"],
                 ]
                 for cmd in cmds:
+                    LOG.info("Restoring ceph mon config: exec: %s", cmd)
                     self.run_command(cmd)
                 LOG.info("Restored ceph-mon parameters to %s values" % from_release)
             except Exception as e:
