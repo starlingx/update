@@ -1767,6 +1767,28 @@ class PatchController(PatchService):
             # iso validation completed
             LOG.info("Starting load import from %s", upgrade_files[constants.ISO_EXTENSION])
 
+            # Remove old releases
+            try:
+                LOG.info("Searching for releases matching major version %s", to_release_maj_ver)
+                releases_to_delete = []
+
+                for rel in self.release_collection.iterate_releases():
+                    rel_maj_ver = utils.get_major_release_version(rel.sw_version)
+                    if rel_maj_ver == to_release_maj_ver:
+                        LOG.info("Marked for deletion: release %s (%s)", rel.id, rel.sw_version)
+                        releases_to_delete.append(rel.id)
+
+                if releases_to_delete:
+                    LOG.info("Deleting %d existing releases for major version %s",
+                             len(releases_to_delete), to_release_maj_ver)
+                    self.software_release_delete_api(releases_to_delete)
+                else:
+                    LOG.info("No existing releases found for major version %s", to_release_maj_ver)
+
+            except Exception as e:
+                LOG.exception("Failed to delete existing releases for major version %s: %s",
+                              to_release_maj_ver, str(e))
+
             # from_release is set to None when uploading N-1 load
             return self._run_load_import(from_release, to_release, iso_mount_dir, upgrade_files)
 
