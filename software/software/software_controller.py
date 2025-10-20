@@ -2251,35 +2251,27 @@ class PatchController(PatchService):
             # TODO(lbonatti): treat the upcoming versioning changes
             PatchFile.delete_versioned_directory(release.sw_release)
 
-            # Delete N-1 load on system controller
-            if is_system_controller() and release_sw_version < SW_VERSION:
-                self._clean_up_inactive_load_import(release_sw_version)
-
             try:
                 # Delete the metadata
                 metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[release.state]
                 os.remove("%s/%s" % (metadata_dir, metadata_file))
             except OSError:
-                # When deleting the load from a system controller, the unavailable
-                # and commited directories are cleaned up and, if the metadata file
-                # is located in one of those, it will result in a exception since
-                # it would have been already removed by the
-                # _clean_up_inactive_load_import method
-                if (
-                    is_system_controller() and
-                    (
-                        metadata_dir == states.UNAVAILABLE_DIR or
-                        metadata_dir == states.COMMITTED_DIR
-                    )
-                ):
-                    msg = (
-                        f"Metadata file already removed: {metadata_dir}/{metadata_file}"
-                    )
-                    LOG.warning(msg)
-                else:
-                    msg = "Failed to remove metadata for %s" % release_id
-                    LOG.exception(msg)
-                    raise MetadataFail(msg)
+                msg = "Failed to remove metadata for %s" % release_id
+                LOG.exception(msg)
+                raise MetadataFail(msg)
+
+            # Delete N-1 load on system controller, if it is the latest N-1 release
+            if is_system_controller() and release_sw_version < SW_VERSION:
+                reload_release_data()
+                latest_n_1_release = True
+                for sys_release in list(self.release_collection.iterate_releases()):
+                    if sys_release.sw_version < SW_VERSION:
+                        LOG.info("Detected an inactive release")
+                        latest_n_1_release = False
+                        break
+                if latest_n_1_release:
+                    LOG.info("Latest inactive release, cleaning up inactive load import")
+                    self._clean_up_inactive_load_import(release_sw_version)
 
             self.delete_start_install_script(release_id)
             self.delete_patch_activate_scripts(release_id)
