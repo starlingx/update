@@ -44,6 +44,7 @@ class BaseHook(object):
     SYSTEMD_ETC_DIR = "%s/etc/systemd/system/multi-user.target.wants" % TO_RELEASE_OSTREE_DIR
     PLATFORM_CONF_PATH = "/etc/platform/"
     PLATFORM_CONF_FILE = os.path.join(PLATFORM_CONF_PATH, "platform.conf")
+    BACKUP_DIR = "/opt/software/backup"
 
     # keywords
     CONTROLLER = "controller"
@@ -260,13 +261,14 @@ class UpdateKernelParametersHook(BaseHook):
     """
 
     PLATFORM_DIR = "/opt/platform"
+    BOOT_ENV = "/boot/efi/EFI/BOOT/boot.env"
+    KERNEL_PARAMS_BACKUP = os.path.join(BaseHook.BACKUP_DIR, "kernel_params")
 
     def read_kernel_parameters(self) -> str:
         kernel_params = ''
 
         try:
-            BOOT_ENV = "/boot/efi/EFI/BOOT/boot.env"
-            cmd = f'grub-editenv {BOOT_ENV} list'
+            cmd = f'grub-editenv {self.BOOT_ENV} list'
             output = subprocess.check_output(cmd.split()).decode('utf-8')
         except Exception as e:
             err = str(e)
@@ -616,11 +618,34 @@ class UpdateKernelParametersHook(BaseHook):
             msg = f"Failed to update {intel_idle_key} kernel parameter. Error = {err}"
             LOG.exception(msg)
 
+    def backup_kernel_params(self, kernel_params: str):
+        os.makedirs(self.BACKUP_DIR, exist_ok=True)
+        with open(self.KERNEL_PARAMS_BACKUP, "w") as fd:
+            fd.write(kernel_params)
+        LOG.info("Backed up kernel parameters: %s", self.KERNEL_PARAMS_BACKUP)
+
+    def restore_kernel_params(self):
+        try:
+            with open(self.KERNEL_PARAMS_BACKUP, "r") as fd:
+                kernel_params = fd.read()
+                cmd = ["grub-editenv", self.BOOT_ENV, "set", f"kernel_params={kernel_params}"]
+                subprocess.run(cmd, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            LOG.error("Error restoring kernel parameters: %s", e.stderr)
+            raise
+        except Exception as e:
+            LOG.error("Error restoring kernel parameters: %s", str(e))
+            raise
+        else:  # remove backup after restored
+            LOG.info("Restored kernel parameters, deleting the backup...")
+            os.remove(self.KERNEL_PARAMS_BACKUP)
+
     def run(self):
         """Execute the hook"""
         if self._action == HookManager.MAJOR_RELEASE_UPGRADE:
             kernel_params = self.read_kernel_parameters()
 
+            self.backup_kernel_params(kernel_params)
             isolcpus = self.read_isolcpus(kernel_params)
             self.update_isolcpus(isolcpus)
 
@@ -632,6 +657,7 @@ class UpdateKernelParametersHook(BaseHook):
         elif self._action == HookManager.MAJOR_RELEASE_ROLLBACK:
             # TODO(jtognoll): remove when 25.09 is no longer a supported from
             # release.
+            self.restore_kernel_params()
             if self._to_release == '25.09':
                 self.add_intel_idle_if_needed()
 
@@ -1065,6 +1091,7 @@ class HookManager(object):
         ],
         MAJOR_RELEASE_ROLLBACK: [
             ReconfigureKernelHook,
+            UpdateKernelParametersHook,
             UpdateGrubConfigHook,
             DeleteControllerFeedRemoteHook,
             FixedEtcMergeRollBackHook,
