@@ -40,7 +40,7 @@ def get_sysinv_client():
     return sysinv_client
 
 
-def log_apps_progress_via_database(client_and_release_info, action='update'):
+def log_apps_progress_via_database(client_and_release_info, action='update', short_version=False):
     """
     Logs the progress of application updates or reverts by querying the database.
     This function retrieves all applications from the database using the provided client,
@@ -54,6 +54,8 @@ def log_apps_progress_via_database(client_and_release_info, action='update'):
             - 'to_release': The release version the apps are being updated to.
         action (str, optional): The action being performed, either 'update' or 'revert'.
             Defaults to 'update'.
+        short_version (bool, optional): If True, logs only the updated/reverted apps.
+            Defaults to False.
     Logs:
         - Lists of applications that have been updated/reverted.
         - Lists of applications that have not yet started updating/reverting.
@@ -93,14 +95,14 @@ def log_apps_progress_via_database(client_and_release_info, action='update'):
             LOG.info(f"Reverted apps up to now: {', '.join(updated)}")
         else:
             LOG.info(f"Updated apps up to now: {', '.join(updated)}")
-    if not_updated:
+    if not_updated and not short_version:
         if action == REVERT_ACTION:
             LOG.info("Applications that have not yet started the reverting process: "
                      f"{', '.join(not_updated)}")
         else:
             LOG.info("Applications that have not yet started the updating process: "
                      f"{', '.join(not_updated)}")
-    if update_in_progress:
+    if update_in_progress and not short_version:
         if action == REVERT_ACTION:
             LOG.info("Applications currently in the reverting process: "
                      f"{', '.join(update_in_progress)}")
@@ -137,9 +139,7 @@ def log_progress(
     verb = 'Reverted' if action == REVERT_ACTION else 'Updated'
     apps_msg = ''
 
-    if updated_apps and status == IN_PROGRESS_STATUS:
-        apps_msg += f"{verb} apps up to now: {', '.join(updated_apps)}."
-    elif updated_apps and status == COMPLETED_STATUS:
+    if updated_apps and status == COMPLETED_STATUS:
         apps_msg += f"{verb} apps: {', '.join(updated_apps)}."
 
     if failed_apps:
@@ -166,6 +166,8 @@ def log_progress(
     LOG.info(progress_log)
     if apps_msg:
         LOG.info(apps_msg)
+    else:
+        log_apps_progress_via_database(client_and_release_info, action=action, short_version=True)
 
 
 def check_apps_update_progress(client_and_release_info, action='update'):
