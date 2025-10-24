@@ -118,49 +118,16 @@ RC=0
 case "$1" in
     start)
         if [ "${system_mode}" = "simplex" ]; then
-            # On a simplex CPE, we need to launch the http server first,
-            # before we can do the software installation
-            LOG_TO_FILE "***** Launching lighttpd *****"
-            /etc/init.d/lighttpd start
-
-            LOG_TO_FILE "***** Starting software operation *****"
-            /usr/bin/software-agent --install 2>>$logfile
-            if [ -f ${software_install_failed_file} ]; then
-                RC=1
-                LOG_TO_FILE "***** Software operation failed *****"
-            fi
-            LOG_TO_FILE "***** Finished software operation *****"
-
-            LOG_TO_FILE "***** Shutting down lighttpd *****"
-            /etc/init.d/lighttpd stop
+            LOG_TO_FILE "***** Skipping SX legacy patch init service *****"
         else
-            check_install_uuid
-            if [ $? -ne 0 ]; then
-                # The INSTALL_UUID doesn't match the active controller, so exit
-                exit 1
-            fi
-
-            LOG_TO_FILE "***** Starting software operation *****"
-            /usr/bin/software-agent --install 2>>$logfile
-            if [ -f ${software_install_failed_file} ]; then
-                RC=1
-                LOG_TO_FILE "***** Software operation failed *****"
-            fi
-            LOG_TO_FILE "***** Finished software operation *****"
+            LOG_TO_FILE "***** Skipping DX legacy patch init service *****"
         fi
-
         ;;
     stop)
         # Nothing to do here
         ;;
     restart)
-        LOG_TO_FILE "***** Starting software operation *****"
-        /usr/bin/software-agent --install 2>>$logfile
-        if [ -f ${software_install_failed_file} ]; then
-            RC=1
-            LOG_TO_FILE "***** Software operation failed *****"
-        fi
-        LOG_TO_FILE "***** Finished software operation *****"
+        LOG_TO_FILE "***** Skipping DX legacy patch init service *****"
         ;;
     *)
         echo "Usage: $0 {start|stop|restart}"
