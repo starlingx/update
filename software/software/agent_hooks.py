@@ -1011,7 +1011,10 @@ class FixSimplexAddressesHook(BaseHook):
             if ceph_net == 'mgmt':
                 ip = self.hosts['controller-0']
             elif ceph_net == 'cluster-host':
-                ip = self.hosts['controller-0-cluster-host']
+                if 'controller-0-cluster-host' in self.hosts:
+                    ip = self.hosts['controller-0-cluster-host']
+                elif 'controller-0-infra' in self.hosts:
+                    ip = self.hosts['controller-0-infra']
 
         if not ip:
             LOG.error("fix-sx-addr: ceph mon: could not find the IP address")
