@@ -11,6 +11,7 @@ import configparser
 import json
 import logging
 import os
+from packaging import version
 import re
 import requests
 import subprocess
@@ -290,3 +291,14 @@ def to_bool(value):
     if isinstance(value, str):
         return value.lower() == 'true'
     return False
+
+
+def get_major_release_version(sw_release_version):
+    """Gets the major release for a given software version """
+    if not sw_release_version:
+        return None
+    try:
+        v = version.Version(sw_release_version)
+        return f"{v.major:02d}.{v.minor:02d}"
+    except Exception:
+        return None

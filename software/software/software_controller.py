@@ -1953,7 +1953,7 @@ class PatchController(PatchService):
 
         return local_info, local_warning, local_error, upload_patch_info
 
-    def software_release_upload(self, release_files):
+    def software_release_upload_api(self, release_files):
         """
         Upload software release files
         :return: dict of info, warning and error messages
