@@ -6,7 +6,6 @@
 # This script will remove the etcd folder of upgrade.
 #
 #
-
 import logging
 import os
 import shutil
@@ -20,8 +19,6 @@ from software.utilities.utils import configure_logging
 
 LOG = logging.getLogger('main_logger')
 ETCD_DIR_NAME = 'db'
-UPGRADE_FLAG_NAME = '.upgrade'
-ROLLBACK_FLAG_NAME = '.rollback'
 
 
 def main():
@@ -56,11 +53,10 @@ def main():
     else:
         major_release = from_major_release
     # Check delete action, upgrade and rollback scenario.
-    if action == 'delete' and (to_major_release == '25.09' or (from_major_release == '25.09'
-                                                               and to_major_release == '24.09')):
+    if action == 'delete':
         try:
             clean_up_deployment_data(major_release)
-            create_etcd_flag(from_major_release)
+            restart_etcd_service()
         except Exception as e:
             LOG.exception("Error: {}".format(e))
             res = 1
@@ -93,21 +89,6 @@ def restart_etcd_service():
         LOG.info("Restarted etcd service")
     except subprocess.CalledProcessError as e:
         LOG.error("Error restarting etcd: %s", str(e))
-
-
-def create_etcd_flag(from_release):
-    """
-    Creates the right flag accordingly to upgrade or rollback
-    """
-    if utils.compare_release_version(SW_VERSION, from_release) and from_release == '24.09':
-        etcd_upgrade_flag_path = os.path.join(constants.ETCD_PATH, UPGRADE_FLAG_NAME)
-        subprocess.run(["touch", etcd_upgrade_flag_path], check=True)
-        LOG.info("Flag %s created.", etcd_upgrade_flag_path)
-    else:
-        etcd_rollback_flag_path = os.path.join(constants.ETCD_PATH, ROLLBACK_FLAG_NAME)
-        subprocess.run(["touch", etcd_rollback_flag_path], check=True)
-        LOG.info("Flag %s created.", etcd_rollback_flag_path)
-    restart_etcd_service()
 
 
 if __name__ == "__main__":

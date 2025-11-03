@@ -167,9 +167,9 @@ def main():
 
     for retry in range(0, RETRIES):
         try:
-            if action == "activate" and from_release == "24.09":
+            if action == "activate":
                 PortierisWebhookDisabler(from_release).apply()
-            elif action == "activate-rollback" and to_release == "24.09":
+            elif action == "activate-rollback":
                 PortierisWebhookDisabler(to_release).rollback()
             else:
                 LOG.info("Nothing to do. "

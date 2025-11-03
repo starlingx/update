@@ -6,7 +6,6 @@
 # This script install fluxcd controllers in the flux-helm namespace
 # in kubernetes
 #
-# This script can be removed in the release that follows stx7
 
 import logging
 import subprocess
