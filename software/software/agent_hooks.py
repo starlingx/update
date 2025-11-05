@@ -1201,14 +1201,6 @@ class AbstractSysctlFlagHook(BaseHook, ABC):
             else:
                 LOG.debug(f"No changes detected for {config_file}. Skipping file write.")
 
-            LOG.info(f"Applying sysctl changes from {config_file}...")
-            result = subprocess.run(['sudo', 'sysctl', '-p', config_file],
-                                    capture_output=True, text=True, check=True)
-            if result.stderr:
-                LOG.error("sysctl -p errors:")
-                LOG.error(result.stderr)
-            LOG.info("sysctl changes applied successfully.")
-
         except FileNotFoundError:
             LOG.error(f"Error: Could not find the file {config_file}.")
         except PermissionError:
