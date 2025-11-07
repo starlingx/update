@@ -507,6 +507,22 @@ class CreateUSMUpgradeInProgressFlag(BaseHook):
             LOG.info("Created %s flag" % flag_file)
 
 
+# TODO(mdecastr): Only required in stx 12. Remove in future releases.
+class CreateKubeApiserverPortUpdatedFlag(BaseHook):
+    def __init__(self, attrs):
+        super().__init__(attrs)
+        self.KUBE_APISERVER_PORT_UPDATED_FLAG = \
+            os.path.join(BaseHook.PLATFORM_CONF_PATH, ".upgrade_kube_apiserver_port_updated")
+
+    def run(self):
+        if (self._to_release == '25.09' and
+                self.get_platform_conf("nodetype") == self.CONTROLLER):
+            flag_file = "%s/%s" % (self.TO_RELEASE_OSTREE_DIR,
+                                   self.KUBE_APISERVER_PORT_UPDATED_FLAG)
+            with open(flag_file, "w") as _:
+                LOG.info("Created %s flag" % flag_file)
+
+
 class RestartKubeApiServer(BaseHook):
     """
     Restart the kube-apiserver after the host rollback/upgrade to
@@ -1368,6 +1384,7 @@ class HookManager(object):
             RevertCrtPermissionsHook,
             LogPermissionRestorerHook,
             CISSysctlFlagHookRollback,
+            CreateKubeApiserverPortUpdatedFlag,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
