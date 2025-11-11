@@ -250,15 +250,11 @@ def read_log_config():
 
     global logging_default_format_string
 
-    # TODO(lbonatti) Remove this default_format when logging_default_format_string is present in stx11,
-    #  when this becomes the N release.
-    default_format = ('%(asctime)s.%(msecs)03d USM - %(exec)s [%(process)s:%(thread)d]: %(filename)s(%(lineno)s): '
-                      '%(levelname)s: %(message)s')
     config = configparser.ConfigParser(interpolation=None)
 
     config.read(software_conf)
     software_conf_mtime = os.stat(software_conf).st_mtime
-    logging_default_format_string = config.get("DEFAULT", "logging_default_format_string", fallback=default_format)
+    logging_default_format_string = config.get("DEFAULT", "logging_default_format_string")
 
 
 def get_available_gib_in_vg():

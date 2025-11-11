@@ -63,19 +63,6 @@ class DeployStart:
                 self._remove_temporary_data()
 
     def _checkout_ostree_repo(self):
-        # TODO(bqian) make commit_id mandatory once the commit-id is built to metadata.xml for major releases
-        if self._commit_id is None:
-            LOG.info("Retrieving commit-id...")
-            # get commit id, only latest for now
-            try:
-                cmd = ["ostree", "rev-parse", f"--repo={self._feed_ostree_repo_dir}", self.OSTREE_BRANCH]
-                process = subprocess.run(cmd, check=True, text=True, capture_output=True)
-                self._commit_id = process.stdout.strip()
-            except subprocess.CalledProcessError as e:
-                LOG.error(f"Failed to retrieve commit-id: {e.stderr}")
-                raise
-            LOG.info(f"Latest commit-id: {self._commit_id}")
-
         LOG.info(f"Checking out ostree repo, commit-id: {self._commit_id}")
         os.makedirs(self.STAGING_DIR, exist_ok=True)
         try:

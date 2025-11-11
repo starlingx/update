@@ -86,8 +86,6 @@ class HealthCheck(object):
                 return False
         return True
 
-    # TODO(heitormatsui): implement patch precheck targeted against USM
-    #  and implement patch precheck for subcloud
     def _check_required_patches_state(self, required_patches, allow_available=False):
         """
         Check if the required patches are in 'deployed' or 'unavailable' state,
@@ -171,8 +169,6 @@ class UpgradeHealthCheck(HealthCheck):
         super().__init__(config)
         self._ostree_feed_path = f"/var/www/pages/feed/rel-{self._major_release}"
 
-    # TODO(heitormatsui): switch from using upgrade metadata xml to
-    #  the new USM metadata format
     def _check_valid_upgrade_path(self):
         """Checks if active release to specified release is a valid upgrade path"""
         # Get active release
@@ -193,7 +189,6 @@ class UpgradeHealthCheck(HealthCheck):
         success = active_release in supported_releases
         return success, active_release, supported_releases.get(active_release, [])
 
-    # TODO(heitormatsui) do we need this check on USM? Remove if we don't
     def _check_active_is_controller_0(self):
         """Checks that active controller is controller-0"""
         controllers = self._sysinv_client.ihost.list()
@@ -205,8 +200,6 @@ class UpgradeHealthCheck(HealthCheck):
 
     def _get_supported_k8s_versions(self):
         supported_versions = []
-        # TODO(heitormatsui): is this the most appropriate way
-        #  to fetch valid k8s versions for a given release?
         cmd = ["ostree", f"--repo={self._ostree_feed_path}/ostree_repo",
                "ls", "starlingx", "/usr/local/kubernetes"]
         try:
@@ -284,7 +277,6 @@ class UpgradeHealthCheck(HealthCheck):
                        (active_version, ", ".join(supported_versions)))
         health_ok = health_ok and success
 
-        # TODO(heitormatsui) Do we need the following check on USM?
         # The load is only imported to controller-0. An upgrade can only
         # be started when controller-0 is active.
         is_controller_0 = self._check_active_is_controller_0()
