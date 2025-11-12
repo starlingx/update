@@ -125,8 +125,8 @@ def get_component_and_versions(release_name):
         return None, None, None, None
 
 
-def get_feed_path(sw_version):
-    sw_ver = get_major_release_version(sw_version)
+def get_feed_path(sw_release):
+    sw_ver = get_major_release_version(sw_release)
     path = os.path.join(constants.UPGRADE_FEED_DIR, f"rel-{sw_ver}")
     return path
 

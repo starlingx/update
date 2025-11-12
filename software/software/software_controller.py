@@ -415,17 +415,18 @@ class PatchMessageHelloAgent(messages.PatchMessage):
 class PatchMessageSendLatestFeedCommit(messages.PatchMessage):
     def __init__(self):
         messages.PatchMessage.__init__(self, messages.PATCHMSG_SEND_LATEST_FEED_COMMIT)
+        self.latest_feed_commit = None
 
     def encode(self):
-        global sc
         messages.PatchMessage.encode(self)
-        self.message['latest_feed_commit'] = sc.latest_feed_commit
+        self.message['latest_feed_commit'] = self.latest_feed_commit
 
     def handle(self, sock, addr):
         LOG.error("Should not get here")
 
-    def send(self, sock):
+    def send(self, sock, latest_feed_commit):
         global sc
+        self.latest_feed_commit = latest_feed_commit
         self.encode()
         message = json.dumps(self.message)
         sock.sendto(str.encode(message), (sc.agent_address, cfg.agent_port))
@@ -1076,12 +1077,6 @@ class PatchController(PatchService):
         self.agent_address = None
         self.patch_op_counter = 1
         reload_release_data()
-        try:
-            self.latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
-        except OSTreeCommandFail:
-            LOG.exception("Failure to fetch the feed ostree latest log while "
-                          "initializing Patch Controller")
-            self.latest_feed_commit = None
 
         self.base_pkgdata = BasePackageData()
 
@@ -1927,6 +1922,8 @@ class PatchController(PatchService):
                     }
                 })
 
+        greatest_previous_patch = None
+
         # create versioned precheck for uploaded patches
         for patch in upload_patch_info:
             filename, values = list(patch.items())[0]
@@ -1950,6 +1947,27 @@ class PatchController(PatchService):
                     LOG.warning("Required patch '%s' is not uploaded." % req_patch)
 
             PatchFile.create_versioned_precheck(patch_file, sw_release, req_patch_version=req_patch_version)
+
+            # Get the greatest uploading patch from previous release, if any exists
+            patch_sw_version = utils.get_major_release_version(sw_release)
+            if utils.compare_release_version(SW_VERSION, patch_sw_version):
+                if greatest_previous_patch is None:
+                    greatest_previous_patch = values
+                elif utils.compare_release_version(sw_release, greatest_previous_patch.get("sw_release")):
+                    greatest_previous_patch = values
+
+        # Call deploy start, if patches are from previous releases
+        # Supports any previous USM release (e.g. N-1, N-2, N-3...)
+        if greatest_previous_patch is not None:
+            deployment_list = self.previous_release_apply_order(greatest_previous_patch.get("id"))
+            rel_folder_path = utils.get_feed_path(greatest_previous_patch.get("sw_release"))
+            feed_repo = os.path.join(rel_folder_path, constants.OSTREE_REPO)
+            # Sync
+            try:
+                self.install_releases(deployment_list, feed_repo)
+                local_info += "%s from previous release installed (deploy start).\n" % deployment_list
+            except SoftwareError as e:
+                local_error += "Error when installing patches from previous release: %s" % e
 
         return local_info, local_warning, local_error, upload_patch_info
 
@@ -2071,7 +2089,7 @@ class PatchController(PatchService):
     def release_apply_order(self, release_id, running_release_sw_version):
         """
         Determines the order of releases for applying.
-        :param release_id: The appliyng release id
+        :param release_id: The applying release id
         :param running_release_sw_version: The running release major version
         :return: List of releases in the order for applying
         """
@@ -2095,6 +2113,37 @@ class PatchController(PatchService):
             rel_id for rel_id in release_dependencies
             if f"-{running_release_sw_version}." in rel_id and
             rel_id not in deployed_or_unavailable_releases_id + preinstalled_patches
+        ]
+
+        to_apply_releases.sort()
+        return to_apply_releases
+
+    def previous_release_apply_order(self, release_id):
+        """
+        Determines the order of patches from previous release for applying.
+        :param release_id: The applying release id
+        :return: List of patches from previous release in the order for applying
+        """
+
+        previous_deployed_releases_id = []
+        preinstalled_patches = []
+
+        # get all previous releases
+        for unavailable_rel in self.release_collection.iterate_releases():
+            if utils.compare_release_version(SW_VERSION, unavailable_rel.sw_version):
+                # if the commit ID exists in the metadata, then it is deployed
+                if unavailable_rel.commit_id:
+                    previous_deployed_releases_id.append(unavailable_rel.id)
+
+                if unavailable_rel.prepatched_iso:
+                    preinstalled_patches = unavailable_rel.preinstalled_patches
+
+        release_dependencies = self.get_release_dependency_list(release_id, preinstalled_patches)
+        release_dependencies.append(release_id)
+
+        to_apply_releases = [
+            rel_id for rel_id in release_dependencies
+            if rel_id not in previous_deployed_releases_id + preinstalled_patches
         ]
 
         to_apply_releases.sort()
@@ -2148,7 +2197,6 @@ class PatchController(PatchService):
                 (constants.FEED_OSTREE_BASE_DIR, release.sw_version)
 
             apt_utils.run_rollback(feed_ostree_dir, commit_id)
-            self.latest_feed_commit = commit_id
         except APTOSTreeCommandFail:
             msg = "Failure when reseting commit %s" % commit_id
             LOG.exception(msg)
@@ -2389,7 +2437,7 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-    def send_latest_feed_commit_to_agent(self):
+    def send_latest_feed_commit_to_agent(self, latest_feed_commit):
         """
         Notify the patch agent that the latest commit on the feed
         repo has been updated
@@ -2401,7 +2449,7 @@ class PatchController(PatchService):
 
         send_commit_to_agent = PatchMessageSendLatestFeedCommit()
         self.socket_lock.acquire()
-        send_commit_to_agent.send(self.sock_out)
+        send_commit_to_agent.send(self.sock_out, latest_feed_commit)
         self.socket_lock.release()
 
     def software_sync(self):
@@ -3167,6 +3215,116 @@ class PatchController(PatchService):
         # Delete metadata and all associated release files
         self.software_release_delete_api(to_delete_releases)
 
+    def install_releases(self, deployment_list, feed_repo):
+        """
+        Install the debian packages, create the commit and update the metadata.
+        """
+
+        try:
+            for release_id in deployment_list:
+                msg = "Starting deployment for: %s" % release_id
+                LOG.info(msg)
+                audit_log_info(msg)
+
+                deploy_release = self._release_basic_checks(release_id)
+                self.copy_patch_activate_scripts(release_id, deploy_release.activation_scripts)
+
+                # Run pre_start script
+                self._run_start_script(deploy_release.pre_start, release_id, constants.APPLY)
+                # Reload release in case pre_start script made some change
+                reload_release_data()
+                deploy_release = self._release_basic_checks(release_id)
+
+                all_commits = ostree_utils.get_all_feed_commits(deploy_release.sw_version)
+                latest_commit = all_commits[0]
+                target_commit = deploy_release.commit_id
+                if target_commit in all_commits:
+                    # This case is for node with prestaged data where ostree
+                    # commits have been pulled from system controller
+                    LOG.info("Commit %s already exists in feed repo for release %s"
+                             % (deploy_release.commit_id, release_id))
+
+                    # If this is the last deployment, and it is not the latest commit in feed
+                    # delete the commits until reach this, and delete metadatas
+                    if release_id == deployment_list[-1] and target_commit != latest_commit:
+                        self.cleanup_old_releases(target_commit, all_commits)
+
+                        # Reset feed to last deployment release
+                        self.reset_feed_commit(deploy_release)
+
+                    continue
+
+                packages = [pkg.split("_")[0] for pkg in deploy_release.packages]
+                if packages is None:
+                    msg = "Unable to determine packages to install"
+                    LOG.error(msg)
+                    raise MetadataFail(msg)
+
+                # Install debian package through apt-ostree
+                try:
+                    apt_utils.run_install(
+                        feed_repo,
+                        deploy_release.sw_version,
+                        deploy_release.sw_release,
+                        packages,
+                        self.pre_bootstrap)
+                except APTOSTreeCommandFail:
+                    msg = "Failed to install Debian packages."
+                    LOG.exception(msg)
+                    raise APTOSTreeCommandFail(msg)
+
+                # Get the latest commit after performing "apt-ostree install".
+                latest_feed_commit = \
+                    ostree_utils.get_feed_latest_commit(deploy_release.sw_version)
+
+                deploystate = deploy_release.state
+                metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[deploystate]
+                metadata_file = "%s/%s-metadata.xml" % (metadata_dir, release_id)
+
+                reload_release_data()
+                # NOTE(bqian) Below check an exception raise should be revisit, if applicable,
+                # should be applied to the begining of all requests.
+                if len(self.hosts) == 0:
+                    msg = "service is running in incorrect state. No registered host"
+                    raise InternalError(msg)
+
+                with self.hosts_lock:
+                    self.interim_state[release_id] = list(self.hosts)
+
+                # Update metadata
+                tree = ET.parse(metadata_file)
+                root = tree.getroot()
+
+                contents = ET.SubElement(root, constants.CONTENTS_TAG)
+                ostree = ET.SubElement(contents, constants.OSTREE_TAG)
+                self.add_text_tag_to_xml(ostree, constants.NUMBER_OF_COMMITS_TAG, "1")
+                base = ET.SubElement(ostree, constants.BASE_TAG)
+                self.add_text_tag_to_xml(base, constants.COMMIT_TAG, latest_commit)
+                self.add_text_tag_to_xml(base, constants.CHECKSUM_TAG, "")
+                commit1 = ET.SubElement(ostree, constants.COMMIT1_TAG)
+                self.add_text_tag_to_xml(commit1, constants.COMMIT_TAG, latest_feed_commit)
+                self.add_text_tag_to_xml(commit1, constants.CHECKSUM_TAG, "")
+
+                ET.indent(tree, '  ')
+                with open(metadata_file, "wb") as outfile:
+                    tree = ET.tostring(root)
+                    outfile.write(tree)
+
+                LOG.info("Latest feed commit: %s added to metadata file" % latest_feed_commit)
+
+                # Run post_start script
+                self._run_start_script(deploy_release.post_start, release_id, constants.APPLY)
+
+            # In prepatched add tombstone
+            ostree_utils.add_tombstone_commit_if_prepatched(constants.OSTREE_REF, feed_repo)
+
+            # Update the feed ostree summary
+            ostree_utils.update_repo_summary_file(feed_repo)
+        except Exception as e:
+            msg = "Failed to install releases. Reason: %s" % e
+            LOG.error(msg)
+            raise SoftwareError(msg)
+
     def install_releases_thread(self, deployment_list, feed_repo, upgrade=False, **kwargs):
         """
         In a separated thread.
@@ -3177,114 +3335,11 @@ class PatchController(PatchService):
             LOG.info("Installing releases on repo: %s" % feed_repo)
 
             try:
-                deploy_sw_version = None
-                for release_id in deployment_list:
-                    msg = "Starting deployment for: %s" % release_id
-                    LOG.info(msg)
-                    audit_log_info(msg)
+                # Process releases
+                self.install_releases(deployment_list, feed_repo)
 
-                    deploy_release = self._release_basic_checks(release_id)
-                    self.copy_patch_activate_scripts(release_id, deploy_release.activation_scripts)
-
-                    # Run pre_start script
-                    self._run_start_script(deploy_release.pre_start, release_id, constants.APPLY)
-                    # Reload release in case pre_start script made some change
-                    reload_release_data()
-                    deploy_release = self._release_basic_checks(release_id)
-
-                    deploy_sw_version = deploy_release.sw_version
-
-                    all_commits = ostree_utils.get_all_feed_commits(deploy_release.sw_version)
-                    latest_commit = all_commits[0]
-                    target_commit = deploy_release.commit_id
-                    if target_commit in all_commits:
-                        # This case is for node with prestaged data where ostree
-                        # commits have been pulled from system controller
-                        LOG.info("Commit %s already exists in feed repo for release %s"
-                                 % (deploy_release.commit_id, release_id))
-
-                        # If this is the last deployment, and it is not the latest commit in feed
-                        # delete the commits until reach this, and delete metadatas
-                        if release_id == deployment_list[-1] and target_commit != latest_commit:
-                            self.cleanup_old_releases(target_commit, all_commits)
-
-                            # Reset feed to last deployment release
-                            self.reset_feed_commit(deploy_release)
-
-                        continue
-
-                    packages = [pkg.split("_")[0] for pkg in deploy_release.packages]
-                    if packages is None:
-                        msg = "Unable to determine packages to install"
-                        LOG.error(msg)
-                        raise MetadataFail(msg)
-
-                    # Install debian package through apt-ostree
-                    try:
-                        apt_utils.run_install(
-                            feed_repo,
-                            deploy_release.sw_version,
-                            deploy_release.sw_release,
-                            packages,
-                            self.pre_bootstrap)
-                    except APTOSTreeCommandFail:
-                        msg = "Failed to install Debian packages."
-                        LOG.exception(msg)
-                        raise APTOSTreeCommandFail(msg)
-
-                    # Get the latest commit after performing "apt-ostree install".
-                    self.latest_feed_commit = \
-                        ostree_utils.get_feed_latest_commit(deploy_release.sw_version)
-
-                    deploystate = deploy_release.state
-                    metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[deploystate]
-                    metadata_file = "%s/%s-metadata.xml" % (metadata_dir, release_id)
-
-                    reload_release_data()
-                    # NOTE(bqian) Below check an exception raise should be revisit, if applicable,
-                    # should be applied to the begining of all requests.
-                    if len(self.hosts) == 0:
-                        msg = "service is running in incorrect state. No registered host"
-                        raise InternalError(msg)
-
-                    with self.hosts_lock:
-                        self.interim_state[release_id] = list(self.hosts)
-
-                    self.latest_feed_commit = \
-                        ostree_utils.get_feed_latest_commit(deploy_release.sw_version)
-
-                    # Update metadata
-                    tree = ET.parse(metadata_file)
-                    root = tree.getroot()
-
-                    contents = ET.SubElement(root, constants.CONTENTS_TAG)
-                    ostree = ET.SubElement(contents, constants.OSTREE_TAG)
-                    self.add_text_tag_to_xml(ostree, constants.NUMBER_OF_COMMITS_TAG, "1")
-                    base = ET.SubElement(ostree, constants.BASE_TAG)
-                    self.add_text_tag_to_xml(base, constants.COMMIT_TAG, latest_commit)
-                    self.add_text_tag_to_xml(base, constants.CHECKSUM_TAG, "")
-                    commit1 = ET.SubElement(ostree, constants.COMMIT1_TAG)
-                    self.add_text_tag_to_xml(commit1, constants.COMMIT_TAG, self.latest_feed_commit)
-                    self.add_text_tag_to_xml(commit1, constants.CHECKSUM_TAG, "")
-
-                    ET.indent(tree, '  ')
-                    with open(metadata_file, "wb") as outfile:
-                        tree = ET.tostring(root)
-                        outfile.write(tree)
-
-                    LOG.info("Latest feed commit: %s added to metadata file" % self.latest_feed_commit)
-
-                    # Run post_start script
-                    self._run_start_script(deploy_release.post_start, release_id, constants.APPLY)
-
-                # In prepatched add tombstone
-                ostree_utils.add_tombstone_commit_if_prepatched(constants.OSTREE_REF, feed_repo)
-
-                # Update the feed ostree summary
-                ostree_utils.update_repo_summary_file(feed_repo)
-                self.latest_feed_commit = ostree_utils.get_feed_latest_commit(deploy_sw_version)
-
-                self.send_latest_feed_commit_to_agent()
+                latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
+                self.send_latest_feed_commit_to_agent(latest_feed_commit)
                 self.software_sync()
 
                 if upgrade:
@@ -3298,7 +3353,7 @@ class PatchController(PatchService):
                 else:
                     # move the deploy state to start-done
                     deploy_state = DeployState.get_instance()
-                    deploy_state.start_done(self.latest_feed_commit)
+                    deploy_state.start_done(latest_feed_commit)
                     LOG.info("Finished releases %s deploy start" % deployment_list)
 
             except Exception as e:
@@ -3645,12 +3700,6 @@ class PatchController(PatchService):
                         msg = "service is running in incorrect state. No registered host"
                         raise InternalError(msg)
 
-                    # only update lastest_feed_commit if it is an ostree patch
-                    if release.base_commit_id is not None:
-                        # Base Commit in this release's metadata.xml file represents the latest commit
-                        # after this release has been removed from the feed repo
-                        self.latest_feed_commit = release.base_commit_id
-
                     with self.hosts_lock:
                         self.interim_state[release_id] = list(self.hosts)
 
@@ -3658,15 +3707,18 @@ class PatchController(PatchService):
                     self._run_start_script(release.post_start, release_id, constants.REMOVE)
 
                 # In prepatched add tombstone
-                if ostree_utils.add_tombstone_commit_if_prepatched(constants.OSTREE_REF, feed_repo):
-                    ostree_utils.update_repo_summary_file(feed_repo)
+                ostree_utils.add_tombstone_commit_if_prepatched(constants.OSTREE_REF, feed_repo)
+
+                # Update the feed ostree summary
+                ostree_utils.update_repo_summary_file(feed_repo)
+                latest_feed_commit = ostree_utils.get_feed_latest_commit(deploy_sw_version)
 
                 # There is no defined behavior for deploy start for patching releases, so
                 # move the deploy state to start-done
                 deploy_state = DeployState.get_instance()
-                deploy_state.start_done(self.latest_feed_commit)
+                deploy_state.start_done(latest_feed_commit)
 
-                self.send_latest_feed_commit_to_agent()
+                self.send_latest_feed_commit_to_agent(latest_feed_commit)
                 self.software_sync()
             except Exception as e:
                 msg_error = "Deploy start removing failed"
@@ -4043,7 +4095,7 @@ class PatchController(PatchService):
             from_deployment = self.release_collection.get_release_by_id(from_release_deployment)
             self.reset_feed_commit(from_deployment)
 
-            self.send_latest_feed_commit_to_agent()
+            self.send_latest_feed_commit_to_agent(from_deployment.commit_id)
             self.software_sync()
 
         major_from_release = utils.get_major_release_version(from_release)
