@@ -18,8 +18,6 @@ import time
 import tempfile
 
 from datetime import datetime
-from ipaddress import ip_address
-from ipaddress import IPv6Address
 
 from packaging import version
 from pathlib import Path
@@ -302,84 +300,6 @@ class PlatformSnapshot(LVMSnapshot):
             LOG.error("Failure updating VIM snapshot db: %s", str(e))
             raise
 
-    def get_ceph_config(self):
-        with open("/etc/platform/platform.conf", "r") as f:
-            content = f.read()
-        ceph_network = None
-        for line in content.splitlines():
-            if line.startswith("ceph_network="):
-                ceph_network = line.split("=", 1)[1].strip()
-                break
-        return ceph_network
-
-    # TODO(heitormatsui): remove this function and its call after stx10 -> stx-11 upgrade
-    def _restore_ceph_mon_configuration(self):
-        content = self.read_file(self.SOFTWARE_JSON_CURRENT)
-        deploy = content.get("deploy")[0]
-        from_release = self.get_major_release_version(deploy["from_release"])
-        state = deploy["state"]
-
-        if from_release == "24.09":
-            if state == "activate-rollback":
-                LOG.info("Not in auto-recovery mode, skipping ceph-mon reconfiguration")
-                return
-
-            ceph_net = self.get_ceph_config()
-            if not ceph_net:
-                LOG.info("Ceph mon configuration: skipping, bare metal ceph not configured")
-                return
-
-            ceph_configured_flags = ["/etc/platform/.node_ceph_configured"]
-            if all(not Path(flag).exists() for flag in ceph_configured_flags):
-                LOG.info("No ceph backend configured, skipping ceph-mon reconfiguration")
-                return
-
-            try:
-                # get from-release controller-0 IP
-                mon_name = "controller-0"
-                mon_ip = None
-
-                mon_host_name = mon_name
-                if ceph_net == 'cluster_host':
-                    mon_host_name = "controller-0-cluster-host"
-
-                with self.mount() as mount_dir:
-                    with open(Path(mount_dir) / "config" / from_release / "hosts", "r") as hosts_file:
-                        for line in hosts_file.readlines():
-                            content = line.strip().split()
-                            if content[1] == mon_host_name:
-                                mon_ip = f"[{content[0]}]" if isinstance(ip_address(content[0]), IPv6Address) else content[0]
-                                break
-
-                # get fsid
-                cp = configparser.ConfigParser()
-                cp.read("/etc/ceph/ceph.conf")
-                fsid = cp["global"]["fsid"]
-
-                # restore ceph-mon parameters to the from-release values
-                if any(not x for x in [mon_ip, fsid]):
-                    LOG.error("Failure getting ceph-mon attributes")
-                    raise ValueError("Invalid values: mon_ip=%s fsid=%s" % (mon_ip, fsid))
-                LOG.info("Retrieved ceph-mon parameters: mon_ip=%s fsid=%s ceph_network=%s" % (mon_ip, fsid, ceph_net))
-
-                cmds = [
-                    ["rm", "-f", "/etc/pmon.d/ceph.conf"],
-                    ["ceph-mon", "--name", f"mon.{mon_name}", "--extract-monmap", f"/tmp/mon-{mon_name}.map"],
-                    ["monmaptool", "--rm", f"{mon_name}", f"/tmp/mon-{mon_name}.map"],
-                    ["monmaptool", "--addv", f"{mon_name}",
-                     f"[v2:{mon_ip}:3300/0,v1:{mon_ip}:6789/0]", f"/tmp/mon-{mon_name}.map"],
-                    ["monmaptool", "--fsid", f"{fsid}", f"/tmp/mon-{mon_name}.map"],
-                    ["ceph-mon", "--name", f"mon.{mon_name}", "--inject-monmap", f"/tmp/mon-{mon_name}.map"],
-                    ["ln", "-s", "/etc/ceph/ceph.conf.pmon", "/etc/pmon.d/ceph.conf"],
-                ]
-                for cmd in cmds:
-                    LOG.info("Restoring ceph mon config: exec: %s", cmd)
-                    self.run_command(cmd)
-                LOG.info("Restored ceph-mon parameters to %s values" % from_release)
-            except Exception as e:
-                LOG.error("Failure while reverting ceph-mon config: %s", str(e))
-                raise
-
     def restore(self):
         """
         Override default restore behavior for platform-lv; which has
@@ -387,13 +307,8 @@ class PlatformSnapshot(LVMSnapshot):
         - VIM DB in snapshot needs to mounted and replaced with active
         DB otherwise during unlock it will be restored with the pre-deploy
         start content incorrectly
-        - Restore ceph-mon configuration on stx-10 to stx-11 upgrade, due
-        to the subnet range reduction that is applied on the upgrade path,
-        but only on the auto-recovery scenario (on the standard rollback
-        an agent hook will do the job)
         """
         self._replace_vim_db()
-        self._restore_ceph_mon_configuration()
         super().restore()
 
 
@@ -415,9 +330,6 @@ class LVMSnapshotManager:
         "rabbit-lv": "1G",
         "var-lv": "3G",
     }
-    # TODO(heitormatsui) revisit this value soon to check
-    #  if it matches the feature requirements and expectations
-    SNAPSHOT_EXPIRE_TIME = 86400  # 24 hours
 
     def __init__(self, vg_name=None, lvs=None):
         self._vg_name = vg_name if vg_name is not None else self.VOLUME_GROUP
