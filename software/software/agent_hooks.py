@@ -18,6 +18,7 @@ SPDX-License-Identifier: Apache-2.0
 from abc import ABC
 from abc import abstractmethod
 import configparser
+import contextlib
 import filecmp
 import glob
 import logging as LOG
@@ -919,6 +920,55 @@ class CISSysctlFlagHookRollback(AbstractSysctlFlagHook):
         LOG.debug("CIS Sysctl Flag Rollback finished.")
 
 
+class FixedEtcMergeHook(BaseHook):
+    RENAME_FILES = {
+        # N release : N+1 release
+        "sysctl.d/k8s.conf": "sysctl.d/80-k8s.conf",
+        "sysctl.d/100-monitor-tools.conf": "sysctl.d/10-monitor-tools.conf",
+    }
+
+    def _rename_file(self, src, dst):
+        with contextlib.suppress(Exception):
+            LOG.info(f"Attempting to rename '{src}' to '{dst}'.")
+            # If the source file does not exist, do nothing
+            if not os.path.exists(src):
+                return
+            # If the destination file already exists, do nothing
+            if os.path.exists(dst):
+                return
+            os.rename(src, dst)
+
+    def cleanup_deprecated_config_files(self):
+        for src, dst in self.RENAME_FILES.items():
+            deprecated_file = \
+                os.path.normpath(f"{self.TO_RELEASE_OSTREE_DIR}/etc/{src}")
+            replacement_file = \
+                os.path.normpath(f"{self.TO_RELEASE_OSTREE_DIR}/etc/{dst}")
+            self._rename_file(deprecated_file, replacement_file)
+
+    def run(self):
+        LOG.info("Starting FixedEtcMergeHook Started.")
+        self.cleanup_deprecated_config_files()
+        LOG.info("FixedEtcMergeHook finished.")
+
+
+class FixedEtcMergeRollBackHook(FixedEtcMergeHook):
+
+    def cleanup_deprecated_config_files_rollback(self):
+        for src, dst in self.RENAME_FILES.items():
+            deprecated_file = \
+                os.path.normpath(f"{self.TO_RELEASE_OSTREE_DIR}/etc/{src}")
+            replacement_file = \
+                os.path.normpath(f"{self.TO_RELEASE_OSTREE_DIR}/etc/{dst}")
+            # During rollback reverse source and destination files
+            self._rename_file(replacement_file, deprecated_file)
+
+    def run(self):
+        LOG.info("Starting FixedEtcMergeRollBackHook.")
+        self.cleanup_deprecated_config_files_rollback()
+        LOG.info("FixedEtcMergeRollBackHook finished.")
+
+
 class HookManager(object):
     """
     Object to manage the execution of agent hooks
@@ -938,6 +988,7 @@ class HookManager(object):
             UpdateGrubConfigHook,
             EnableNewServicesHook,
             DeleteControllerFeedRemoteHook,
+            FixedEtcMergeHook,
             CISSysctlFlagHookUpgrade,
             # enable usm-initialize service for next
             # reboot only if everything else is done
@@ -947,6 +998,7 @@ class HookManager(object):
             ReconfigureKernelHook,
             UpdateGrubConfigHook,
             DeleteControllerFeedRemoteHook,
+            FixedEtcMergeRollBackHook,
             CISSysctlFlagHookRollback,
             CreateKubeApiserverPortUpdatedFlag,
             # enable usm-initialize service for next
