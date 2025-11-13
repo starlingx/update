@@ -16,10 +16,11 @@ import logging
 import os
 import subprocess
 import sys
+from urllib.parse import urljoin
 
 import software_client
 
-from software_client import client as sclient
+from software_client import auth
 from software_client import exc
 from software_client.common import utils
 from software_client.constants import LOCAL_ROOT
@@ -388,7 +389,15 @@ class SoftwareClientShell(object):
                              'software commands as root (sudo)')
             raise exc.CommandError(exception_msg)
 
-        client = sclient.get_client(api_version, auth_mode, **(args.__dict__))
+        args_dict = args.__dict__
+        if args.software_url:
+            endpoint = args.software_url
+            api_version_str = 'v' + api_version
+            if api_version_str not in endpoint.split('/'):
+                endpoint = urljoin(endpoint, api_version_str)
+            args_dict['endpoint'] = endpoint
+
+        client = auth.get_client(api_version, auth_mode, **(args_dict))
 
         try:
             return args.func(client, args)

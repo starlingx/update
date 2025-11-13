@@ -8,13 +8,11 @@ from oslo_utils import importutils
 from urllib.parse import urljoin
 
 from software_client import exc
-from software_client.constants import LOCAL_ROOT
+from software_client.common import http
 
 
 SERVICE_NAME = 'usm'
 SERVICE_TYPE = 'usm'
-API_PORT = "5493"
-API_ENDPOINT = "http://127.0.0.1:" + API_PORT
 
 
 def _make_session(**kwargs):
@@ -91,25 +89,17 @@ def _make_session(**kwargs):
     return session
 
 
-def get_client(api_version, auth_mode, session=None, service_type=SERVICE_TYPE, **kwargs):
+def get_ks_client(api_version, auth_type, service_type=SERVICE_TYPE, endpoint=None, **kwargs):
     """Get an authenticated client, based on credentials in the keyword args.
 
     :param api_version: the API version to use ('1' or '2')
-    :param auth_mode: the authentication mode (token, keystone, local_root)
+    :param auth_type: the authentication mode (token, keystone, local_root)
     :param session: the session to use (if it exists)
     :param service_type: service_type should always be 'usm'
     :param kwargs: additional keyword args to pass to the client or auth
     """
-    endpoint = kwargs.get('software_url')
-
-    auth_token = kwargs.get('os_auth_token')
-    local_root = auth_mode == LOCAL_ROOT
-    # if we have an endpoint and token, use those
-    if local_root or (endpoint and auth_token):
-        pass
-    elif not session:
-        # Make a session to determine the endpoint
-        session = _make_session(**kwargs)
+    # Make a session to determine the endpoint
+    session = _make_session(**kwargs)
 
     if not endpoint:
         if session:
@@ -119,55 +109,36 @@ def get_client(api_version, auth_mode, session=None, service_type=SERVICE_TYPE, 
                 endpoint = session.get_endpoint(service_type=service_type,
                                                 interface=interface,
                                                 region_name=region_name)
+                api_version_str = 'v' + api_version
+                if api_version_str not in endpoint.split('/'):
+                    endpoint = urljoin(endpoint, api_version_str)
+
             except Exception as e:
                 msg = ('Failed to get openstack endpoint')
                 raise exc.EndpointException(
                     ('%(message)s, error was: %(error)s') % {'message': msg, 'error': e})
-        elif local_root:
-            endpoint = API_ENDPOINT
         else:
             exception_msg = ('Missing / invalid authorization credentials')
             raise exc.AmbigiousAuthSystem(exception_msg)
 
-    if endpoint:
-        api_version_str = 'v' + api_version
-        if api_version_str not in endpoint.split('/'):
-            endpoint = urljoin(endpoint, api_version_str)
-
-    if session:
-        # this will be a LegacyJsonAdapter
-        cli_kwargs = {
-            'session': session,
-            'service_type': service_type,
-            'service_name': SERVICE_NAME,
-            'interface': kwargs.get('os_endpoint_type'),
-            'region_name': kwargs.get('os_region_name'),
-            'endpoint_override': endpoint,
-            'global_request_id': kwargs.get('global_request_id'),
-            'user_agent': kwargs.get('user_agent', 'software_client'),
-            'api_version': kwargs.get('system_api_version')
-        }
-    else:
-        # This will become a httplib2 object
-        auth_ref = None
-        cli_kwargs = {
-            'local_root': local_root,
-            'token': auth_token,
-            'insecure': kwargs.get('insecure'),
-            'cacert': kwargs.get('cacert'),
-            'timeout': kwargs.get('timeout'),
-            'ca_file': kwargs.get('ca_file'),
-            'cert_file': kwargs.get('cert_file'),
-            'key_file': kwargs.get('key_file'),
-            'auth_ref': auth_ref,
-            'auth_url': kwargs.get('os_auth_url'),
-            'api_version': kwargs.get('system_api_version')
-        }
+    # this will be a LegacyJsonAdapter
+    cli_kwargs = {
+        'session': session,
+        'service_type': service_type,
+        'service_name': SERVICE_NAME,
+        'interface': kwargs.get('os_endpoint_type'),
+        'region_name': kwargs.get('os_region_name'),
+        'endpoint_override': endpoint,
+        'global_request_id': kwargs.get('global_request_id'),
+        'user_agent': kwargs.get('user_agent', 'software_client'),
+        'api_version': kwargs.get('system_api_version')
+    }
     return Client(api_version, endpoint, session, **cli_kwargs)
 
 
 def Client(version, *args, **kwargs):
+    http_adaptor = http.construct_http_client(*args, **kwargs)
     module = importutils.import_versioned_module('software_client',
                                                  version, 'client')
     client_class = getattr(module, 'Client')
-    return client_class(*args, **kwargs)
+    return client_class(http_adaptor=http_adaptor)
