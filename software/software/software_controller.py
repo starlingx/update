@@ -1085,8 +1085,6 @@ class PatchController(PatchService):
 
         self.base_pkgdata = BasePackageData()
 
-        # This is for alarm cache. It will be used to store the last raising alarm id
-        self.usm_alarm = {constants.LAST_IN_SYNC: False}
         self.hostname = socket.gethostname()
         self.fm_api = fm_api.FaultAPIs()
 
@@ -4624,23 +4622,19 @@ class PatchController(PatchService):
                                        "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, constants.CONTROLLER_FLOATING_HOSTNAME),
                                        reason_text=reason_text)
 
-    def handle_deploy_state_sync(self):
+    def handle_deploy_state_out_of_sync_alarm(self):
         """
-        Handle the deploy state sync.
+        Handle the deploy state out of sync alarm.
         If deploy state is in sync, clear the alarm.
         If not, raise the alarm.
         """
         is_in_sync = is_deploy_state_in_sync()
 
-        # Deploy in sync state is not changed, no need to update the alarm
-        if is_in_sync == self.usm_alarm.get(constants.LAST_IN_SYNC):
-            return
-
         try:
-            LOG.info("software.json in sync: %s", is_in_sync)
-            out_of_sync_alarm_fault = self.get_out_of_sync_alarm()
 
-            if out_of_sync_alarm_fault and is_in_sync:
+            has_out_of_sync_alarm = self.get_out_of_sync_alarm()
+
+            if has_out_of_sync_alarm and is_in_sync:
                 # There was an out of sync alarm raised, but local software.json is in sync,
                 # we clear the alarm
                 self.manage_software_alarm(
@@ -4648,9 +4642,8 @@ class PatchController(PatchService):
                     alarm_state=fm_constants.FM_ALARM_STATE_CLEAR,
                     entity_instance_id=constants.ALARM_INSTANCE_ID_OUT_OF_SYNC
                 )
-                # Deploy in sync state is changed, update the cache
-                self.usm_alarm[constants.LAST_IN_SYNC] = is_in_sync
-            elif (not out_of_sync_alarm_fault) and (not is_in_sync):
+                LOG.info("Deploy state became in sync, clearing the deploy out of sync alarm")
+            elif (not has_out_of_sync_alarm) and (not is_in_sync):
                 # There was no out of sync alarm raised, but local software.json is not in sync,
                 # we raise the alarm
                 self.manage_software_alarm(
@@ -4658,11 +4651,12 @@ class PatchController(PatchService):
                     alarm_state=fm_constants.FM_ALARM_STATE_SET,
                     entity_instance_id=constants.ALARM_INSTANCE_ID_OUT_OF_SYNC
                 )
-                # Deploy in sync state is changed, update the cache
-                self.usm_alarm[constants.LAST_IN_SYNC] = is_in_sync
+                LOG.info("Deploy state became out of sync, raising the deploy out of sync alarm")
             else:
-                # Shouldn't come to here
-                LOG.error("Unexpected case in handling deploy state sync. ")
+                if has_out_of_sync_alarm:
+                    LOG.info("Deploy state out of sync alarm already raised")
+                if not is_in_sync:
+                    LOG.info("Deploy state is out of sync")
 
         except Exception as ex:
             LOG.exception("Failed in handling deploy state sync. Error: %s" % str(ex))
@@ -4981,10 +4975,6 @@ class PatchControllerMainThread(threading.Thread):
             else:
                 sc.install_local = False
 
-            # Update the out of sync alarm cache when the thread starts
-            out_of_sync_alarm_fault = sc.get_out_of_sync_alarm()
-            sc.usm_alarm[constants.LAST_IN_SYNC] = not out_of_sync_alarm_fault
-
             sock_in = sc.setup_socket()
 
             while sock_in is None:
@@ -5239,7 +5229,7 @@ class PatchControllerMainThread(threading.Thread):
                                     sc.socket_lock.release()
 
                             if not sc.pre_bootstrap:
-                                sc.handle_deploy_state_sync()
+                                sc.handle_deploy_state_out_of_sync_alarm()
 
         except Exception as ex:
             # Log all exceptions
