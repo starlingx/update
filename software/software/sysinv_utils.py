@@ -7,7 +7,6 @@ SPDX-License-Identifier: Apache-2.0
 import logging
 
 from software.exceptions import SysinvClientNotInitialized
-from software.exceptions import ServiceParameterNotFound
 from software import constants
 from software import utils
 
@@ -146,17 +145,6 @@ def get_service_parameter(service=None, section=None, name=None):
             data.append(v)
 
     return data
-
-
-def get_backup_oot_drivers():
-    # get the value of backup service parameter backup_oot_drivers
-    name = "backup_oot_drivers_24.09"
-    res_list = get_service_parameter(name=name)
-    if not res_list:
-        raise ServiceParameterNotFound(name)
-
-    parameter = res_list[0]
-    return parameter["value"]
 
 
 def trigger_evaluate_apps_reapply(trigger):
