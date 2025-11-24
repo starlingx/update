@@ -37,8 +37,6 @@ override_dh_install:
 		${ROOT}/etc/init.d/software-controller-daemon
 	install -m 500 service-files/software-agent-init.sh \
 		${ROOT}/etc/init.d/software-agent
-	install -m 500 service-files/software-init.sh \
-		${ROOT}/etc/init.d/software
 	install -m 500 service-files/software-controller-init.sh \
 		${ROOT}/etc/init.d/software-controller
 	install -m 500 service-files/usm-initialize-init.sh \

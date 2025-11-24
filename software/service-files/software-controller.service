@@ -1,6 +1,6 @@
 [Unit]
 Description=Unified Software Management Controller
-After=syslog.service network-online.target software.service
+After=syslog.service network-online.target
 Before=software-agent.service software-controller-daemon.service
 
 [Service]
