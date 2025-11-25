@@ -38,6 +38,8 @@ class LVMSnapshot:
         self._lv_name = lv_name
         self._lv_size = lv_size
         self._name = f"{lv_name}_snapshot"
+        self.lvm_log_file = "/var/log/lvm_snapshot.log"
+        self._log_config = f'log {{ report_command_log=1 level=7 verbose=1 file="{self.lvm_log_file}" overwrite=0 }}'
 
     @property
     def lv_name(self):
@@ -60,6 +62,7 @@ class LVMSnapshot:
         :param check: if subprocess.CalledProcessError must be raised when rc != 0
         """
         try:
+            LOG.info("Executing command: %s" % command)
             result = subprocess.run(command, shell=shell, check=check,
                                     text=True, capture_output=True)
             return result
@@ -117,23 +120,23 @@ class LVMSnapshot:
         """
         Run the command to create a snapshot
         """
-        command = [self.get_command_abs_path("lvcreate"), "-y", "-L", self._lv_size, "-s", "-n",
-                   self._name, Path("/dev") / self._vg_name / self._lv_name]
+        command = [self.get_command_abs_path("lvcreate"), "--config", self._log_config, "-y", "-L",
+                   self._lv_size, "-s", "-n", self._name, Path("/dev") / self._vg_name / self._lv_name]
         self.run_command(command)
 
     def restore(self):
         """
         Run the command to restore a snapshot
         """
-        command = [self.get_command_abs_path("lvconvert"), "-y", "--merge",
-                   Path("/dev") / self._vg_name / self._name]
+        command = [self.get_command_abs_path("lvconvert"), "--config", self._log_config,
+                   "-y", "--merge", Path("/dev") / self._vg_name / self._name]
         self.run_command(command)
 
     def delete(self):
         """
         Run the command to delete a snapshot
         """
-        command = [self.get_command_abs_path("lvremove"), "-f",
+        command = [self.get_command_abs_path("lvremove"), "--config", self._log_config, "-f",
                    Path("/dev") / self._vg_name / self._name]
         self.run_command(command)
 

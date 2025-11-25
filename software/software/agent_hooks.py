@@ -721,6 +721,7 @@ class UpdateGrubConfigHook(BaseHook):
                 "--set-boot-variable",
                 f"system_mode={system_mode}",
             ]
+            LOG.info("Executing command: %s", cmd)
             subprocess.run(cmd, check=True, text=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             LOG.error("Failed to update system_mode in boot.env: %s", e.stderr)
