@@ -133,6 +133,9 @@ ETC_HOSTS_BACKUP_FILE_PATH = "/etc/hosts.patchbak"
 PATCH_MIGRATION_SCRIPT_DIR = "/etc/update.d"
 SOFTWARE_LOG_FILE = "/var/log/software.log"
 
+SYNC_MAX_ATTEMPTS = 3
+SYNC_RETRY_DELAY = 3    # seconds
+
 stale_hosts = []
 pending_queries = []
 
@@ -349,11 +352,25 @@ class PatchMessageSyncReq(messages.PatchMessage):
         LOG.info("Handling sync req")
 
         # NOTE(bqian) sync_from_nbr returns "False" if sync operations failed.
-        # need to think of reattempt to deal w/ the potential failure.
-        sc.sync_from_nbr(host)
+        sync_succesful = False
+        for attempt in range(1, SYNC_MAX_ATTEMPTS + 1):
+            rc = sc.sync_from_nbr(host)
 
-        resp = PatchMessageSyncComplete()
-        resp.send(sock)
+            if rc:
+                LOG.info("Sync from %s successful on attempt %d",
+                         host, attempt)
+                sync_succesful = True
+                break
+
+            LOG.warning("Sync from %s failed on attempt %d/%d",
+                        host, attempt, SYNC_MAX_ATTEMPTS)
+
+            if attempt < SYNC_MAX_ATTEMPTS:
+                time.sleep(SYNC_RETRY_DELAY)
+
+        if sync_succesful:
+            resp = PatchMessageSyncComplete()
+            resp.send(sock)
 
     def send(self, sock):
         global sc
