@@ -18,13 +18,16 @@
 import copy
 import hashlib
 import httplib2
+from http.client import RemoteDisconnected
 from keystoneauth1 import adapter
+from keystoneauth1.exceptions.connection import ConnectFailure
 import logging
 import os
 from oslo_serialization import jsonutils
 from oslo_utils import encodeutils
 import requests
 import socket
+import time
 from pecan.core import Response as PCResponse
 
 import six
@@ -52,6 +55,7 @@ UPLOAD_REQUEST_TIMEOUT = 1800
 USER_AGENT = 'software_client'
 API_VERSION = '/v1'
 DEFAULT_API_VERSION = 'latest'
+MAX_RETRIES = 3
 
 # httplib2 retries requests on socket.timeout which
 # is not idempotent and can lead to orhan objects.
@@ -199,8 +203,16 @@ class SessionClient(adapter.LegacyJsonAdapter):
         endpoint_filter.setdefault('service_type', self.service_type)
         endpoint_filter.setdefault('region_name', self.region_name)
 
-        resp = self.session.request(url, method,
-                                    raise_exc=False, **kwargs)
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                resp = self.session.request(url, method,
+                                            raise_exc=False, **kwargs)
+            except (RemoteDisconnected, ConnectFailure) as e:
+                _logger.warning(f"Attempt {attempt}/{MAX_RETRIES} failed: %s", e)
+                if attempt == MAX_RETRIES:
+                    raise
+                time.sleep(2 * attempt)
+
         # NOTE (bqian) Do not recreate and raise exceptions. Let the
         # display_error utility function to handle the well formatted
         # response for webob.exc.HTTPClientError
@@ -377,22 +389,30 @@ class HTTPClient(httplib2.Http):
             log_kargs = self._strip_credentials(kargs)
 
         self.http_log_req(_logger, args, log_kargs)
-        try:
-            response, body = self.request(*args, **kargs)
-            resp = PCResponse(body=body, status=response.get('status', None))
-        except requests.exceptions.SSLError as e:
-            raise exceptions.SslCertificateValidationError(reason=str(e))
-        except Exception as e:
-            # Wrap the low-level connection error (socket timeout, redirect
-            # limit, decompression error, etc) into our custom high-level
-            # connection exception (it is excepted in the upper layers of code)
-            _logger.debug("throwing ConnectionFailed : %s", e)
-            raise exceptions.CommunicationError(str(e))
-        finally:
-            # Temporary Fix for gate failures. RPC calls and HTTP requests
-            # seem to be stepping on each other resulting in bogus fd's being
-            # picked up for making http requests
-            self.connections.clear()
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                response, body = self.request(*args, **kargs)
+                resp = PCResponse(body=body, status=response.get('status', None))
+                break
+            except requests.exceptions.SSLError as e:
+                raise exceptions.SslCertificateValidationError(reason=str(e))
+            except (RemoteDisconnected, ConnectFailure) as e:
+                _logger.warning(f"Attempt {attempt}/{MAX_RETRIES} failed: %s", e)
+                if attempt == MAX_RETRIES:
+                    raise
+                time.sleep(2 * attempt)
+            except Exception as e:
+                # Wrap the low-level connection error (socket timeout, redirect
+                # limit, decompression error, etc) into our custom high-level
+                # connection exception (it is excepted in the upper layers of code)
+                _logger.debug("throwing ConnectionFailed : %s", e)
+                raise exceptions.CommunicationError(str(e))
+            finally:
+                # Temporary Fix for gate failures. RPC calls and HTTP requests
+                # seem to be stepping on each other resulting in bogus fd's being
+                # picked up for making http requests
+                self.connections.clear()
+                break
 
         # NOTE (bqian) Do not recreate and raise exceptions. Let the
         # display_error utility function to handle the well formatted
