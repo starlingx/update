@@ -1,6 +1,6 @@
 [Unit]
 Description=Unified Software Management Agent
-After=syslog.target network-online.target software.service
+After=syslog.target network-online.target
 Before=pmon.service
 
 [Service]
