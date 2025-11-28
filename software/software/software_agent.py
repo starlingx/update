@@ -207,9 +207,13 @@ class PatchMessageHelloAgentAck(messages.PatchMessage):
     def encode(self):
         global pa
         messages.PatchMessage.encode(self)
+        if pa.pre_bootstrap:
+            hostname = constants.PREBOOTSTRAP_HOSTNAME
+        else:
+            hostname = socket.gethostname()
         self.message['query_id'] = pa.query_id
         self.message['out_of_date'] = pa.changes
-        self.message['hostname'] = socket.gethostname()
+        self.message['hostname'] = hostname
         self.message['requires_reboot'] = pa.node_is_patched
         self.message['patch_failed'] = pa.patch_failed
         self.message['sw_version'] = SW_VERSION
