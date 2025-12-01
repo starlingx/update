@@ -1,4 +1,4 @@
-# Copyright 2013-2024 Wind River, Inc.
+# Copyright 2013-2025 Wind River, Inc.
 # Copyright 2012 Openstack Foundation
 # All Rights Reserved.
 #
@@ -26,6 +26,7 @@ from pecan.core import Response as PCResponse
 
 import six
 from six.moves.urllib.parse import urlparse
+from platform_util.oidc import oidc_utils
 
 
 try:
@@ -44,11 +45,12 @@ from software_client import exc as exceptions
 _logger = logging.getLogger(__name__)
 
 CHUNKSIZE = 1024 * 64  # 64kB
-SENSITIVE_HEADERS = ('X-Auth-Token',)
+SENSITIVE_HEADERS = ('X-Auth-Token', 'OIDC-Token')
 UPLOAD_REQUEST_TIMEOUT = 1800
 USER_AGENT = 'software_client'
 API_VERSION = '/v1'
 DEFAULT_API_VERSION = 'latest'
+OIDC = 'oidc'
 
 # httplib2 retries requests on socket.timeout which
 # is not idempotent and can lead to orhan objects.
@@ -160,6 +162,11 @@ class HTTPClient(httplib2.Http):
         self.local_root = kwargs.get('local_root', False)
         self.api_version = 'v' + kwargs.pop('api_version')
 
+        # oidc params
+        self.oidc_token = None
+        self.oidc_auth = kwargs.get('stx_auth_type') == OIDC
+        self.oidc_username = kwargs.get('oidc_username', None)
+
         # httplib2 overrides
         self.disable_ssl_certificate_validation = insecure
         self.ca_file = kwargs.get('ca_file', None)
@@ -221,7 +228,10 @@ class HTTPClient(httplib2.Http):
             kargs['headers']['Content-Type'] = self.content_type
             kargs['headers']['Accept'] = self.content_type
 
-        if self.auth_token:
+        if self.oidc_auth:
+            self._get_oidc_token()
+            kargs['headers']['OIDC-Token'] = self.oidc_token
+        elif self.auth_token:
             kargs['headers']['X-Auth-Token'] = self.auth_token
 
         if 'body' in kwargs:
@@ -255,6 +265,14 @@ class HTTPClient(httplib2.Http):
 
         return resp, body
 
+    def _get_oidc_token(self):
+        """Gets the auth data. Need to be called for every OIDC request."""
+        oidc_token = oidc_utils.get_oidc_token(self.oidc_username)
+        if oidc_token is None:
+            raise exceptions.OidcCredentialsMissing()
+
+        self.oidc_token = oidc_token
+
     def json_request(self, method, url, **kwargs):
         kwargs.setdefault('headers', {})
         kwargs['headers'].setdefault('Content-Type', 'application/json')
@@ -281,7 +299,11 @@ class HTTPClient(httplib2.Http):
 
     def upload_request_with_multipart(self, method, url, **kwargs):
         connection_url = self._get_connection_url(url)
-        kwargs['headers']['X-Auth-Token'] = self.auth_token
+        if self.oidc_auth:
+            self._get_oidc_token()
+            kwargs['headers']['OIDC-Token'] = self.oidc_token
+        else:
+            kwargs['headers']['X-Auth-Token'] = self.auth_token
 
         if self.disable_ssl_certificate_validation:
             verify = False

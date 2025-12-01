@@ -47,5 +47,26 @@ SCRATCH_DIR = "/scratch"
 
 # Authorization modes of software cli
 KEYSTONE = 'keystone'
+OIDC = 'oidc'
 TOKEN = 'token'
 LOCAL_ROOT = 'local_root'
+
+PUBLIC = 'public'
+INTERNAL = 'internal'
+ADMIN = 'admin'
+
+INTERFACE_MAP = {
+    'publicURL': PUBLIC,
+    'internalURL': INTERNAL,
+    'adminURL': ADMIN
+}
+
+SYSTEM_CONTROLLER_REGION = 'SystemController'
+REGION_ONE = 'RegionOne'
+DEFAULT_REGION = 'Default'
+
+PORT_MAP = {
+    SYSTEM_CONTROLLER_REGION: {ADMIN: '25498', INTERNAL: '25497', PUBLIC: '25497'},
+    REGION_ONE: {ADMIN: '5497', INTERNAL: '5497', PUBLIC: '15497'},
+    DEFAULT_REGION: {ADMIN: '5497', INTERNAL: '5497', PUBLIC: '15497'},
+}
