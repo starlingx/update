@@ -47,8 +47,8 @@ override_dh_install:
 		${ROOT}/etc/init.d/reset-boot-counter
 	install -m 600 service-files/software.conf \
 		${ROOT}/etc/software/software.conf
-	install -m 644 service-files/policy.json \
-		${ROOT}/etc/software/policy.json
+	install -m 644 service-files/policy.yaml \
+		${ROOT}/etc/software/policy.yaml
 	install -m 444 service-files/pmon-software-controller-daemon.conf \
 		${PMONDIR}/software-controller-daemon.conf
 	install -m 444 service-files/pmon-software-agent.conf \
