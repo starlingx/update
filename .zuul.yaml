@@ -59,6 +59,7 @@
     required-projects:
       - starlingx/config
       - starlingx/fault
+      - starlingx/utilities
     files:
       - software/*
     vars:
@@ -73,6 +74,7 @@
     required-projects:
       - starlingx/config
       - starlingx/fault
+      - starlingx/utilities
     files:
       - software/*
     vars:
