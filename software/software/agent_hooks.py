@@ -970,6 +970,38 @@ class FixedEtcMergeRollBackHook(FixedEtcMergeHook):
         LOG.info("FixedEtcMergeRollBackHook finished.")
 
 
+class OOTDriverHook(BaseHook):
+    """
+    Hook to remove out-of-tree driver kernel parameters during upgrade.
+    """
+
+    PARAM_NAME = "out-of-tree-drivers"
+
+    def _remove_kernel_param(self):
+        try:
+            cmd = (
+                "python /usr/local/bin/puppet-update-grub-env.py "
+                f"--remove-kernelparams {self.PARAM_NAME}"
+            )
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+            LOG.info("Removed kernel parameter: %s", self.PARAM_NAME)
+        except subprocess.CalledProcessError as e:
+            LOG.exception(
+                "Failed to remove kernel parameter %s: %s",
+                self.PARAM_NAME, str(e)
+            )
+
+    def run(self):
+        if self._from_release == "25.09":
+            # Upgrade path: remove kernel param
+            self._remove_kernel_param()
+            LOG.info("Upgrade OOTDriverHook completed.")
+        else:
+            LOG.info(
+                "OOTDriverHook: nothing to do for this release transition."
+            )
+
+
 class HookManager(object):
     """
     Object to manage the execution of agent hooks
@@ -982,6 +1014,7 @@ class HookManager(object):
     AGENT_HOOKS = {
         MAJOR_RELEASE_UPGRADE: [
             CreateUSMUpgradeInProgressFlag,
+            OOTDriverHook,
             EtcMerger,
             CopyPxeFilesHook,
             ReconfigureKernelHook,
