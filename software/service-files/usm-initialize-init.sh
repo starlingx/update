@@ -143,6 +143,7 @@ refresh_init_links() {
         ln -s /usr/share/starlingx/pmon.d/sssd.conf /etc/pmon.d/sssd.conf
         ln -s /usr/share/starlingx/pmon.d/sysinv-agent.conf /etc/pmon.d/sysinv-agent.conf
         ln -s /usr/share/starlingx/pmon.d/syslog-ng.conf /etc/pmon.d/syslog-ng.conf
+        ln -s /usr/share/starlingx/pmon.d/software-agent.conf /etc/pmon.d/software-agent.conf
     fi
     if [ "${storage}" = true ] ; then
         ln -s /usr/share/starlingx/pmon.d/acpid.conf /etc/pmon.d/acpid.conf
@@ -160,6 +161,7 @@ refresh_init_links() {
         ln -s /usr/share/starlingx/pmon.d/sssd.conf /etc/pmon.d/sssd.conf
         ln -s /usr/share/starlingx/pmon.d/sysinv-agent.conf /etc/pmon.d/sysinv-agent.conf
         ln -s /usr/share/starlingx/pmon.d/syslog-ng.conf /etc/pmon.d/syslog-ng.conf
+        ln -s /usr/share/starlingx/pmon.d/software-agent.conf /etc/pmon.d/software-agent.conf
     fi
 }
 
