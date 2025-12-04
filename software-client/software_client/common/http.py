@@ -17,14 +17,11 @@
 
 import copy
 import httplib2
-from http.client import RemoteDisconnected
 from keystoneauth1 import adapter
-from keystoneauth1.exceptions.connection import ConnectFailure
 import logging
 import os
 from oslo_serialization import jsonutils
 import socket
-import time
 
 import six
 
@@ -45,7 +42,6 @@ UPLOAD_REQUEST_TIMEOUT = 1800
 USER_AGENT = 'software_client'
 API_VERSION = '/v1'
 DEFAULT_API_VERSION = 'latest'
-MAX_RETRIES = 3
 
 # httplib2 retries requests on socket.timeout which
 # is not idempotent and can lead to orhan objects.
@@ -193,16 +189,8 @@ class SessionClient(adapter.LegacyJsonAdapter):
         endpoint_filter.setdefault('service_type', self.service_type)
         endpoint_filter.setdefault('region_name', self.region_name)
 
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                resp = self.session.request(url, method,
-                                            raise_exc=False, **kwargs)
-            except (RemoteDisconnected, ConnectFailure) as e:
-                _logger.warning(f"Attempt {attempt}/{MAX_RETRIES} failed: %s", e)
-                if attempt == MAX_RETRIES:
-                    raise
-                time.sleep(2 * attempt)
-
+        resp = self.session.request(url, method,
+                                    raise_exc=False, **kwargs)
         # NOTE (bqian) Do not recreate and raise exceptions. Let the
         # display_error utility function to handle the well formatted
         # response for webob.exc.HTTPClientError
