@@ -947,9 +947,24 @@ class FixedEtcMergeHook(BaseHook):
                 os.path.normpath(f"{self.TO_RELEASE_OSTREE_DIR}/etc/{dst}")
             self._rename_file(deprecated_file, replacement_file)
 
+    def restart_sysctl_service(self):
+        cmd = ["systemctl", "restart", "systemd-sysctl.service"]
+        LOG.info(f"Restarting the systemd-sysctl service: {' '.join(cmd)}")
+        try:
+            subprocess.run(cmd, check=True,
+                           text=True, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            LOG.exception(f"Failed to restart systemd-sysctl service: {e}")
+            raise
+        except Exception as e:
+            LOG.exception(f"Unexpected error restarting systemd-sysctl service: {e}")
+            raise
+
     def run(self):
         LOG.info("Starting FixedEtcMergeHook Started.")
         self.cleanup_deprecated_config_files()
+        self.restart_sysctl_service()
         LOG.info("FixedEtcMergeHook finished.")
 
 
@@ -967,6 +982,7 @@ class FixedEtcMergeRollBackHook(FixedEtcMergeHook):
     def run(self):
         LOG.info("Starting FixedEtcMergeRollBackHook.")
         self.cleanup_deprecated_config_files_rollback()
+        self.restart_sysctl_service()
         LOG.info("FixedEtcMergeRollBackHook finished.")
 
 
