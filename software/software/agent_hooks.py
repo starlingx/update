@@ -969,8 +969,27 @@ class FixedEtcMergeHook(BaseHook):
 
 
 class FixedEtcMergeRollBackHook(FixedEtcMergeHook):
+    DELETE_FILES = [
+        # N+1 release
+        "sysctl.d/05-default-sysctl.conf",
+        "sysctl.d/80-puppet.conf",
+        "sysctl.d/100-custom-user.conf",
+    ]
+
+    def _delete_file(self, file_path):
+        with contextlib.suppress(Exception):
+            LOG.info(f"Attempting to delete '{file_path}'.")
+            # If the file does not exist, do nothing
+            if not os.path.exists(file_path):
+                return
+            os.remove(file_path)
 
     def cleanup_deprecated_config_files_rollback(self):
+        for file_name in self.DELETE_FILES:
+            file_path = \
+                os.path.normpath(f"{self.TO_RELEASE_OSTREE_DIR}/etc/{file_name}")
+            self._delete_file(file_path)
+
         for src, dst in self.RENAME_FILES.items():
             deprecated_file = \
                 os.path.normpath(f"{self.TO_RELEASE_OSTREE_DIR}/etc/{src}")
