@@ -60,7 +60,6 @@ from software.exceptions import SoftwareServiceError
 from software.exceptions import InvalidOperation
 from software.exceptions import HostAgentUnreachable
 from software.exceptions import MaxReleaseExceeded
-from software.exceptions import ServiceParameterNotFound
 from software.plugin import DeployPluginRunner
 from software.release_data import reload_release_data
 from software.release_data import get_SWReleaseCollection
@@ -100,7 +99,6 @@ from software.sysinv_utils import is_system_controller
 from software.sysinv_utils import update_host_sw_version
 from software.sysinv_utils import are_all_hosts_unlocked_and_online
 from software.sysinv_utils import get_system_info
-from software.sysinv_utils import get_backup_oot_drivers
 from software.sysinv_utils import trigger_evaluate_apps_reapply
 from software.sysinv_utils import trigger_vim_host_audit
 
@@ -4323,13 +4321,6 @@ class PatchController(PatchService):
                 LOG.error("Fail to start deploy host")
                 deploy_host_state.deploy_failed()
                 raise
-
-            # Update additional_data context with backup oot_drivers key, value
-            try:
-                oot_drivers = get_backup_oot_drivers()
-            except ServiceParameterNotFound:
-                oot_drivers = ""
-            additional_data.update({"backup_oot_drivers_24.09": oot_drivers})
 
         self.hosts_lock.acquire()
         self.hosts[ip].install_pending = True

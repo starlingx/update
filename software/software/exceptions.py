@@ -190,9 +190,3 @@ class FileSystemError(SoftwareError):
     Likely fixable by a root user.
     """
     pass
-
-
-class ServiceParameterNotFound(Exception):
-    def __init__(self, name):
-        msg = f"service parameter name={name} not found"
-        super().__init__(msg)
