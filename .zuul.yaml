@@ -15,8 +15,6 @@
         - software-tox-pylint
         - software-client-tox-flake8
         - software-client-tox-pylint
-        - sw-patch-tox-pylint
-        - sw-patch-tox-py39
     gate:
       jobs:
         - openstack-tox-linters
@@ -28,8 +26,6 @@
         - software-tox-pylint
         - software-client-tox-flake8
         - software-client-tox-pylint
-        - sw-patch-tox-pylint
-        - sw-patch-tox-py39
     post:
       jobs:
         - stx-update-upload-git-mirror
@@ -108,35 +104,6 @@
 
 
 - job:
-    name: sw-patch-tox-py39
-    parent: tox-py39
-    nodeset: debian-bullseye
-    required-projects:
-      - starlingx/config
-      - starlingx/fault
-    files:
-      - sw-patch/cgcs-patch/*
-    vars:
-      tox_envlist: py39
-      python_version: 3.9
-      tox_extra_args: -c sw-patch/cgcs-patch/tox.ini
-
-- job:
-    name: sw-patch-tox-pylint
-    parent: tox
-    nodeset: debian-bullseye
-    required-projects:
-      - starlingx/config
-      - starlingx/fault
-    files:
-      - sw-patch/cgcs-patch/*
-    vars:
-      tox_envlist: pylint
-      python_version: 3.9
-      tox_extra_args: -c sw-patch/cgcs-patch/tox.ini
-
-
-- job:
     name: patch-alarm-tox-pylint
     parent: tox
     nodeset: debian-bullseye
@@ -172,9 +139,6 @@
       - starlingx/integ
     vars:
       tox_envlist: functional
-      devstack_services:
-        # StarlingX services
-        sw-patch: true
       devstack_plugins:
         # integ: https://opendev.org/starlingx/integ
         update: https://opendev.org/starlingx/update
