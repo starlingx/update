@@ -1,0 +1,15 @@
+[Unit]
+Description=StarlingX Patching
+After=syslog.target network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/etc/init.d/sw-patch start
+RemainAfterExit=yes
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target
+

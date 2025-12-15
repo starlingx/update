@@ -1,0 +1,7 @@
+[run]
+branch = True
+source = cgcs_patch
+omit = cgcs_patch/tests/*
+
+[report]
+ignore_errors = True

@@ -1,0 +1,29 @@
+<!--
+Copyright (c) 2022 Wind River Systems, Inc.
+
+SPDX-License-Identifier: Apache-2.0
+-->
+<PATCH_RECIPE>
+    <METADATA>
+        <ID>DEBIAN_INSVC</ID>
+        <SW_VERSION>00.00</SW_VERSION>
+        <SUMMARY>Debian patch test</SUMMARY>
+        <DESCRIPTION>
+            In service patch
+        </DESCRIPTION>
+        <INSTALL_INSTRUCTIONS>
+            Sample instructions
+        </INSTALL_INSTRUCTIONS>
+        <WARNINGS>
+            Sample warning
+        </WARNINGS>
+        <REBOOT_REQUIRED>N</REBOOT_REQUIRED>
+        <UNREMOVABLE>N</UNREMOVABLE>
+        <STATUS>DEV</STATUS>
+        <RESTART_SCRIPT>
+            /build/repo/cgcs-root/stx/update/patch-scripts/EXAMPLE_0001/scripts/example-restart
+        </RESTART_SCRIPT>
+        <REQUIRES>
+        </REQUIRES>
+    </METADATA>
+</PATCH_RECIPE>
