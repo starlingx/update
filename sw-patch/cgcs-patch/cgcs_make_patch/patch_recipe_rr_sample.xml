@@ -1,0 +1,26 @@
+<!--
+Copyright (c) 2022 Wind River Systems, Inc.
+
+SPDX-License-Identifier: Apache-2.0
+-->
+<PATCH_RECIPE>
+    <METADATA>
+        <ID>DEBIAN_RR</ID>
+        <SW_VERSION>00.00</SW_VERSION>
+        <SUMMARY>Debian patch test</SUMMARY>
+        <DESCRIPTION>
+            Reboot required patch
+        </DESCRIPTION>
+        <INSTALL_INSTRUCTIONS>
+            Sample instructions
+        </INSTALL_INSTRUCTIONS>
+        <WARNINGS>
+            Sample warning
+        </WARNINGS>
+        <REBOOT_REQUIRED>Y</REBOOT_REQUIRED>
+        <UNREMOVABLE>N</UNREMOVABLE>
+        <STATUS>DEV</STATUS>
+        <REQUIRES>
+        </REQUIRES>
+    </METADATA>
+</PATCH_RECIPE>

@@ -1,0 +1,4 @@
+etc/init.d
+lib/systemd/system
+usr/sbin
+usr/share/bash-completion/completions

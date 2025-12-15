@@ -1,0 +1,9 @@
+etc/patching/policy.json
+etc/patching/patching.conf
+etc/patching/patch-functions
+run/patch-tmpdirs.conf
+usr/sbin/run-patch-scripts
+etc/init.d/sw-patch
+lib/systemd/system/sw-patch.service
+etc/goenabled.d/patch_check_goenabled.sh
+etc/logrotate.d/patching
