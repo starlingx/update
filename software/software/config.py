@@ -147,7 +147,7 @@ def get_mgmt_ip():
            not os.path.exists(tsc.VOLATILE_CONTROLLER_CONFIG_COMPLETE):
             return None
     except Exception:
-        logging.info("not able to get system_mode, continue sw-patch services")
+        logging.info("not able to get system_mode, continue softwae services")
 
     mgmt_hostname = socket.gethostname()
     return utils.gethostbyname(mgmt_hostname)

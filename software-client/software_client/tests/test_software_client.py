@@ -1,7 +1,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# Copyright (c) 2023-2024 Wind River Systems, Inc.
+# Copyright (c) 2023-2025 Wind River Systems, Inc.
 #
 
 import json
@@ -124,7 +124,7 @@ class SoftwareClientNonRootMixin(object):
 
 
 class SoftwareClientHelpTestCase(SoftwareClientTestCase, SoftwareClientNonRootMixin):
-    """Test the sw-patch CLI calls that invoke 'help'
+    """Test the software CLI calls that invoke 'help'
 
     'check_for_os_region_name' is the first method called
     after args are parsed
