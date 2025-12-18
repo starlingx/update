@@ -159,16 +159,16 @@ def _display_error(status_code, text):
         return
 
     if "code" in data:
-        print("Status: %s." % data["code"], end="")
+        print("Status: %s\n" % data["code"], end="")
     else:
-        print("Status: %s." % status_code, end="")
+        print("Status: %s\n" % status_code, end="")
 
     if "description" in data:
         print(" " + data["description"])
     elif "title" in data:
         print(" " + data["title"])
     elif "error" in data:
-        print("Error:\n%s" % data["error"])
+        print("Error: %s" % data["error"])
     else:
         # any 4xx and 5xx errors does not contain API information.
         print(HTTP_ERRORS[status_code])
