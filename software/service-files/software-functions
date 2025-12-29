@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2023 Wind River Systems, Inc.
+# Copyright (c) 2023-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -12,12 +12,15 @@
 # Source platform.conf, for nodetype and subfunctions
 . /etc/platform/platform.conf
 
-declare PATCH_SCRIPTDIR=/run/software/software-scripts
-declare PRE_INSTALL_SCRIPTDIR=/run/software/software-scripts/preinstall
-declare POST_INSTALL_SCRIPTDIR=/run/software/software-scripts/postinstall
+declare PATCH_SCRIPTDIR=/var/persist/software-agent/software-scripts
+declare PRE_INSTALL_SCRIPTDIR="${PATCH_SCRIPTDIR}/preinstall"
+declare POST_INSTALL_SCRIPTDIR="${PATCH_SCRIPTDIR}/postinstall"
 declare PATCH_FLAGDIR=/run/software/software-flags
 declare -i PATCH_STATUS_OK=0
 declare -i PATCH_STATUS_FAILED=1
+
+declare BEFORE_REBOOT="before-reboot"
+declare AFTER_REBOOT="after-reboot"
 
 declare logfile=/var/log/software.log
 declare NAME=$(basename $0)
@@ -52,3 +55,10 @@ function is_locked()
     test -f /var/run/.node_locked
 }
 
+not_controller() {
+    [[ "$nodetype" != "controller" ]]
+}
+
+is_dc_central_controller() {
+    [[ "$nodetype" == "controller" && "$distributed_cloud_role" == "systemcontroller" ]]
+}

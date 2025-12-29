@@ -1,5 +1,5 @@
 """
-Copyright (c) 2024-2025 Wind River Systems, Inc.
+Copyright (c) 2024-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -46,10 +46,11 @@ ostree_pull_completed_deployment_pending_file = \
     "/var/run/ostree_pull_completed_deployment_pending"
 run_hooks_flag = "/var/run/run_hooks"
 mount_pending_file = "/var/run/mount_pending"
-insvc_software_scripts = "/run/software/software-scripts"
+install_scripts = "%s/software-scripts" % SOFTWARE_PERSIST_FOLDER
 insvc_software_flags = "/run/software/software-flags"
 insvc_software_restart_agent = "/run/software/.restart.software-agent"
 
+# script located at update/software/service-files/
 run_install_software_scripts_cmd = "/usr/sbin/run-software-scripts"
 
 pa = None
@@ -74,6 +75,11 @@ def clearflag(fname):
 
 
 def pull_install_scripts_from_controller(install_local=False):
+    # Clear install scripts folder and use an empty one
+    if os.path.exists(install_scripts):
+        shutil.rmtree(install_scripts, ignore_errors=True)
+    os.makedirs(install_scripts, 0o700)
+
     # If the rsync fails, it raises an exception to
     # the caller "handle_install()" and fails the
     # host-install request for this host.
@@ -88,7 +94,7 @@ def pull_install_scripts_from_controller(install_local=False):
                                           "--delete",
                                           "--exclude", "tmp",
                                           "rsync://%s/repo/software-scripts/" % host,
-                                          "%s/" % insvc_software_scripts],
+                                          "%s/" % install_scripts],
                                          stderr=subprocess.STDOUT)
         LOG.info("Synced restart scripts from controller: %s", output)
     except subprocess.CalledProcessError as e:
@@ -99,15 +105,21 @@ def pull_install_scripts_from_controller(install_local=False):
             raise
 
 
-def run_post_install_script():
-    LOG.info("Running post-install patch-scripts")
+def run_post_install_script(running_after_reboot=False):
+    success = True
+
+    running = constants.AFTER_REBOOT if running_after_reboot else constants.BEFORE_REBOOT
+    LOG.info(f"Running post-install patch-scripts {running}")
 
     try:
-        subprocess.check_output([run_install_software_scripts_cmd, "postinstall"],
+        subprocess.check_output([run_install_software_scripts_cmd, "postinstall", running],
                                 stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
         LOG.exception("Failed to execute post-install scripts.")
         LOG.error("Command output: %s", e.output)
+        success = False
+
+    return success
 
 
 def check_install_uuid():
@@ -673,13 +685,10 @@ class PatchAgent(PatchService):
         setflag(patch_installing_file)
 
         try:
-            # Create insvc patch directories
-            if not os.path.exists(insvc_software_scripts):
-                os.makedirs(insvc_software_scripts, 0o700)
             if not os.path.exists(insvc_software_flags):
                 os.makedirs(insvc_software_flags, 0o700)
         except Exception:
-            LOG.exception("Failed to create in-service patch directories")
+            LOG.exception("Failed to create in-service flag")
 
         # Send a hello to provide a state update
         if self.sock_out is not None:
@@ -773,9 +782,9 @@ class PatchAgent(PatchService):
                     print("This node has been patched.")
 
                 if os.path.exists(node_is_software_updated_rr_file):
-                    LOG.info("Reboot is required. Skipping patch-scripts")
+                    LOG.info("Reboot is required.")
                 elif disallow_insvc_patch:
-                    LOG.info("Disallowing patch-scripts. Treating as reboot-required")
+                    LOG.info("Treating as reboot-required")
                     setflag(node_is_software_updated_rr_file)
                 else:
                     LOG.info("Mounting the new deployment")
@@ -787,21 +796,18 @@ class PatchAgent(PatchService):
                         setflag(mount_pending_file)
                         ostree_utils.mount_new_deployment(deployment_dir, active_dir)
                         clearflag(mount_pending_file)
-                        LOG.info("Running post-install patch-scripts")
-                        subprocess.check_output([run_install_software_scripts_cmd, "postinstall"],
-                                                stderr=subprocess.STDOUT)
 
                         # Clear the node_is_patched flag, since we've handled it in-service
                         clearflag(node_is_patched_file)
                         self.node_is_patched = False
-                    except subprocess.CalledProcessError as e:
-                        LOG.exception("Failed to execute post-install scripts.")
-                        LOG.error("Command output: %s", e.output)
+                    except OSTreeCommandFail:
+                        LOG.exception("Failed to mount in-service deployment")
                         success = False
 
-        # Clear the in-service patch dirs
-        if os.path.exists(insvc_software_scripts):
-            shutil.rmtree(insvc_software_scripts, ignore_errors=True)
+                if success:
+                    LOG.info("Running post-install patch scripts")
+                    success = run_post_install_script()
+
         if os.path.exists(insvc_software_flags):
             shutil.rmtree(insvc_software_flags, ignore_errors=True)
 
@@ -1062,7 +1068,7 @@ def main():
     # Run on reboot after the node was updated by a reboot required patch/ISO
     if os.path.exists(node_is_software_updated_rr_file):
         ostree_utils.delete_older_deployments()
-        run_post_install_script()
+        run_post_install_script(running_after_reboot=True)
         clearflag(node_is_software_updated_rr_file)
 
     if len(sys.argv) <= 1:
