@@ -15,6 +15,7 @@ import os
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -25,6 +26,7 @@ from lxml import etree as ElementTree
 from xml.dom import minidom
 
 import software.apt_utils as apt_utils
+import software.config as cfg
 from software.db.api import get_instance
 from software.release_verify import verify_files
 from software.release_verify import cert_type_all
@@ -84,11 +86,8 @@ def configure_logging(logtofile=True, level=logging.INFO):
     if logtofile:
         my_exec = os.path.basename(sys.argv[0])
 
-        log_format = '%(asctime)s: ' \
-                     + my_exec + '[%(process)s:%(thread)d]: ' \
-                     + '%(filename)s(%(lineno)s): ' \
-                     + '%(levelname)s: %(message)s'
-
+        log_format = cfg.logging_default_format_string
+        log_format = log_format.replace('%(exec)s', my_exec)
         formatter = logging.Formatter(log_format, datefmt="%FT%T")
 
         LOG.setLevel(level)
@@ -96,16 +95,13 @@ def configure_logging(logtofile=True, level=logging.INFO):
         main_log_handler.setFormatter(formatter)
         LOG.addHandler(main_log_handler)
 
-        try:
-            os.chmod(logfile, 0o640)
-        except Exception:
-            pass
-
         auditLOG.setLevel(level)
         api_log_handler = logging.FileHandler(apilogfile)
         api_log_handler.setFormatter(formatter)
         auditLOG.addHandler(api_log_handler)
+
         try:
+            os.chmod(logfile, 0o640)
             os.chmod(apilogfile, 0o640)
         except Exception:
             pass
@@ -349,6 +345,8 @@ class ReleaseData(object):
                     "summary",
                     "description",
                     "install_instructions",
+                    "pre_start",
+                    "post_start",
                     "pre_install",
                     "post_install",
                     "warnings",
@@ -379,6 +377,11 @@ class ReleaseData(object):
         if release_sw_version not in package_dir:
             package_dir[release_sw_version] = "%s/%s" % (root_package_dir, release_sw_version)
             repo_dir[release_sw_version] = "%s/rel-%s" % (repo_root_dir, release_sw_version)
+
+        self.metadata[release_id]["preinstalled_patches"] = []
+        for req in root.findall("preinstalled_patches"):
+            for patch_id in req.findall("id"):
+                self.metadata[release_id]["preinstalled_patches"].append(patch_id.text)
 
         self.metadata[release_id]["requires"] = []
         for req in root.findall("requires"):
@@ -677,14 +680,19 @@ class PatchFile(object):
         # Filelist used for signature validation and verification
         filelist = ["metadata.tar", "software.tar"]
 
-        # Check if conditional scripts are inside the patch
+        # Check if conditional files are inside the patch
         # If yes then add them to signature checklist
-        if "semantics.tar" in [f.name for f in tar.getmembers()]:
-            filelist.append("semantics.tar")
-        if "pre-install.sh" in [f.name for f in tar.getmembers()]:
-            filelist.append("pre-install.sh")
-        if "post-install.sh" in [f.name for f in tar.getmembers()]:
-            filelist.append("post-install.sh")
+        tar_names = {f.name for f in tar.getmembers()}
+        scripts = [
+            "semantics.tar",
+            "extra.tar",
+            "pre-start.sh",
+            "post-start.sh",
+            "pre-install.sh",
+            "post-install.sh"]
+        for script in scripts:
+            if script in tar_names:
+                filelist.append(script)
 
         for f in filelist:
             tar.extract(f, path=dest)
@@ -849,7 +857,7 @@ class PatchFile(object):
         error_msg = None
 
         abs_patch = os.path.abspath(patch)
-        abs_metadata_dir = os.path.abspath(metadata_dir)
+
         # Create a temporary working directory
         tmpdir = tempfile.mkdtemp(prefix="patch_")
 
@@ -869,10 +877,11 @@ class PatchFile(object):
                 msg = "Unable to extract patch ID"
                 raise ReleaseValidationFailure(error=msg)
 
+            patch_sw_release = thispatch.metadata[patch_id]["sw_version"]
+            patch_sw_version = utils.get_major_release_version(patch_sw_release)
+
             if not metadata_only and base_pkgdata is not None:
                 # Run version validation tests first
-                patch_sw_version = utils.get_major_release_version(
-                    thispatch.metadata[patch_id]["sw_version"])
                 if utils.compare_release_version(constants.LOWEST_MAJOR_RELEASE_FOR_PATCH_SUPPORT,
                                                  patch_sw_version):
                     msg = "Software patching is supported starting from release %s and later" % (
@@ -880,7 +889,8 @@ class PatchFile(object):
                     LOG.exception(msg)
                     raise ReleaseValidationFailure(error=msg)
                 if not base_pkgdata.check_release(patch_sw_version):
-                    msg = "Software version %s for release %s is not installed" % (patch_sw_version, patch_id)
+                    msg = "Software version %s for release %s is not installed" % (
+                        patch_sw_version, patch_id)
                     LOG.exception(msg)
                     raise ReleaseValidationFailure(error=msg)
 
@@ -892,8 +902,10 @@ class PatchFile(object):
                     LOG.error(msg)
                     raise ReleaseMismatchFailure(error=msg)
 
-            patch_sw_version = utils.get_major_release_version(
-                thispatch.metadata[patch_id]["sw_version"])
+            metadata_dir = states.UNAVAILABLE_DIR if utils.compare_release_version(
+                SW_VERSION, patch_sw_version) else states.AVAILABLE_DIR
+            abs_metadata_dir = os.path.abspath(metadata_dir)
+
             abs_ostree_tar_dir = package_dir[patch_sw_version]
             if not os.path.exists(abs_ostree_tar_dir):
                 os.makedirs(abs_ostree_tar_dir)
@@ -907,20 +919,28 @@ class PatchFile(object):
 
             if not os.path.exists(root_scripts_dir):
                 os.makedirs(root_scripts_dir)
-            if thispatch.metadata[patch_id].get("pre_install"):
-                pre_install_script_name = thispatch.metadata[patch_id]["pre_install"]
-                shutil.move(os.path.join(tmpdir, pre_install_script_name),
-                            "%s/%s_%s" % (root_scripts_dir, patch_id, pre_install_script_name))
-            if thispatch.metadata[patch_id].get("post_install"):
-                post_install_script_name = thispatch.metadata[patch_id]["post_install"]
-                shutil.move(os.path.join(tmpdir, post_install_script_name),
-                            "%s/%s_%s" % (root_scripts_dir, patch_id, post_install_script_name))
+            # start and install scripts
+            for script in constants.PATCH_SCRIPTS:
+                script_name = thispatch.metadata[patch_id].get(script)
+                if script_name:
+                    dest_path = os.path.join(root_scripts_dir, f"{patch_id}_{script_name}")
+                    shutil.move(os.path.join(tmpdir, script_name), dest_path)
+                    os.chmod(dest_path, os.stat(dest_path).st_mode | stat.S_IXUSR)
 
-            activate_scripts = thispatch.metadata[patch_id].get("activation_scripts")
+            activate_scripts = thispatch.metadata[patch_id].get(constants.ACTIVATION_SCRIPTS)
             if activate_scripts:
                 for script in activate_scripts:
                     shutil.move(os.path.join(tmpdir, script),
                                 "%s/%s_%s" % (root_scripts_dir, patch_id, script))
+
+            # Copy extra folder if exists
+            extra_origin = os.path.join(tmpdir, "extra.tar")
+            if os.path.exists(extra_origin):
+                patch_dir = "%s/rel-%s" % (constants.SOFTWARE_STORAGE_DIR, patch_sw_release)
+                if not os.path.exists(patch_dir):
+                    os.makedirs(patch_dir)
+                shutil.move(extra_origin, patch_dir)
+                LOG.info("extra.tar copied to %s" % patch_dir)
 
         except tarfile.TarError as te:
             error_msg = "Extract software failed %s" % str(te)
@@ -1018,6 +1038,10 @@ class PatchFile(object):
             package_list = []
             list_size = 25  # Number of files per group
 
+            # Initialize apt-ostree if does not exist
+            if not os.path.exists(package_repo_dir):
+                apt_utils.initialize_apt_ostree(package_repo_dir)
+
             for deb in deb_dir:
                 deb_path = os.path.join(tmpdir, deb.name)
                 msg = "Adding package to upload list: %s" % deb_path
@@ -1035,14 +1059,20 @@ class PatchFile(object):
                                               sw_release,
                                               package_list)
 
+            # Extract extra.tar if it is present
+            patch_dir = "%s/rel-%s" % (constants.SOFTWARE_STORAGE_DIR, sw_release)
+            extra_tar = "%s/extra.tar" % patch_dir
+            if os.path.exists(extra_tar) and tarfile.is_tarfile(extra_tar):
+                tar = tarfile.open(extra_tar)
+                tar.extractall(path=patch_dir)
+                os.remove(extra_tar)
+
         except tarfile.TarError:
-            msg = "Failed to extract the ostree tarball for %s" \
-                  % sw_version
+            msg = "Failed to extract tarball for %s" % sw_release
             LOG.exception(msg)
             raise OSTreeTarFail(msg)
         except OSError as e:
-            msg = "Failed to scan %s for Debian packages. Error: %s" \
-                  % (package_repo_dir, e.errno)
+            msg = "Error: %s" % e
             LOG.exception(msg)
             raise OSTreeTarFail(msg)
         finally:
@@ -1542,28 +1572,6 @@ def mount_remote_directory(remote_dir, local_dir):
             LOG.error("Error unmounting %s: %s" % (local_dir, str(e)))
 
 
-def clean_up_deployment_data(major_release):
-    """
-    Clean up all data generated during deployment.
-
-    :param major_release: Major release to be deleted.
-    """
-    # Delete the data inside /opt/platform/<folder>/<major_release>
-    for folder in constants.DEPLOY_CLEANUP_FOLDERS_NAME:
-        path = os.path.join(constants.PLATFORM_PATH, folder, major_release, "")
-        shutil.rmtree(path, ignore_errors=True)
-    # TODO(lbonatti): These folders should be revisited on software deploy abort/rollback
-    #                 to check additional folders that might be needed to delete.
-    upgrade_folders = [
-        os.path.join(constants.POSTGRES_PATH, constants.UPGRADE),
-        os.path.join(constants.POSTGRES_PATH, major_release),
-        os.path.join(constants.RABBIT_PATH, major_release),
-        os.path.join(constants.ETCD_PATH, major_release),
-    ]
-    for folder in upgrade_folders:
-        shutil.rmtree(folder, ignore_errors=True)
-
-
 def remove_major_release_deployment_flags():
     """
     Cleanup local major release deployment flags
@@ -1585,20 +1593,18 @@ def remove_major_release_deployment_flags():
     return success
 
 
-def run_deploy_clean_up_script(release):
+def run_remove_temporary_data_script(release):
     """
-    Runs the deploy-cleanup script for the given release.
+    Runs the remove-temporary-data script for the given release.
 
     :param release: Release to be cleaned.
     """
-    cmd_path = utils.get_software_deploy_script(release, constants.DEPLOY_CLEANUP_SCRIPT)
-    if (os.path.exists(f"{constants.STAGING_DIR}/{constants.OSTREE_REPO}") and
-            os.path.exists(constants.ROOT_DIR)):
+    cmd_path = utils.get_software_deploy_script(release, constants.REMOVE_TEMPORARY_DATA_SCRIPT)
+    if os.path.exists(constants.ROOT_DIR):
         try:
-            subprocess.check_output([cmd_path, f"{constants.STAGING_DIR}/{constants.OSTREE_REPO}",
-                                     constants.ROOT_DIR, "all"], stderr=subprocess.STDOUT)
+            subprocess.check_output([cmd_path, constants.ROOT_DIR], stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
-            LOG.exception("Error running deploy-cleanup script: %s" % str(e))
+            LOG.exception("Error running remove-temporary-data script: %s" % str(e))
             raise
 
 
@@ -1689,3 +1695,11 @@ def execute_agent_hooks(software_version, additional_data=None):
     except Exception as e:
         LOG.exception("Error running agent hooks: %s" % str(e))
         raise
+
+
+def to_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() == 'true'
+    return False

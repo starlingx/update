@@ -5,6 +5,9 @@ SPDX-License-Identifier: Apache-2.0
 
 """
 import configparser
+import filecmp
+import fcntl
+import glob
 import logging
 import os
 import re
@@ -21,6 +24,7 @@ from gi.repository import OSTree  # pylint: disable=E0611
 
 from software import constants
 from software.exceptions import OSTreeCommandFail
+from tsconfig.tsconfig import subfunctions
 
 LOG = logging.getLogger('main_logger')
 
@@ -72,23 +76,23 @@ def get_ostree_latest_commit(ostree_ref, repo_path):
     return latest_commit
 
 
-def add_gpg_verify_false():
+def add_gpg_verify_false(repo_path=constants.SYSROOT_OSTREE):
     # TODO(mmachado): remove once gpg is enabled
     # Modify the ostree configuration to disable gpg-verify
-    try:
-        command = """
-        # Check if gpg-verify=false is at the end of the file and adds it if not
-        if ! tail -n 1 /sysroot/ostree/repo/config | grep -q '^gpg-verify=false$'; then
-            echo "gpg-verify=false" >> /sysroot/ostree/repo/config
-        fi
-        """
-        subprocess.run(command, shell=True, check=True)
+    config_path = os.path.join(repo_path, constants.OSTREE_CONFIG)
+    if os.path.exists(config_path):
+        config = configparser.ConfigParser()
+        config.read(config_path)
 
-    except subprocess.CalledProcessError as e:
-        msg = "Failed to modify ostree config to disable GPG verification"
-        err_msg = "Command Error: return code: %s, Output: %s" \
-            % (e.returncode, e.stderr.decode("utf-8") if e.stderr else "No error message")
-        LOG.exception(err_msg)
+        for section in config.sections():
+            if section.startswith("remote ") and \
+               constants.OSTREE_GPG_VERIFY not in config[section]:
+                config[section][constants.OSTREE_GPG_VERIFY] = "false"
+
+        with open(config_path, 'w') as file:
+            config.write(file, space_around_delimiters=False)
+    else:
+        msg = f"Ostree config file: {config_path} does not exist"
         raise OSTreeCommandFail(msg)
 
 
@@ -286,25 +290,26 @@ def pull_ostree_from_remote(remote=None):
         ref_cmd = "ostree refs --force --create=%s %s" % (ref, constants.OSTREE_REF)
 
     try:
-        output = subprocess.run(cmd % ref, shell=True, check=True, capture_output=True)
+        LOG.info("Executing ostree pull command: %s" % cmd)
+        process = subprocess.run(cmd % ref, shell=True, check=True, text=True, capture_output=True)
     except subprocess.CalledProcessError as e:
         msg = "Failed to pull from %s remote into sysroot ostree" % ref
         err_msg = "OSTree Pull Error: return code: %s, Output: %s" \
-                  % (e.returncode, e.stderr.decode("utf-8"))
+                  % (e.returncode, e.stderr.strip())
         LOG.exception(err_msg)
         raise OSTreeCommandFail(msg)
 
     # Log to help identify errors
-    msg = "Remote pull output: %s" % output
+    msg = "Remote pull output: %s" % process.stdout.strip()
     LOG.info(msg)
 
     if ref_cmd:
         try:
-            subprocess.run(ref_cmd, shell=True, check=True, capture_output=True)
+            subprocess.run(ref_cmd, shell=True, check=True, text=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             msg = "Failed to create ref %s for remote %s" % (ref, remote)
             err_msg = "OSTree Ref Error: return code: %s, Output: %s" \
-                      % (e.returncode, e.stderr.decode("utf-8"))
+                      % (e.returncode, e.stderr.strip())
             LOG.exception(err_msg)
             raise OSTreeCommandFail(msg)
 
@@ -428,6 +433,13 @@ def create_deployment(ref=None):
         LOG.info(info_msg)
         raise OSTreeCommandFail(msg)
 
+    boot_cmd = ["grub-editenv", "/boot/efi/EFI/BOOT/boot.env", "set", "default=0"]
+    try:
+        subprocess.run(boot_cmd, check=True, text=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        LOG.info("Failed to update default grub entry to 0: %s", e.stderr)
+        raise
+
 
 def fetch_pending_deployment():
     """
@@ -452,31 +464,77 @@ def fetch_pending_deployment():
     return pending_deployment
 
 
-def mount_new_deployment(deployment_dir):
+def fetch_active_deployment():
     """
-    Unmount /usr and /etc from the file system and remount it to directory
-    <depoyment_dir>/usr and <depoyment_dir>/etc respectively
-    :param deployment_dir: a path on the filesystem which points to the pending
-    deployment
-     example: /ostree/deploy/debian/deploy/<deployment_id>
+    Fetch the deployment ID of the active deployment
+    :return: The deployment ID of the active deployment
     """
+
+    cmd = "ostree admin status | grep %s | awk '{printf $3}'" % constants.OSTREE_ACTIVE_DEPLOYMENT_TAG
+
     try:
-        new_usr_mount_dir = "%s/usr" % (deployment_dir)
-        new_etc_mount_dir = "%s/etc" % (deployment_dir)
-        sh.mount("--bind", "-o", "ro,noatime", new_usr_mount_dir, "/usr")
-        sh.mount("--bind", "-o", "rw,noatime", new_etc_mount_dir, "/etc")
+        output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to fetch ostree admin status for active deployment."
+        info_msg = "OSTree Admin Status Error: return code: %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.info(info_msg)
+        raise OSTreeCommandFail(msg)
+
+    # Store the output of the above command in a string
+    active_deployment = output.stdout.decode('utf-8')
+
+    return active_deployment
+
+
+def create_bind_mount(source, target, permissions=constants.READ_ONLY_PERMISSION):
+    """
+    Create a bind mount.
+    :param source: The source directory
+    :param target: The directory where the bind will be mounted
+    :param permissions: The access permissions
+    """
+    LOG.info("Creating bind mount from: %s, to: %s, with permissions: %s"
+             % (source, target, permissions))
+
+    try:
+        sh.mount("--bind", "-o", permissions, source, target)
     except sh.ErrorReturnCode:
-        LOG.warning("Mount failed. Retrying to mount /usr and /etc again after 5 secs.")
+        LOG.warning("Mount failed. Retrying to mount %s again after 5 secs." % target)
         time.sleep(5)
         try:
-            sh.mount("--bind", "-o", "ro,noatime", new_usr_mount_dir, "/usr")
-            sh.mount("--bind", "-o", "rw,noatime", new_etc_mount_dir, "/etc")
+            sh.mount("--bind", "-o", permissions, source, target)
         except sh.ErrorReturnCode as e:
-            msg = "Failed to re-mount /usr and /etc."
-            info_msg = "OSTree Deployment Mount Error: Output: %s" \
-                       % (e.stderr.decode("utf-8"))
+            msg = "Failed to re-mount %s" % target
+            info_msg = "OSTree Deployment Mount Error: Output: %s" % (e.stderr.decode("utf-8"))
             LOG.warning(info_msg)
             raise OSTreeCommandFail(msg)
+
+
+def mount_new_deployment(pending_dir, active_dir):
+    """
+    Create the following mounts used by an inservice patch:
+    1) /usr                 -> <pending_dir>/usr
+    2) /etc                 -> <pending_dir>/etc
+    3) <active_dir>/usr/etc -> <pending_dir>/usr/etc
+    4) <active_dir>/etc     -> <pending_dir>/etc
+    Also mounts K8s version files
+    :param pending_dir: a path on the filesystem which points to the pending
+    deployment (e.g.: /ostree/deploy/debian/deploy/<deployment_id>)
+    :param active_dir: a path on the filesystem which points to the active
+    deployment
+    """
+    try:
+        new_usr_mount_dir = "%s%s" % (pending_dir, constants.USR)
+        new_etc_mount_dir = "%s%s" % (pending_dir, constants.ETC)
+        new_usr_etc_mount_dir = "%s%s" % (pending_dir, constants.USR_ETC)
+        act_usr_etc_mount_dir = "%s%s" % (active_dir, constants.USR_ETC)
+        act_etc_mount_dir = "%s%s" % (active_dir, constants.ETC)
+
+        create_bind_mount(new_usr_mount_dir, constants.USR)
+        create_bind_mount(new_etc_mount_dir, constants.ETC, constants.READ_WRITE_PERMISSION)
+        create_bind_mount(new_usr_etc_mount_dir, act_usr_etc_mount_dir)
+        create_bind_mount(new_etc_mount_dir, act_etc_mount_dir)
     finally:
         # Handle the switch from bind mounts to symlinks for K8s versions.
         # Can be removed once the switch is complete.
@@ -491,26 +549,24 @@ def mount_new_deployment(deployment_dir):
                 LOG.info(msg)
 
 
-def delete_older_deployments():
+def delete_older_deployments(delete_pending=False):
     """
     Delete all older deployments after a reboot to save space
     """
     # Sample command and output that is parsed to get the list of
     # deployment IDs
     #
-    # Command: ostree admin status | grep debian
+    # Command: ostree admin status | egrep 'debian [a-z0-9]+'
     #
     # Output:
     #
-    # * debian 3334dc80691a38c0ba6c519ec4b4b449f8420e98ac4d8bded3436ade56bb229d.2
-    # debian 3334dc80691a38c0ba6c519ec4b4b449f8420e98ac4d8bded3436ade56bb229d.1 (rollback)
-    # debian 3334dc80691a38c0ba6c519ec4b4b449f8420e98ac4d8bded3436ade56bb229d.0
+    # * debian 9a4d8040800f8cf9191ca3401f8006f3df5760b33d78f931309b5bb5db062ab3.2
+    #   debian 9a4d8040800f8cf9191ca3401f8006f3df5760b33d78f931309b5bb5db062ab3.1 (rollback)
+    #   debian 9a4d8040800f8cf9191ca3401f8006f3df5760b33d78f931309b5bb5db062ab3.0
 
-    LOG.info("Inside delete_older_deployments of ostree_utils")
-    cmd = "ostree admin status | grep debian"
-
+    cmd = "ostree admin status | egrep 'debian [a-z0-9]+'"
     try:
-        output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
+        output = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as e:
         msg = "Failed to fetch ostree admin status."
         info_msg = "OSTree Admin Status Error: return code: %s , Output: %s" \
@@ -518,68 +574,36 @@ def delete_older_deployments():
         LOG.info(info_msg)
         raise OSTreeCommandFail(msg)
 
-    # Store the output of the above command in a string
-    output_string = output.stdout.decode('utf-8')
+    # Find the active deployment (which usually is the first, but there are exceptions)
+    # and once found attempt to delete deployments after it in the list, except the rollback
+    delete_deployments = False
+    deployments_to_delete = []
+    for index, deployment in enumerate(output.stdout.strip().split("\n")):
+        if delete_pending and "pending" in deployment:
+            deployments_to_delete.append(index)
+        if delete_deployments and "rollback" not in deployment:
+            deployments_to_delete.append(index)
+        if "*" in deployment:
+            LOG.info("Active deployment %s: %s", index, deployment)
+            delete_deployments = True
 
-    # Parse the string to get the latest commit for the ostree
-    split_output_string = output_string.split()
-    deployment_id_list = []
-    for index, deployment_id in enumerate(split_output_string):
-        if deployment_id == "debian":
-            deployment_id_list.append(split_output_string[index + 1])
-
-    # After a reboot, the deployment ID at the 0th index of the list
-    # is always the active deployment and the deployment ID at the
-    # 1st index of the list is always the fallback deployment.
-    # We want to delete all deployments except the two mentioned above.
-    # This means we will undeploy all deployments starting from the
-    # 2nd index of deployment_id_list
-    deploys_amount = len(deployment_id_list)
-    if deploys_amount <= 2:
+    if not deployments_to_delete:
         LOG.info("No older deployments to delete")
-        return
+        return True
 
-    for index in reversed(range(2, deploys_amount)):
+    for index in reversed(deployments_to_delete):
         try:
             cmd = "ostree admin undeploy %s" % index
-            output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
-            info_log = "Deleted ostree deployment %s" % deployment_id_list[index]
+            output = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
+            info_log = "Deleted ostree deployment %s: %s" % (index, output.stdout)
             LOG.info(info_log)
         except subprocess.CalledProcessError as e:
-            msg = "Failed to undeploy ostree deployment %s." % deployment_id_list[index]
+            msg = "Failed to undeploy ostree deployment %s." % index
             info_msg = "OSTree Undeploy Error: return code: %s , Output: %s" \
-                       % (e.returncode, e.stderr.decode("utf-8"))
+                       % (e.returncode, e.stderr)
             LOG.info(info_msg)
             raise OSTreeCommandFail(msg)
-
-
-def undeploy_inactive_deployments():
-    """
-    Remove deployments other than the current deployment,
-    i.e. deployments from index 1 to len(deployments) - 1,
-    in the reverse order, from the oldest to the newest
-    """
-    cmd = ["ostree", "admin", "status"]
-    try:
-        output = subprocess.run(cmd, text=True, check=True, capture_output=True)
-    except subprocess.CalledProcessError as e:
-        LOG.exception("Error getting ostree deployment list: %s" % e.stderr)
-        return False
-
-    success = True
-    pattern = r"debian [a-z0-9]+.[0-9]+"
-    deployments = re.findall(pattern, output.stdout)
-    # skip the first (active) deployment
-    for index, deployment in reversed(list(enumerate(deployments[1:], 1))):
-        commit_id = deployment.replace("debian ", "").split(".")[0]
-        cmd = ["ostree", "admin", "undeploy", str(index)]
-        try:
-            subprocess.run(cmd, check=True)
-            LOG.info("Removed deployment %s, commit-id %s" % (index, commit_id))
-        except subprocess.CalledProcessError as e:
-            LOG.exception("Error removing deployment %s, commit-id %s: %s" % (index, commit_id, e.stderr))
-            success = False
-    return success
+    return True
 
 
 def checkout_latest_ostree_commit(patch_sw_version):
@@ -901,3 +925,66 @@ def delete_temporary_refs_and_remotes():
     if not success:
         LOG.error("Failure deleting temporary refs and remotes, please cleanup manually.")
     return success
+
+
+def update_deployment_kernel_env():
+    """
+    Update the /boot/1/kernel.env after creating a deployment
+    """
+    try:
+        # copy /boot/2/kernel.env to /boot/1/kernel.env
+        # this is to preserve args (ie: apparmor)
+        # if the files are identical, do nothing
+        if not filecmp.cmp("/boot/1/kernel.env",
+                           "/boot/2/kernel.env",
+                           shallow=False):
+            shutil.copy2("/boot/2/kernel.env",
+                         "/boot/1/kernel.env")
+        # Determine the appropriate kernel for this env
+        desired_kernel = None
+        for kernel in glob.glob(os.path.join("/boot/1", "vmlinuz*-amd64")):
+            kernel_entry = os.path.basename(kernel)
+            # If we are running in lowlatency mode, we want the rt-amd64 kernel
+            if 'lowlatency' in subfunctions and 'rt-amd64' in kernel_entry:
+                desired_kernel = kernel_entry
+                break
+            # If we are not running lowlatency we want the entry that does NOT contain rt-amd64
+            if 'lowlatency' not in subfunctions and 'rt-amd64' not in kernel_entry:
+                desired_kernel = kernel_entry
+                break
+        if desired_kernel is None:   # This should never happen
+            LOG.warning("Unable to find a valid kernel under /boot/1")
+        else:
+            # Explicitly update /boot/1/kernel.env using the
+            # /usr/local/bin/puppet-update-grub-env.py utility
+            LOG.info("Updating /boot/1/kernel.env to:%s", desired_kernel)
+            cmd = "python /usr/local/bin/puppet-update-grub-env.py --set-kernel %s" % desired_kernel
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to run puppet-update-grub-env.py"
+        info_msg = "OSTree Post-Deployment Error: return code: %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.info(info_msg)
+        raise OSTreeCommandFail(msg)
+    except Exception as e:
+        msg = "Failed to manually update /boot/1/kernel.env. Err=%s" % str(e)
+        LOG.info(msg)
+        raise OSTreeCommandFail(msg)
+
+
+def ostree_lock(func):
+    def wrapper(*args, **kwargs):
+        with open(constants.OSTREE_LOCK, "w+") as fd:
+            # try/except block is used to ensure the lock is always released,
+            # even in the case where an unhandled exception is returned by func
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+                LOG.info("Acquired ostree lock")
+                result = func(*args, **kwargs)
+            except Exception:  # pylint: disable=try-except-raise
+                raise
+            finally:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+                LOG.info("Released ostree lock")
+            return result
+    return wrapper

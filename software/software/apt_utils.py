@@ -13,6 +13,28 @@ from software.exceptions import APTOSTreeCommandFail
 LOG = logging.getLogger('main_logger')
 
 
+def initialize_apt_ostree(feed_dir):
+    """
+    Initialize an apt Debian package archive.
+
+    :param feed_dir: apt package feed directory
+    """
+    try:
+        subprocess.run(
+            ["apt-ostree", "repo", "init",
+             "--feed", str(feed_dir),
+             "--release", constants.DEBIAN_RELEASE,
+             "--origin", constants.DEBIAN_ORIGIN],
+            check=True,
+            capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to initialize apt-ostree repo"
+        info_msg = "\"apt-ostree repo init\" error: return code %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.error(info_msg)
+        raise APTOSTreeCommandFail(msg)
+
+
 def package_list_upload(feed_dir, sw_release, package_list):
     """
     Upload a Debian package to an apt repository.
@@ -106,7 +128,7 @@ def component_remove(pkg_feed_dir, component):
         raise APTOSTreeCommandFail(msg)
 
 
-def run_install(repo_dir, sw_version, sw_release, packages):
+def run_install(repo_dir, sw_version, sw_release, packages, pre_bootstrap=False):
     """
     Run Debian package upgrade.
 
@@ -117,8 +139,13 @@ def run_install(repo_dir, sw_version, sw_release, packages):
     """
     LOG.info("Running apt-ostree install")
 
-    package_feed = "http://controller:8080/updates/debian/rel-%s/ %s %s" \
-        % (sw_version, constants.DEBIAN_RELEASE, sw_release)
+    if pre_bootstrap:
+        package_feed = "file:///var/www/pages/updates/debian/rel-%s/ %s %s" \
+            % (sw_version, constants.DEBIAN_RELEASE, sw_release)
+    else:
+        package_feed = "http://controller:8080/updates/debian/rel-%s/ %s %s" \
+            % (sw_version, constants.DEBIAN_RELEASE, sw_release)
+
     packages = " ".join(packages)
 
     try:

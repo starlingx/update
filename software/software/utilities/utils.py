@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024 Wind River Systems, Inc.
+# Copyright (c) 2023-2025 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -10,7 +10,9 @@ import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import subprocess
+import sys
 import tempfile
+import traceback
 import yaml
 
 # WARNING: The first controller upgrade is done before any puppet manifests
@@ -20,6 +22,7 @@ from software.utilities.constants import PLATFORM_PATH
 from software.utilities.constants import KEYRING_PERMDIR
 
 from software.utilities import constants
+import software.config as cfg
 
 LOG = logging.getLogger('main_logger')
 SOFTWARE_LOG_FILE = "/var/log/software.log"
@@ -36,103 +39,153 @@ ACTION_START = "start"
 ACTION_MIGRATE = "migrate"
 ACTION_ACTIVATE = "activate"
 ACTION_ACTIVATE_ROLLBACK = "activate-rollback"
+ACTION_DELETE = "delete"
 
 
 def configure_logging():
-    log_format = ('%(asctime)s: ' + __name__ + '[%(process)s]: '
-                                               '%(filename)s(%(lineno)s): %(levelname)s: %(message)s')
-    log_datefmt = "%FT%T"
-    logging.basicConfig(filename=SOFTWARE_LOG_FILE, format=log_format, level=logging.INFO, datefmt=log_datefmt)
+    cfg.read_config()
+
+    my_exec = os.path.basename(sys.argv[0])
+
+    log_format = cfg.logging_default_format_string
+    log_format = log_format.replace('%(exec)s', my_exec)
+    formatter = logging.Formatter(log_format, datefmt="%FT%T")
+
+    root_logger = logging.getLogger()
+
+    root_logger.setLevel(logging.INFO)
+    main_log_handler = logging.FileHandler(SOFTWARE_LOG_FILE)
+    main_log_handler.setFormatter(formatter)
+    root_logger.addHandler(main_log_handler)
 
 
-def execute_migration_scripts(from_release, to_release, action, port=None,
-                              migration_script_dir="/usr/local/share/upgrade.d"):
-    """Execute deployment scripts with an action:
-          start: Prepare for upgrade on release N side. Called during
-                 "system upgrade-start".
-          migrate: Perform data migration on release N+1 side. Called while
-                   system data migration is taking place.
-          activate: Activates the deployment. Called during "software deploy activate".
-          activate-rollback: Rolls back the activate deployment. Called during
-                   "software deploy activate".
-    """
-
-    LOG.info("Executing deployment scripts from: %s with from_release: %s, to_release: %s, "
-             "action: %s" % (migration_script_dir, from_release, to_release, action))
-
-    ignore_errors = os.environ.get("IGNORE_ERRORS", 'False').upper() == 'TRUE'
-
+def get_migration_scripts(migration_script_dir):
     if not os.path.isdir(migration_script_dir):
         msg = "Folder %s does not exist" % migration_script_dir
         LOG.exception(msg)
         raise Exception(msg)
 
-    # Get a sorted list of all the migration scripts
-    # Exclude any files that can not be executed, including .pyc and .pyo files
     files = [f for f in os.listdir(migration_script_dir)
              if os.path.isfile(os.path.join(migration_script_dir, f)) and
              os.access(os.path.join(migration_script_dir, f), os.X_OK)]
+    return files
+
+
+def sort_migration_scripts(scripts, action):
+    reversed_actions = ['activate-rollback']
     # From file name, get the number to sort the calling sequence,
     # abort when the file name format does not follow the pattern
     # "nnn-*.*", where "nnn" string shall contain only digits, corresponding
     # to a valid unsigned integer (first sequence of characters before "-")
     try:
-        files.sort(key=lambda x: int(x.split("-")[0]))
+        scripts.sort(key=lambda x: int(x.split("-")[0]))
+        if action in reversed_actions:
+            scripts = scripts[::-1]
+            LOG.info(f"Executing deployment scripts for {action} in reversed order")
     except Exception:
         LOG.exception("Deployment script sequence validation failed, invalid "
                       "file name format")
         raise
 
+    return scripts
+
+
+# This file is currently categorized as independent from framework,
+# which is runnable w/ N+1 code on a N runtime environment. The exception class
+# is defined here instead of software.exceptions module as result.
+# TODO(bqian) move the exception definition to software.exceptions if this code
+# becomes part of framework.
+class MigrationScriptFailed(Exception):
+    def __init__(self, msg, inner_exception):
+        super().__init__(msg)
+        self._inner_exception = inner_exception
+
+    @property
+    def inner_exception(self):
+        return self._inner_exception
+
+
+def execute_script(script, from_release, to_release, action, port):
     MSG_SCRIPT_FAILURE = "Deployment script %s failed with return code %d" \
                          "\nScript output:\n%s"
+    try:
+        LOG.info("Executing deployment script %s" % script)
+        cmdline = [script, from_release, to_release, action]
+        if port is not None:
+            cmdline.append(port)
+
+        # Let subprocess.run handle non-zero exit codes via check=True
+        subprocess.run(cmdline,
+                       stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT,
+                       text=True,
+                       check=True)
+
+    except subprocess.CalledProcessError as e:
+        # Deduplicate output lines using set and create error message
+        unique_output = "\n".join(e.output.splitlines()) + "\n"
+        error = MSG_SCRIPT_FAILURE % (script, e.returncode, unique_output)
+        raise MigrationScriptFailed(error, e)
+    except Exception as ee:
+        # Log exception but continue processing
+        error = f"Unexpected error executing {script}: {str(ee)}"
+        raise MigrationScriptFailed(error, ee)
+
+    LOG.info(f'Deployment script {script} completed successfully')
+
+
+def initialize_deploy_failure_log():
+    if not DEPLOY_SCRIPTS_FAILURES_LOG.handlers:
+        log_format = ('%(asctime)s: %(message)s')
+        log_datefmt = "%FT%T"
+        DEPLOY_SCRIPTS_FAILURES_LOG.setLevel(logging.INFO)
+        log_file_handler = logging.FileHandler(DEPLOY_SCRIPTS_FAILURES_LOG_FILE)
+        log_file_handler.setFormatter(logging.Formatter(
+            fmt=log_format, datefmt=log_datefmt))
+        DEPLOY_SCRIPTS_FAILURES_LOG.addHandler(log_file_handler)
+
+
+def log_exception(msg, exc):
+    trace = ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    LOG.error(msg)
+    LOG.error(trace)
+
+
+def execute_scripts(scripts, from_release, to_release, action, port, migration_script_dir):
     # Execute each migration script and collect errors
+    ignore_errors = os.environ.get("IGNORE_ERRORS", 'False').upper() == 'TRUE'
     errors = []
-    for f in files:
+    for f in scripts:
         migration_script = os.path.join(migration_script_dir, f)
         try:
-            LOG.info("Executing deployment script %s" % migration_script)
-            cmdline = [migration_script, from_release, to_release, action]
-            if port is not None:
-                cmdline.append(port)
+            execute_script(migration_script, from_release, to_release, action, port)
+        except MigrationScriptFailed as e:
+            if ignore_errors:
+                log_exception(f"Migrate script error, action {action} continue.",
+                              e.inner_exception)
+                errors.append(str(e))
+            else:
+                log_exception(f"Migrate script error, action {action} stopped.",
+                              e.inner_exception)
+                raise e.inner_exception
 
-            # Let subprocess.run handle non-zero exit codes via check=True
-            subprocess.run(cmdline,
-                           stdout=subprocess.PIPE,
-                           stderr=subprocess.STDOUT,
-                           text=True,
-                           check=True)
-
-        except subprocess.CalledProcessError as e:
-            # Deduplicate output lines using set and create error message
-            unique_output = "\n".join(set(e.output.splitlines()))
-            msg = MSG_SCRIPT_FAILURE % (migration_script, e.returncode, unique_output)
-            errors.append(msg)
-        except Exception as e:
-            # Log exception but continue processing
-            error_msg = f"Unexpected error executing {migration_script}: {str(e)}"
-            errors.append(error_msg)
-
-    if errors:
-        LOG.exception(
-            "%d deployment scripts failed.\n See details in %s.\n",
-            len(errors), DEPLOY_SCRIPTS_FAILURES_LOG_FILE)
-
-        if not DEPLOY_SCRIPTS_FAILURES_LOG.handlers:
-            log_format = ('%(asctime)s: %(message)s')
-            log_datefmt = "%FT%T"
-            DEPLOY_SCRIPTS_FAILURES_LOG.setLevel(logging.INFO)
-            log_file_handler = logging.FileHandler(DEPLOY_SCRIPTS_FAILURES_LOG_FILE)
-            log_file_handler.setFormatter(logging.Formatter(
-                fmt=log_format, datefmt=log_datefmt))
-            DEPLOY_SCRIPTS_FAILURES_LOG.addHandler(log_file_handler)
-
-        # Log the errors to the dedicated failure log
+    if errors and ignore_errors:
+        LOG.warning(f"Action {action} completed with errors. Operation continue as IGNORE_ERRORS is set." +
+                    f" Summarized error information can be found in {DEPLOY_SCRIPTS_FAILURES_LOG_FILE}")
+        initialize_deploy_failure_log()
+        # initialize_deploy_failure_log Log the errors to the dedicated failure log
         DEPLOY_SCRIPTS_FAILURES_LOG.info("%s action partially failed. " % action)
         DEPLOY_SCRIPTS_FAILURES_LOG.info("\n".join(errors))
 
-    # After processing all files, raise any accumulated errors
-    if errors and (not ignore_errors):
-        raise   # pylint: disable=misplaced-bare-raise
+
+def execute_migration_scripts(from_release, to_release, action, port=None,
+                              migration_script_dir="/usr/local/share/upgrade.d"):
+    LOG.info("Executing deployment scripts from: %s with from_release: %s, to_release: %s, "
+             "action: %s" % (migration_script_dir, from_release, to_release, action))
+    scripts = get_migration_scripts(migration_script_dir)
+    scripts = sort_migration_scripts(scripts, action)
+
+    execute_scripts(scripts, from_release, to_release, action, port, migration_script_dir)
 
 
 def get_db_connection(hiera_db_records, database):

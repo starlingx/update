@@ -30,7 +30,8 @@ class DeployManager(base.Manager):
         body = {}
         if args.force:
             body["force"] = "true"
-
+        if args.options:
+            body["options"] = args.options
         if args.region_name:
             body["region_name"] = args.region_name
 
@@ -49,6 +50,8 @@ class DeployManager(base.Manager):
         body = {}
         if args.force:
             body["force"] = "true"
+        if args.options:
+            body["options"] = args.options
 
         return self._post(path, body=body)
 

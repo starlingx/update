@@ -1,0 +1,13 @@
+[Unit]
+Description=Reset Boot Counter
+DefaultDependencies=no
+After=controllerconfig.service storageconfig.service workerconfig.service pmon.service
+
+[Service]
+Type=oneshot
+ExecStart=/etc/init.d/reset-boot-counter
+TimeoutStartSec=300
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

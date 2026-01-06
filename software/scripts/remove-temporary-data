@@ -1,0 +1,155 @@
+#!/usr/bin/python3
+#
+# Copyright (c) 2024-2025 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# This script removes artifacts created by the deploy start script:
+# 1. Stop temporary database created for data migrations
+# 2. Unmount the bind mounts used by the data migration process
+# 3. Remove the staging deployment directory created by checking out TO release ostree branch
+#
+# It can be used either by another script (e.g. deploy-start) to automatically
+# cleanup the environment after both success/failure paths of the data migration process,
+# or can be used by a system administrator to manually cleanup the environment if the
+# automatic cleanup process fails.
+#
+
+import logging
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+import upgrade_utils
+
+LOG = logging.getLogger('main_logger')
+
+
+class RemoveTemporaryData:
+    SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))  # this script location
+
+    def __init__(self, checkout_dir):
+        self._checkout_dir = checkout_dir
+
+        try:
+            checkout_usr_etc = os.path.join(self._checkout_dir, "usr/etc")
+            self._sw_version = self.get_sw_version(checkout_usr_etc)
+        except subprocess.CalledProcessError as e:
+            LOG.warning("Attempting to get SW_VERSION it from the script path...")
+            match = re.match(r".*rel-(\d+.\d+)/", self.SCRIPT_DIR)
+            if match is None:
+                LOG.error(f"Failed to get SW_VERSION, won't proceed with the cleanup")
+                raise
+            self._sw_version = match.group(1)
+
+    @staticmethod
+    def get_sw_version(etc_dir="/etc"):
+        try:
+            p = subprocess.run(f"source {etc_dir}/build.info; echo $SW_VERSION",
+                               shell=True, check=True, capture_output=True, text=True)
+            running_sw_version = p.stdout.strip()
+        except subprocess.CalledProcessError as e:
+            LOG.error(f"Error getting SW_VERSION from {etc_dir}: {e.stderr.strip()}")
+            raise
+        return running_sw_version
+
+    def stop_database(self):
+        db_dir = os.path.join(self._checkout_dir, "var/lib/postgresql", self._sw_version)
+        LOG.info(f"Attempting to stop the temporary database in {db_dir}...")
+        if os.path.isdir(db_dir):
+            try:
+                cmd = ["lsof", db_dir]
+                subprocess.run(cmd, check=True)
+            except subprocess.CalledProcessError:
+                LOG.info("Database is not running")
+                return
+            try:
+                cmd = [os.path.join(self._checkout_dir, "usr/bin/pgconfig"), "--bindir"]
+                process = subprocess.run(cmd, check=True, text=True, capture_output=True)
+                db_bin_dir = process.stdout.strip()
+
+                cmd = ["sudo", "-u", "postgres", os.path.join(db_bin_dir, "pg_ctl"), "-D", db_dir, "stop"]
+                subprocess.run(cmd, check=True)
+                LOG.info("Success stopping database")
+            except subprocess.CalledProcessError:
+                LOG.error("Error stopping database")
+                raise
+        else:
+            LOG.warning("No database found in the specified directory")
+
+    def unmount_filesystems(self):
+        script_path = (f"/var/www/pages/feed/rel-{self._sw_version}"
+                       f"/upgrades/software-deploy/prepare-chroot-mounts")
+
+        LOG.info(f"Attempting to unmount filesystems under {self._checkout_dir}...")
+        try:
+            cmd = [f"{script_path}", f"{self._checkout_dir}", "-u"]
+            subprocess.run(cmd, check=True, text=True, capture_output=True)
+            LOG.info("Success unmounting filesystems")
+        except subprocess.CalledProcessError as e:
+            LOG.error(f"Error unmounting filesystems: {e.stderr.strip()}")
+            raise
+
+    def remove_temp_directories(self):
+        script_path = (f"/var/www/pages/feed/rel-{self._sw_version}"
+                       f"/upgrades/software-deploy/prepare-chroot-mounts")
+        temp_dirs = [self._checkout_dir]
+
+        LOG.info(f"Attempting to remove temporary deployment directories "
+                 f"{temp_dirs}...")
+        try:
+            cmd = [f"{script_path}", f"{self._checkout_dir}", "-c"]
+            subprocess.run(cmd, check=True, text=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            LOG.error(f"Some mount points are still mounted ({e.stdout.strip()}), "
+                      f"cannot proceed with the cleanup: {e.stderr.strip()}")
+            raise
+
+        for temp_dir in temp_dirs:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            LOG.info(f"{temp_dir} removed successfully")
+
+    def run(self):
+        running_sw_version = self.get_sw_version()
+        if running_sw_version == self._sw_version:
+            LOG.error(f"Cannot proceed with cleanup, running software version "
+                      f"{running_sw_version} is the same as the requested cleanup "
+                      f"version, please remove {self._checkout_dir} manually")
+            return 1
+
+        LOG.info("Starting temporary data cleanup...")
+        try:
+            self.stop_database()
+            self.unmount_filesystems()
+            self.remove_temp_directories()
+            LOG.info("Temporary data cleanup finished")
+        except Exception:
+            LOG.error("Error executing cleanup, please check the logs, fix the errors and retry")
+            return 1
+        return 0
+
+
+if __name__ == "__main__":
+    upgrade_utils.configure_logging("/var/log/software.log", log_level=logging.INFO)
+
+    checkout_dir = None
+    for arg in range(1, len(sys.argv)):
+        if arg == 1:
+            checkout_dir = sys.argv[arg]
+
+    if checkout_dir is None:
+        usage_msg = f"usage: {sys.argv[0]} <ostree-checkout-dir>"
+        print(usage_msg)
+        LOG.error(usage_msg)
+        sys.exit(1)
+
+    if not os.path.isdir(checkout_dir):
+        error_msg = f"Checkout directory {checkout_dir} does not exist, cannot proceed with cleanup"
+        print(error_msg)
+        LOG.error(error_msg)
+        sys.exit(1)
+
+    deploy_cleanup = RemoveTemporaryData(checkout_dir)
+    sys.exit(deploy_cleanup.run())

@@ -26,6 +26,8 @@ release_state_transition = {
 
 
 class ReleaseState(object):
+    _callbacks = []
+
     def __init__(self, release_ids=None, release_state=None):
         not_found_list = []
         release_collection = get_SWReleaseCollection()
@@ -37,6 +39,14 @@ class ReleaseState(object):
 
         if len(not_found_list) > 0:
             raise ReleaseNotFound(not_found_list)
+
+    @staticmethod
+    def register_event_listener(callback):
+        """register event listener to be triggered when a state transition is completed"""
+        if callback is not None:
+            if callback not in ReleaseState._callbacks:
+                LOG.debug("Register event listener %s", callback.__qualname__)
+                ReleaseState._callbacks.append(callback)
 
     @staticmethod
     def deploy_updated(target_state):
@@ -62,8 +72,11 @@ class ReleaseState(object):
         if self.check_transition(target_state):
             release_collection = get_SWReleaseCollection()
             release_collection.update_state(self._release_ids, target_state)
-
         reload_release_data()
+
+        for callback in ReleaseState._callbacks:
+            LOG.debug("Calling event listener %s", callback.__qualname__)
+            callback(target_state)
 
     def is_major_release_deployment(self):
         release_collection = get_SWReleaseCollection()

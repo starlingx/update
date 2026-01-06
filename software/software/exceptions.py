@@ -54,11 +54,6 @@ class HostNotFound(SoftwareServiceError):
         super().__init__(error="Host %s can not be found" % hostname)
 
 
-class HostIpNotFound(SoftwareServiceError):
-    def __init__(self, hostname):
-        super().__init__(error="Host %s not found\n" % hostname)
-
-
 class HostAgentUnreachable(SoftwareServiceError):
     def __init__(self, hostname):
         super().__init__(error="Agent is unreachable, please check if %s is online "
@@ -195,9 +190,3 @@ class FileSystemError(SoftwareError):
     Likely fixable by a root user.
     """
     pass
-
-
-class ServiceParameterNotFound(Exception):
-    def __init__(self, name):
-        msg = f"service parameter name={name} not found"
-        super().__init__(msg)

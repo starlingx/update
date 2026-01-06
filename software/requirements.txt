@@ -8,6 +8,7 @@ oslo.policy
 oslo.serialization
 netaddr
 pecan
+psutil
 psycopg2-binary
 pycryptodomex
 PyGObject

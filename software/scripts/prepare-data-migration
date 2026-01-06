@@ -12,7 +12,7 @@
 Run platform upgrade prep data migration as a standalone executable
 """
 
-import logging as LOG
+import logging
 import os
 import shutil
 import subprocess
@@ -25,11 +25,11 @@ POSTGRES_PATH = '/var/lib/postgresql'
 DISTRIBUTED_CLOUD_ROLE_SYSTEMCONTROLLER = 'systemcontroller'
 SERVICE_TYPE_IDENTITY = 'identity'
 PLATFORM_PATH = "/opt/platform"
-ETCD_PATH = '/opt/etcd'
 RABBIT_PATH = '/var/lib/rabbitmq'
 KUBERNETES_CONF_PATH = "/etc/kubernetes"
 KUBERNETES_ADMIN_CONF_FILE = "admin.conf"
 
+LOG = logging.getLogger('main_logger')
 
 class DataMigration(object):
 
@@ -149,23 +149,6 @@ class DataMigration(object):
         finally:
             devnull.close()
 
-    def export_etcd(self):
-        """
-        Copy etcd from N to N+1 in /opt/etcd/
-        """
-        etcd_to_dir = os.path.join(ETCD_PATH, self.to_release)
-        etcd_from_dir = os.path.join(ETCD_PATH, self.from_release)
-
-        shutil.rmtree(etcd_to_dir, ignore_errors=True)
-
-        try:
-            shutil.copytree(etcd_from_dir, etcd_to_dir)
-            LOG.info("Copied etcd from %s to %s completed", etcd_from_dir, etcd_to_dir)
-        except Exception as e:
-            LOG.exception("Failed to copy etcd from %s to %s. Error: %s.",
-                          etcd_from_dir, etcd_to_dir, e.output)
-            raise
-
     def copy_kubernetes_conf(self):
         """
         Copy /etc/kubernetes/admin.conf to $rootdir/usr/etc/kubernetes/
@@ -266,6 +249,37 @@ class DataMigration(object):
             LOG.exception("Failed to create rabbitmq directory. Error: %s" % str(e))
             raise
 
+    def disable_rook_ceph_crash_alarms(self):
+        """
+        Disable recent rook ceph crash alarms
+        """
+
+        if not os.path.exists("/etc/platform/.node_rook_configured"):
+            return
+
+        try:
+            # Get the value of warn_recent_interval
+            process = subprocess.run(["/usr/local/bin/ceph", "config", "get", "mgr",
+                                    "mgr/crash/warn_recent_interval"],
+                                    check=True, text=True, capture_output=True)
+
+            # Store the value of mgr/crash/warn_recent_interval to a temporary key
+            if process.stdout:
+                subprocess.run(["/usr/local/bin/ceph", "config-key", "set",
+                                "usm/mgr/crash/warn_recent_interval", process.stdout.strip()],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            # Set the value of warn_recent_interval to 0, disabling the alarm
+            subprocess.check_call(["/usr/local/bin/ceph", "config", "set", "mgr",
+                                   "mgr/crash/warn_recent_interval", "0"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            # Archive any crashes that already exist
+            subprocess.check_call(["/usr/local/bin/ceph", "crash", "archive-all"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            LOG.info("Disabling rook ceph crash alarms completed.")
+        except subprocess.CalledProcessError as cpe:
+            LOG.exception("Failed to disable rook ceph daemon crash alarms. Skipping..\nReturn code: %s. Error: %s.",
+                          cpe.returncode, cpe.output)
 
 def main(sys_argv):
     args = upgrade_utils.parse_arguments(sys_argv)
@@ -304,12 +318,6 @@ def main(sys_argv):
         # Export VIM database
         data_migration.export_vim()
 
-        # Point N+1 etcd to N for now. We will migrate when both controllers are
-        # running N+1, during the swact back to controller-0. This solution will
-        # present some problems when we do upgrade etcd, so further development
-        # will be required at that time.
-        data_migration.export_etcd()
-
         # Copy /etc/kubernetes/admin.conf to $rootdir/usr/etc/kubernetes/
         data_migration.copy_kubernetes_conf()
 
@@ -326,6 +334,9 @@ def main(sys_argv):
         # Create rabbitmq directory
         data_migration.create_rabbitmq_directory()
 
+        # Disable rook ceph recent crash alarms
+        data_migration.disable_rook_ceph_crash_alarms()
+
         LOG.info("Data migration preparation completed successfully.")
 
     except Exception as e:
@@ -335,5 +346,5 @@ def main(sys_argv):
 
 
 if __name__ == "__main__":
-    upgrade_utils.configure_logging("/var/log/software.log", log_level=LOG.INFO)
+    upgrade_utils.configure_logging("/var/log/software.log", log_level=logging.INFO)
     sys.exit(main(sys.argv))

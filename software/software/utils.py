@@ -13,10 +13,12 @@ from netaddr import IPAddress
 import os
 from oslo_config import cfg as oslo_cfg
 from packaging import version
+import psutil
 import re
 import shutil
 import socket
 from socket import if_nametoindex as if_nametoindex_func
+import time
 import traceback
 import webob
 
@@ -114,7 +116,8 @@ def get_component_and_versions(release_name):
     match = pattern.match(release_name)
     if match:
         component = match.group(2) or None
-        release_version = f"{match.group(3)}.{match.group(4)}" + (f".{match.group(5)}" if match.group(5) else ".0")
+        release_version = f"{match.group(3)}.{match.group(4)}" + (f".{match.group(5)}"
+                                                                  if match.group(5) else ".0")
         software_version = f"{match.group(3)}.{match.group(4)}"
         patch_version = match.group(5) or '0'
         return component, release_version, software_version, patch_version
@@ -122,8 +125,8 @@ def get_component_and_versions(release_name):
         return None, None, None, None
 
 
-def get_feed_path(sw_version):
-    sw_ver = get_major_release_version(sw_version)
+def get_feed_path(sw_release):
+    sw_ver = get_major_release_version(sw_release)
     path = os.path.join(constants.UPGRADE_FEED_DIR, f"rel-{sw_ver}")
     return path
 
@@ -274,7 +277,8 @@ def save_temp_file(file_item, temp_dir=constants.SCRATCH_DIR):
             LOG.error("Not enough space to save file %s in %s \n \
                 Available %s bytes. File size %s", file_name, temp_dir, avail_space, file_size)
     except Exception:
-        msg = "Failed to get file size in bytes for {} or disk space for {}".format(file_item, temp_dir)
+        msg = "Failed to get file size in bytes for {} or disk space for {}".format(
+            file_item, temp_dir)
         LOG.exception(msg)
         raise Exception(msg)
 
@@ -519,3 +523,59 @@ def find_file_by_regex(dir_path, pattern):
     except Exception:
         LOG.error("Can't find files by regex pattern in directory %s." % dir_path)
         return []
+
+
+def get_iface_ip(iface_name: str, ip_family: int = socket.AF_INET) -> list[str]:
+    """Get IP addresses for a network interface filtered by address family.
+
+    :param iface_name: Name of the network interface to query
+    :param ip_family: Address family to filter by (socket.AF_INET or socket.AF_INET6)
+
+    return: List of IP addresses matching the specified family
+    """
+    # Input validation
+    if not iface_name or not isinstance(iface_name, str):
+        raise ValueError("Interface name must be a non-empty string")
+
+    if ip_family not in (socket.AF_INET, socket.AF_INET6):
+        raise TypeError(f"Invalid address family: {ip_family}")
+
+    try:
+        # Get network interface addresses
+        interface_addresses = psutil.net_if_addrs()
+
+        # Return early if interface not found
+        if iface_name not in interface_addresses:
+            LOG.error("Interface %s not found", iface_name)
+            return []
+
+        # Filter interfaces and collect IP addresses in one pass
+        # Secondary IP config e.g. enp0s8:2 needs to be handled accordingly
+        return [
+            addr.address
+            for name, addrs in interface_addresses.items()
+            if name.startswith(iface_name)
+            for addr in addrs
+            if addr.family == ip_family
+        ]
+
+    except Exception as e:
+        LOG.error("Error getting IP for interface %s: %s", iface_name, str(e))
+        return []
+
+
+def interval_task(interval_sec=10, no_run_return=False):
+    def wrap(func):
+        last_run = time.time()
+
+        def exec_op(*args, **kwargs):
+            nonlocal last_run
+            cur_time = time.time()
+            if cur_time - last_run < interval_sec:
+                return no_run_return
+
+            res = func(*args, **kwargs)
+            last_run = cur_time
+            return res
+        return exec_op
+    return wrap

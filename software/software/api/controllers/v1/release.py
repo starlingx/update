@@ -93,7 +93,7 @@ class ReleaseController(RestController):
                 LOG.info("Uploaded files: %s", uploaded_files)
 
             # Process uploaded files
-            return sc.software_release_upload(uploaded_files)
+            return sc.software_release_upload_api(uploaded_files)
 
         finally:
             # Remove all uploaded files from /scratch dir

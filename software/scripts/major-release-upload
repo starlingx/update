@@ -17,13 +17,15 @@ to the controller.
 import argparse
 import configparser
 import glob
-import logging as LOG
+import logging
 import os
 import shutil
 import subprocess
 import sys
 
 import upgrade_utils
+
+LOG = logging.getLogger('main_logger')
 
 AVAILABLE_DIR = "/opt/software/metadata/available"
 UNAVAILABLE_DIR = "/opt/software/metadata/unavailable"
@@ -38,21 +40,6 @@ FEED_REMOTE = "starlingx"
 FEED_BRANCH = "starlingx"
 
 
-# TODO(bqian) move the function to shareable utils.
-def get_major_release_version(sw_release_version):
-    """Gets the major release for a given software version """
-    if not sw_release_version:
-        return None
-    else:
-        try:
-            separator = '.'
-            separated_string = sw_release_version.split(separator)
-            major_version = separated_string[0] + separator + separated_string[1]
-            return major_version
-        except Exception:
-            return None
-
-
 def setup_from_release_load(from_release, to_feed_dir):
     """
     Setup from release load
@@ -65,7 +52,7 @@ def setup_from_release_load(from_release, to_feed_dir):
         return
 
     try:
-        from_major_rel = get_major_release_version(from_release)
+        from_major_rel = upgrade_utils.get_major_release_version(from_release)
 
         # Copy install_uuid to /var/www/pages/feed/rel-<release>
         from_feed_dir = os.path.join(FEED_OSTREE_BASE_DIR, ("rel-%s" % from_major_rel))
@@ -97,7 +84,7 @@ def setup_from_release_load(from_release, to_feed_dir):
         raise
 
 
-def load_import(from_release, to_major_rel, iso_mount_dir):
+def load_import(from_release, to_release, iso_mount_dir):
     """
     Import the iso files to the feed and pxeboot directories
     :param from_release: from release version (MM.mm/MM.mm.p)
@@ -105,14 +92,11 @@ def load_import(from_release, to_major_rel, iso_mount_dir):
     :param iso_mount_dir: iso mount dir
     """
 
-    # for now the from_release is the same as from_major_rel. until
-    # the sw_version is redefied to major release version, there is
-    # chance that from_release could be major.minor.patch.
-
+    to_major_rel = upgrade_utils.get_major_release_version(to_release)
+    to_feed_dir = os.path.join(FEED_OSTREE_BASE_DIR, ("rel-%s" % to_major_rel))
     try:
         # Copy the iso file to /var/www/pages/feed/rel-<release>
         os.makedirs(FEED_OSTREE_BASE_DIR, exist_ok=True)
-        to_feed_dir = os.path.join(FEED_OSTREE_BASE_DIR, ("rel-%s" % to_major_rel))
         if os.path.exists(to_feed_dir):
             shutil.rmtree(to_feed_dir)
             LOG.info("Removed existing %s", to_feed_dir)
@@ -126,7 +110,7 @@ def load_import(from_release, to_major_rel, iso_mount_dir):
                 shutil.copyfile(src_abs_path, os.path.join(to_feed_dir, content))
                 LOG.info("Copied %s to %s", src_abs_path, to_feed_dir)
             elif os.path.isdir(src_abs_path):
-                shutil.copytree(src_abs_path, os.path.join(to_feed_dir, content))
+                shutil.copytree(src_abs_path, os.path.join(to_feed_dir, content,), symlinks=True)
                 LOG.info("Copied %s to %s", src_abs_path, to_feed_dir)
 
         # Add min-free-space-percent to feed ostree config file
@@ -140,8 +124,9 @@ def load_import(from_release, to_major_rel, iso_mount_dir):
                 config.write(file, space_around_delimiters=False)
 
         # Create 'starlingx' remote on the feed ostree_repo
-        cmd = ["ostree", "remote", "add", "--repo=%s/ostree_repo/" % to_feed_dir,
-               FEED_REMOTE, "http://controller:8080/feed/rel-%s/ostree_repo/" % to_major_rel,
+        cmd = ["ostree", "remote", "add", "--no-gpg-verify",
+               "--repo=%s/ostree_repo/" % to_feed_dir, FEED_REMOTE,
+               "http://controller:8080/feed/rel-%s/ostree_repo/" % to_major_rel,
                FEED_BRANCH]
         try:
             subprocess.check_call(cmd)
@@ -169,16 +154,6 @@ def load_import(from_release, to_major_rel, iso_mount_dir):
                                                           os.path.basename(initrd_file)))
                 LOG.info("Copied %s to %s", initrd_file, VAR_PXEBOOT_DIR)
 
-        # Copy to_release_feed/pxelinux.cfg.files to /var/pxeboot/pxelinux.cfg.files
-        pxeboot_cfg_files = glob.glob(os.path.join(to_feed_dir, 'pxeboot', 'pxelinux.cfg.files',
-                                                   '*' + to_major_rel))
-        for pxeboot_cfg_file in pxeboot_cfg_files:
-            if os.path.isfile(pxeboot_cfg_file):
-                shutil.copyfile(pxeboot_cfg_file, os.path.join(VAR_PXEBOOT_DIR,
-                                                               'pxelinux.cfg.files',
-                                                               os.path.basename(pxeboot_cfg_file)))
-                LOG.info("Copied %s to %s", pxeboot_cfg_file, VAR_PXEBOOT_DIR)
-
         # Copy pxeboot-update.sh to /etc
         pxeboot_update_filename = "pxeboot-update-%s.sh" % to_major_rel
         shutil.copyfile(os.path.join(to_feed_dir, "upgrades", pxeboot_update_filename),
@@ -198,121 +173,30 @@ def load_import(from_release, to_major_rel, iso_mount_dir):
 
 def move_metadata_file_to_target_dir(to_release, iso_mount_dir, target_dir):
     """
-    Move release metadata file to target dir in /opt/software/metadata/
+    Copy release metadata file to target_dir
     :param to_release: release version
     :param iso_mount_dir: iso mount dir
     :param target_dir: target directory the metadata file moves to
     """
     try:
-        # Copy metadata.xml to target dir in /opt/software/metadata/
+        # Copy all *-metadata.xml to target_dir
         os.makedirs(target_dir, exist_ok=True)
-        metadata_name = f"{RELEASE_GA_NAME % to_release}-metadata.xml"
-        LOG.info("metadata name: %s", metadata_name)
-        abs_stx_release_metadata_file = os.path.join(iso_mount_dir,
-                                                     'patches',
-                                                     metadata_name)
-
-        # Copy stx release metadata.xml to available metadata dir
-        # TODO(jli14): prepatched iso will have more than one metadata file.
-        shutil.copyfile(abs_stx_release_metadata_file,
-                        os.path.join(target_dir, metadata_name))
-        LOG.info("Copied %s to %s", abs_stx_release_metadata_file, target_dir)
+        for metadata_file in glob.glob(os.path.join(iso_mount_dir, "patches", "*-metadata.xml")):
+            metadata_name = os.path.basename(metadata_file)
+            shutil.copyfile(metadata_file, os.path.join(target_dir, metadata_name))
+            LOG.info("Copied %s to %s", metadata_name, target_dir)
     except shutil.Error:
-        LOG.exception("Failed to copy the release %s metadata file to %s" %
-                      (to_release, target_dir))
+        LOG.exception("Failed to copy the %s metadata files to %s" % (to_release, target_dir))
         raise
 
 
-def generate_metadata_file_in_unavailable_dir(to_release):
-    """
-    Generate release metadata file in /opt/software/metadata/unavailable
-    This is only for 22.12 pre USM iso load import
-    :param to_release: release version
-    """
-    try:
-        # Copy metadata.xml to /opt/software/metadata/unavailable
-        os.makedirs(UNAVAILABLE_DIR, exist_ok=True)
-        # TODO(jli14): release name should be dynamically generated based on the branch.
-        metadata_name = f"{RELEASE_GA_NAME % to_release}-metadata.xml"
-        LOG.info("metadata name: %s", metadata_name)
-
-        # Generate metadata.xml
-        import xml.etree.ElementTree as ET
-        from xml.dom import minidom
-
-        root = ET.Element('patch')
-        ET.SubElement(root, "id").text = RELEASE_GA_NAME % to_release
-        ET.SubElement(root, "sw_version").text = to_release
-        ET.SubElement(root, "component").text = RELEASE_GA_NAME.split('-')[0]
-        ET.SubElement(root, "summary").text = 'This file is generated by usm_load_import'
-        xml_str = ET.tostring(root, encoding='unicode')
-        pretty_xml = minidom.parseString(xml_str).toprettyxml(indent="  ")
-        pretty_xml = '\n'.join([line for line in pretty_xml.split('\n') if line.strip()])
-
-        # Write to file
-        abs_path_metadata_filename = os.path.join(UNAVAILABLE_DIR, metadata_name)
-        with open(abs_path_metadata_filename, "w") as file:
-            file.write(pretty_xml)
-
-    except Exception:
-        LOG.exception("Failed to copy the release %s metadata file to %s" %
-                      (to_release, UNAVAILABLE_DIR))
-        raise
-
-
-def copy_patch_metadata_files_to_committed(iso_mount_dir):
-    """
-    Copy patch metadata files to /opt/software/metadata/committed
-    :param iso_mount_dir: iso mount dir
-    """
-    committed_patch_dir = os.path.join(iso_mount_dir, 'patches')
-    try:
-        shutil.copytree(committed_patch_dir, COMMITTED_DIR, dirs_exist_ok=True)
-        LOG.info("Copied patch metadata file to %s", COMMITTED_DIR)
-    except shutil.Error:
-        LOG.exception("Failed to copy patch metadata file(s) to %s" %
-                      COMMITTED_DIR)
-        raise
-
-
-def copy_patch_metadata_files_to_patching_committed(iso_mount_dir):
-    # TODO(jli14): remove this function when 'sw-patch query' is deprecated
-    """
-    Copy patch metadata files to /opt/patching/metadata/committed
-    :param iso_mount_dir: iso mount dir
-    """
-    deployed_patch_dir = os.path.join(iso_mount_dir, 'patches')
-    try:
-        shutil.copytree(deployed_patch_dir, PATCHING_COMMITTED_DIR, dirs_exist_ok=True)
-        LOG.info("Copied patch metadata file to %s", PATCHING_COMMITTED_DIR)
-    except shutil.Error:
-        LOG.exception("Failed to copy patch metadata file(s) to %s" %
-                      PATCHING_COMMITTED_DIR)
-        raise
-
-
-def restart_legacy_patching_service():
-    """
-    Restart legacy patching service daemon
-    """
-    # TODO(jli14): remove this function when 'sw-patch query' is deprecated
-    try:
-        restart_cmd = ['pmon-restart', 'sw-patch-controller-daemon']
-        LOG.info("Restarting legacy patching service daemon: %s", " ".join(restart_cmd))
-        subprocess.run(restart_cmd, stdout=subprocess.PIPE,
-                       stderr=subprocess.STDOUT, check=True, text=True)
-        LOG.info("Restarted legacy patching service daemon successfully")
-    except Exception as e:
-        LOG.exception("Failed to restart legacy patching service daemon with error: %s", str(e))
-        raise
-
-
-def sync_inactive_load_to_controller1(to_major_rel):
+def sync_inactive_load_standby_controller(to_release):
     """
     Sync inactive load to controller-1
     Upload is only allowed in controller-0 so sync to controller-1 is needed
-    :param to_major_rel: release version
+    :param to_release: release version
     """
+    to_major_rel = upgrade_utils.get_major_release_version(to_release)
     feed_dir = os.path.join(FEED_OSTREE_BASE_DIR, ("rel-%s" % to_major_rel))
     sync_cmd = [
         "rsync",
@@ -337,48 +221,27 @@ def main():
         required=True,
         help="The from-release version.",
     )
-
     parser.add_argument(
         "--to-release",
         required=True,
         help="The to-release version, MM.mm.p",
     )
-
     parser.add_argument(
         "--iso-dir",
         required=True,
         help="The mounted iso image directory.",
     )
-
-    parser.add_argument(
-        "--is-usm-iso",
-        required=False,
-        help="True if the iso supports USM upgrade.",
-        default=True
-    )
-
     args = parser.parse_args()
 
     try:
-        to_major_rel = get_major_release_version(args.to_release)
         LOG.info("Load import from %s to %s started", args.from_release, args.to_release)
-        load_import(args.from_release, to_major_rel, args.iso_dir)
+        load_import(args.from_release, args.to_release, args.iso_dir)
 
-        if args.is_usm_iso in ["True", True]:  # This is USM compatible iso
-            if args.from_release in ['None', None]:  # This is N-1 load
-                move_metadata_file_to_target_dir(args.to_release, args.iso_dir, UNAVAILABLE_DIR)
-            else:
-                move_metadata_file_to_target_dir(args.to_release, args.iso_dir, AVAILABLE_DIR)
+        if args.from_release in ['None', None]:  # This is N-1 load
+            move_metadata_file_to_target_dir(args.to_release, args.iso_dir, UNAVAILABLE_DIR)
+            sync_inactive_load_standby_controller(args.to_release)
         else:
-            # pre USM iso needs to generate metadata file
-            generate_metadata_file_in_unavailable_dir(args.to_release)
-            copy_patch_metadata_files_to_committed(args.iso_dir)
-
-        # Currently imported load is N-1
-        if args.from_release in ['None', None]:
-            copy_patch_metadata_files_to_patching_committed(args.iso_dir)
-            restart_legacy_patching_service()
-            sync_inactive_load_to_controller1(to_major_rel)
+            move_metadata_file_to_target_dir(args.to_release, args.iso_dir, AVAILABLE_DIR)
 
     except Exception as e:
         LOG.exception(e)
@@ -386,5 +249,5 @@ def main():
 
 
 if __name__ == "__main__":
-    upgrade_utils.configure_logging('/var/log/software.log', log_level=LOG.INFO)
+    upgrade_utils.configure_logging('/var/log/software.log', log_level=logging.INFO)
     sys.exit(main())

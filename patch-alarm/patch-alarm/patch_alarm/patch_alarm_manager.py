@@ -1,5 +1,5 @@
 """
-Copyright (c) 2014-2024 Wind River Systems, Inc.
+Copyright (c) 2014-2025 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -22,6 +22,8 @@ import software.config as cfg
 from software.constants import ENABLE_DEV_CERTIFICATE_PATCH_IDENTIFIER
 from software.software_functions import configure_logging
 from software.software_functions import LOG
+from software.software_functions import SW_VERSION
+from software.utils import get_major_release_version
 
 ###################
 # CONSTANTS
@@ -89,21 +91,8 @@ class PatchAlarmDaemon(object):
     def check_patch_alarms(self):
         self._handle_patch_alarms()
         self._get_handle_failed_hosts()
-        self._handle_pip_alarm()
 
-    def _handle_pip_alarm(self):
-        entity_instance_id = "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, "controller")
-
-        # Alarm from prior release that's no longer relevant
-        # could've been raised inadvertently when software api is missing during upgrade
-        pip_alarm = self.fm_api.get_fault(fm_constants.FM_ALARM_ID_PATCH_IN_PROGRESS,
-                                          entity_instance_id)
-        if pip_alarm:
-            LOG.info("Clearing patch-in-progress alarm")
-            self.fm_api.clear_fault(fm_constants.FM_ALARM_ID_PATCH_IN_PROGRESS,
-                                    entity_instance_id)
-
-    def _handle_patch_alarms(self):
+    def _handle_patch_alarms(self):  # pylint: disable=too-many-branches
         url = "http://%s/v1/release" % self.api_addr
 
         try:
@@ -125,6 +114,9 @@ class PatchAlarmDaemon(object):
                         raise_dip_alarm = True
                     elif rel_metadata['state'] == 'unavailable':
                         raise_obs_alarm = True
+                        if 'sw_version' in rel_metadata and \
+                           get_major_release_version(rel_metadata['sw_version']) == SW_VERSION:
+                            raise_obs_alarm = False
                 if 'release_id' in rel_metadata and ENABLE_DEV_CERTIFICATE_PATCH_IDENTIFIER in rel_metadata['release_id']:
                     raise_cert_alarm = True
 

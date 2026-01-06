@@ -1,6 +1,6 @@
 [Unit]
 Description=Unified Software Management Controller Daemon
-After=syslog.target network-online.target software.service software-controller.service
+After=syslog.target network-online.target software-controller.service
 Before=pmon.service
 
 [Service]

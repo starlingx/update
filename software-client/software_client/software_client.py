@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2013-2024 Wind River Systems, Inc.
+# Copyright (c) 2013-2025 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -16,10 +16,11 @@ import logging
 import os
 import subprocess
 import sys
+from urllib.parse import urljoin
 
 import software_client
 
-from software_client import client as sclient
+from software_client import auth
 from software_client import exc
 from software_client.common import utils
 from software_client.constants import LOCAL_ROOT
@@ -275,7 +276,8 @@ class SoftwareClientShell(object):
         subparsers2 = self._add_deploy_subparser(subparsers)
         deploy_submodule = utils.import_versioned_module(version, 'deploy_cmd')
         deploy_submodule.enhance_parser(parser, subparsers2, self.subcommands)
-        utils.define_commands_from_module(subparsers2, self, self.subcommands)
+        utils.define_commands_from_module(subparsers2, self, self.subcommands,
+                                          cmd_area='deploy')
         self._add_bash_completion_subparser(subparsers2)
         return parser
 
@@ -387,7 +389,15 @@ class SoftwareClientShell(object):
                              'software commands as root (sudo)')
             raise exc.CommandError(exception_msg)
 
-        client = sclient.get_client(api_version, auth_mode, **(args.__dict__))
+        args_dict = args.__dict__
+        if args.software_url:
+            endpoint = args.software_url
+            api_version_str = 'v' + api_version
+            if api_version_str not in endpoint.split('/'):
+                endpoint = urljoin(endpoint, api_version_str)
+            args_dict['endpoint'] = endpoint
+
+        client = auth.get_client(api_version, auth_mode, **(args_dict))
 
         try:
             return args.func(client, args)

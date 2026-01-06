@@ -7,7 +7,6 @@ SPDX-License-Identifier: Apache-2.0
 import logging
 
 from software.exceptions import SysinvClientNotInitialized
-from software.exceptions import ServiceParameterNotFound
 from software import constants
 from software import utils
 
@@ -107,6 +106,18 @@ def update_host_sw_version(hostname, sw_version):
         raise
 
 
+def trigger_vim_host_audit(hostname):
+    """Trigger for the sysinv function vim_host_audit."""
+    token, endpoint = utils.get_endpoints_token()
+    sysinv_client = get_sysinv_client(token=token, endpoint=endpoint)
+    try:
+        host = sysinv_client.ihost.get(hostname)
+        sysinv_client.ihost.vim_host_audit(host.uuid)
+    except Exception as err:
+        LOG.error("Failed to trigger VIM host audit for %s: %s", hostname, err)
+        raise
+
+
 def get_service_parameter(service=None, section=None, name=None):
     """return a list of dictionaries with keys
        uuid, service, section, name, personality, resource, value
@@ -134,17 +145,6 @@ def get_service_parameter(service=None, section=None, name=None):
             data.append(v)
 
     return data
-
-
-def get_oot_drivers():
-    # get the value of service parameter out_of_tree_drivers
-    name = "out_of_tree_drivers"
-    res_list = get_service_parameter(name=name)
-    if not res_list:
-        raise ServiceParameterNotFound(name)
-
-    parameter = res_list[0]
-    return parameter["value"]
 
 
 def trigger_evaluate_apps_reapply(trigger):

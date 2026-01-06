@@ -15,7 +15,6 @@
 #    under the License.
 
 
-from software_client.common import http
 from software_client.v1 import release
 from software_client.v1 import deploy
 
@@ -25,10 +24,10 @@ class Client(object):
 
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, http_adaptor):
         """Initialize a new client for the Software v1 API."""
         super(Client, self).__init__()
-        self.http_client = http.construct_http_client(*args, **kwargs)
+        self.http_client = http_adaptor
 
         self.release = release.ReleaseManager(self.http_client)
         self.deploy = deploy.DeployManager(self.http_client)

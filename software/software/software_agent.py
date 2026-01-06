@@ -14,18 +14,20 @@ import socket
 import subprocess
 import sys
 import time
+from packaging import version
 
 import software.ostree_utils as ostree_utils
 from software.software_functions import configure_logging
 from software.software_functions import execute_agent_hooks
-from software.software_functions import remove_major_release_deployment_flags
 from software.software_functions import LOG
+from software.software_functions import remove_major_release_deployment_flags
 import software.config as cfg
 from software.base import PatchService
 from software.exceptions import OSTreeCommandFail
 import software.utils as utils
 import software.messages as messages
 import software.constants as constants
+import software.deploy_utils as deploy_utils
 
 from tsconfig.tsconfig import http_port
 from tsconfig.tsconfig import install_uuid
@@ -205,9 +207,13 @@ class PatchMessageHelloAgentAck(messages.PatchMessage):
     def encode(self):
         global pa
         messages.PatchMessage.encode(self)
+        if pa.pre_bootstrap:
+            hostname = constants.PREBOOTSTRAP_HOSTNAME
+        else:
+            hostname = socket.gethostname()
         self.message['query_id'] = pa.query_id
         self.message['out_of_date'] = pa.changes
-        self.message['hostname'] = socket.gethostname()
+        self.message['hostname'] = hostname
         self.message['requires_reboot'] = pa.node_is_patched
         self.message['patch_failed'] = pa.patch_failed
         self.message['sw_version'] = SW_VERSION
@@ -362,38 +368,36 @@ class SoftwareMessageDeployDeleteCleanupReq(messages.PatchMessage):
 
     def handle(self, sock, addr):
         LOG.info("Handling deploy delete cleanup request, major_release=%s" % self.major_release)
-        success_cleanup = ostree_utils.delete_temporary_refs_and_remotes()
+
+        # remove temporary remote and ref created during the upgrade process
+        success_ostree_remote_cleanup = ostree_utils.delete_temporary_refs_and_remotes()
+
+        # update the default remote 'debian' to point to the to-release feed
         nodetype = utils.get_platform_conf("nodetype")
-        success_update = ostree_utils.add_ostree_remote(self.major_release, nodetype,
-                                                        replace_default_remote=True)
-        success_flags = remove_major_release_deployment_flags()
-        success_undeploy = ostree_utils.undeploy_inactive_deployments()
+        success_ostree_remote_update = ostree_utils.add_ostree_remote(
+            self.major_release, nodetype, replace_default_remote=True)
 
-        if success_cleanup:
-            LOG.info("Success cleaning temporary refs/remotes.")
-        else:
-            LOG.error("Failure cleaning temporary refs/remotes. "
-                      "Please do the cleanup manually.")
+        # remove the local upgrade flags created for the upgrade process
+        success_remove_upgrade_flags = remove_major_release_deployment_flags()
 
-        if success_update:
-            LOG.info("Success updating default remote.")
-        else:
-            LOG.error("Failure updating default remote. "
-                      "Please update '%s' remote manually." % constants.OSTREE_REMOTE)
+        # undeploy the from-release ostree deployment to free sysroot disk space
+        success_ostree_undeploy_from_release = ostree_utils.delete_older_deployments(
+            delete_pending=True)
 
-        if success_flags:
-            LOG.info("Success removing local major release deployment flags.")
-        else:
-            LOG.error("Failure removing major release deployment flags. "
-                      "Please remove them manually.")
+        deploy_utils.delete_etc_backup()
+        cleanup_results = [
+            (success_ostree_remote_cleanup, "cleaning temporary refs/remotes"),
+            (success_ostree_remote_update, "updating default remote"),
+            (success_remove_upgrade_flags, "removing local upgrade flags"),
+            (success_ostree_undeploy_from_release, "undeploying from-release ostree deployment"),
+        ]
+        for result, log_msg in cleanup_results:
+            if result not in [None, False]:
+                LOG.info("Success %s" % log_msg)
+            else:
+                LOG.error("Failure %s, manual cleanup is required" % log_msg)
+        success = all(x not in [None, False] for x, _ in cleanup_results)
 
-        if success_undeploy:
-            LOG.info("Success undeploying from-release deployment.")
-        else:
-            LOG.error("Failure undeploying from-release deployment. "
-                      "Please remove it manually using 'ostree admin undeploy' command.")
-
-        success = success_cleanup and success_update
         resp = SoftwareMessageDeployDeleteCleanupResp()
         resp.success = success
         resp.send(sock, addr)
@@ -527,6 +531,7 @@ class PatchAgent(PatchService):
         setflag(patch_failed_file)
         self.state = constants.PATCH_AGENT_STATE_INSTALL_FAILED
 
+    @ostree_utils.ostree_lock
     def query(self, major_release=None):
         """Check current patch state """
         if not self.install_local and not check_install_uuid():
@@ -618,6 +623,9 @@ class PatchAgent(PatchService):
                 # when in major release deployment, if hooks failed in a previous deploy
                 # host attempt, a flag is created so that their execution is reattempted here
                 if major_release and os.path.exists(run_hooks_flag):
+                    additional_data.update({'from_commit_id': active_commit_id,
+                                            'to_commit_id': commit_id})
+
                     LOG.info("Major release deployment %s flag found. "
                              "Running hooks." % run_hooks_flag)
                     try:
@@ -701,6 +709,11 @@ class PatchAgent(PatchService):
                 ostree_utils.pull_ostree_from_remote(remote=remote)
 
                 self.query(major_release=major_release)  # Updates following self variables
+
+                if major_release and version.Version(major_release) > version.Version(constants.SW_VERSION):
+                    # no backup for rollback
+                    deploy_utils.backup_etc(commit_id)
+
                 if self.latest_feed_commit:
                     # If latest_feed_commit is not null, the node can check the deployment health
                     if self.latest_sysroot_commit == self.latest_feed_commit:
@@ -737,6 +750,11 @@ class PatchAgent(PatchService):
                     changed = True
                     clearflag(ostree_pull_completed_deployment_pending_file)
 
+                # Creating a new deployment restores the kernel.env from ostree
+                # which does not have local modifications (such as selecting a RT kernel)
+                # We need to re-align that file after creating a deployment.
+                ostree_utils.update_deployment_kernel_env()
+
             except OSTreeCommandFail:
                 LOG.exception("Failed to pull changes and create deployment"
                               "during host-install.")
@@ -764,8 +782,10 @@ class PatchAgent(PatchService):
                     try:
                         pending_deployment = ostree_utils.fetch_pending_deployment()
                         deployment_dir = constants.OSTREE_BASE_DEPLOYMENT_DIR + pending_deployment
+                        active_deployment = ostree_utils.fetch_active_deployment()
+                        active_dir = constants.OSTREE_BASE_DEPLOYMENT_DIR + active_deployment
                         setflag(mount_pending_file)
-                        ostree_utils.mount_new_deployment(deployment_dir)
+                        ostree_utils.mount_new_deployment(deployment_dir, active_dir)
                         clearflag(mount_pending_file)
                         LOG.info("Running post-install patch-scripts")
                         subprocess.check_output([run_install_software_scripts_cmd, "postinstall"],
@@ -867,6 +887,21 @@ class PatchAgent(PatchService):
             connections.remove(s)
             s.close()
 
+    @utils.interval_task(interval_sec=10)
+    def update_node(self):
+        update = PatchMessageHelloAgentAck()
+        update.send(self.sock_out)
+
+    @staticmethod
+    @utils.interval_task(interval_sec=30)
+    def check_for_restart():
+        # Check for in-service patch restart flag
+        if os.path.exists(insvc_software_restart_agent):
+            # Restart
+            LOG.info("In-service software restart flag detected. Exiting.")
+            os.remove(insvc_software_restart_agent)
+            exit(0)
+
     def run(self):
         # Check if bootstrap stage is completed
         if self.pre_bootstrap and cfg.get_mgmt_ip():
@@ -898,8 +933,7 @@ class PatchAgent(PatchService):
 
         connections = []
 
-        timeout = time.time() + 30.0
-        remaining = 30
+        min_interval_sec = 2
 
         while True:
             if self.pre_bootstrap and cfg.get_mgmt_ip():
@@ -914,18 +948,16 @@ class PatchAgent(PatchService):
             inputs = [self.sock_in, self.listener] + connections
             outputs = []
 
-            rlist, wlist, xlist = select.select(inputs, outputs, inputs, remaining)
-
-            remaining = int(timeout - time.time())
-            if remaining <= 0 or remaining > 30:
-                timeout = time.time() + 30.0
-                remaining = 30
+            rlist, wlist, xlist = select.select(inputs, outputs, inputs, min_interval_sec)
 
             if (len(rlist) == 0 and
                     len(wlist) == 0 and
                     len(xlist) == 0):
                 # Timeout hit
                 self.audit_socket()
+
+                self.check_for_restart()
+                self.update_node()
                 continue
 
             for s in rlist:
@@ -1011,25 +1043,13 @@ class PatchAgent(PatchService):
                     connections.remove(s)
                     s.close()
 
-            # Check for in-service patch restart flag
-            if os.path.exists(insvc_software_restart_agent):
-                # Make sure it's safe to restart, ie. no reqs queued
-                rlist, wlist, xlist = select.select(inputs, outputs, inputs, 0)
-                if (len(rlist) == 0 and
-                        len(wlist) == 0 and
-                        len(xlist) == 0):
-                    # Restart
-                    LOG.info("In-service software restart flag detected. Exiting.")
-                    os.remove(insvc_software_restart_agent)
-                    exit(0)
-
 
 def main():
     global pa
 
-    configure_logging()
-
     cfg.read_config()
+
+    configure_logging()
 
     pa = PatchAgent()
     if os.path.isfile(constants.INSTALL_LOCAL_FLAG):

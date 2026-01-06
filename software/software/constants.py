@@ -52,8 +52,9 @@ DC_VAULT_LOADS_DIR = "%s/loads" % DC_VAULT_DIR
 # Certificate
 ENABLE_DEV_CERTIFICATE_PATCH_IDENTIFIER = 'ENABLE_DEV_CERTIFICATE'
 
-# Software path's
+# Software paths
 SOFTWARE_STORAGE_DIR = "/opt/software"
+SOFTWARE_METADATA_STORAGE_DIR = "%s/metadata" % SOFTWARE_STORAGE_DIR
 SOFTWARE_CONFIG_FILE_LOCAL = "/etc/software/software.conf"
 SOFTWARE_DEPLOY_FOLDER = "software-deploy"
 SOFTWARE_JSON_FILE = "%s/software.json" % SOFTWARE_STORAGE_DIR
@@ -66,8 +67,9 @@ RC_UNHEALTHY = 3
 # Script names
 DEPLOY_PRECHECK_SCRIPT = "deploy-precheck"
 UPGRADE_UTILS_SCRIPT = "upgrade_utils.py"
-DEPLOY_START_SCRIPT = "software-deploy-start"
-DEPLOY_CLEANUP_SCRIPT = "deploy-cleanup"
+DEPLOY_START_SCRIPT = "deploy-start"
+REMOVE_TEMPORARY_DATA_SCRIPT = "remove-temporary-data"
+MAJOR_RELEASE_UPLOAD_SCRIPT = "major-release-upload"
 USM_LOAD_IMPORT_SCRIPT = "usm_load_import"
 PATCH_SCRIPTS_STAGING_DIR = "/var/www/pages/updates/software-scripts"
 
@@ -84,14 +86,18 @@ PATCH_AGENT_STATE_INSTALL_REJECTED = "install-rejected"
 
 # Patch
 CHECKOUT_FOLDER = "checked_out_commit"
+APPLY = "apply"
+REMOVE = "remove"
 
 # Feed
 DEBIAN_RELEASE = "bullseye"
+DEBIAN_ORIGIN = "updates"
 FEED_DIR = "/var/www/pages/feed/"
 FEED_OSTREE_BASE_DIR = "/var/www/pages/feed"
 FEED_OSTREE_URL = "http://controller:8080/feed"
 PACKAGE_FEED_DIR = "/var/www/pages/updates/debian"
 UPGRADE_FEED_DIR = FEED_DIR
+OSTREE_LOCK = "/run/.ostree_lock"
 
 # Ostree
 OSTREE_BASE_DEPLOYMENT_DIR = "/ostree/deploy/debian/deploy/"
@@ -102,6 +108,9 @@ OSTREE_AUX_REMOTE_PATH = "/ostree/repo"
 OSTREE_HISTORY_NOT_FETCHED = "<< History beyond this commit not fetched >>"
 OSTREE_REPO = 'ostree_repo'
 SYSROOT_OSTREE_REF = "debian:starlingx"
+OSTREE_CONFIG = "config"
+OSTREE_GPG_VERIFY = "gpg-verify"
+OSTREE_ACTIVE_DEPLOYMENT_TAG = "'* '"
 
 # Sysroot
 SYSROOT_OSTREE = "/sysroot/ostree/repo"
@@ -109,6 +118,7 @@ STAGING_DIR = "/sysroot/upgrade"
 ROOT_DIR = "%s/sysroot" % STAGING_DIR
 
 ETCD_PATH = "/opt/etcd"
+ETCD_DIR_NAME = "db"
 PLATFORM_PATH = "/opt/platform"
 PLAYBOOKS_PATH = "/usr/share/ansible/stx-ansible/playbooks"
 POSTGRES_PATH = "/var/lib/postgresql"
@@ -140,6 +150,12 @@ SIG_EXTENSION = ".sig"
 PATCH_EXTENSION = ".patch"
 SUPPORTED_UPLOAD_FILE_EXT = [ISO_EXTENSION, SIG_EXTENSION, PATCH_EXTENSION]
 SCRATCH_DIR = "/scratch"
+PRE_START_SCRIPT = "pre_start"
+POST_START_SCRIPT = "post_start"
+PRE_INSTALL_SCRIPT = "pre_install"
+POST_INSTALL_SCRIPT = "post_install"
+ACTIVATION_SCRIPTS = "activation_scripts"
+PATCH_SCRIPTS = [PRE_START_SCRIPT, POST_START_SCRIPT, PRE_INSTALL_SCRIPT, POST_INSTALL_SCRIPT]
 
 # Release
 LOWEST_MAJOR_RELEASE_FOR_PATCH_SUPPORT = "24.09"
@@ -202,7 +218,7 @@ SOFTWARE_ALARMS = {
     fm_constants.FM_ALARM_ID_USM_CLEANUP_DEPLOYMENT_DATA: {
         "entity_type_id": fm_constants.FM_ENTITY_TYPE_HOST,
         "severity": fm_constants.FM_ALARM_SEVERITY_WARNING,
-        "reason_text": "Deploy in %s state, delete deployment to clean up the remaining %s deployment data",
+        "reason_text": "Deployment finished, delete to clean up the remaining deployment data",
         "alarm_type": fm_constants.FM_ALARM_TYPE_11,
         "probable_cause": fm_constants.ALARM_PROBABLE_CAUSE_65,
         "proposed_repair_action": "Delete deployment",
@@ -219,6 +235,8 @@ COMMIT_TAG = "commit"
 COMMIT1_TAG = "commit1"
 NUMBER_OF_COMMITS_TAG = "number_of_commits"
 OSTREE_TAG = "ostree"
+PREPATCHED_ISO_TAG = "prepatched_iso"
+REQUIRES_TAG = "requires"
 
 # Flags
 INSTALL_LOCAL_FLAG = "/opt/software/.install_local"
@@ -231,3 +249,25 @@ MAX_OSTREE_DEPLOY_RETRIES = 5
 
 # Precheck timeout
 PRECHECK_RESULT_VALID_PERIOD = 300
+
+# Logging
+LOG_DEFAULT_FORMAT = ('%(asctime)s.%(msecs)03d USM - %(exec)s [%(process)s:%(thread)d]: '
+                      '%(filename)s(%(lineno)s): %(levelname)s: %(message)s')
+SOFTWARE_API_SUPPRESS_PATTERNS = [
+    r"GET /v1/deploy/software_upgrade",
+]
+SOFTWARE_API_MAX_LENGTH = 240
+
+# Reserved_words
+RESERVED_WORDS_SET = {"OS_AUTH_TOKEN", "OS_AUTH_TYPE", "OS_AUTH_URL", "OS_ENDPOINT_TYPE", "OS_IDENTITY_API_VERSION",
+                      "OS_INTERFACE", "OS_PASSWORD", "OS_PROJECT_DOMAIN_ID", "OS_PROJECT_DOMAIN_NAME", "OS_PROJECT_ID",
+                      "OS_PROJECT_NAME", "OS_REGION_NAME", "OS_SERVICE_TOKEN", "OS_USERNAME", "OS_USER_DOMAIN_NAME",
+                      "OS_SERVICE_TYPE", "OS_TENANT_ID", "OS_TENANT_NAME", "OS_USER_DOMAIN_ID", "SYSTEM_API_VERSION",
+                      "SYSTEM_URL"}
+
+# Mount bind
+READ_ONLY_PERMISSION = "ro,noatime"
+READ_WRITE_PERMISSION = "rw,noatime"
+ETC = "/etc"
+USR = "/usr"
+USR_ETC = "/usr/etc"
