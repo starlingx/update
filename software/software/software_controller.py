@@ -3356,9 +3356,10 @@ class PatchController(PatchService):
                 self.software_sync()
 
                 if upgrade:
-                    base_deployment = deployment_list[0]
+                    base_deployment = deployment_list[-1]
                     base_release = self._release_basic_checks(base_deployment)
                     upgrade_commit_id = base_release.commit_id
+                    self.db_api_instance.update_deploy(commit_id=upgrade_commit_id)
                     if self._deploy_upgrade_start(base_release.sw_release, upgrade_commit_id, **kwargs):
                         LOG.info("Finished releases %s deploy start" % deployment_list)
                     else:
