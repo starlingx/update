@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2013-2024 Wind River Systems, Inc.
+# Copyright (c) 2013-2025 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -89,11 +89,10 @@ def _make_session(**kwargs):
     return session
 
 
-def get_ks_client(api_version, auth_type, service_type=SERVICE_TYPE, endpoint=None, **kwargs):
+def get_ks_client(api_version, service_type=SERVICE_TYPE, endpoint=None, **kwargs):
     """Get an authenticated client, based on credentials in the keyword args.
 
     :param api_version: the API version to use ('1' or '2')
-    :param auth_type: the authentication mode (token, keystone, local_root)
     :param session: the session to use (if it exists)
     :param service_type: service_type should always be 'usm'
     :param kwargs: additional keyword args to pass to the client or auth

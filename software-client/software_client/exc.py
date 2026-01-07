@@ -1,4 +1,4 @@
-# Copyright 2013-2024 Wind River, Inc.
+# Copyright 2013-2025 Wind River, Inc.
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -239,6 +239,10 @@ class SslCertificateValidationError(SoftwareclientException):
 
 class EndpointException(SoftwareclientException):
     message = "Generic endpoint exception. reason=%(reason)s"
+
+
+class OidcCredentialsMissing(SoftwareclientException):
+    message = "Either OIDC token or OIDC user is missing."
 
 
 # Alias for backwards compatibility

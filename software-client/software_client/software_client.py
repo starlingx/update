@@ -23,9 +23,10 @@ import software_client
 from software_client import auth
 from software_client import exc
 from software_client.common import utils
-from software_client.constants import LOCAL_ROOT
 from software_client.constants import KEYSTONE
+from software_client.constants import OIDC
 from software_client.constants import TOKEN
+from software_client.constants import LOCAL_ROOT
 
 
 VIRTUAL_REGION = 'SystemController'
@@ -193,6 +194,13 @@ class SoftwareClientShell(object):
                             help='Defaults to env[OS_AUTH_TOKEN]')
 
         parser.add_argument('--os_auth_token',
+                            help=argparse.SUPPRESS)
+
+        parser.add_argument('--stx-auth-type',
+                            default=utils.env('STX_AUTH_TYPE', default='keystone'),
+                            help='Defaults to env[STX_AUTH_TYPE].')
+
+        parser.add_argument('--stx_auth_type',
                             help=argparse.SUPPRESS)
 
         parser.add_argument('--software-url',
@@ -374,9 +382,11 @@ class SoftwareClientShell(object):
             rc = 1
             exit(rc)
 
-        # Identify authentication mode [token, keystone, local_root]
+        # Identify authentication mode [token, OIDC, keystone, local_root]
         if args.software_url and args.os_auth_token:
             auth_mode = TOKEN
+        elif args.stx_auth_type == OIDC:
+            auth_mode = OIDC
         elif check_keystone_credentials(args):
             auth_mode = KEYSTONE
         elif os.geteuid() == 0:
@@ -385,7 +395,7 @@ class SoftwareClientShell(object):
             exception_msg = ('Invalid authentication credentials. '
                              'Acceptable authentication modes are, '
                              'user-defined endpoint & token OR '
-                             'keystone credentials OR '
+                             'keystone credentials OR OIDC OR '
                              'software commands as root (sudo)')
             raise exc.CommandError(exception_msg)
 

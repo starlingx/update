@@ -86,6 +86,7 @@
     nodeset: debian-bullseye
     required-projects:
       - starlingx/config
+      - starlingx/utilities
     files:
       - software-client/*
     vars:
