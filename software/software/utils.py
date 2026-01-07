@@ -62,7 +62,8 @@ class ExceptionHook(hooks.PecanHook):
             data = dict(info="", warning="", error=str(e))
         elif isinstance(e, webob.exc.HTTPClientError):
             LOG.warning("%s. Signature [%s]" % (str(e), signature))
-            raise e
+            status = e.code
+            data = dict(info="", warning="", error=str(e))
         else:
             # with an exception that is not pre-categorized as "expected", it is a
             # bug. Or not properly categorizing the exception itself is a bug.
