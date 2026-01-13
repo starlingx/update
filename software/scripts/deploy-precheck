@@ -134,7 +134,11 @@ class HealthCheck(object):
                 api_cmd += f'?alarm_ignore_list={alarm_ignore_list}'
 
             method = 'GET'
-            output = upgrade_utils.call_api(self._sysinv_token, method, api_cmd)
+            try:
+                output = upgrade_utils.call_api(self._sysinv_token, method, api_cmd)
+            except Exception as e:
+                msg = "Failed to get system health status. Error: %s" % str(e)
+                raise Exception(msg)
         else:
             output = 'System Health:\n'
 

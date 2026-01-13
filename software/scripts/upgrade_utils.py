@@ -94,7 +94,7 @@ def get_sysinv_client(token, endpoint):
 
 
 def call_api(token_id, method, api_cmd, api_cmd_headers=None,
-             api_cmd_payload=None, timeout_in_secs=40):
+             api_cmd_payload=None, timeout_in_secs=60):
 
     headers = {"Accept": "application/json"}
     if token_id:
