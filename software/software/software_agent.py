@@ -381,8 +381,7 @@ class SoftwareMessageDeployDeleteCleanupReq(messages.PatchMessage):
         success_remove_upgrade_flags = remove_major_release_deployment_flags()
 
         # undeploy the from-release ostree deployment to free sysroot disk space
-        success_ostree_undeploy_from_release = ostree_utils.delete_older_deployments(
-            delete_pending=True)
+        success_ostree_undeploy_from_release = ostree_utils.delete_older_deployments()
 
         deploy_utils.delete_etc_backup()
         cleanup_results = [
