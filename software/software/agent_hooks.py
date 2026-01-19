@@ -44,7 +44,7 @@ class BaseHook(object):
     SYSTEMD_ETC_DIR = "%s/etc/systemd/system/multi-user.target.wants" % TO_RELEASE_OSTREE_DIR
     PLATFORM_CONF_PATH = "/etc/platform/"
     PLATFORM_CONF_FILE = os.path.join(PLATFORM_CONF_PATH, "platform.conf")
-    BACKUP_DIR = "/opt/software/backup"
+    BACKUP_DIR = "/sysroot/upgrade/backup"
 
     # keywords
     CONTROLLER = "controller"
@@ -69,17 +69,6 @@ class BaseHook(object):
             cp = configparser.ConfigParser()
             cp.read_string(f"[{default}]\n" + fp.read())
         return cp[default][key]
-
-    def get_etc_backup_path(self, commit_id=None):
-        ETC_BACKUP_PATH = '/sysroot/upgrade/deploy-%s'
-        if commit_id is None:
-            commit_id = '*'
-        return ETC_BACKUP_PATH % commit_id
-
-    def get_etc_backup(self):
-        if self._to_commit_id:
-            return self.get_etc_backup_path(self._to_commit_id)
-        return None
 
     def enable_service(self, service):
         src = "%s/%s" % (self.SYSTEMD_LIB_DIR, service)
@@ -630,6 +619,8 @@ class UpdateKernelParametersHook(BaseHook):
                 kernel_params = fd.read()
                 cmd = ["grub-editenv", self.BOOT_ENV, "set", f"kernel_params={kernel_params}"]
                 subprocess.run(cmd, check=True, capture_output=True, text=True)
+        except FileNotFoundError:
+            LOG.warning("Kernel parameters backup file not found, unable to restore...")
         except subprocess.CalledProcessError as e:
             LOG.error("Error restoring kernel parameters: %s", e.stderr)
             raise
