@@ -2321,6 +2321,11 @@ class PatchController(PatchService):
                 LOG.exception(msg)
                 raise MetadataFail(msg)
 
+            # We need to clean up all N-1 release related scripts before
+            # reload_release_data() run to remove the N-1 from the release_collection
+            self.delete_start_install_script(release_id)
+            self.delete_patch_activate_scripts(release_id)
+
             # Delete N-1 load on system controller, if it is the latest N-1 release
             if is_system_controller() and release_sw_version < SW_VERSION:
                 reload_release_data()
@@ -2334,8 +2339,6 @@ class PatchController(PatchService):
                     LOG.info("Latest inactive release, cleaning up inactive load import")
                     self._clean_up_inactive_load_import(release_sw_version)
 
-            self.delete_start_install_script(release_id)
-            self.delete_patch_activate_scripts(release_id)
             reload_release_data()
             msg = "%s has been deleted" % release_id
             LOG.info(msg)
