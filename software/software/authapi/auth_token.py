@@ -18,13 +18,44 @@
 #
 
 import logging
+
 from keystonemiddleware import auth_token
-from platform_util.oidc import oidc_utils
-from software import utils
 from webob import exc
 from webob import Response
 
+from platform_util.oidc import oidc_utils
+from software import utils
+
 LOG = logging.getLogger("main_logger")
+
+
+class OIDCTokenMiddleware():
+    def __init__(self, app, conf):
+        self._app = app
+        self._token_cache = {}
+        self._domain = conf.get("oidc_default_domain", "Default")
+        self._project = conf.get("oidc_default_project", "admin")
+
+    def __call__(self, env, start_response):
+        token = env.get("HTTP_OIDC_TOKEN")
+        claims = self._authenticate(token)
+        self._inject_claims(env, claims)
+        return self._app(env, start_response)
+
+    def _authenticate(self, token):
+        try:
+            claims = oidc_utils.get_oidc_token_claims(token, self._token_cache)
+            parsed_claims = oidc_utils.parse_oidc_token_claims(claims, self._domain, self._project)
+        except Exception as e:
+            raise exc.HTTPForbidden(str(e))
+        return parsed_claims
+
+    def _inject_claims(self, env, claims):
+        roles = claims.get("roles", [])
+        username = claims.get("username", "")
+        env['HTTP_X_ROLES'] = ','.join(roles)
+        env['HTTP_X_USER_NAME'] = username
+        env['HTTP_X_PROJECT_NAME'] = self._project
 
 
 class AuthTokenMiddleware(auth_token.AuthProtocol):
@@ -36,105 +67,18 @@ class AuthTokenMiddleware(auth_token.AuthProtocol):
     """
     def __init__(self, app, conf, public_api_routes=None):
         self._software_app = app
-        self._oidc_token_cache = {}
-        self._default_domain = conf.get('oidc_default_domain', 'Default')
-        self._default_project = conf.get('oidc_default_project', 'admin')
 
         if public_api_routes is None:
             public_api_routes = []
         self.public_api_routes = set(public_api_routes)
+
+        self.oidc_middleware = OIDCTokenMiddleware(app, conf)
 
         super(AuthTokenMiddleware, self).__init__(app, conf)
 
     @staticmethod
     def _error_response(message):
         return Response(status=403, json_body={'error': message})
-
-    # TODO(heitormatsui): migrate the token validation
-    #  functions to a common library
-    def _validate_oidc_token(self, oidc_token):
-        try:
-            oidc_config = oidc_utils.get_apiserver_oidc_args()
-        except Exception as e:
-            msg = 'Get OIDC config failed: %s' % e
-            LOG.error(msg)
-            raise exc.HTTPForbidden(msg) from e
-
-        if oidc_config is None:
-            msg = 'OIDC config is empty'
-            LOG.error(msg)
-            raise exc.HTTPForbidden(msg)
-
-        issuer_url = oidc_config.get('oidc-issuer-url')
-        client_id = oidc_config.get('oidc-client-id')
-        username_claim = oidc_config.get('oidc-username-claim')
-        group_claim = oidc_config.get('oidc-groups-claim')
-
-        # Validate token
-        try:
-            oidc_token_dict = oidc_utils.validate_oidc_token(
-                oidc_token,
-                self._oidc_token_cache,
-                issuer_url,
-                client_id
-            )
-        except Exception as e:
-            msg = 'OIDC token validation failed: %s' % e
-            LOG.error(msg)
-            raise exc.HTTPForbidden(msg) from e
-
-        if not oidc_token_dict:
-            msg = 'Failed OIDC validation for token details'
-            LOG.error(msg)
-            raise exc.HTTPForbidden(msg)
-
-        return oidc_token_dict, username_claim, group_claim
-
-    def _authenticate_oidc_token(self, oidc_token, env):
-        if not oidc_token:
-            msg = 'Missing OIDC token in the request'
-            LOG.error(msg)
-            return self._error_response(message=msg)
-
-        try:
-            oidc_token_dict, username_claim, group_claim = \
-                self._validate_oidc_token(oidc_token)
-        except Exception as e:
-            return self._error_response(message=str(e))
-
-        # Get username
-        try:
-            username = oidc_utils.get_username_from_oidc_token(
-                oidc_token_dict, username_claim)
-        except Exception as e:
-            msg = 'Failed to extract username from OIDC token: %s' % e
-            LOG.error(msg)
-            return self._error_response(message=msg)
-
-        if not username:
-            msg = 'Invalid username for the OIDC token'
-            LOG.error(msg)
-            return self._error_response(message=msg)
-
-        # Get roles
-        try:
-            roles = oidc_utils.get_keystone_roles_for_oidc_token(
-                oidc_token_dict, username_claim, group_claim,
-                domain=self._default_domain, project=self._default_project)
-        except Exception as e:
-            msg = 'Failed to get roles from OIDC token: %s' % e
-            LOG.error(msg)
-            return self._error_response(message=msg)
-
-        if not roles:
-            msg = 'Invalid roles for the OIDC token'
-            LOG.error(msg)
-            return self._error_response(message=msg)
-
-        env['HTTP_X_ROLES'] = ','.join(roles)
-        env['HTTP_X_USER_NAME'] = username
-        env['HTTP_X_PROJECT_NAME'] = self._default_project
-        return self._software_app
 
     def __call__(self, env, start_response):
         path = utils.safe_rstrip(env.get('PATH_INFO'), '/')
@@ -144,7 +88,6 @@ class AuthTokenMiddleware(auth_token.AuthProtocol):
 
         oidc_token = env.get("HTTP_OIDC_TOKEN")
         if oidc_token:
-            resp = self._authenticate_oidc_token(oidc_token, env)
-            return resp(env, start_response)
+            return self.oidc_middleware(env, start_response)
 
         return super(AuthTokenMiddleware, self).__call__(env, start_response)  # pylint: disable=too-many-function-args
