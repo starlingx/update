@@ -28,7 +28,7 @@ export storage=false
 
 if [ "${nodetype}" == "controller" ]; then
     controller=true
-    if [ "${subfunction}" == "controller,worker" ]; then
+    if [[ "${subfunction}" =~ "worker" ]]; then
         worker=true
     fi
 fi
