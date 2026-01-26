@@ -16,17 +16,17 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 #
-# Copyright (c) 2023,2026 Wind River Systems, Inc.
+# Copyright (c) 2023-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
-#
+
 from oslo_config import cfg
 from oslo_serialization import jsonutils
 from pecan import hooks
 from webob import exc
 
-from software.authapi.policies import base as base_policy
 from software.authapi.context import RequestContext
+from software.authapi.policies import base as base_policy
 from software.authapi import policy
 from software import utils
 

@@ -1,9 +1,10 @@
-# Copyright (c) 2023-2024 Wind River Systems, Inc.
+# Copyright (c) 2023-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
 
 from oslo_config import cfg
+
 
 API_SERVICE_OPTS = [
     cfg.StrOpt('auth_api_bind_ip',

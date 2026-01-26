@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2023-2025 Wind River Systems, Inc.
+# Copyright (c) 2023-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -11,7 +11,6 @@ import configparser
 import json
 import logging
 import os
-from packaging import version
 import re
 import requests
 import subprocess
@@ -19,11 +18,11 @@ import sys
 import time
 import yaml
 
-from oslo_config import cfg
-
 from keystoneauth1 import exceptions
 from keystoneauth1 import identity
 from keystoneauth1 import session
+from oslo_config import cfg
+import packaging
 
 LOG = logging.getLogger('main_logger')
 CONF = cfg.CONF
@@ -294,7 +293,7 @@ def get_major_release_version(sw_release_version):
     if not sw_release_version:
         return None
     try:
-        v = version.Version(sw_release_version)
+        v = packaging.version.Version(sw_release_version)
         return f"{v.major:02d}.{v.minor:02d}"
     except Exception:
         return None

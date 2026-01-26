@@ -1,5 +1,5 @@
 """
-Copyright (c) 2013-2024 Wind River Systems, Inc.
+Copyright (c) 2013-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -8,8 +8,8 @@ SPDX-License-Identifier: Apache-2.0
 
 import datetime
 
-import wsme
 from wsme import types as wtypes
+import wsme
 
 
 class APIBase(wtypes.Base):

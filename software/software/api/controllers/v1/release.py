@@ -1,5 +1,5 @@
 """
-Copyright (c) 2024 Wind River Systems, Inc.
+Copyright (c) 2024-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -8,16 +8,17 @@ import cgi
 import json
 import logging
 import os
+import shutil
+
+from pecan.rest import RestController
 from pecan import expose
 from pecan import request
-from pecan.rest import RestController
-import shutil
 import webob
 
-from software import constants
 from software.exceptions import SoftwareServiceError
 from software.release_data import reload_release_data
 from software.software_controller import sc
+from software import constants
 from software import utils
 
 

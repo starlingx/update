@@ -1,19 +1,19 @@
 """
-Copyright (c) 2023-2024 Wind River Systems, Inc.
+Copyright (c) 2023-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
-from oslo_log import log
-import pecan
-from pecan import rest
 
-from software.api.controllers import v1
+import wsmeext.pecan as wsme_pecan
+from oslo_log import log
+from pecan import rest
+from wsme import types as wtypes
+import pecan
+
 from software.api.controllers.v1 import base
 from software.api.controllers.v1 import link
-
-from wsme import types as wtypes
-import wsmeext.pecan as wsme_pecan
+from software.api.controllers import v1
 
 LOG = log.getLogger(__name__)
 

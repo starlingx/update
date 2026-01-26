@@ -1,10 +1,11 @@
 #
-# Copyright (c) 2023 Wind River Systems, Inc.
+# Copyright (c) 2023-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
 
 """Access Control Lists (ACL's) control access the API server."""
+
 from software.authapi import auth_token
 
 OPT_GROUP_NAME = 'keystone_authtoken'

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2013-2024 Wind River Systems, Inc.
+# Copyright (c) 2013-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -15,17 +15,17 @@ Version 1 of the USM API
 Specification can be found in code repo.
 """
 
-import pecan
 import wsmeext.pecan as wsme_pecan
-from pecan import rest
 from wsme import types as wtypes
+from pecan import rest
+import pecan
 
-from software.api.controllers.v1 import base
-from software.api.controllers.v1 import link
-from software.api.controllers.v1.software import SoftwareAPIController
-from software.api.controllers.v1.release import ReleaseController
 from software.api.controllers.v1.deploy import DeployController
 from software.api.controllers.v1.deploy_host import DeployHostController
+from software.api.controllers.v1.release import ReleaseController
+from software.api.controllers.v1.software import SoftwareAPIController
+from software.api.controllers.v1 import base
+from software.api.controllers.v1 import link
 
 
 class MediaType(base.APIBase):

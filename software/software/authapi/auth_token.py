@@ -12,18 +12,18 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 #
-# Copyright (c) 2023,2026 Wind River Systems, Inc.
+# Copyright (c) 2023-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
 
 import logging
 
+from platform_util.oidc import oidc_utils
 from keystonemiddleware import auth_token
 from webob import exc
 from webob import Response
 
-from platform_util.oidc import oidc_utils
 from software import utils
 
 LOG = logging.getLogger("main_logger")
