@@ -4027,8 +4027,11 @@ class PatchController(PatchService):
         else:
             activate_cmd = ["source", "/etc/platform/openrc;", cmd_path, from_release, to_release]
 
+        from_release_maj_min_version = utils.get_major_release_version(from_release)
+        to_release_maj_min_version = utils.get_major_release_version(to_release)
         deploying = ReleaseState(release_state=states.DEPLOYING)
-        if deploying.is_major_release_deployment():
+        if deploying.is_major_release_deployment() \
+                or from_release_maj_min_version != to_release_maj_min_version:
             activate_cmd.append('--is_major_release')
 
         env = os.environ.copy()
@@ -4219,8 +4222,14 @@ class PatchController(PatchService):
             msg = "Deployment is missing unexpectedly"
             raise InvalidOperation(msg)
 
+        from_release = deploy.get("from_release")
+        to_release = deploy.get("to_release")
+        from_release_maj_min_version = utils.get_major_release_version(from_release)
+        to_release_maj_min_version = utils.get_major_release_version(to_release)
+
         deploying = ReleaseState(release_state=states.DEPLOYING)
-        if deploying.is_major_release_deployment():
+        if deploying.is_major_release_deployment() \
+                or from_release_maj_min_version != to_release_maj_min_version:
             self._activate_rollback_major_release(deploy)
         else:
             self._activate_rollback_patching_release()
