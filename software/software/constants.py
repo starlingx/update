@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023-2025 Wind River Systems, Inc.
+Copyright (c) 2023-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -271,3 +271,7 @@ READ_WRITE_PERMISSION = "rw,noatime"
 ETC = "/etc"
 USR = "/usr"
 USR_ETC = "/usr/etc"
+
+# Software-agent
+BEFORE_REBOOT = "before-reboot"
+AFTER_REBOOT = "after-reboot"

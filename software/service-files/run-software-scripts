@@ -1,11 +1,13 @@
 #!/bin/bash
 #
-# Copyright (c) 2023-2024 Wind River Systems, Inc.
+# Copyright (c) 2023-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
 
 . /etc/software/software-functions
+
+declare REBOOT_STATUS=""
 
 if [ -z "$1" ]
 then
@@ -13,23 +15,29 @@ then
     exit 0
 fi
 
+if [ -n "$2" ]
+then
+    REBOOT_STATUS="$2"
+    loginfo "Reboot status: $2"
+fi
+
 declare DIR="${PATCH_SCRIPTDIR}/${1}"
-declare SCRIPTS=$(find $DIR -type f -executable | sort)
+declare SCRIPTS=$(find $DIR -type f -executable | sort -V)
 
 if [ ${#SCRIPTS} -eq 0 ]
 then
-    loginfo "No in-service patch scripts found at the directory ${DIR}"
+    loginfo "No patch install script found at the directory ${DIR}"
     exit 0
 fi
 
 declare -i NUM_SCRIPTS=$(echo "$SCRIPTS" | wc -l)
 
-loginfo "Running $NUM_SCRIPTS in-service patch scripts"
+loginfo "Running $NUM_SCRIPTS patch install scripts"
 
 declare SCRIPTLOG=/var/log/software.log
 cat <<EOF >>$SCRIPTLOG
 ############################################################
-`date "+%FT%T.%3N"`: Running $NUM_SCRIPTS install patch scripts:
+`date "+%FT%T.%3N"`: Running $NUM_SCRIPTS patch install scripts:
 
 $SCRIPTS
 
@@ -45,7 +53,7 @@ do
 
 EOF
 
-    bash -x $cmd >>$SCRIPTLOG 2>&1
+    bash -x $cmd "$REBOOT_STATUS" >>$SCRIPTLOG 2>&1
     rc=$?
     if [ $rc -ne $PATCH_STATUS_OK ]
     then
