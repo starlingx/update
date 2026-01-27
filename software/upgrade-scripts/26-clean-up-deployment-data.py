@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2025 Wind River Systems, Inc.
+# Copyright (c) 2025-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -13,9 +13,10 @@ import subprocess
 import sys
 
 from software.utilities.constants import SW_VERSION
+from software.utilities.utils import configure_logging
 from software import constants
 from software import utils
-from software.utilities.utils import configure_logging
+
 
 LOG = logging.getLogger('main_logger')
 ETCD_DIR_NAME = 'db'

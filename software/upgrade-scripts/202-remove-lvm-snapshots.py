@@ -1,16 +1,18 @@
 #!/usr/bin/env python
 #
-# Copyright (c) 2025 Wind River Systems, Inc.
+# Copyright (c) 2025-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
 
 import configparser
 import logging
-from pathlib import Path
-import sys
+import pathlib
 import subprocess
+import sys
+
 from software.utilities.utils import configure_logging
+
 
 LOG = logging.getLogger('main_logger')
 
@@ -28,7 +30,7 @@ def get_system_mode():
 
 
 def delete_lvm_snapshots():
-    script_path = Path("/usr/sbin/software-deploy/manage-lvm-snapshots")
+    script_path = pathlib.Path("/usr/sbin/software-deploy/manage-lvm-snapshots")
     if not script_path.is_file():
         raise FileNotFoundError(f"{script_path} not found")
 

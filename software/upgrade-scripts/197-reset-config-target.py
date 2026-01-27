@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2021-2025 Wind River Systems, Inc.
+# Copyright (c) 2021-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -11,10 +11,12 @@
 import logging
 import sys
 
-from psycopg2.extras import RealDictCursor
-from controllerconfig import utils
 from controllerconfig.common import constants
+from controllerconfig import utils
+from psycopg2.extras import RealDictCursor
+
 from software.utilities.utils import configure_logging
+
 
 LOG = logging.getLogger('main_logger')
 

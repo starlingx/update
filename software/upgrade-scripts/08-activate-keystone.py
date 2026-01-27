@@ -1,15 +1,16 @@
 #!/usr/bin/env python
-# Copyright (c) 2025 Wind River Systems, Inc.
+# Copyright (c) 2025-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
 
 import logging
-from oslo_config import cfg
 import os
 from six.moves import configparser
-import sys
 import subprocess
+import sys
+
+from oslo_config import cfg
 
 from cgtsclient import client as cgts_client
 from software.utilities.utils import configure_logging
