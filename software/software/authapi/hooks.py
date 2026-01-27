@@ -94,17 +94,32 @@ class ContextHook(hooks.PecanHook):
         path = utils.safe_rstrip(state.request.path, '/')
         is_public_api = path in self.public_api_routes
 
-        state.request.context = RequestContext(
-            auth_token=auth_token,
-            user=user_id,
-            tenant=tenant,
-            domain_id=domain_id,
-            domain_name=domain_name,
-            is_admin=is_admin,
-            is_public_api=is_public_api,
-            project_name=project_name,
-            roles=roles,
-            service_catalog=service_catalog)
+        try:
+            state.request.context = RequestContext(
+                auth_token=auth_token,
+                user_id=user_id,
+                project_id=tenant,
+                domain_id=domain_id,
+                domain_name=domain_name,
+                is_admin=is_admin,
+                is_public_api=is_public_api,
+                project_name=project_name,
+                roles=roles,
+                service_catalog=service_catalog)
+        except TypeError:
+            # TODO(svanka): Remove this fallback after full switch to Trixie.
+            # Bullseye oslo.context uses deprecated user/tenant params.
+            state.request.context = RequestContext(
+                auth_token=auth_token,
+                user=user_id,
+                tenant=tenant,
+                domain_id=domain_id,
+                domain_name=domain_name,
+                is_admin=is_admin,
+                is_public_api=is_public_api,
+                project_name=project_name,
+                roles=roles,
+                service_catalog=service_catalog)
 
 
 class AccessPolicyHook(hooks.PecanHook):
