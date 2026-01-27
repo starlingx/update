@@ -1,5 +1,5 @@
 """
-Copyright (c) 2024-2025 Wind River Systems, Inc.
+Copyright (c) 2024-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -15,8 +15,6 @@ SPDX-License-Identifier: Apache-2.0
 #          python environments
 #####################################################################
 
-from abc import ABC
-from abc import abstractmethod
 import configparser
 import contextlib
 import filecmp
@@ -142,13 +140,15 @@ class EtcMerger(BaseHook):
 
         new_deploy_etc_file_path = self.get_new_deploy_path(self.USM_ETC_FILE_PATH)
         for source_file in iterate_etc_files(new_deploy_etc_file_path):
-            destination_file = os.path.join('/etc', os.path.relpath(source_file,
-                                            new_deploy_etc_file_path))
+            destination_file = \
+                os.path.join(f'{self.TO_RELEASE_OSTREE_DIR}/etc',
+                             os.path.relpath(source_file,
+                                             new_deploy_etc_file_path))
             try:
                 LOG.info(f"Replacing {destination_file} with {source_file}")
                 shutil.copyfile(source_file, destination_file)
             except FileNotFoundError:
-                # imposible?
+                # impossible?
                 LOG.error(f"copy file {source_file} not found")
             except Exception:
                 LOG.exception(f"Fail to replace file {destination_file} with {source_file}")
@@ -793,204 +793,11 @@ class DeleteControllerFeedRemoteHook(BaseHook):
             LOG.info("Host nodetype is %s, no ostree remote to delete" % self.CONTROLLER)
 
 
-class AbstractSysctlFlagHook(BaseHook, ABC):
-    """
-    Abstract base class for managing CIS benchmark sysctl flags on the kernel.
-    """
-
-    def __init__(self, attrs):
-        super(AbstractSysctlFlagHook, self).__init__(attrs)
-        # This property must be implemented by derived classes
-        self._parameters_to_set = None
-
-    @property
-    @abstractmethod
-    def parameters_to_set(self):
-        pass
-
-    @abstractmethod
-    def run(self):
-        pass
-
-    def _set_sysctl_param(self, config_file: str, param_name: str, param_value: int, lines: list):
-        """
-        Helper function to set or update a specific sysctl parameter in the list of lines.
-        Handles commented-out lines by uncommenting and updating them.
-        Returns True if the line was found/updated, False otherwise (meaning it needs to be added).
-        """
-        setting_to_set = f"{param_name} = {param_value}"
-        setting_pattern = re.compile(rf"^\s*#?\s*{re.escape(param_name)}\s*=")
-
-        updated_in_place = False
-        for i, line in enumerate(lines):
-            if setting_pattern.match(line):
-                # If the line is already exactly what we want (uncommented and correct value)
-                if line.strip() == setting_to_set:
-                    LOG.info(f"'{param_name}' already set to '{param_value}' in {config_file}")
-                else:
-                    # If it's a matching line but needs updating or uncommenting
-                    lines[i] = setting_to_set + '\n'
-                    LOG.info(f"Updated '{param_name}' to '{param_value}' (uncommented if necessary) in {config_file}")
-                updated_in_place = True
-                break
-
-        return updated_in_place
-
-    def _configure_sysctl_parameters(self, ostree_dir):
-        """
-        Configures multiple sysctl parameters in /etc/sysctl.conf
-        and applies the changes using sysctl -p.
-        Handles commented-out lines by uncommenting and updating them.
-        Uses the parameters defined by the derived class's 'parameters_to_set' property.
-        """
-        config_file = os.path.normpath(ostree_dir + "/etc/sysctl.conf")
-
-        if self.parameters_to_set is None:
-            LOG.error("Derived class must define 'parameters_to_set' property.")
-            return
-
-        try:
-            if not os.path.exists(config_file):
-                LOG.error(f"Error: {config_file} not found. Please ensure the file exists.")
-                return
-
-            with open(config_file, 'r') as f:
-                lines = f.readlines()
-
-            new_lines = list(lines)
-
-            for param_name, param_value in self.parameters_to_set.items():
-                param_found_and_updated = self._set_sysctl_param(
-                    config_file, param_name, param_value, new_lines
-                )
-
-                if not param_found_and_updated:
-                    setting_to_add = f"{param_name} = {param_value}"
-                    # Ensure we don't add extra blank lines if the file already ends with one
-                    if new_lines and not new_lines[-1].strip():
-                        new_lines.append(setting_to_add + '\n')
-                    else:
-                        new_lines.append('\n' + setting_to_add + '\n')
-                    LOG.info(f"Added '{setting_to_add}' to {config_file}")
-
-            if new_lines != lines:  # Simple check if content has changed
-                with open(config_file, 'w') as f:
-                    f.writelines(new_lines)
-                LOG.debug(f"Successfully modified {config_file}")
-            else:
-                LOG.debug(f"No changes detected for {config_file}. Skipping file write.")
-
-        except FileNotFoundError:
-            LOG.error(f"Error: Could not find the file {config_file}.")
-        except PermissionError:
-            LOG.error(f"Error: Permission denied for {config_file}. Please run with sufficient permissions.")
-        except subprocess.CalledProcessError as e:
-            LOG.error(f"Error applying sysctl changes: {e}")
-            LOG.error(f"Command: {e.cmd}")
-            LOG.error(f"Return Code: {e.returncode}")
-            LOG.error(f"Stdout: {e.stdout}")
-            LOG.error(f"Stderr: {e.stderr}")
-        except Exception as e:
-            LOG.error(f"An unexpected error occurred: {e}", exc_info=True)
-
-
-class CISSysctlFlagHookUpgrade(AbstractSysctlFlagHook):
-    """
-    Hook to upgrade CIS benchmark sysctl flags to their hardened values.
-    """
-    @property
-    def parameters_to_set(self):
-        if self._parameters_to_set is None:
-            self._parameters_to_set = {
-                "net.ipv4.icmp_echo_ignore_broadcasts": 1,
-                "net.ipv4.tcp_syncookies": 1,
-                "net.ipv4.conf.all.rp_filter": 1,
-                "net.ipv4.conf.default.rp_filter": 1,
-                "net.ipv4.conf.all.accept_source_route": 0
-            }
-        return self._parameters_to_set
-
-    def run(self):
-        LOG.info("Starting CIS Sysctl Flag Upgrade...")
-        self._configure_sysctl_parameters(self.TO_RELEASE_OSTREE_DIR)
-        LOG.debug("CIS Sysctl Flag Upgrade finished.")
-
-
-class CISSysctlFlagHookRollback(AbstractSysctlFlagHook):
-    """
-    Hook to rollback CIS benchmark sysctl flags to their original values.
-    """
-    @property
-    def parameters_to_set(self):
-        if self._parameters_to_set is None:
-            self._parameters_to_set = {
-                "net.ipv4.icmp_echo_ignore_broadcasts": 1,
-                "net.ipv4.tcp_syncookies": 1,
-                "net.ipv4.conf.all.rp_filter": 0,
-                "net.ipv4.conf.default.rp_filter": 0,
-                "net.ipv4.conf.all.accept_source_route": 0
-            }
-        return self._parameters_to_set
-
-    def run(self):
-        LOG.info("Starting CIS Sysctl Flag Rollback...")
-        self._configure_sysctl_parameters(self.FROM_RELEASE_OSTREE_DIR)
-        LOG.debug("CIS Sysctl Flag Rollback finished.")
-
-
 class FixedEtcMergeHook(BaseHook):
-    RENAME_FILES = {
-        # N release : N+1 release
-        "sysctl.d/k8s.conf": "sysctl.d/80-k8s.conf",
-        "sysctl.d/100-monitor-tools.conf": "sysctl.d/10-monitor-tools.conf",
-    }
-
-    def _rename_file(self, src, dst):
-        with contextlib.suppress(Exception):
-            LOG.info(f"Attempting to rename '{src}' to '{dst}'.")
-            # If the source file does not exist, do nothing
-            if not os.path.exists(src):
-                return
-            # If the destination file already exists, do nothing
-            if os.path.exists(dst):
-                return
-            os.rename(src, dst)
-
-    def cleanup_deprecated_config_files(self):
-        for src, dst in self.RENAME_FILES.items():
-            deprecated_file = \
-                os.path.normpath(f"{self.TO_RELEASE_OSTREE_DIR}/etc/{src}")
-            replacement_file = \
-                os.path.normpath(f"{self.TO_RELEASE_OSTREE_DIR}/etc/{dst}")
-            self._rename_file(deprecated_file, replacement_file)
-
-    def restart_sysctl_service(self):
-        cmd = ["systemctl", "restart", "systemd-sysctl.service"]
-        LOG.info(f"Restarting the systemd-sysctl service: {' '.join(cmd)}")
-        try:
-            subprocess.run(cmd, check=True,
-                           text=True, stdout=subprocess.PIPE,
-                           stderr=subprocess.STDOUT)
-        except subprocess.CalledProcessError as e:
-            LOG.exception(f"Failed to restart systemd-sysctl service: {e}")
-            raise
-        except Exception as e:
-            LOG.exception(f"Unexpected error restarting systemd-sysctl service: {e}")
-            raise
-
-    def run(self):
-        LOG.info("Starting FixedEtcMergeHook Started.")
-        self.cleanup_deprecated_config_files()
-        self.restart_sysctl_service()
-        LOG.info("FixedEtcMergeHook finished.")
-
-
-class FixedEtcMergeRollBackHook(FixedEtcMergeHook):
     DELETE_FILES = [
-        # N+1 release
-        "sysctl.d/05-default-sysctl.conf",
-        "sysctl.d/80-puppet.conf",
-        "sysctl.d/100-custom-user.conf",
+        # N release
+        "sysctl.d/100-monitor-tools.conf",
+        "sysctl.d/k8s.conf",
     ]
 
     def _delete_file(self, file_path):
@@ -998,27 +805,37 @@ class FixedEtcMergeRollBackHook(FixedEtcMergeHook):
             LOG.info(f"Attempting to delete '{file_path}'.")
             # If the file does not exist, do nothing
             if not os.path.exists(file_path):
+                LOG.info(f"File not found: '{file_path}'.")
                 return
             os.remove(file_path)
+            LOG.info(f"Successfully deleted '{file_path}'.")
 
-    def cleanup_deprecated_config_files_rollback(self):
+    def cleanup_deprecated_config_files(self):
         for file_name in self.DELETE_FILES:
             file_path = \
                 os.path.normpath(f"{self.TO_RELEASE_OSTREE_DIR}/etc/{file_name}")
             self._delete_file(file_path)
 
-        for src, dst in self.RENAME_FILES.items():
-            deprecated_file = \
-                os.path.normpath(f"{self.TO_RELEASE_OSTREE_DIR}/etc/{src}")
-            replacement_file = \
-                os.path.normpath(f"{self.TO_RELEASE_OSTREE_DIR}/etc/{dst}")
-            # During rollback reverse source and destination files
-            self._rename_file(replacement_file, deprecated_file)
+    def run(self):
+        LOG.info("Starting FixedEtcMergeHook Started.")
+        self.cleanup_deprecated_config_files()
+        LOG.info("FixedEtcMergeHook finished.")
+
+
+class FixedEtcMergeRollBackHook(FixedEtcMergeHook):
+    DELETE_FILES = [
+        # N+1 release
+        "sysctl.d/05-default-sysctl.conf",
+        "sysctl.d/10-monitor-tools.conf",
+        "sysctl.d/80-puppet.conf",
+        "sysctl.d/80-k8s.conf",
+        "sysctl.d/98-sysctl.conf",
+        "sysctl.d/zzz-custom-user.conf",
+    ]
 
     def run(self):
         LOG.info("Starting FixedEtcMergeRollBackHook.")
-        self.cleanup_deprecated_config_files_rollback()
-        self.restart_sysctl_service()
+        self.cleanup_deprecated_config_files()
         LOG.info("FixedEtcMergeRollBackHook finished.")
 
 
@@ -1075,7 +892,6 @@ class HookManager(object):
             EnableNewServicesHook,
             DeleteControllerFeedRemoteHook,
             FixedEtcMergeHook,
-            CISSysctlFlagHookUpgrade,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
@@ -1086,7 +902,6 @@ class HookManager(object):
             UpdateGrubConfigHook,
             DeleteControllerFeedRemoteHook,
             FixedEtcMergeRollBackHook,
-            CISSysctlFlagHookRollback,
             CreateKubeApiserverPortUpdatedFlag,
             # enable usm-initialize service for next
             # reboot only if everything else is done
