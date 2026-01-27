@@ -1,25 +1,25 @@
-#
 # SPDX-License-Identifier: Apache-2.0
 #
-# Copyright (c) 2023 Wind River Systems, Inc.
-#
+# Copyright (c) 2023-2026 Wind River Systems, Inc.
+
+import unittest
+
 import testtools
-from unittest import mock
 
 from software.messages import PatchMessage
-from software.software_controller import PatchMessageHello
-from software.software_controller import PatchMessageHelloAck
-from software.software_controller import PatchMessageSyncReq
-from software.software_controller import PatchMessageSyncComplete
-from software.software_controller import PatchMessageHelloAgent
-from software.software_controller import PatchMessageSendLatestFeedCommit
-from software.software_controller import PatchMessageHelloAgentAck
-from software.software_controller import PatchMessageQueryDetailed
-from software.software_controller import PatchMessageQueryDetailedResp
+from software.states import DEPLOY_HOST_STATES
 from software.software_controller import PatchMessageAgentInstallReq
 from software.software_controller import PatchMessageAgentInstallResp
 from software.software_controller import PatchMessageDropHostReq
-from software.states import DEPLOY_HOST_STATES
+from software.software_controller import PatchMessageHello
+from software.software_controller import PatchMessageHelloAck
+from software.software_controller import PatchMessageHelloAgent
+from software.software_controller import PatchMessageHelloAgentAck
+from software.software_controller import PatchMessageQueryDetailed
+from software.software_controller import PatchMessageQueryDetailedResp
+from software.software_controller import PatchMessageSendLatestFeedCommit
+from software.software_controller import PatchMessageSyncComplete
+from software.software_controller import PatchMessageSyncReq
 
 FAKE_AGENT_ADDRESS = "127.0.0.1"
 FAKE_AGENT_MCAST_GROUP = "239.1.1.4"
@@ -43,14 +43,14 @@ class FakeSoftwareController(object):
         self.sock_out = None
 
         # mock all the lock objects
-        self.controller_neighbours_lock = mock.Mock()
-        self.hosts_lock = mock.Mock()
-        self.software_data_lock = mock.Mock()
-        self.socket_lock = mock.Mock()
+        self.controller_neighbours_lock = unittest.mock.Mock()
+        self.hosts_lock = unittest.mock.Mock()
+        self.software_data_lock = unittest.mock.Mock()
+        self.socket_lock = unittest.mock.Mock()
 
         # mock the software data
-        self.base_pkgdata = mock.Mock()
-        self.software_data = mock.Mock()
+        self.base_pkgdata = unittest.mock.Mock()
+        self.software_data = unittest.mock.Mock()
         self.pre_bootstrap = False
         self.install_local = False
 
@@ -87,7 +87,7 @@ class SoftwareControllerMessagesTestCase(testtools.TestCase):
             self.assertIsNotNone(test_obj)
             self.assertIsInstance(test_obj, PatchMessage)
 
-    @mock.patch('software.software_controller.sc', FakeSoftwareController())
+    @unittest.mock.patch('software.software_controller.sc', FakeSoftwareController())
     def test_message_class_encode(self):
         """'encode' method populates self.message"""
         # mock the global software_controller 'sc' variable used by encode
@@ -110,11 +110,11 @@ class SoftwareControllerMessagesTestCase(testtools.TestCase):
             test_obj2.decode(test_obj.message)
             # decode does not populate 'message' so nothing to compare
 
-    @mock.patch('software.software_controller.sc', FakeSoftwareController())
-    @mock.patch('software.config.agent_mcast_group', FAKE_AGENT_MCAST_GROUP)
+    @unittest.mock.patch('software.software_controller.sc', FakeSoftwareController())
+    @unittest.mock.patch('software.config.agent_mcast_group', FAKE_AGENT_MCAST_GROUP)
     def test_message_class_send(self):
         """'send' writes to a socket"""
-        mock_sock = mock.Mock()
+        mock_sock = unittest.mock.Mock()
 
         # socket sendto and sendall are not called by:
         # PatchMessageHelloAgentAck
@@ -144,14 +144,14 @@ class SoftwareControllerMessagesTestCase(testtools.TestCase):
             if message_class in send_all:
                 mock_sock.sendall.assert_called()
 
-    @mock.patch('software.software_controller.sc', FakeSoftwareController())
-    @mock.patch('software.db.api.SoftwareAPI.get_deploy_host_by_hostname',
-                return_value={"state": DEPLOY_HOST_STATES.DEPLOYING})
-    @mock.patch('software.software_entities.DeployHostHandler.update', return_value=True)
+    @unittest.mock.patch('software.software_controller.sc', FakeSoftwareController())
+    @unittest.mock.patch('software.db.api.SoftwareAPI.get_deploy_host_by_hostname',
+                         return_value={"state": DEPLOY_HOST_STATES.DEPLOYING})
+    @unittest.mock.patch('software.software_entities.DeployHostHandler.update', return_value=True)
     def test_message_class_handle(self, mock_get_deploy_host_by_hostname, mock_update):  # pylint: disable=unused-argument
         """'handle' method tests"""
         addr = [FAKE_CONTROLLER_ADDRESS, ]  # addr is a list
-        mock_sock = mock.Mock()
+        mock_sock = unittest.mock.Mock()
         special_setup = {
             PatchMessageDropHostReq: ('ip', FAKE_HOST_IP),
             PatchMessageAgentInstallResp: ('status', True),

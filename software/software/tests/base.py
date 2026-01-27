@@ -1,4 +1,5 @@
 import sys
-from unittest import mock
+import unittest
 
-sys.modules['fm_core'] = mock.Mock()
+
+sys.modules['fm_core'] = unittest.mock.Mock()

@@ -1,16 +1,13 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# Copyright (c) 2025 Wind River Systems, Inc.
+# Copyright (c) 2025-2026 Wind River Systems, Inc.
 #
 
 import unittest
-from unittest.mock import MagicMock
-from unittest.mock import patch
 
 from software.software_controller import PatchController
 from software.states import DEPLOY_STATES
-
 # This import has to be first
 from software.tests import base  # pylint: disable=unused-import # noqa: F401
 
@@ -22,9 +19,9 @@ class TestSoftwareControllerVimNotification(unittest.TestCase):
     def tearDown(self):
         pass
 
-    @patch("software.software_controller.PatchController.__init__", return_value=None)
-    @patch("software.software_controller.trigger_vim_host_audit")
-    @patch("socket.gethostname", return_value="controller-0")
+    @unittest.mock.patch("software.software_controller.PatchController.__init__", return_value=None)
+    @unittest.mock.patch("software.software_controller.trigger_vim_host_audit")
+    @unittest.mock.patch("socket.gethostname", return_value="controller-0")
     def test_notify_vim_on_state_change_supported_states(
         self, mock_gethostname, mock_trigger_vim_host_audit, mock_init
     ):  # pylint: disable=unused-argument
@@ -49,9 +46,9 @@ class TestSoftwareControllerVimNotification(unittest.TestCase):
             mock_gethostname.assert_called_with()
             mock_trigger_vim_host_audit.assert_called_once_with("controller-0")
 
-    @patch("software.software_controller.PatchController.__init__", return_value=None)
-    @patch("software.software_controller.trigger_vim_host_audit")
-    @patch("socket.gethostname")
+    @unittest.mock.patch("software.software_controller.PatchController.__init__", return_value=None)
+    @unittest.mock.patch("software.software_controller.trigger_vim_host_audit")
+    @unittest.mock.patch("socket.gethostname")
     def test_notify_vim_on_state_change_unsupported_states(
         self, mock_gethostname, mock_trigger_vim_host_audit, mock_init
     ):  # pylint: disable=unused-argument
@@ -72,8 +69,8 @@ class TestSoftwareControllerVimNotification(unittest.TestCase):
             mock_gethostname.assert_not_called()
             mock_trigger_vim_host_audit.assert_not_called()
 
-    @patch("software.software_controller.PatchController.__init__", return_value=None)
-    @patch("software.software_controller.DeployState")
+    @unittest.mock.patch("software.software_controller.PatchController.__init__", return_value=None)
+    @unittest.mock.patch("software.software_controller.DeployState")
     def test_register_deploy_state_change_listeners(
         self, mock_deploy_state, mock_init
     ):  # pylint: disable=unused-argument
@@ -81,10 +78,10 @@ class TestSoftwareControllerVimNotification(unittest.TestCase):
         controller = PatchController()
 
         # Mock other methods that are called during registration
-        controller._state_changed_sync = MagicMock()  # pylint: disable=protected-access
+        controller._state_changed_sync = unittest.mock.MagicMock()  # pylint: disable=protected-access
         # pylint: disable=protected-access
-        controller._state_changed_notify = MagicMock()
-        controller.create_clean_up_deployment_alarm = MagicMock()
+        controller._state_changed_notify = unittest.mock.MagicMock()
+        controller.create_clean_up_deployment_alarm = unittest.mock.MagicMock()
 
         # Call the method
         controller.register_deploy_state_change_listeners()
@@ -95,9 +92,9 @@ class TestSoftwareControllerVimNotification(unittest.TestCase):
             controller._notify_vim_on_state_change
         )
 
-    @patch("software.software_controller.PatchController.__init__", return_value=None)
-    @patch("software.software_controller.trigger_vim_host_audit")
-    @patch("socket.gethostname")
+    @unittest.mock.patch("software.software_controller.PatchController.__init__", return_value=None)
+    @unittest.mock.patch("software.software_controller.trigger_vim_host_audit")
+    @unittest.mock.patch("socket.gethostname")
     def test_notify_vim_on_state_change_prebootstrap(
         self, mock_gethostname, mock_trigger_vim_host_audit, mock_init
     ):  # pylint: disable=unused-argument
