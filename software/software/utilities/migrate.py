@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2023-2024 Wind River Systems, Inc.
+# Copyright (c) 2023-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -9,17 +9,18 @@ import glob
 import json
 import logging
 import os
-from pathlib import Path
-import psycopg2
+import pathlib
 import shutil
 import socket
-import sys
 import subprocess
+import sys
 import yaml
 
-from software.utilities import constants
+import psycopg2
+
 from software.utilities.utils import configure_logging
 import software.utilities.utils as utils
+from software.utilities import constants
 
 
 sout = sys.stdout
@@ -71,7 +72,7 @@ def migrate_pxeboot_config(from_release, to_release):
     dest_pxelinux = os.path.join(constants.PLATFORM_PATH, "config", to_release,
                                  "pxelinux.cfg")
 
-    Path(dest_pxelinux).mkdir(parents=True, exist_ok=True)
+    pathlib.Path(dest_pxelinux).mkdir(parents=True, exist_ok=True)
 
     try:
         subprocess.check_call(

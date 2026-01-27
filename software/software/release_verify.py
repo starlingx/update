@@ -1,22 +1,23 @@
 """
-Copyright (c) 2023 Wind River Systems, Inc.
+Copyright (c) 2023-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
 
+import binascii
 import os
 import logging
 
-from Cryptodome.Signature import PKCS1_v1_5
-from Cryptodome.Signature import PKCS1_PSS
 from Cryptodome.Hash import SHA256
 from Cryptodome.PublicKey import RSA
+from Cryptodome.Signature import PKCS1_PSS
+from Cryptodome.Signature import PKCS1_v1_5
 from Cryptodome.Util.asn1 import DerSequence
-from binascii import a2b_base64
 
 from software.certificates import dev_certificate
 from software.certificates import formal_certificate
+
 
 # To save memory, read and hash 1M of files at a time
 default_blocksize = 1 * 1024 * 1024
@@ -144,7 +145,7 @@ def read_RSA_key(key_data):
         x509lines = key_data.replace(' ', '').split()
         x509text = ''.join(x509lines[1:-1])
         x509data = DerSequence()
-        x509data.decode(a2b_base64(x509text))
+        x509data.decode(binascii.a2b_base64(x509text))
 
         # X.509 contains a few parts.  The first part (index 0) is the
         # certificate itself, (TBS or "to be signed" cert) and the 7th field

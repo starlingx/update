@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2024 Wind River Systems, Inc.
+# Copyright (c) 2018-2026 Wind River Systems, Inc.
 # Copyright © 2012 New Dream Network, LLC (DreamHost)
 #
 # Author: Doug Hellmann <doug.hellmann@dreamhost.com>
@@ -22,12 +22,13 @@ response with one formatted so the client can parse it.
 
 Based on pecan.middleware.errordocument
 """
+
 import html
 import json
 import logging
 import six
 import webob
-from xml import etree as et
+import xml.etree as et
 
 
 LOG = logging.getLogger('main_logger')

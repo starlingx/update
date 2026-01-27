@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023-2025 Wind River Systems, Inc.
+Copyright (c) 2023-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -11,13 +11,12 @@ sys.modules['osprofiler'] = None
 
 import configparser
 import gc
+import glob
 import json
 import logging
 import os
-from packaging import version
 import re
 import select
-import sh
 import shutil
 import socket
 import subprocess
@@ -25,92 +24,90 @@ import tempfile
 import threading
 import time
 import typing
-from wsgiref import simple_server
-from glob import glob
-from fm_api import fm_api
+import wsgiref.simple_server as simple_server
+import xml.etree.ElementTree as ET
+
 from fm_api import constants as fm_constants
-
+from fm_api import fm_api
 from oslo_config import cfg as oslo_cfg
+from packaging import version
+import sh
+from tsconfig.tsconfig import INITIAL_CONFIG_COMPLETE_FLAG
+from tsconfig.tsconfig import VOLATILE_CONTROLLER_CONFIG_COMPLETE
 
-import software.apt_utils as apt_utils
-import software.lvm_snapshot as lvm_snapshot
-import software.ostree_utils as ostree_utils
 from software.api import app
+import software.apt_utils as apt_utils
 from software.authapi import app as auth_app
-from software.constants import INSTALL_LOCAL_FLAG
-from software.states import DEPLOY_HOST_STATES
-from software.states import DEPLOY_STATES
-from software.states import INTERRUPTION_RECOVERY_STATES
 from software.base import PatchService
+import software.config as cfg
+import software.constants as constants
+from software.constants import INSTALL_LOCAL_FLAG
+from software.db.api import get_instance
 from software.dc_utils import get_subcloud_groupby_version
+from software.deploy_host_state import DeployHostState
+from software.deploy_state import DeployState
 from software.deploy_state import require_deploy_state
 from software.exceptions import APTOSTreeCommandFail
+from software.exceptions import HostAgentUnreachable
 from software.exceptions import HostNotFound
 from software.exceptions import InternalError
+from software.exceptions import InvalidOperation
+from software.exceptions import MaxReleaseExceeded
 from software.exceptions import MetadataFail
-from software.exceptions import UpgradeNotSupported
 from software.exceptions import OSTreeCommandFail
 from software.exceptions import OSTreeTarFail
+from software.exceptions import ReleaseInvalidRequest
+from software.exceptions import ReleaseIsoDeleteFailure
+from software.exceptions import ReleaseValidationFailure
 from software.exceptions import SoftwareError
 from software.exceptions import SoftwareFail
-from software.exceptions import ReleaseInvalidRequest
-from software.exceptions import ReleaseValidationFailure
-from software.exceptions import ReleaseIsoDeleteFailure
 from software.exceptions import SoftwareServiceError
-from software.exceptions import InvalidOperation
-from software.exceptions import HostAgentUnreachable
-from software.exceptions import MaxReleaseExceeded
+from software.exceptions import UpgradeNotSupported
+import software.lvm_snapshot as lvm_snapshot
+import software.messages as messages
+import software.ostree_utils as ostree_utils
 from software.plugin import DeployPluginRunner
-from software.release_data import reload_release_data
 from software.release_data import get_SWReleaseCollection
+from software.release_data import reload_release_data
+from software.release_state import ReleaseState
+from software.release_verify import verify_files
+from software.software_functions import audit_log_info
+from software.software_functions import BasePackageData
 from software.software_functions import collect_current_load_for_hosts
+from software.software_functions import configure_logging
 from software.software_functions import copy_pxeboot_update_file
 from software.software_functions import copy_pxeboot_cfg_files
 from software.software_functions import create_deploy_hosts
 from software.software_functions import deploy_host_validations
-from software.software_functions import validate_host_deploy_order
-from software.software_functions import parse_release_metadata
-from software.software_functions import configure_logging
-from software.software_functions import mount_iso_load
-from software.software_functions import unmount_iso_load
-from software.software_functions import read_upgrade_support_versions
+from software.software_functions import get_release_from_patch
 from software.software_functions import get_to_release_from_metadata_file
-from software.software_functions import BasePackageData
-from software.software_functions import PatchFile
-from software.software_functions import package_dir
-from software.software_functions import repo_dir
-from software.software_functions import root_scripts_dir
-from software.software_functions import SW_VERSION
-from software.software_functions import audit_log_info
-from software.software_functions import repo_root_dir
 from software.software_functions import is_deploy_state_in_sync
 from software.software_functions import is_deployment_in_progress
-from software.software_functions import get_release_from_patch
+from software.software_functions import mount_iso_load
+from software.software_functions import package_dir
+from software.software_functions import parse_release_metadata
+from software.software_functions import PatchFile
+from software.software_functions import read_upgrade_support_versions
+from software.software_functions import repo_dir
+from software.software_functions import repo_root_dir
+from software.software_functions import root_scripts_dir
 from software.software_functions import run_remove_temporary_data_script
+from software.software_functions import SW_VERSION
 from software.software_functions import to_bool
-from software.release_state import ReleaseState
-from software.deploy_host_state import DeployHostState
-from software.deploy_state import DeployState
-from software.release_verify import verify_files
-import software.config as cfg
-import software.utils as utils
-from software.sysinv_utils import get_k8s_ver
-from software.sysinv_utils import is_system_controller
-from software.sysinv_utils import update_host_sw_version
+from software.software_functions import unmount_iso_load
+from software.software_functions import validate_host_deploy_order
+from software.states import DEPLOY_HOST_STATES
+from software.states import DEPLOY_STATES
+from software.states import INTERRUPTION_RECOVERY_STATES
 from software.sysinv_utils import are_all_hosts_unlocked_and_online
+from software.sysinv_utils import get_k8s_ver
 from software.sysinv_utils import get_system_info
+from software.sysinv_utils import is_system_controller
 from software.sysinv_utils import trigger_evaluate_apps_reapply
 from software.sysinv_utils import trigger_vim_host_audit
-
-from software.db.api import get_instance
-
-import software.messages as messages
-import software.constants as constants
+from software.sysinv_utils import update_host_sw_version
+import software.utils as utils
 from software import states
-
-from tsconfig.tsconfig import INITIAL_CONFIG_COMPLETE_FLAG
-from tsconfig.tsconfig import VOLATILE_CONTROLLER_CONFIG_COMPLETE
-import xml.etree.ElementTree as ET
 
 
 CONF = oslo_cfg.CONF
@@ -3065,7 +3062,7 @@ class PatchController(PatchService):
         # Copy to_release_feed/pxelinux.cfg.files to /var/pxeboot/pxelinux.cfg.files
         var_pxeboot_dir = "/var/pxeboot"
         major_to_release_dir = os.path.join(constants.FEED_DIR, "rel-%s/" % major_to_release)
-        pxeboot_cfg_files = glob(os.path.join(
+        pxeboot_cfg_files = glob.glob(os.path.join(
             major_to_release_dir, 'pxeboot', 'pxelinux.cfg.files',
             '*' + major_to_release))
         for pxeboot_cfg_file in pxeboot_cfg_files:

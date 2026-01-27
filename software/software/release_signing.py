@@ -1,13 +1,15 @@
 """
-Copyright (c) 2023 Wind River Systems, Inc.
+Copyright (c) 2023-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
 
 import os
-from Cryptodome.Signature import PKCS1_PSS
+
 from Cryptodome.Hash import SHA256
+from Cryptodome.Signature import PKCS1_PSS
+
 from software import release_verify
 
 # To save memory, read and hash 1M of files at a time

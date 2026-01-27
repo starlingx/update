@@ -1,5 +1,5 @@
 """
-Copyright (c) 2024-2025 Wind River Systems, Inc.
+Copyright (c) 2024-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -9,8 +9,9 @@ import logging
 import re
 
 from pecan import hooks
-from software.constants import SOFTWARE_API_SUPPRESS_PATTERNS
+
 from software.constants import SOFTWARE_API_MAX_LENGTH
+from software.constants import SOFTWARE_API_SUPPRESS_PATTERNS
 
 logger = None
 

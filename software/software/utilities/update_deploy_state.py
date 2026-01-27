@@ -1,13 +1,14 @@
 #
-# Copyright (c) 2024 Wind River Systems, Inc.
+# Copyright (c) 2024-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
 
 import argparse
 import json
-from oslo_log import log
 import socket
+
+from oslo_log import log
 
 import software.config as cfg
 from software.messages import PATCHMSG_DEPLOY_STATE_CHANGED

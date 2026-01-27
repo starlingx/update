@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024 Wind River Systems, Inc.
+# Copyright (c) 2024-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -10,13 +10,14 @@ Update deploy state and host state to fail and also informs next legit operation
 
 import argparse
 import sys
+
 from software.db.api import get_instance
+from software.deploy_host_state import DeployHostState
 from software.deploy_state import DeployState
+from software.states import DEPLOY_HOST_STATES
 from software.states import DEPLOY_STATES
 from software.utils import is_active_controller
 
-from software.deploy_host_state import DeployHostState
-from software.states import DEPLOY_HOST_STATES
 
 SOFTWARE_DEPLOY_COMMAND = "software deploy"
 

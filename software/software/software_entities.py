@@ -1,38 +1,36 @@
 """
-Copyright (c) 2023-2024 Wind River Systems, Inc.
+Copyright (c) 2023-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
 
-import logging
-from abc import ABC
-from abc import abstractmethod
+import abc
 from enum import Enum
+import logging
 from typing import List
 
-from software import constants
-from software.exceptions import DeployDoNotExist
 from software.exceptions import DeployAlreadyExist
-from software.utils import check_instances
-from software.utils import check_state
-from software.utils import save_to_json_file
-from software.utils import get_software_filesystem_data
-from software.utils import get_synced_software_filesystem_data
-from software.utils import validate_versions
-
+from software.exceptions import DeployDoNotExist
 from software.states import DEPLOY_HOST_STATES
 from software.states import DEPLOY_STATES
+from software.utils import check_instances
+from software.utils import check_state
+from software.utils import get_software_filesystem_data
+from software.utils import get_synced_software_filesystem_data
+from software.utils import save_to_json_file
+from software.utils import validate_versions
+from software import constants
 
 LOG = logging.getLogger('main_logger')
 
 
-class Release(ABC):
+class Release(abc.ABC):
 
     def __init__(self):
         self.states = Enum('States', 'active deploying inactive')
 
-    @abstractmethod
+    @abc.abstractmethod
     def create(self, rel_ver: str, state: str):
         """
         Create a new release with the given release version and state
@@ -44,7 +42,7 @@ class Release(ABC):
         check_state(state, self.states)
         pass
 
-    @abstractmethod
+    @abc.abstractmethod
     def query(self, rel_ver: str):
         """
         Get information about a release based on its version.
@@ -54,7 +52,7 @@ class Release(ABC):
         check_instances([rel_ver], str)
         pass
 
-    @abstractmethod
+    @abc.abstractmethod
     def update(self, rel_ver: str, state: str):
         """
         Update the state of release based on its version.
@@ -67,7 +65,7 @@ class Release(ABC):
         check_state(state, self.states)
         pass
 
-    @abstractmethod
+    @abc.abstractmethod
     def delete(self, rel_ver: str):
         """
         Delete a release based on its version.
@@ -78,9 +76,9 @@ class Release(ABC):
         pass
 
 
-class CompatibleRelease(ABC):
+class CompatibleRelease(abc.ABC):
 
-    @abstractmethod
+    @abc.abstractmethod
     def create(self, rel_ver: str, compatible_ver: str, required_patches: List[str]):
         """
         Create a new compatible release entry.
@@ -94,7 +92,7 @@ class CompatibleRelease(ABC):
         check_instances(required_patches, str)
         pass
 
-    @abstractmethod
+    @abc.abstractmethod
     def query(self, rel_ver: str):
         """
         Get compatible releases for a given release version.
@@ -105,7 +103,7 @@ class CompatibleRelease(ABC):
         check_instances([rel_ver], str)
         pass
 
-    @abstractmethod
+    @abc.abstractmethod
     def update(self, rel_ver: str, compatible_ver: str, required_patches: List[str]):
         """
         Update a compatible release entry
@@ -119,7 +117,7 @@ class CompatibleRelease(ABC):
         check_instances(required_patches, str)
         pass
 
-    @abstractmethod
+    @abc.abstractmethod
     def delete(self, rel_ver: str):
         """
         Delete compatible releases for a given release version.
@@ -131,11 +129,11 @@ class CompatibleRelease(ABC):
         pass
 
 
-class Deploy(ABC):
+class Deploy(abc.ABC):
     def __init__(self):
         pass
 
-    @abstractmethod
+    @abc.abstractmethod
     def create(self, from_release: str, to_release: str, feed_repo: str,
                commit_id: str, reboot_required: bool, state: DEPLOY_STATES, **kwargs):
         """
@@ -153,7 +151,7 @@ class Deploy(ABC):
         check_instances([reboot_required], bool)
         check_instances([state], DEPLOY_STATES)
 
-    @abstractmethod
+    @abc.abstractmethod
     def query(self, from_release, to_release):
         """
         Get deployments based on current and target release versions.
@@ -161,7 +159,7 @@ class Deploy(ABC):
         validate_versions([from_release, to_release])
         pass
 
-    @abstractmethod
+    @abc.abstractmethod
     def update(self, from_release=None, to_release=None, feed_repo=None, commit_id=None, reboot_required: bool = None,
                new_state: DEPLOY_STATES = None):
         """
@@ -182,7 +180,7 @@ class Deploy(ABC):
             check_instances([reboot_required], bool)
         check_instances([param for param in str_params if param is not None], str)
 
-    @abstractmethod
+    @abc.abstractmethod
     def delete(self):
         """
         Delete a deployment entry based on current and target release versions.
@@ -190,12 +188,12 @@ class Deploy(ABC):
         pass
 
 
-class DeployHosts(ABC):
+class DeployHosts(abc.ABC):
 
     def __init__(self):
         pass
 
-    @abstractmethod
+    @abc.abstractmethod
     def create(self, hostname: str, state: DEPLOY_HOST_STATES):
         """
         Create a new deploy-host entry
@@ -210,7 +208,7 @@ class DeployHosts(ABC):
         check_instances(instances, str)
         pass
 
-    @abstractmethod
+    @abc.abstractmethod
     def query(self, hostname: str):
         """
         Get deploy-host entries for a given host.
@@ -221,7 +219,7 @@ class DeployHosts(ABC):
         check_instances([hostname], str)
         pass
 
-    @abstractmethod
+    @abc.abstractmethod
     def update(self, hostname: str, state: DEPLOY_HOST_STATES):
         """
         Update a deploy-host entry
@@ -233,7 +231,7 @@ class DeployHosts(ABC):
         check_instances([state], DEPLOY_HOST_STATES)
         pass
 
-    @abstractmethod
+    @abc.abstractmethod
     def delete(self, hostname):
         """
         Delete deploy-host entries for a given host.

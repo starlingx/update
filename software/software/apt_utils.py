@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023-2024 Wind River Systems, Inc.
+Copyright (c) 2023-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -7,8 +7,8 @@ SPDX-License-Identifier: Apache-2.0
 import logging
 import subprocess
 
-from software import constants
 from software.exceptions import APTOSTreeCommandFail
+from software import constants
 
 LOG = logging.getLogger('main_logger')
 

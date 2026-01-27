@@ -4,6 +4,7 @@ Copyright (c) 2023-2025 Wind River Systems, Inc.
 SPDX-License-Identifier: Apache-2.0
 
 """
+
 import logging
 
 from software.exceptions import SysinvClientNotInitialized
