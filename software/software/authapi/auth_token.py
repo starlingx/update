@@ -38,7 +38,12 @@ class OIDCTokenMiddleware():
 
     def __call__(self, env, start_response):
         token = env.get("HTTP_OIDC_TOKEN")
-        claims = self._authenticate(token)
+        try:
+            claims = self._authenticate(token)
+        except exc.HTTPForbidden as e:
+            msg = f"OIDC authentication: {str(e)}."
+            return self._error_response(message=msg)
+
         self._inject_claims(env, claims)
         return self._app(env, start_response)
 
@@ -56,6 +61,10 @@ class OIDCTokenMiddleware():
         env['HTTP_X_ROLES'] = ','.join(roles)
         env['HTTP_X_USER_NAME'] = username
         env['HTTP_X_PROJECT_NAME'] = self._project
+
+    @staticmethod
+    def _error_response(message):
+        return Response(json_body={'error': message})
 
 
 class AuthTokenMiddleware(auth_token.AuthProtocol):
@@ -76,10 +85,6 @@ class AuthTokenMiddleware(auth_token.AuthProtocol):
 
         super(AuthTokenMiddleware, self).__init__(app, conf)
 
-    @staticmethod
-    def _error_response(message):
-        return Response(status=403, json_body={'error': message})
-
     def __call__(self, env, start_response):
         path = utils.safe_rstrip(env.get('PATH_INFO'), '/')
 
@@ -88,6 +93,9 @@ class AuthTokenMiddleware(auth_token.AuthProtocol):
 
         oidc_token = env.get("HTTP_OIDC_TOKEN")
         if oidc_token:
-            return self.oidc_middleware(env, start_response)
+            resp = self.oidc_middleware(env, start_response)
+            if isinstance(resp, Response):
+                return resp(env, start_response)
+            return resp
 
         return super(AuthTokenMiddleware, self).__call__(env, start_response)  # pylint: disable=too-many-function-args
