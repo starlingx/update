@@ -807,6 +807,11 @@ class PatchAgent(PatchService):
                     LOG.info("Running post-install patch scripts")
                     success = run_post_install_script()
 
+        try:
+            ostree_utils.copy_updated_efi_files()
+        except Exception:
+            success = False
+
         if os.path.exists(insvc_software_flags):
             shutil.rmtree(insvc_software_flags, ignore_errors=True)
 

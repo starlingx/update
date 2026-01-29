@@ -972,6 +972,52 @@ def update_deployment_kernel_env():
         raise OSTreeCommandFail(msg)
 
 
+def copy_updated_efi_files():
+    pending_deployment = fetch_pending_deployment()
+    deployment_dir = constants.OSTREE_BASE_DEPLOYMENT_DIR + pending_deployment
+
+    try:
+        LOG.info("Copying updated efi files.")
+        # Create EFI_NEW_PATH
+        create_folder_cmd = f"sudo mkdir -p {constants.EFI_NEW_PATH}"
+        subprocess.run(create_folder_cmd, shell=True, check=True)
+
+        # Copy all from EFI_PATH to EFI_NEW_PATH
+        copy_cmd = f"sudo cp -rp {constants.EFI_PATH}/* {constants.EFI_NEW_PATH}"
+        subprocess.run(copy_cmd, shell=True, check=True, capture_output=True)
+
+        # Copy files from pending dir to EFI_NEW_PATH
+        for file in constants.EFI_FILES_TO_COPY:
+            file_path = f"{deployment_dir}{constants.OSTREE_EFI_PATH}/{file}"
+            LOG.info("Copying file %s." % file)
+            if os.path.exists(file_path):
+                copy_from_pending_dir_cmd = (f"sudo cp {file_path} "
+                                             f"{constants.EFI_NEW_PATH}/")
+                subprocess.run(copy_from_pending_dir_cmd, shell=True, check=True, capture_output=True)
+
+        # Copy grub file from pxeboot
+        grub_copy_cmd = f"sudo cp {deployment_dir}{constants.GRUB_CFG_PATH} {constants.EFI_NEW_PATH}/grub.cfg"
+        subprocess.run(grub_copy_cmd, shell=True, check=True, capture_output=True)
+
+        # Atomic folder swap
+        atomic_swap_cmd = (f"sudo mv {constants.EFI_PATH} {constants.EFI_BKP_PATH} && "
+                           f"sudo mv {constants.EFI_NEW_PATH} {constants.EFI_PATH}")
+        subprocess.run(atomic_swap_cmd, shell=True, check=True, capture_output=True)
+
+        # check updated EFI_PATH
+        check_cmd = f"ls {constants.EFI_PATH}"
+        result = subprocess.run(check_cmd, shell=True, check=True, capture_output=True)
+        LOG.info(f"New content of {constants.EFI_PATH}: {result.stdout}")
+
+        # Sync
+        subprocess.run(["sync", "-f", constants.EFI_PATH], check=True)
+
+        LOG.info("Efi files copied and backed up successfully.")
+    except subprocess.CalledProcessError as e:
+        LOG.exception(f"Failed to copy efi files: {e}")
+        raise
+
+
 def ostree_lock(func):
     def wrapper(*args, **kwargs):
         with open(constants.OSTREE_LOCK, "w+") as fd:
