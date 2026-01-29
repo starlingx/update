@@ -1,0 +1,147 @@
+From 82257289f0c70149c026c1cb19e97be13b526cdc Mon Sep 17 00:00:00 2001
+From: Sai Lakshmi Teja Vanka <SaiLakshmiTeja.Vanka@windriver.com>
+Date: Thu, 29 Jan 2026 05:06:37 -0500
+Subject: [PATCH] Migrate patch-alarm to python-daemon 3.x
+
+Migrate patch-alarm from python-daemon 2.x to 3.x as part of the
+Debian Trixie and Python 3.13 upgrade.
+
+The python-daemon library changed its API between versions 2.x and
+3.x. The new version uses a cleaner context manager approach instead
+of the runner pattern.
+
+Changes:
+- Replace daemon.runner with daemon.DaemonContext and daemon.pidfile
+- Remove DaemonRunnerWrapper workaround class (no longer needed)
+- Refactor start_polling() to use context manager pattern
+- Simplify PatchAlarmDaemon class by removing daemon-specific attrs
+- Update requirements.txt: python-daemon<3 to python-daemon>=3
+- Update test mocks from daemon.runner to daemon.pidfile
+
+Signed-off-by: Sai Lakshmi Teja Vanka <SaiLakshmiTeja.Vanka@windriver.com>
+---
+ patch_alarm/patch_alarm_manager.py    | 44 +++++++++++----------------
+ patch_alarm/tests/test_patch_alarm.py |  4 +--
+ requirements.txt                      |  2 +-
+ 3 files changed, 20 insertions(+), 30 deletions(-)
+
+diff --git a/patch_alarm/patch_alarm_manager.py b/patch_alarm/patch_alarm_manager.py
+index abf1dcb..71ac41d 100644
+--- a/patch_alarm/patch_alarm_manager.py
++++ b/patch_alarm/patch_alarm_manager.py
+@@ -1,5 +1,5 @@
+ """
+-Copyright (c) 2014-2025 Wind River Systems, Inc.
++Copyright (c) 2014-2026 Wind River Systems, Inc.
+ 
+ SPDX-License-Identifier: Apache-2.0
+ 
+@@ -10,11 +10,14 @@ SPDX-License-Identifier: Apache-2.0
+ ###################
+ import json
+ import logging
++import os
++import sys
+ import time
+ 
+ import requests
+ 
+-from daemon import runner
++import daemon
++from daemon import pidfile
+ from fm_api import constants as fm_constants
+ from fm_api import fm_api
+ 
+@@ -31,29 +34,24 @@ from software.utils import get_major_release_version
+ PID_FILE = '/var/run/patch-alarm-manager.pid'
+ 
+ 
+-class DaemonRunnerWrapper(runner.DaemonRunner):
+-    # Workaround: fix the "unbuffered bytes I/O for py3" runtime
+-    # error in pyhon3 env.
+-    # Picked from [starlingx/utilities]:utilities/logmgmt/logmgmt/logmgmt/logmgmt.py
+-    # If there will be a saner approach, it must be changed also in utilities repo.
+-    def _open_streams_from_app_stream_paths(self, app):
+-        self.daemon_context.stdin = open(app.stdin_path, 'rt')
+-        self.daemon_context.stdout = open(app.stdout_path, 'w+t')
+-        try:
+-            self.daemon_context.stderr = open(app.stderr_path, 'w+t', buffering=0)
+-        except Exception:
+-            self.daemon_context.stderr = open(app.stderr_path, 'wb+', buffering=0)
+-
+-
+ ###################
+ # METHODS
+ ###################
+ def start_polling():
+     cfg.read_config()
+     patch_alarm_daemon = PatchAlarmDaemon()
+-    alarm_runner = DaemonRunnerWrapper(patch_alarm_daemon)
+-    alarm_runner.daemon_context.umask = 0o022
+-    alarm_runner.do_action()
++
++    # Use DaemonContext directly (python-daemon 3.x)
++    context = daemon.DaemonContext(
++        pidfile=pidfile.TimeoutPIDLockFile(PID_FILE, 5),
++        stdin=open('/dev/null', 'rt'),
++        stdout=open('/dev/null', 'w+t'),
++        stderr=open('/dev/null', 'w+t'),
++        umask=0o022,
++    )
++
++    with context:
++        patch_alarm_daemon.run()
+ 
+ 
+ ###################
+@@ -64,15 +62,7 @@ class PatchAlarmDaemon(object):
+         the patch monitoring program
+     """
+     def __init__(self):
+-        # Daemon-specific init
+-        self.stdin_path = '/dev/null'
+-        self.stdout_path = '/dev/null'
+-        self.stderr_path = '/dev/null'
+-        self.pidfile_path = PID_FILE
+-        self.pidfile_timeout = 5
+-
+         self.api_addr = "127.0.0.1:%d" % cfg.api_port
+-
+         self.fm_api = fm_api.FaultAPIs()
+ 
+     def run(self):
+diff --git a/patch_alarm/tests/test_patch_alarm.py b/patch_alarm/tests/test_patch_alarm.py
+index 2e33750..255517e 100644
+--- a/patch_alarm/tests/test_patch_alarm.py
++++ b/patch_alarm/tests/test_patch_alarm.py
+@@ -1,7 +1,7 @@
+ #
+ # SPDX-License-Identifier: Apache-2.0
+ #
+-# Copyright (c) 2019-2023 Wind River Systems, Inc.
++# Copyright (c) 2019-2026 Wind River Systems, Inc.
+ #
+ import sys
+ from unittest import mock
+@@ -10,7 +10,7 @@ import testtools
+ 
+ # disable importing these modules
+ sys.modules['daemon'] = mock.Mock()
+-sys.modules['daemon.runner'] = mock.Mock()
++sys.modules['daemon.pidfile'] = mock.Mock()
+ sys.modules['fm_core'] = mock.Mock()
+ 
+ # this import needs to be done after fm_core is turned off
+diff --git a/requirements.txt b/requirements.txt
+index 1ffcef9..adb306b 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -2,4 +2,4 @@
+ # of appearance. Changing the order has an impact on the overall integration
+ # process, which may cause wedges in the gate later.
+ 
+-python-daemon<3
++python-daemon>=3
+-- 
+2.43.0
+
