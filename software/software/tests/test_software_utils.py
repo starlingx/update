@@ -1,13 +1,12 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# Copyright (c) 2025 Wind River Systems, Inc.
+# Copyright (c) 2025-2026 Wind River Systems, Inc.
 #
 import unittest
-from unittest.mock import patch
 
-from software.utils import get_component_and_versions
 from software.utils import find_file_by_regex
+from software.utils import get_component_and_versions
 
 
 class TestSoftwareUtils(unittest.TestCase):
@@ -38,8 +37,8 @@ class TestSoftwareUtils(unittest.TestCase):
         result = get_component_and_versions("invalid-version")
         self.assertEqual(result, (None, None, None, None))
 
-    @patch('os.path.exists')
-    @patch('os.listdir')
+    @unittest.mock.patch('os.path.exists')
+    @unittest.mock.patch('os.listdir')
     def test_find_files_basic_regex(self, mock_listdir, mock_exists):
         """Test basic regex matching"""
         mock_exists.return_value = True
@@ -47,8 +46,8 @@ class TestSoftwareUtils(unittest.TestCase):
         result = find_file_by_regex('/test', r'file\d\.txt')
         self.assertEqual(result, ['file1.txt'])
 
-    @patch('os.path.exists')
-    @patch('os.listdir')
+    @unittest.mock.patch('os.path.exists')
+    @unittest.mock.patch('os.listdir')
     def test_find_files_no_matches(self, mock_listdir, mock_exists):
         """Test when no files match the pattern"""
         mock_exists.return_value = True
@@ -56,15 +55,15 @@ class TestSoftwareUtils(unittest.TestCase):
         result = find_file_by_regex('/test', r'no_match.*')
         self.assertEqual(result, [])
 
-    @patch('os.path.exists')
+    @unittest.mock.patch('os.path.exists')
     def test_invalid_directory(self, mock_exists):
         """Test with invalid directory path"""
         mock_exists.return_value = False
         result = find_file_by_regex('/invalid/path', r'.*')
         self.assertEqual(result, [])
 
-    @patch('os.path.exists')
-    @patch('os.listdir')
+    @unittest.mock.patch('os.path.exists')
+    @unittest.mock.patch('os.listdir')
     def test_multiple_matches(self, mock_listdir, mock_exists):
         """Test multiple files matching pattern"""
         mock_exists.return_value = True

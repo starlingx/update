@@ -1,12 +1,10 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# Copyright (c) 2024 Wind River Systems, Inc.
+# Copyright (c) 2024-2026 Wind River Systems, Inc.
 #
 import unittest
-from unittest.mock import patch
-from unittest.mock import mock_open
-import xml.etree.ElementTree as ET
+import xml
 
 from software.release_data import SWReleaseCollection
 from software.software_functions import get_to_release_from_metadata_file
@@ -199,21 +197,21 @@ class TestSoftwareFunction(unittest.TestCase):
             self.assertEqual(val["commit_id"], r.commit_id)
             self.assertEqual(val["checksum"], r.commit_checksum)
 
-    @patch('os.path.join')
-    @patch('lxml.etree.parse')
+    @unittest.mock.patch('os.path.join')
+    @unittest.mock.patch('lxml.etree.parse')
     def test_read_attributes_valid_xml(self, mock_parse, mock_join):
         mock_join.return_value = "/test/upgrades/metadata.xml"
 
         # Creating a mock XML structure
-        root = ET.Element("root")
-        version_elem = ET.SubElement(root, "version")
+        root = xml.etree.ElementTree.Element("root")
+        version_elem = xml.etree.ElementTree.SubElement(root, "version")
         version_elem.text = "1.0.0"
 
-        supported_upgrades_elem = ET.SubElement(root, "supported_upgrades")
-        upgrade_elem = ET.SubElement(supported_upgrades_elem, "upgrade")
-        version_elem = ET.SubElement(upgrade_elem, "version")
+        supported_upgrades_elem = xml.etree.ElementTree.SubElement(root, "supported_upgrades")
+        upgrade_elem = xml.etree.ElementTree.SubElement(supported_upgrades_elem, "upgrade")
+        version_elem = xml.etree.ElementTree.SubElement(upgrade_elem, "version")
         version_elem.text = "0.9.0"
-        required_patch_elem = ET.SubElement(upgrade_elem, "required_patch")
+        required_patch_elem = xml.etree.ElementTree.SubElement(upgrade_elem, "required_patch")
         required_patch_elem.text = "patch_001"
 
         mock_parse.return_value = root
@@ -232,8 +230,8 @@ class TestSoftwareFunction(unittest.TestCase):
 
         self.assertEqual(result, expected_result)
 
-    @patch('software.software_functions.get_metadata_files')
-    @patch('software.software_functions.read_attributes_from_metadata_file')
+    @unittest.mock.patch('software.software_functions.get_metadata_files')
+    @unittest.mock.patch('software.software_functions.read_attributes_from_metadata_file')
     def test_get_to_release_from_metadata_file_without_usm(self,
                                                            mock_read_attributes,
                                                            mock_get_metadata_files):
@@ -246,8 +244,8 @@ class TestSoftwareFunction(unittest.TestCase):
 
         assert result == "1.0.0"
 
-    @patch('software.software_functions.get_metadata_files')
-    @patch('software.software_functions.get_sw_version')
+    @unittest.mock.patch('software.software_functions.get_metadata_files')
+    @unittest.mock.patch('software.software_functions.get_sw_version')
     def test_get_to_release_from_metadata_file_with_usm(self,
                                                         mock_get_ver,
                                                         mock_get_metadata_files):
@@ -258,8 +256,8 @@ class TestSoftwareFunction(unittest.TestCase):
 
         assert result == "1.0.0"
 
-    @patch('software.software_controller.os.path.isfile')
-    @patch('software.software_controller.json.load')
+    @unittest.mock.patch('software.software_controller.os.path.isfile')
+    @unittest.mock.patch('software.software_controller.json.load')
     def test_is_deploy_state_in_sync(self,
                                      mock_json_load,
                                      mock_isfile
@@ -274,14 +272,14 @@ class TestSoftwareFunction(unittest.TestCase):
                                "commit_id": "67d36b8f06cf3ddca871612012b283b540d118c7c738afd2b7839458eb3db42d", "reboot_required": True,
                                "state": "activate-failed"}]}
         mock_json_load.side_effect = [state_1, state_2]
-        m = mock_open()
-        with patch('builtins.open', m):
+        m = unittest.mock.mock_open()
+        with unittest.mock.patch('builtins.open', m):
             res = is_deploy_state_in_sync()
 
         assert res is True
 
-    @patch('software.software_controller.os.path.isfile')
-    @patch('software.software_controller.json.load')
+    @unittest.mock.patch('software.software_controller.os.path.isfile')
+    @unittest.mock.patch('software.software_controller.json.load')
     def test_is_deploy_state_not_in_sync(self,
                                          mock_json_load,
                                          mock_isfile
@@ -296,14 +294,14 @@ class TestSoftwareFunction(unittest.TestCase):
                                "commit_id": "67d36b8f06cf3ddca871612012b283b540d118c7c738afd2b7839458eb3db42d", "reboot_required": True,
                                "state": "activate-failed"}]}
         mock_json_load.side_effect = [state_1, state_2]
-        m = mock_open()
-        with patch('builtins.open', m):
+        m = unittest.mock.mock_open()
+        with unittest.mock.patch('builtins.open', m):
             res = is_deploy_state_in_sync()
 
         assert res is False
 
-    @patch('software.software_controller.os.path.isfile')
-    @patch('software.software_controller.json.load')
+    @unittest.mock.patch('software.software_controller.os.path.isfile')
+    @unittest.mock.patch('software.software_controller.json.load')
     def test_is_deploy_state_in_sync_no_state(self,
                                               mock_json_load,
                                               mock_isfile
@@ -318,14 +316,14 @@ class TestSoftwareFunction(unittest.TestCase):
                                "commit_id": "67d36b8f06cf3ddca871612012b283b540d118c7c738afd2b7839458eb3db42d", "reboot_required": True,
                                "state": "activate-failed"}]}
         mock_json_load.side_effect = [state_1, state_2]
-        m = mock_open()
-        with patch('builtins.open', m):
+        m = unittest.mock.mock_open()
+        with unittest.mock.patch('builtins.open', m):
             res = is_deploy_state_in_sync()
 
         assert res is True
 
-    @patch('software.software_controller.os.path.isfile')
-    @patch('software.software_controller.json.load')
+    @unittest.mock.patch('software.software_controller.os.path.isfile')
+    @unittest.mock.patch('software.software_controller.json.load')
     def test_is_deploy_state_not_in_sync_no_synced(self,
                                                    mock_json_load,
                                                    mock_isfile
@@ -340,8 +338,8 @@ class TestSoftwareFunction(unittest.TestCase):
                                "commit_id": "67d36b8f06cf3ddca871612012b283b540d118c7c738afd2b7839458eb3db42d", "reboot_required": True,
                                "state": "activate-failed"}]}
         mock_json_load.side_effect = [state_1, state_2]
-        m = mock_open()
-        with patch('builtins.open', m):
+        m = unittest.mock.mock_open()
+        with unittest.mock.patch('builtins.open', m):
             res = is_deploy_state_in_sync()
 
         assert res is False
