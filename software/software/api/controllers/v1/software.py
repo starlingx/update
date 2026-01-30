@@ -1,14 +1,16 @@
 """
-Copyright (c) 2023-2024 Wind River Systems, Inc.
+Copyright (c) 2023-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
 import logging
-from pecan import expose
+
 from pecan.rest import RestController
+from pecan import expose
 
 from software.software_controller import sc
+
 
 LOG = logging.getLogger('main_logger')
 

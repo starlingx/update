@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023-2024 Wind River Systems, Inc.
+Copyright (c) 2023-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -8,8 +8,8 @@ SPDX-License-Identifier: Apache-2.0
 import pecan
 
 from software.config import CONF
-from software.utils import ExceptionHook
 from software.logging_hook import LoggingHook
+from software.utils import ExceptionHook
 
 
 def get_pecan_config():

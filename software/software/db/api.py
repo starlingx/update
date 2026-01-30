@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023-2024 Wind River Systems, Inc.
+Copyright (c) 2023-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -7,12 +7,13 @@ SPDX-License-Identifier: Apache-2.0
 
 import logging
 import threading
-from software import constants
+
 from software.software_entities import DeployHandler
 from software.software_entities import DeployHostHandler
 from software.states import DEPLOY_STATES
 from software.utils import get_software_filesystem_data
 from software.utils import save_to_json_file
+from software import constants
 
 LOG = logging.getLogger('main_logger')
 

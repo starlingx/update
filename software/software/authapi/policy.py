@@ -1,4 +1,3 @@
-#
 # Copyright (c) 2011 OpenStack Foundation
 # All Rights Reserved.
 #
@@ -14,10 +13,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-# Copyright (c) 2023,2025 Wind River Systems, Inc.
+# Copyright (c) 2023-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
-#
 
 """Policy Engine For Unified Software Management."""
 

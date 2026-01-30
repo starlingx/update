@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023-2024 Wind River Systems, Inc.
+Copyright (c) 2023-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -12,8 +12,8 @@ from software.authapi import acl
 from software.authapi import config
 from software.authapi import hooks
 from software.authapi import policy
-from software.utils import ExceptionHook
 from software.logging_hook import LoggingHook
+from software.utils import ExceptionHook
 
 
 auth_opts = [
