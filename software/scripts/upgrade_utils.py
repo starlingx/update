@@ -22,7 +22,7 @@ from keystoneauth1 import exceptions
 from keystoneauth1 import identity
 from keystoneauth1 import session
 from oslo_config import cfg
-import packaging
+from packaging import version
 
 LOG = logging.getLogger('main_logger')
 CONF = cfg.CONF
@@ -293,7 +293,7 @@ def get_major_release_version(sw_release_version):
     if not sw_release_version:
         return None
     try:
-        v = packaging.version.Version(sw_release_version)
+        v = version.Version(sw_release_version)
         return f"{v.major:02d}.{v.minor:02d}"
     except Exception:
         return None
