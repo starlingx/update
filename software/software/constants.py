@@ -125,6 +125,15 @@ POSTGRES_PATH = "/var/lib/postgresql"
 RABBIT_PATH = '/var/lib/rabbitmq'
 TMP_DIR = "/tmp"
 
+# EFI/Grub path
+EFI_PATH = "/boot/efi/EFI/BOOT"
+EFI_FILES_TO_COPY = ["bootx64.efi", "bootx64-nosig.efi", "grubx64.efi", "LockDown.efi", "LockDown.efi.sig",
+                     "mmx64.efi", "grub.cfg"]
+EFI_BKP_PATH = "/boot/efi/EFI/BOOT_BKP"
+EFI_NEW_PATH = "/boot/efi/EFI/BOOT_NEW"
+OSTREE_EFI_PATH = "/usr/lib/ostree-boot/efi/EFI/BOOT"
+GRUB_CFG_PATH = "/var/pxeboot/pxelinux.cfg.files/grub.cfg.stx"
+
 # Upgrade dirs
 ARMADA = "armada"
 CONFIG = "config"

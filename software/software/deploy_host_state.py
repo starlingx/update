@@ -94,8 +94,7 @@ class DeployHostState(object):
         elif state in [DEPLOY_HOST_STATES.ROLLBACK_PENDING, DEPLOY_HOST_STATES.ROLLBACK_FAILED]:
             self.transform(DEPLOY_HOST_STATES.ROLLBACK_DEPLOYING)
         else:
-            LOG.warning("Unmapped host state transition: deploy_started from %s" %
-                        (state.value if state else state))
+            LOG.warning("Unmapped host state transition: deploy_started from %s" % (state.value if state else state))
 
     def deployed(self):
         state = self.get_deploy_host_state()
