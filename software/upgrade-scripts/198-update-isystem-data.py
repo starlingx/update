@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2025 Wind River Systems, Inc.
+# Copyright (c) 2025-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -8,10 +8,12 @@
 
 
 import logging
-import psycopg2
 import sys
 
+import psycopg2
+
 from software.utilities.utils import configure_logging
+
 
 LOG = logging.getLogger('main_logger')
 

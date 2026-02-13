@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2022-2025 Wind River Systems, Inc.
+# Copyright (c) 2022-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -7,10 +7,9 @@
 import logging
 import os
 import sys
-from time import sleep
+import time
 
 from cgtsclient import client as cgts_client
-
 from software.utilities.utils import configure_logging
 
 
@@ -191,7 +190,7 @@ def check_apps_update_progress(client_and_release_info, action='update'):
                 action=action
             )
             if status == IN_PROGRESS_STATUS:
-                sleep(PROGRESS_CHECK_INTERVAL_IN_SECONDS)
+                time.sleep(PROGRESS_CHECK_INTERVAL_IN_SECONDS)
                 currently_attempt += 1
             elif status == FAILED_STATUS:
                 return False
@@ -208,7 +207,7 @@ def check_apps_update_progress(client_and_release_info, action='update'):
                 error_msg=e,
                 action=action
             )
-            sleep(PROGRESS_CHECK_INTERVAL_IN_SECONDS)
+            time.sleep(PROGRESS_CHECK_INTERVAL_IN_SECONDS)
             currently_attempt += 1
     log_progress(
         max_attempts, currently_attempt, TIMEOUT_STATUS, client_and_release_info, action=action)
@@ -248,7 +247,7 @@ def main():
             update_operation_result = False
             if action == 'activate':
                 client.kube_app.update_all()
-                sleep(5)
+                time.sleep(5)
                 update_operation_result = check_apps_update_progress(client_and_release_info)
             elif action == 'activate-rollback':
                 if client.kube_app.get_all_apps_by_status('apply-failed'):
@@ -258,7 +257,7 @@ def main():
                     )
                     return 1
                 client.kube_app.rollback_all_apps()
-                sleep(5)
+                time.sleep(5)
                 update_operation_result = check_apps_update_progress(
                     client_and_release_info, REVERT_ACTION)
             if update_operation_result:

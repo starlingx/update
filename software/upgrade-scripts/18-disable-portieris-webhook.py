@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2024-2025 Wind River Systems, Inc.
+# Copyright (c) 2024-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -15,15 +15,15 @@
 #
 
 import logging
+import os
 import subprocess
 import sys
-import os
 import tempfile
 import time
 import yaml
 
-from sysinv.common.kubernetes import test_k8s_health
 from software.utilities.utils import configure_logging
+from sysinv.common.kubernetes import test_k8s_health
 
 LOG = logging.getLogger('main_logger')
 
