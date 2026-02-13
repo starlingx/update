@@ -1,33 +1,34 @@
 """
-Copyright (c) 2023-2025 Wind River Systems, Inc.
+Copyright (c) 2023-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
+
 import configparser
 import hashlib
-from pecan import hooks
 import json
 import logging
-from netaddr import IPAddress
 import os
-from oslo_config import cfg as oslo_cfg
-from packaging import version
-import psutil
 import re
 import shutil
 import socket
-from socket import if_nametoindex as if_nametoindex_func
 import time
 import traceback
+
+from netaddr import IPAddress
+from oslo_config import cfg as oslo_cfg
+from packaging import version
+from pecan import hooks
+import psutil
+from tsconfig.tsconfig import PLATFORM_CONF_FILE
 import webob
 
 import software.constants as constants
-import software.ostree_utils as ostree
 from software.exceptions import SoftwareError
 from software.exceptions import SoftwareServiceError
 from software.exceptions import StateValidationFailure
-from tsconfig.tsconfig import PLATFORM_CONF_FILE
+import software.ostree_utils as ostree
 
 
 LOG = logging.getLogger('main_logger')
@@ -76,7 +77,7 @@ class ExceptionHook(hooks.PecanHook):
 
 def if_nametoindex(name):
     try:
-        return if_nametoindex_func(name)
+        return socket.if_nametoindex(name)
     except Exception:
         return 0
 

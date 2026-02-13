@@ -1,17 +1,16 @@
-#
-# Copyright (c) 2024 Wind River Systems, Inc.
+# Copyright (c) 2024-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
-#
+
 import argparse
 
 from oslo_log import log
 
 from software.states import DEPLOY_STATES
 from software.utilities.update_deploy_state import update_deploy_state
+from software.utilities.utils import ACTION_ACTIVATE
 from software.utilities.utils import configure_logging
 from software.utilities.utils import execute_migration_scripts
-from software.utilities.utils import ACTION_ACTIVATE
 import software.utils as utils
 
 LOG = log.getLogger(__name__)

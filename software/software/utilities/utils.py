@@ -1,28 +1,28 @@
 #
-# Copyright (c) 2023-2025 Wind River Systems, Inc.
+# Copyright (c) 2023-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
 
-import keyring
 import logging
 import os
-import psycopg2
-from psycopg2.extras import RealDictCursor
 import subprocess
 import sys
 import tempfile
 import traceback
 import yaml
 
+import keyring
+from psycopg2.extras import RealDictCursor
+import psycopg2
+
 # WARNING: The first controller upgrade is done before any puppet manifests
 # have been applied, so only the static entries from tsconfig can be used.
 # (the platform.conf file will not have been updated with dynamic values).
-from software.utilities.constants import PLATFORM_PATH
-from software.utilities.constants import KEYRING_PERMDIR
-
-from software.utilities import constants
 import software.config as cfg
+from software.utilities.constants import KEYRING_PERMDIR
+from software.utilities.constants import PLATFORM_PATH
+from software.utilities import constants
 
 LOG = logging.getLogger('main_logger')
 SOFTWARE_LOG_FILE = "/var/log/software.log"

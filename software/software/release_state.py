@@ -1,14 +1,15 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# Copyright (c) 2024 Wind River Systems, Inc.
+# Copyright (c) 2024-2026 Wind River Systems, Inc.
 #
+
 import logging
 
-from software import states
 from software.exceptions import ReleaseNotFound
 from software.release_data import get_SWReleaseCollection
 from software.release_data import reload_release_data
+from software import states
 
 
 LOG = logging.getLogger('main_logger')

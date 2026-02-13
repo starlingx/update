@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023-2025 Wind River Systems, Inc.
+Copyright (c) 2023-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -20,31 +20,32 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from xml.dom import minidom
+
+from lxml import etree as ElementTree
 from oslo_config import cfg as oslo_cfg
 from packaging import version
-from lxml import etree as ElementTree
-from xml.dom import minidom
 
 import software.apt_utils as apt_utils
 import software.config as cfg
+import software.constants as constants
 from software.db.api import get_instance
-from software.release_verify import verify_files
-from software.release_verify import cert_type_all
-from software.release_signing import sign_files
+
 from software.exceptions import MetadataFail
 from software.exceptions import OSTreeTarFail
+from software.exceptions import ReleaseMismatchFailure
 from software.exceptions import ReleaseUploadFailure
 from software.exceptions import ReleaseValidationFailure
-from software.exceptions import ReleaseMismatchFailure
 from software.exceptions import SoftwareServiceError
 from software.exceptions import VersionedDeployPrecheckFailure
-
-import software.constants as constants
-from software import states
-import software.utils as utils
+from software.release_signing import sign_files
+from software.release_verify import cert_type_all
+from software.release_verify import verify_files
 from software.sysinv_utils import get_ihost_list
 from software.sysinv_utils import get_system_info
 from software.sysinv_utils import is_host_locked_and_online
+import software.utils as utils
+from software import states
 
 
 try:

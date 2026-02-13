@@ -4,6 +4,7 @@ Copyright (c) 2024-2026 Wind River Systems, Inc.
 SPDX-License-Identifier: Apache-2.0
 
 """
+
 import json
 import os
 import random
@@ -14,25 +15,26 @@ import socket
 import subprocess
 import sys
 import time
-from packaging import version
 
+from packaging import version
+from tsconfig.tsconfig import http_port
+from tsconfig.tsconfig import install_uuid
+from tsconfig.tsconfig import subfunctions
+from tsconfig.tsconfig import SW_VERSION
+
+from software.base import PatchService
+import software.config as cfg
+import software.constants as constants
+import software.deploy_utils as deploy_utils
+from software.exceptions import OSTreeCommandFail
+import software.messages as messages
 import software.ostree_utils as ostree_utils
 from software.software_functions import configure_logging
 from software.software_functions import execute_agent_hooks
 from software.software_functions import LOG
 from software.software_functions import remove_major_release_deployment_flags
-import software.config as cfg
-from software.base import PatchService
-from software.exceptions import OSTreeCommandFail
 import software.utils as utils
-import software.messages as messages
-import software.constants as constants
-import software.deploy_utils as deploy_utils
 
-from tsconfig.tsconfig import http_port
-from tsconfig.tsconfig import install_uuid
-from tsconfig.tsconfig import subfunctions
-from tsconfig.tsconfig import SW_VERSION
 
 SOFTWARE_PERSIST_FOLDER = "/var/persist/software-agent"
 

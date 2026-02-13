@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """
-Copyright (c) 2025 Wind River Systems, Inc.
+Copyright (c) 2025-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -9,18 +9,17 @@ SPDX-License-Identifier: Apache-2.0
 import argparse
 import configparser
 import contextlib
+import datetime
 import json
 import logging
+import pathlib
 import shutil
 import subprocess
 import sys
-import time
 import tempfile
-
-from datetime import datetime
+import time
 
 from packaging import version
-from pathlib import Path
 
 LOG = logging.getLogger("main_logger")
 
@@ -51,7 +50,7 @@ class LVMSnapshot:
 
     @staticmethod
     def get_command_abs_path(command):
-        return Path("/usr/sbin") / command
+        return pathlib.Path("/usr/sbin") / command
 
     @staticmethod
     def run_command(command, shell=False, check=True):
@@ -87,7 +86,7 @@ class LVMSnapshot:
         """
         Return snapshot path under /dev
         """
-        return Path("/dev") / self._vg_name / self._name
+        return pathlib.Path("/dev") / self._vg_name / self._name
 
     @contextlib.contextmanager
     def mount(self):
@@ -121,7 +120,7 @@ class LVMSnapshot:
         Run the command to create a snapshot
         """
         command = [self.get_command_abs_path("lvcreate"), "--config", self._log_config, "-y", "-L",
-                   self._lv_size, "-s", "-n", self._name, Path("/dev") / self._vg_name / self._lv_name]
+                   self._lv_size, "-s", "-n", self._name, pathlib.Path("/dev") / self._vg_name / self._lv_name]
         self.run_command(command)
 
     def restore(self):
@@ -129,7 +128,7 @@ class LVMSnapshot:
         Run the command to restore a snapshot
         """
         command = [self.get_command_abs_path("lvconvert"), "--config", self._log_config,
-                   "-y", "--merge", Path("/dev") / self._vg_name / self._name]
+                   "-y", "--merge", pathlib.Path("/dev") / self._vg_name / self._name]
         self.run_command(command)
 
     def delete(self):
@@ -137,7 +136,7 @@ class LVMSnapshot:
         Run the command to delete a snapshot
         """
         command = [self.get_command_abs_path("lvremove"), "--config", self._log_config, "-f",
-                   Path("/dev") / self._vg_name / self._name]
+                   pathlib.Path("/dev") / self._vg_name / self._name]
         self.run_command(command)
 
     def get_attributes(self):
@@ -153,7 +152,7 @@ class LVMSnapshot:
         attributes = output.split(self.SEPARATOR)
         create_date = attributes[0]
         valid_state = "invalid" not in attributes[1].lower()
-        return datetime.strptime(create_date, self.CREATE_DATE_MASK), valid_state
+        return datetime.datetime.strptime(create_date, self.CREATE_DATE_MASK), valid_state
 
     # TODO(sshathee) Delete this function and use the one in utils file.
     # Currently lvm snapshot is executed from feed repo where utils file
@@ -188,7 +187,7 @@ class VarSnapshot(LVMSnapshot):
     def _update_deployment_data(self):
         try:
             with self.mount() as mount_dir:
-                software_json = Path(mount_dir) / self.SOFTWARE_JSON_SNAPSHOT
+                software_json = pathlib.Path(mount_dir) / self.SOFTWARE_JSON_SNAPSHOT
                 shutil.copy2(self.SOFTWARE_JSON_CURRENT, software_json)
                 LOG.info("Copied current deployment to %s", software_json)
                 content = self.read_file(software_json)
@@ -273,7 +272,7 @@ class PlatformSnapshot(LVMSnapshot):
                               mount_dir])
             LOG.info("Mounted %s under %s", self._name, mount_dir)
 
-            vim_db_snap = Path(mount_dir) / vim_db_snapshot
+            vim_db_snap = pathlib.Path(mount_dir) / vim_db_snapshot
             # Empty contents of snapshot vim db directory
             shutil.rmtree(vim_db_snap, ignore_errors=True)
             vim_db_snap.mkdir()
@@ -511,5 +510,6 @@ def main():
 
 if __name__ == "__main__":
     import upgrade_utils  # pylint: disable=E0401
+
     upgrade_utils.configure_logging('/var/log/software.log', log_level=logging.INFO)
     sys.exit(main())

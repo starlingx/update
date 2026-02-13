@@ -1,19 +1,20 @@
 """
-Copyright (c) 2025 Wind River Systems, Inc.
+Copyright (c) 2025-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
-import logging
-from packaging.version import Version
-import re
-import os
-import tempfile
-import subprocess
 
+import logging
+import os
+import re
+import subprocess
+import tempfile
+
+from packaging.version import Version
+from software.utilities.utils import SOFTWARE_LOG_FILE
 from software import constants
 from software import utils
-from software.utilities.utils import SOFTWARE_LOG_FILE
 
 
 LOG = logging.getLogger('main_logger')

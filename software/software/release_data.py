@@ -1,19 +1,21 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# Copyright (c) 2024-2025 Wind River Systems, Inc.
+# Copyright (c) 2024-2026 Wind River Systems, Inc.
 #
 
 import os
-from packaging import version
 import shutil
 import threading
-from software import states
+
+from packaging import version
+
 from software.exceptions import FileSystemError
 from software.exceptions import ReleaseNotFound
 from software.software_functions import LOG
-from software import utils
 from software.software_functions import ReleaseData
+from software import states
+from software import utils
 
 
 class SWRelease(object):

@@ -1,30 +1,31 @@
 """
-Copyright (c) 2023-2025 Wind River Systems, Inc.
+Copyright (c) 2023-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
+
 import configparser
-import filecmp
 import fcntl
+import filecmp
 import glob
 import logging
 import os
 import re
-import sh
 import shutil
 import subprocess
 import time
 
-import gi
-gi.require_version('OSTree', '1.0')
 from gi.repository import Gio
 from gi.repository import GLib
 from gi.repository import OSTree  # pylint: disable=E0611
-
-from software import constants
-from software.exceptions import OSTreeCommandFail
+import gi
+gi.require_version('OSTree', '1.0')
+import sh
 from tsconfig.tsconfig import subfunctions
+
+from software.exceptions import OSTreeCommandFail
+from software import constants
 
 LOG = logging.getLogger('main_logger')
 

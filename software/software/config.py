@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023-2025 Wind River Systems, Inc.
+Copyright (c) 2023-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -13,8 +13,8 @@ import socket
 from oslo_config import cfg
 import tsconfig.tsconfig as tsc
 
-import software.utils as utils
 import software.constants as constants
+import software.utils as utils
 
 controller_mcast_group = None
 agent_mcast_group = None

@@ -5,6 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 """
 import os
+
 try:
     # The tsconfig module is only available at runtime
     import tsconfig.tsconfig as tsc

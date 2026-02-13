@@ -1,22 +1,21 @@
 """
-Copyright (c) 2024 Wind River Systems, Inc.
+Copyright (c) 2024-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
 """
 import json
 import logging
+import six.moves.urllib.request as six_req
+
 from keystoneauth1 import exceptions
 from keystoneauth1 import identity
 from keystoneauth1 import session
-
 from oslo_config import cfg
 from oslo_utils import encodeutils
-from six.moves.urllib.request import Request
-from six.moves.urllib.request import urlopen
 
-from software import utils
 from software.constants import SYSTEM_CONTROLLER_REGION
+from software import utils
 
 
 LOG = logging.getLogger('main_logger')
@@ -60,7 +59,7 @@ def rest_api_request(token, method, api_cmd,
     api_cmd_headers['Content-type'] = "application/json"
     api_cmd_headers['User-Agent'] = "usm/1.0"
 
-    request_info = Request(api_cmd)
+    request_info = six_req.Request(api_cmd)
     request_info.get_method = lambda: method
     if token:
         request_info.add_header("X-Auth-Token", token)
@@ -75,7 +74,7 @@ def rest_api_request(token, method, api_cmd,
 
     request = None
     try:
-        request = urlopen(request_info, timeout=timeout)
+        request = six_req.urlopen(request_info, timeout=timeout)
         response = request.read()
     finally:
         if request:
