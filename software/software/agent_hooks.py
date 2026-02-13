@@ -883,11 +883,11 @@ class HookManager(object):
     AGENT_HOOKS = {
         MAJOR_RELEASE_UPGRADE: [
             CreateUSMUpgradeInProgressFlag,
-            OOTDriverHook,
             EtcMerger,
             CopyPxeFilesHook,
-            ReconfigureKernelHook,
             UpdateKernelParametersHook,
+            ReconfigureKernelHook,
+            OOTDriverHook,
             UpdateGrubConfigHook,
             EnableNewServicesHook,
             DeleteControllerFeedRemoteHook,
