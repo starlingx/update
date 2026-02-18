@@ -26,11 +26,14 @@ import shutil
 import subprocess
 
 from packaging import version
+from ruamel.yaml import YAML
 
 log_format = ('%(asctime)s: ' + '[%(process)s]: '
               '%(filename)s(%(lineno)s): %(levelname)s: %(message)s')
 LOG.basicConfig(filename="/var/log/software.log",
                 format=log_format, level=LOG.INFO, datefmt="%FT%T")
+yaml = YAML()
+yaml.preserve_quotes = True
 
 
 class BaseHook(object):
@@ -871,6 +874,65 @@ class OOTDriverHook(BaseHook):
             )
 
 
+# TODO(rjosemat): Only required in stx 11 and 12. Remove in future releases.
+class PuppetControllerYamlCopier(BaseHook):
+
+    def __init__(self, attrs):
+        super().__init__(attrs)
+        self.source_file = ("%s/usr/etc/puppet/hieradata/controller.yaml"
+                            % self.TO_RELEASE_OSTREE_DIR)
+        self.destination_file = ("%s/etc/puppet/hieradata/controller.yaml"
+                                 % self.TO_RELEASE_OSTREE_DIR)
+        self.current_file = "/etc/puppet/hieradata/controller.yaml"
+
+    def should_run_update(self):
+        with open(self.destination_file) as f:
+            data = yaml.load(f)
+            large_limit = data.get("platform::memcached::params::max_memory_large")
+            small_limit = data.get("platform::memcached::params::max_memory_small")
+            if small_limit is None or large_limit is None:
+                LOG.info(f"File {self.destination_file} is missing memcached memory "
+                         "limit parameters. Will run update.")
+                return True
+            else:
+                LOG.info(f"File {self.destination_file} has memcached memory "
+                         "limit parameters. Skipping update.")
+                return False
+
+    def copy_file(self):
+        try:
+            LOG.info(f"Replacing {self.destination_file} with {self.source_file}")
+            shutil.copyfile(self.source_file, self.destination_file)
+        except Exception:
+            LOG.exception(f"Fail to replace file {self.destination_file} with {self.source_file}")
+            raise
+
+    def replace_region(self):
+        try:
+            LOG.info(f"Updating region to {self.destination_file}")
+            with open(self.current_file) as f:
+                data = yaml.load(f)
+                current_region = data.get("platform::mtce::params::auth_region")
+
+            with open(self.destination_file, "r") as f:
+                data = yaml.load(f)
+                data["platform::mtce::params::auth_region"] = current_region
+                data["keystone::endpoint::region"] = current_region
+
+            with open(self.destination_file, "w") as f:
+                yaml.dump(data, f)
+
+        except Exception:
+            LOG.exception(f"Fail to replace region to {self.destination_file}")
+            raise
+
+    def run(self):
+        LOG.info("Running PuppetControllerYamlCopier hook")
+        if self.should_run_update():
+            self.copy_file()
+            self.replace_region()
+
+
 class HookManager(object):
     """
     Object to manage the execution of agent hooks
@@ -895,6 +957,7 @@ class HookManager(object):
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
+            PuppetControllerYamlCopier,
         ],
         MAJOR_RELEASE_ROLLBACK: [
             ReconfigureKernelHook,
@@ -906,6 +969,7 @@ class HookManager(object):
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
+            PuppetControllerYamlCopier,
         ],
     }
 
