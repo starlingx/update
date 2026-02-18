@@ -117,7 +117,7 @@ def configure_k8s_oidc_param(sysinv, oam_network):
         {
             c.SERVICE_PARAM_NAME_OIDC_ISSUER_URL: issuer_url,
             c.SERVICE_PARAM_NAME_OIDC_CLIENT_ID: "stx-oidc-client-app",
-            c.SERVICE_PARAM_NAME_OIDC_USERNAME_CLAIM: "email",
+            c.SERVICE_PARAM_NAME_OIDC_USERNAME_CLAIM: "name",
             c.SERVICE_PARAM_NAME_OIDC_GROUPS_CLAIM: "groups",
         },
     )
