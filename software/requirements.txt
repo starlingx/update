@@ -13,6 +13,7 @@ psycopg2-binary
 pycryptodomex
 PyGObject
 requests_toolbelt
+ruamel.yaml >= 0.16.12
 sh
 WebOb
 WSME>=0.5b2
