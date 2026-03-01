@@ -5,11 +5,15 @@
 #
 
 import argparse
+import base64
+import configparser
 import glob
 import json
+import keyring
 import logging
 import os
 import pathlib
+import secrets
 import shutil
 import socket
 import subprocess
@@ -21,6 +25,7 @@ import psycopg2
 from software.utilities.utils import configure_logging
 import software.utilities.utils as utils
 from software.utilities import constants
+from packaging import version
 
 
 sout = sys.stdout
@@ -49,16 +54,199 @@ DB_PASSWORD_ENCRYPTION = "scram-sha-256"
 LOG = logging.getLogger(__name__)
 
 
-def migrate_keyring_data(from_release, to_release):
-    """Migrates keyring data. """
+def set_keyring_env(keyring_path='', keyring_password=''):
+    """
+    Configure keyring environment and clear cached password.
 
-    LOG.info("Migrating keyring data")
-    # First delete any keyring files for the to_release - they can be created
-    # if release N+1 nodes are incorrectly left powered up when the release N
-    # load is installed.
-    target_path = os.path.join(constants.KEYRING_DIR_PATH, to_release)
-    shutil.rmtree(target_path, ignore_errors=True)
-    shutil.copytree(os.path.join(constants.KEYRING_DIR_PATH, from_release), target_path)
+    Sets XDG_DATA_HOME to specify keyring location and optionally sets
+    KEYRING_PASSWORD for pre-LUKS keyring access. Clears cached keyring
+    password from backend to force re-reading with new credentials.
+
+    For LUKS keyrings, password is automatically read from .keyring_secret
+    file based on SW_VERSION, so keyring_password should be empty.
+
+    Args:
+        keyring_path: Path to keyring directory (sets XDG_DATA_HOME)
+        keyring_password: Password for pre-LUKS keyrings (empty for LUKS)
+    """
+    LOG.info(f"Setting XDG_DATA_HOME to {keyring_path}")
+    os.environ['XDG_DATA_HOME'] = keyring_path
+
+    LOG.info(f"Setting KEYRING_PASSWORD to {'<redacted>' if keyring_password else '<empty>'}")
+    os.environ['KEYRING_PASSWORD'] = keyring_password
+
+    # Clear cached password
+    chainer = keyring.get_keyring()
+    if hasattr(chainer, 'backends'):
+        for backend in chainer.backends:
+            if hasattr(backend, '__dict__') and 'keyring_key' in backend.__dict__:
+                del backend.__dict__['keyring_key']
+
+
+def change_keyring_ownership(keyring_path):
+    """
+    Change keyring directory ownership to sys_protected group.
+
+    Recursively changes group ownership of keyring directory to sys_protected
+    to allow platform services to access keyring files.
+
+    Args:
+        keyring_path: Path to keyring directory
+
+    Raises:
+        Exception: If directory does not exist or chgrp command fails
+    """
+    # Change group ownership to sys_protected for keyring directory
+    if os.path.isdir(keyring_path):
+        chgrp_cmd = 'chgrp -R sys_protected ' + keyring_path
+        try:
+            LOG.info("Executing keyring migrate command: %s" % chgrp_cmd)
+            subprocess.check_call([chgrp_cmd],
+                                  shell=True, stdout=sout, stderr=sout)
+        except subprocess.CalledProcessError as ex:
+            LOG.exception("Failed to execute command: '%s' during upgrade "
+                          "processing, return code: %d" % (chgrp_cmd, ex.returncode))
+            raise
+    else:
+        LOG.error("Directory %s does not exist" % keyring_path)
+        raise Exception("keyring directory cannot be found")
+
+
+def extract_keyring(from_release):
+    """Extract credentials from pre-LUKS keyring using hardcoded password.
+
+    Reads encrypted keyring from /opt/platform/.keyring/{from_release}/python_keyring
+    and extracts all stored credentials using the legacy hardcoded password.
+    Decodes underscore-encoded usernames (_2d -> -, _5f -> _, _20 -> space).
+
+    Args:
+        from_release: Source release version (e.g., "25.09")
+
+    Returns:
+        dict: Mapping of (service, username) tuples to passwords
+
+    Raises:
+        Exception: If source keyring not found or config file missing
+    """
+    source_path = os.path.join("/opt/platform/", ".keyring", from_release)
+    old_keyring_pwd = "Please set a password for your new keyring: "
+
+    if not os.path.exists(source_path):
+        raise Exception(f"Source keyring not found at {source_path}")
+
+    set_keyring_env(keyring_path=source_path,
+                    keyring_password=old_keyring_pwd)
+
+    config_file = os.path.join(source_path, "python_keyring", 'crypted_pass.cfg')
+
+    if not os.path.exists(config_file):
+        raise Exception(f"Keyring config file not found: {config_file}")
+
+    config = configparser.ConfigParser()
+    config.read(config_file)
+
+    credentials = {}
+    for section in config.sections():
+        # Skip keyring metadata section
+        if section == 'keyring_2Dsetting':
+            continue
+
+        for username in config.options(section):
+            # Decode underscore-encoded names: _2d -> -, _5f -> _, _20 -> space
+            decoded_username = username.replace('_5f', '_').replace('_2d', '-').replace('_20', ' ')
+            try:
+                pwd = keyring.get_password(section, decoded_username)
+                if pwd:
+                    credentials[(section, decoded_username)] = pwd
+            except Exception as e:
+                LOG.warning(f"Failed to extract {section}/{decoded_username}: {e}")
+
+    # CRITICAL: Clear old password after all extractions
+    os.environ.pop('KEYRING_PASSWORD', None)
+
+    LOG.info(f"Extracted {len(credentials)} credentials")
+    return credentials
+
+
+def migrate_keyring_data(from_release, to_release):
+    """Migrate keyring data between releases with LUKS encryption support.
+
+    Handles two migration scenarios:
+    1. Pre-LUKS → LUKS (from_release < 26.03, to_release >= 26.03):
+       - Extracts credentials from /opt/platform/.keyring/{from_release}
+       - Re-encrypts with new random secret
+       - Stores on LUKS filesystem at /var/luks/stx/luks_fs/controller/.keyring/{to_release}
+       - Creates .keyring_secret file (32-byte base64-encoded)
+
+    2. LUKS → LUKS (both releases >= 26.03):
+       - Copies keyring data from old to new version path on LUKS
+       - Reuses same encryption secret (no re-encryption)
+
+    Both scenarios create .CREDENTIAL file at /opt/platform/.keyring/{to_release}/
+    for /etc/platform/openrc integration.
+
+    Args:
+        from_release: Source release version (e.g., "25.09", "26.03")
+        to_release: Target release version (e.g., "26.03", "26.09")
+
+    Raises:
+        Exception: If credential extraction fails or keyring paths inaccessible
+    """
+    # Create .CREDENTIAL file for /etc/platform/openrc
+    shutil.rmtree(constants.KEYRING_SCRIPT_DIR, ignore_errors=True)
+    os.makedirs(constants.KEYRING_SCRIPT_DIR, exist_ok=True)
+    keyring_script_file = os.path.join(constants.KEYRING_SCRIPT_BASE, from_release, ".CREDENTIAL")
+    shutil.copy2(keyring_script_file, constants.KEYRING_SCRIPT_FILE)
+    change_keyring_ownership(constants.KEYRING_SCRIPT_DIR)
+
+    from_ver = version.Version(from_release)
+    to_ver = version.Version(to_release)
+    luks_min_version = version.Version("26.09")
+    if from_ver < luks_min_version <= to_ver:
+        # TODO(This block can be removed post 27.03)
+        shutil.rmtree(constants.KEYRING_DIR_PATH, ignore_errors=True)
+        os.makedirs(constants.KEYRING_DIR_PATH, exist_ok=True)
+        change_keyring_ownership(constants.KEYRING_DIR_PATH)
+
+        LOG.info(f"Migrating keyring to LUKS: {from_release} -> {to_release}")
+        credentials = extract_keyring(from_release)
+        if not credentials:
+            raise Exception("No credentials extracted from keyring")
+
+        if os.path.exists(constants.KEYRING_PATH):
+            LOG.info(f"Removing existing target path: {constants.KEYRING_PATH}")
+            shutil.rmtree(constants.KEYRING_PATH)
+
+        target_path = os.path.join(constants.KEYRING_PATH, "python_keyring")
+        LOG.info(f"Creating LUKS keyring directory: {target_path}")
+        os.makedirs(target_path, mode=0o755, exist_ok=True)
+
+        new_secret = base64.b64encode(secrets.token_bytes(32)).decode('ascii')
+        LOG.info("Generated new random keyring secret (32 bytes, base64-encoded)")
+
+        secret_file = constants.KEYRING_SECRET_PATH
+        LOG.info(f"Writing keyring secret to: {secret_file}")
+        with open(secret_file, 'w') as f:
+            f.write(new_secret)
+        os.chmod(secret_file, 0o640)
+
+        set_keyring_env(keyring_path=constants.KEYRING_PATH)
+
+        LOG.info(f"Re-encrypting {len(credentials)} credentials with new secret")
+        for (service, username), pwd in credentials.items():
+            keyring.set_password(service, username, pwd)
+        LOG.info("All credentials re-encrypted successfully")
+
+        LOG.info(f"Changing ownership of {constants.KEYRING_PATH} to sys_protected")
+        change_keyring_ownership(constants.KEYRING_PATH)
+        LOG.info("Keyring migration to LUKS completed successfully")
+    else:
+        source_path = os.path.join(constants.KEYRING_DIR_PATH, from_release)
+        shutil.rmtree(constants.KEYRING_PATH, ignore_errors=True)
+        shutil.copytree(source_path, constants.KEYRING_PATH)
+        change_keyring_ownership(constants.KEYRING_PATH)
+        set_keyring_env(keyring_path=constants.KEYRING_PATH)
+        LOG.info("Keyring migration from LUKS to LUKS completed successfully")
 
 
 def migrate_pxeboot_config(from_release, to_release):
@@ -476,12 +664,18 @@ def migrate_hiera_data(from_release):
     static_file = os.path.join(constants.HIERADATA_PERMDIR, "static.yaml")
     with open(static_file, 'r') as yaml_file:
         static_config = yaml.load(yaml_file, Loader=yaml.Loader)
+
+    # Remove old keyring parameters
+    static_config.pop('platform::client::credentials::params::keyring_base', None)
+    static_config.pop('platform::client::credentials::params::keyring_directory', None)
+    static_config.pop('platform::client::credentials::params::keyring_file', None)
+
     static_config.update({
         'platform::params::software_version': constants.SW_VERSION,
-        'platform::client::credentials::params::keyring_directory':
-            constants.KEYRING_PATH,
-        'platform::client::credentials::params::keyring_file':
-            os.path.join(constants.KEYRING_PATH, '.CREDENTIAL'),
+        'platform::params::keyring_directory': constants.KEYRING_PATH,
+        'platform::client::credentials::params::keyring_script_base': constants.KEYRING_SCRIPT_BASE,
+        'platform::client::credentials::params::keyring_script_directory': constants.KEYRING_SCRIPT_DIR,
+        'platform::client::credentials::params::keyring_script_file': constants.KEYRING_SCRIPT_FILE,
     })
 
     with open(static_file, 'w') as yaml_file:
@@ -779,13 +973,6 @@ def upgrade_controller(from_release, to_release, target_port):
     role = get_system_role(target_port)
     shared_services = get_shared_services(target_port)
 
-    # Create /tmp/python_keyring - used by keystone manifest.
-    tmp_keyring_path = "/tmp/python_keyring"
-    key_ring_path = os.path.join(constants.PLATFORM_PATH, ".keyring", to_release,
-                                 "python_keyring")
-    shutil.rmtree(tmp_keyring_path, ignore_errors=True)
-    shutil.copytree(key_ring_path, tmp_keyring_path)
-
     # Migrate hiera data
     migrate_hiera_data(from_release)
     utils.add_upgrade_entries_to_hiera_data(from_release)
@@ -811,9 +998,6 @@ def upgrade_controller(from_release, to_release, target_port):
     utils.execute_migration_scripts(
         from_release, to_release, utils.ACTION_MIGRATE, target_port)
 
-    # Remove manifest and keyring files
-    shutil.rmtree("/tmp/python_keyring", ignore_errors=True)
-
     first_controller = get_first_controller(target_port)
     # Generate config to be used by "regular" manifest
     print("Generating config for %s" % first_controller)
@@ -831,21 +1015,6 @@ def upgrade_controller(from_release, to_release, target_port):
     if from_release == "22.12":
         LOG.info("Generating mgmt-ip config for %s" % first_controller)
         create_mgmt_ip_hieradata(first_controller, target_port)
-
-    # Change group ownership to sys_protected for keyring directory
-    if os.path.isdir(constants.KEYRING_DIR_PATH):
-        chgrp_cmd = 'chgrp -R sys_protected ' + constants.KEYRING_DIR_PATH
-        try:
-            LOG.info("Executing keyring migrate command: %s" % chgrp_cmd)
-            subprocess.check_call([chgrp_cmd],
-                                  shell=True, stdout=sout, stderr=sout)
-        except subprocess.CalledProcessError as ex:
-            LOG.exception("Failed to execute command: '%s' during upgrade "
-                          "processing, return code: %d" % (chgrp_cmd, ex.returncode))
-            raise
-    else:
-        LOG.error("Directory %s does not exist" % constants.KEYRING_DIR_PATH)
-        raise Exception("keyring directory cannot be found")
 
     # Stop postgres server
     LOG.info("Shutting down PostgreSQL...")
