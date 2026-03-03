@@ -204,8 +204,8 @@ class SoftwareClientShell(object):
                             help=argparse.SUPPRESS)
 
         parser.add_argument('--software-url',
-                            default=utils.env('SYSTEM_URL'),
-                            help='Defaults to env[SYSTEM_URL]')
+                            default=utils.env('SOFTWARE_URL'),
+                            help='Defaults to env[SOFTWARE_URL]')
 
         parser.add_argument('--software_url',
                             help=argparse.SUPPRESS)
