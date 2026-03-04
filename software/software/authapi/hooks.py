@@ -122,11 +122,12 @@ class AccessPolicyHook(hooks.PecanHook):
                 except Exception:
                     raise exc.HTTPForbidden()
             else:
+                role = ""
                 method = state.request.method
                 if method == 'GET':
-                    role = "admin, reader, operator or configurator"
+                    role = "reader or operator"
                     has_api_access = policy.authorize(
-                        base_policy.ADMIN_OR_READER_OR_OPERATOR_OR_CONFIGURATOR, {},
+                        base_policy.READER_OR_OPERATOR_OR_CONFIGURATOR, {},
                         context.to_dict(), do_raise=False)
                 else:
                     role = "admin or configurator"
@@ -134,5 +135,4 @@ class AccessPolicyHook(hooks.PecanHook):
                         base_policy.ADMIN_OR_CONFIGURATOR, {},
                         context.to_dict(), do_raise=False)
                 if not has_api_access:
-                    raise exc.HTTPForbidden("Not allowed, roles " + role +
-                                            " are needed to execute the action.")
+                    raise exc.HTTPForbidden("Not allowed, role " + role + " is needed")
