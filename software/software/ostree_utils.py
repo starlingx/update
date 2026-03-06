@@ -1000,6 +1000,11 @@ def copy_updated_efi_files():
         grub_copy_cmd = f"sudo cp {deployment_dir}{constants.GRUB_CFG_PATH} {constants.EFI_NEW_PATH}/grub.cfg"
         subprocess.run(grub_copy_cmd, shell=True, check=True, capture_output=True)
 
+        # Remove bkp folder before create other bkp
+        if os.path.exists(constants.EFI_BKP_PATH):
+            shutil.rmtree(constants.EFI_BKP_PATH)
+            LOG.info("Removed EFI backup.")
+
         # Atomic folder swap
         atomic_swap_cmd = (f"sudo mv {constants.EFI_PATH} {constants.EFI_BKP_PATH} && "
                            f"sudo mv {constants.EFI_NEW_PATH} {constants.EFI_PATH}")
