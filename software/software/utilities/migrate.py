@@ -222,7 +222,8 @@ def migrate_sysinv_data(from_release, to_release, port):
                 "(msecs)03d %(process)d %(levelname)s %(name)s [-] %"
                 "(instance)s%(message)s\n")
         f.write("debug=False\n")
-        f.write('sql_connection=postgresql://%s:%s@127.0.0.1:%s/sysinv\n' %
+        f.write("\n[database]\n")
+        f.write('connection=postgresql://%s:%s@127.0.0.1:%s/sysinv\n' %
                 (username, password, port))
 
 
@@ -302,6 +303,30 @@ def import_databases(target_port, from_path=None):
                           "processing, return code: %d" %
                           (cmd[1], ex.returncode))
             raise
+
+    # TODO(svanka): Remove these GRANT statements once Bullseye is no longer
+    # in the upgrade path. PostgreSQL 17 (Trixie) revoked CREATE on public
+    # schema by default; these grants are only needed for upgrades from
+    # Bullseye (PG13) to Trixie (PG17).
+    try:
+        LOG.info("Granting permissions on public schema to admin-sysinv")
+        subprocess.check_call(
+            ['sudo -u postgres psql --port=%s -d sysinv -c '
+             '"GRANT ALL ON SCHEMA public TO \\"admin-sysinv\\";"' % target_port],
+            shell=True, stdout=devnull, stderr=sout)
+    except subprocess.CalledProcessError as ex:
+        LOG.exception("Failed to grant schema permissions, return code: %d" % ex.returncode)
+        raise
+
+    try:
+        LOG.info("Granting permissions on public schema to admin-fm")
+        subprocess.check_call(
+            ['sudo -u postgres psql --port=%s -d fm -c '
+             '"GRANT ALL ON SCHEMA public TO \\"admin-fm\\";"' % target_port],
+            shell=True, stdout=devnull, stderr=sout)
+    except subprocess.CalledProcessError as ex:
+        LOG.exception("Failed to grant fm schema permissions, return code: %d" % ex.returncode)
+        raise
 
 
 def migrate_vim_database(from_release, to_release):
