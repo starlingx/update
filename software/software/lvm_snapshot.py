@@ -28,6 +28,7 @@ class LVMSnapshot:
     ATTRIBUTES = ["lv_time", "lv_snapshot_invalid"]
     SEPARATOR = ","
     CREATE_DATE_MASK = "%Y-%m-%d %H:%M:%S %z"
+    TAG_PREFIX = "id="
     SOFTWARE_JSON_SNAPSHOT = "rootdirs/opt/software/software.json"
     SOFTWARE_JSON_CURRENT = "/opt/software/software.json"
     VIM_CONFIG = "/etc/nfv/vim/config.ini"
@@ -80,6 +81,8 @@ class LVMSnapshot:
             "name": self._name,
             "vg_name": self._vg_name,
             "lv_name": self._lv_name,
+            "lv_size": self._lv_size,
+            "tag_id": self.get_id_from_tag()
         }
 
     def get_dev_path(self):
@@ -115,13 +118,46 @@ class LVMSnapshot:
         result = self.run_command(command, shell=True, check=False)
         return result.returncode == 0
 
-    def create(self):
+    def create(self, tag_id):
         """
-        Run the command to create a snapshot
+        Run the command to create a snapshot, if an ID is passed
+        tag the snapshot with it so it can be validated before rollback
         """
         command = [self.get_command_abs_path("lvcreate"), "--config", self._log_config, "-y", "-L",
                    self._lv_size, "-s", "-n", self._name, pathlib.Path("/dev") / self._vg_name / self._lv_name]
+        if tag_id:
+            command += ["--addtag", f"{self.TAG_PREFIX}{tag_id}"]
         self.run_command(command)
+
+    def get_id_from_tag(self):
+        """
+        Return the ID tag stored on the snapshot, or None if not set
+        """
+        command = [self.get_command_abs_path("lvs"), "--noheadings", "-o", "lv_tags",
+                   str(pathlib.Path("/dev") / self._vg_name / self._name)]
+        result = self.run_command(command)
+        for tag in result.stdout.strip().split(","):
+            tag = tag.strip()
+            if tag.startswith(self.TAG_PREFIX):
+                return tag[len(self.TAG_PREFIX):]
+        return None
+
+    def validate_for_rollback(self, expected_tag_id):
+        """
+        Validate that the snapshot is safe to roll back to:
+        - Must not be in an invalid state
+        - Must be tagged with the expected ID
+        Raises ValueError if validation fails
+        """
+        _, valid_state = self.get_attributes()
+        if not valid_state:
+            raise ValueError(f"Snapshot {self._name} is invalid (overflowed or corrupted)")
+        snapshot_tag_id = self.get_id_from_tag()
+        if snapshot_tag_id != expected_tag_id:
+            raise ValueError(
+                f"Snapshot {self._name} ID mismatch: "
+                f"expected '{expected_tag_id}', found '{snapshot_tag_id}'"
+            )
 
     def restore(self):
         """
@@ -185,6 +221,7 @@ class LVMSnapshot:
 
 class VarSnapshot(LVMSnapshot):
     def _update_deployment_data(self):
+        software_json = ""
         try:
             with self.mount() as mount_dir:
                 software_json = pathlib.Path(mount_dir) / self.SOFTWARE_JSON_SNAPSHOT
@@ -310,6 +347,7 @@ class PlatformSnapshot(LVMSnapshot):
         DB otherwise during unlock it will be restored with the pre-deploy
         start content incorrectly
         """
+        # NOTE(lvieira) this function only works when there is a deploy in progress
         self._replace_vim_db()
         super().restore()
 
@@ -356,33 +394,35 @@ class LVMSnapshotManager:
         # is used in multiple places. Currently lvm snapshot is executed
         # from feed repo where constants file is not copied.
 
+        lv_size = self._lvs.get(lv_name)
         # specific snapshot instances
         if lv_name == "var-lv":
-            return VarSnapshot(self.vg_name, lv_name)
+            return VarSnapshot(self.vg_name, lv_name, lv_size)
         elif lv_name == "platform-lv":
-            return PlatformSnapshot(self.vg_name, lv_name)
+            return PlatformSnapshot(self.vg_name, lv_name, lv_size)
         # otherwise create a generic instance
-        return LVMSnapshot(self.vg_name, lv_name)
+        return LVMSnapshot(self.vg_name, lv_name, lv_size)
 
-    def _create_snapshots(self):
+    def _create_snapshots(self, tag_id):
         """Create snapshots for the specified logical volumes"""
-        LOG.info("Creating snapshots...")
+        LOG.info("Creating snapshots with ID: %s", tag_id)
         for lv_name, lv_size in self.lvs.items():
             snapshot = LVMSnapshot(self.vg_name, lv_name, lv_size)
             if snapshot.exists():
                 LOG.info("Snapshot %s already exists, deleting snapshot...", snapshot.name)
                 snapshot.delete()
             LOG.info("Creating snapshot for %s in volume group %s" % (lv_name, self.vg_name))
-            snapshot.create()
+            snapshot.create(tag_id)
         LOG.info("Snapshots created successfully")
 
-    def create_snapshots(self):
+    def create_snapshots(self, tag_id=None):
         """
-        Create snapshots and return success only if all expected snapshots are created,
-        if any snapshot creation returns error, all snapshots are cleared
+        Create snapshots, tagged with an ID.
+        Returns success only if all expected snapshots are created;
+        if any snapshot creation fails, all snapshots are cleared.
         """
         try:
-            self._create_snapshots()
+            self._create_snapshots(tag_id)
         except Exception:
             LOG.error("Error creating snapshots, existing snapshots will be deleted")
             self.delete_snapshots()
@@ -401,7 +441,7 @@ class LVMSnapshotManager:
             snapshot.restore()
         LOG.info("Snapshots restored, reboot is needed to apply the changes")
 
-    def restore_snapshots(self):
+    def restore_snapshots(self, expected_tag_id=None):
         """
         Restore snapshots, but only after doing sanity checks:
         - If all expected snapshots exists
@@ -422,14 +462,15 @@ class LVMSnapshotManager:
             return False
 
         # check for invalid or expired snapshots
+        # validate snapshots against the given ID
         invalid_snapshots = []
         for snapshot in snapshots:
-            _, valid_state = snapshot.get_attributes()
-            if valid_state is False:
-                LOG.error("Snapshot %s is invalid", snapshot.name)
+            try:
+                snapshot.validate_for_rollback(expected_tag_id)
+                LOG.info("Snapshot %s validated for ID %s", snapshot.name, expected_tag_id)
+            except ValueError as e:
+                LOG.error("%s", e)
                 invalid_snapshots.append(snapshot.name)
-            else:
-                LOG.info("Snapshot %s can be used", snapshot.name)
 
         if invalid_snapshots:
             LOG.error("Cannot proceed with snapshot restore, "
@@ -460,8 +501,8 @@ class LVMSnapshotManager:
         """Check if any snapshots exist for the specified logical volumes."""
         LOG.info("Checking for existing LVM snapshots...")
         snapshots = []
-        for lv_name in self.lvs.keys():
-            snapshot = LVMSnapshot(self.vg_name, lv_name)
+        for lv_name, lv_size in self.lvs.items():
+            snapshot = LVMSnapshot(self.vg_name, lv_name, lv_size)
             if snapshot.exists():
                 LOG.info("Snapshot exists for %s: %s", lv_name, snapshot.name)
                 snapshots.append(snapshot)
@@ -476,6 +517,8 @@ def main():
     parser.add_argument("-c", "--create",
                         action="store_true",
                         help="Create LVM snapshots")
+    parser.add_argument("--tag-id",
+                        help="ID to tag snapshots with it")
     parser.add_argument("-r", "--restore",
                         action="store_true",
                         help="Restore LVM snapshots")
@@ -491,9 +534,9 @@ def main():
         manager = LVMSnapshotManager()
         success = True
         if args.create:
-            success = manager.create_snapshots()
+            success = manager.create_snapshots(args.tag_id)
         elif args.restore:
-            success = manager.restore_snapshots()
+            success = manager.restore_snapshots(args.tag_id)
         elif args.delete:
             manager.delete_snapshots()
         elif args.list:
