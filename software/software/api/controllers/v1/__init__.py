@@ -24,6 +24,7 @@ from software.api.controllers.v1.deploy import DeployController
 from software.api.controllers.v1.deploy_host import DeployHostController
 from software.api.controllers.v1.release import ReleaseController
 from software.api.controllers.v1.software import SoftwareAPIController
+from software.api.controllers.v1.system_deploy import SystemDeployController
 from software.api.controllers.v1 import base
 from software.api.controllers.v1 import link
 
@@ -105,6 +106,7 @@ class Controller(rest.RestController):
     release = ReleaseController()
     deploy = DeployController()
     deploy_host = DeployHostController()
+    system_deploy = SystemDeployController()
 
     @wsme_pecan.wsexpose(V1)
     def get(self):

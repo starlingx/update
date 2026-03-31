@@ -1,4 +1,4 @@
-# Copyright (c) 2013-2024 Wind River Systems, Inc.
+# Copyright (c) 2013-2026 Wind River Systems, Inc.
 # Copyright 2012-2024 OpenStack LLC.
 # All Rights Reserved.
 #
@@ -17,6 +17,7 @@
 
 from software_client.v1 import release
 from software_client.v1 import deploy
+from software_client.v1 import system_deploy
 
 
 class Client(object):
@@ -31,3 +32,4 @@ class Client(object):
 
         self.release = release.ReleaseManager(self.http_client)
         self.deploy = deploy.DeployManager(self.http_client)
+        self.system_deploy = system_deploy.SystemDeployManager(self.http_client)

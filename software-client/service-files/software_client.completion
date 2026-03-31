@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024 Wind River Systems, Inc.
+# Copyright (c) 2024-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -13,6 +13,8 @@ _software_opts="" # lazy init
 _software_flags="" # lazy init
 _software_deploy_opts="" # lazy init
 _software_deploy_flags="" # lazy init
+_software_system_deploy_opts="" # lazy init
+_software_system_deploy_flags="" # lazy init
 _software_opts_exp="" # lazy init
 
 _software()
@@ -38,7 +40,19 @@ _software()
         _software_deploy_opts_exp="`echo $_software_deploy_opts | sed -e "s/[ ]\+/|/g"`"
     fi
 
-    if [ "$cmd" == "deploy" ] ; then
+    if [ "x$_software_system_deploy_opts" == "x" ] && [ "$cmd" == "system-deploy" ] ; then
+        kbc="`software system-deploy bash-completion | sed -e "s/ -h / /"`"
+        _software_system_deploy_opts="`echo "$kbc" | sed -e "s/--[a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
+        _software_system_deploy_flags="`echo " $kbc" | sed -e "s/ [^-][^-][a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
+    fi
+
+    if [ "$cmd" == "system-deploy" ] ; then
+        if [[ " ${_software_system_deploy_opts} " == *" $prev "* && "$prev" != "help" ]] ; then
+            COMPREPLY=($(compgen -W "${_software_system_deploy_flags}" -- ${cur}))
+        else
+            COMPREPLY=($(compgen -W "${_software_system_deploy_opts}" -- ${cur}))
+        fi
+    elif [ "$cmd" == "deploy" ] ; then
         if [[ " ${_software_deploy_opts} " == *" $prev "* && "$prev" != "help" ]] ; then
             COMPREPLY=($(compgen -W "${_software_deploy_flags}" -- ${cur}))
         else

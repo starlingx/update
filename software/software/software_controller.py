@@ -3014,6 +3014,20 @@ class PatchController(PatchService):
 
         return release_info
 
+    def software_system_deploy_init_api(self, release_id: str, kube_version: str = "") -> dict:
+        """
+        Initialize a system deploy for the given release.
+        :param release_id: release ID to deploy
+        :param kube_version: optional target k8s version
+        :return: dict of info, warning and error messages
+        """
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
+
+        LOG.info("release_id: %s, kube_version: %s" % (release_id, kube_version))
+        return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
     def software_deploy_precheck_api(self, deployment: str, force: bool = False, region_name=None,
                                      **kwargs) -> dict:
         """

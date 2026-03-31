@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2013-2025 Wind River Systems, Inc.
+# Copyright (c) 2013-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -281,12 +281,20 @@ class SoftwareClientShell(object):
         submodule = utils.import_versioned_module(version, 'shell')
         submodule.enhance_parser(parser, subparsers, self.subcommands)
         utils.define_commands_from_module(subparsers, self, self.subcommands)
+
         subparsers2 = self._add_deploy_subparser(subparsers)
         deploy_submodule = utils.import_versioned_module(version, 'deploy_cmd')
         deploy_submodule.enhance_parser(parser, subparsers2, self.subcommands)
         utils.define_commands_from_module(subparsers2, self, self.subcommands,
                                           cmd_area='deploy')
         self._add_bash_completion_subparser(subparsers2)
+
+        subparsers3 = self._add_system_deploy_subparser(subparsers)
+        system_deploy_submodule = utils.import_versioned_module(version, 'system_deploy_cmd')
+        system_deploy_submodule.enhance_parser(parser, subparsers3, self.subcommands)
+        utils.define_commands_from_module(subparsers3, self, self.subcommands,
+                                          cmd_area='system-deploy')
+        self._add_bash_completion_subparser(subparsers3)
         return parser
 
     def _add_bash_completion_subparser(self, subparsers):
@@ -332,6 +340,28 @@ class SoftwareClientShell(object):
         )
         sub_cmds.required = True
 
+        return sub_cmds
+
+    def _add_system_deploy_subparser(self, subparsers):
+        """system-deploy commands
+        - init
+        """
+        cmd_area = 'system-deploy'
+        cmd_parser = subparsers.add_parser(
+            cmd_area,
+            help='Software System Deploy',
+            description="StarlingX Combined Software Deployment and K8s",
+            add_help=False
+        )
+        cmd_parser.set_defaults(cmd_area=cmd_area)
+        self.subcommands['system-deploy'] = cmd_parser
+        cmd_parser.set_defaults(region_restricted=True)
+
+        sub_cmds = cmd_parser.add_subparsers(
+            title='Software System Deploy Commands',
+            metavar='<subcommand>'
+        )
+        sub_cmds.required = True
         return sub_cmds
 
     def _setup_debugging(self, debug):
@@ -421,19 +451,26 @@ class SoftwareClientShell(object):
         """
         commands = set()
         deploy_commands = set()
+        system_deploy_commands = set()
         options = set()
         deploy_options = set()
-        software_deploy_command = "software deploy"
-        deploy_command = "deploy"
+        system_deploy_options = set()
+        software_deploy_prog = "software deploy"
+        software_system_deploy_prog = "software system-deploy"
         unlisted_commands = ["bash-completion", "bash_completion"]
 
         for sc_str, sc in self.subcommands.items():
-            # Separate between software command and deploy commands
-            if sc.prog.startswith(software_deploy_command):
+            if sc.prog.startswith(software_system_deploy_prog):
                 if sc_str in unlisted_commands:
                     continue
-                # Remove deploy prefix output
-                opt = sc_str[len(f"{deploy_command} "):]
+                opt = sc_str[len("system-deploy "):]
+                system_deploy_commands.add(opt)
+                for option in list(sc._optionals._option_string_actions):
+                    system_deploy_options.add(option)
+            elif sc.prog.startswith(software_deploy_prog):
+                if sc_str in unlisted_commands:
+                    continue
+                opt = sc_str[len("deploy "):]
                 deploy_commands.add(opt)
                 for option in list(sc._optionals._option_string_actions):
                     deploy_options.add(option)
@@ -442,10 +479,14 @@ class SoftwareClientShell(object):
                 for option in list(sc._optionals._option_string_actions):
                     options.add(option)
 
-        if getattr(args, 'cmd_area', None):
+        cmd_area = getattr(args, 'cmd_area', None)
+        if cmd_area == 'system-deploy':
+            print(' '.join(system_deploy_commands | system_deploy_options))
+        elif cmd_area == 'deploy':
             print(' '.join(deploy_commands | deploy_options))
         else:
-            commands.add(deploy_command)
+            commands.add('deploy')
+            commands.add('system-deploy')
             print(' '.join(commands | options))
 
     @utils.arg('command', metavar='<subcommand>', nargs='?',
