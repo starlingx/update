@@ -60,6 +60,7 @@ SOFTWARE_CONFIG_FILE_LOCAL = "/etc/software/software.conf"
 SOFTWARE_DEPLOY_FOLDER = "software-deploy"
 SOFTWARE_JSON_FILE = "%s/software.json" % SOFTWARE_STORAGE_DIR
 SYNCED_SOFTWARE_JSON_FILE = "%s/synced/software.json" % SOFTWARE_STORAGE_DIR
+SYSTEM_DEPLOY_JSON_FILE = "%s/system_deploy.json" % SOFTWARE_STORAGE_DIR
 
 # Deploy precheck return codes
 RC_SUCCESS = 0

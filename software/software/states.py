@@ -1,5 +1,5 @@
 """
-Copyright (c) 2023-2024 Wind River Systems, Inc.
+Copyright (c) 2023-2026 Wind River Systems, Inc.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -159,3 +159,9 @@ INTERRUPTION_RECOVERY_STATES = [
     DEPLOY_STATES.ACTIVATE,
     DEPLOY_STATES.ACTIVATE_ROLLBACK,
 ]
+
+
+class SYSTEM_DEPLOY_STATES(Enum):
+    START = 'start'
+    START_DONE = 'start-done'
+    START_FAILED = 'start-failed'

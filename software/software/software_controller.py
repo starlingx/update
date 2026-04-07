@@ -3025,6 +3025,10 @@ class PatchController(PatchService):
         msg_warning = ""
         msg_error = ""
 
+        # TODO(jli14) the id should be a constant across different files
+        self.db_api_instance.create_system_deploy(
+            id='default', to_release=release_id, to_k8s_version=kube_version)
+
         LOG.info("release_id: %s, kube_version: %s" % (release_id, kube_version))
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 

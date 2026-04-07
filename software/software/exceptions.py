@@ -190,3 +190,8 @@ class FileSystemError(SoftwareError):
     Likely fixable by a root user.
     """
     pass
+
+
+class SystemDeployNotExist(SoftwareError):
+    """System Deploy Does Not Exist"""
+    pass

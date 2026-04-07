@@ -10,7 +10,9 @@ import threading
 
 from software.software_entities import DeployHandler
 from software.software_entities import DeployHostHandler
+from software.software_entities import SystemDeployHandler
 from software.states import DEPLOY_STATES
+from software.states import SYSTEM_DEPLOY_STATES
 from software.utils import get_software_filesystem_data
 from software.utils import save_to_json_file
 from software import constants
@@ -35,6 +37,7 @@ class SoftwareAPI:
     def __init__(self):
         self.deploy_handler = DeployHandler()
         self.deploy_host_handler = DeployHostHandler()
+        self.system_deploy_handler = SystemDeployHandler()
 
     def create_deploy(self, from_release, to_release, feed_repo,
                       commit_id, reboot_required: bool, **kwargs):
@@ -160,6 +163,36 @@ class SoftwareAPI:
             data = get_software_filesystem_data()
             data.update(current_load_data)
             save_to_json_file(constants.SOFTWARE_JSON_FILE, data)
+        finally:
+            self.end_update()
+
+    def create_system_deploy(self, id, to_release, to_k8s_version):
+        self.begin_update()
+        try:
+            self.system_deploy_handler.create(id, to_release, to_k8s_version)
+        finally:
+            self.end_update()
+
+    def get_system_deploy(self):
+        self.begin_update()
+        try:
+            return self.system_deploy_handler.query()
+        finally:
+            self.end_update()
+
+    def update_system_deploy_state(self, target_state: SYSTEM_DEPLOY_STATES):
+        self.begin_update()
+        try:
+            system_deploy = self.get_system_deploy()
+            if system_deploy:
+                self.system_deploy_handler.update(target_state)
+        finally:
+            self.end_update()
+
+    def delete_system_deploy(self):
+        self.begin_update()
+        try:
+            self.system_deploy_handler.delete()
         finally:
             self.end_update()
 

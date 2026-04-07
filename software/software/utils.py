@@ -452,9 +452,9 @@ def is_upgrade_deploy(from_release, to_release):
         return True
 
 
-def get_software_filesystem_data():
-    if os.path.exists(constants.SOFTWARE_JSON_FILE):
-        return load_from_json_file(constants.SOFTWARE_JSON_FILE)
+def get_software_filesystem_data(data_file=constants.SOFTWARE_JSON_FILE):
+    if os.path.exists(data_file):
+        return load_from_json_file(data_file)
     else:
         return {}
 

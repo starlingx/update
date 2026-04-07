@@ -12,8 +12,10 @@ from typing import List
 
 from software.exceptions import DeployAlreadyExist
 from software.exceptions import DeployDoNotExist
+from software.exceptions import SystemDeployNotExist
 from software.states import DEPLOY_HOST_STATES
 from software.states import DEPLOY_STATES
+from software.states import SYSTEM_DEPLOY_STATES
 from software.utils import check_instances
 from software.utils import check_state
 from software.utils import get_software_filesystem_data
@@ -240,6 +242,93 @@ class DeployHosts(abc.ABC):
         """
         check_instances([hostname], str)
         pass
+
+
+class SystemDeploy(abc.ABC):
+    @abc.abstractmethod
+    def create(self, id: str, to_release: str, to_k8s_version: str, state: SYSTEM_DEPLOY_STATES):
+        """
+        Create a new system deployment entry.
+
+        :param id: The system deployment identifier.
+        :param to_release: The target release version.
+        :param to_k8s_version: The target kubernetes version.
+        :param state: The current system deploy state
+        """
+        check_instances([id, to_release, to_k8s_version], str)
+        check_instances([state], SYSTEM_DEPLOY_STATES)
+        pass
+
+    @abc.abstractmethod
+    def query(self):
+        """
+        Get system deployment information for a given release version.
+        """
+        pass
+
+    @abc.abstractmethod
+    def update(self, state: SYSTEM_DEPLOY_STATES):
+        """
+        Update the state of a system deployment.
+
+        :param state: The current system deploy state
+        """
+        check_instances([state], SYSTEM_DEPLOY_STATES)
+        pass
+
+    @abc.abstractmethod
+    def delete(self):
+        """
+        Delete a system deployment entry for a given id.
+        """
+        pass
+
+
+class SystemDeployHandler(SystemDeploy):
+    def create(self, id, to_release, to_k8s_version, state=SYSTEM_DEPLOY_STATES.START):
+        super().create(id, to_release, to_k8s_version, state)
+        new_system_deploy = {
+            "id": id,
+            "to_release": to_release,
+            "to_k8s_version": to_k8s_version,
+            "state": state.value
+        }
+
+        data = get_software_filesystem_data(data_file=constants.SYSTEM_DEPLOY_JSON_FILE)
+        data["system_deploy"] = new_system_deploy
+        save_to_json_file(constants.SYSTEM_DEPLOY_JSON_FILE, data)
+
+    def query(self):
+        super().query()
+        data = get_software_filesystem_data(data_file=constants.SYSTEM_DEPLOY_JSON_FILE)
+        return data.get("system_deploy", [])
+
+    def update(self, state: SYSTEM_DEPLOY_STATES):
+        super().update(state)
+
+        system_deploy = self.query()
+        if not system_deploy:
+            raise SystemDeployNotExist(
+                "Error to update system deploy state. No system deploy in progress.")
+
+        data = get_software_filesystem_data()
+
+        new_system_deploy = {
+            "id": system_deploy["id"],
+            "to_release": system_deploy["to_release"],
+            "to_k8s_version": system_deploy["to_k8s_version"],
+            "state": state.value
+        }
+
+        save_to_json_file(constants.SYSTEM_DEPLOY_JSON_FILE, data)
+        return new_system_deploy
+
+    def delete(self):
+        super().delete()
+        data = get_software_filesystem_data()
+        if data.get("system_deploy"):
+            data.pop("system_deploy")
+            save_to_json_file(constants.SYSTEM_DEPLOY_JSON_FILE, data)
 
 
 class DeployHandler(Deploy):
