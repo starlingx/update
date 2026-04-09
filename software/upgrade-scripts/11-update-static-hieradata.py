@@ -20,9 +20,6 @@ LOG = logging.getLogger('main_logger')
 def get_list_of_keys(from_release, to_release):
     keys = {"static": [], "secure_static": []}
 
-    if from_release == "25.09":
-        keys["static"] = ["platform::etcd::params::etcd_version"]
-
     return keys
 
 

@@ -245,6 +245,8 @@ class CopyPxeFilesHook(BaseHook):
                           self._to_release)
 
 
+# TODO(bqian) split the framework based kernel parameters backup and restore
+# from feature based kernel parameter pre-populate code.
 class UpdateKernelParametersHook(BaseHook):
     """
     Update the kernel parameters
@@ -649,9 +651,10 @@ class UpdateKernelParametersHook(BaseHook):
             intel_idle = self.read_intel_idle(kernel_params)
             self.remove_intel_idle_if_set(intel_idle)
         elif self._action == HookManager.MAJOR_RELEASE_ROLLBACK:
+            self.restore_kernel_params()
             # TODO(jtognoll): remove when 25.09 is no longer a supported from
             # release.
-            self.restore_kernel_params()
+            # NOTE(bqian): keep for 25.09 to 26.09 upgrade/rollback
             if self._to_release == '25.09':
                 self.add_intel_idle_if_needed()
 
@@ -759,6 +762,7 @@ class CreateUSMUpgradeInProgressFlag(BaseHook):
 
 
 # TODO(mdecastr): Only required in stx 12. Remove in future releases.
+# NOTE(bqian): this may still be applicable for 26.09 rollback to 25.09
 class CreateKubeApiserverPortUpdatedFlag(BaseHook):
     def __init__(self, attrs):
         super().__init__(attrs)
@@ -864,6 +868,7 @@ class OOTDriverHook(BaseHook):
             )
 
     def run(self):
+        # NOTE(bqian): keep for 25.09 to 26.09
         if self._from_release == "25.09":
             # Upgrade path: remove kernel param
             self._remove_kernel_param()
