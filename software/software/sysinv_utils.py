@@ -30,7 +30,7 @@ def get_sysinv_client(token, endpoint):
         raise SysinvClientNotInitialized(msg)
 
 
-def get_active_k8s_ver():
+def get_k8s_ver():
     try:
         token, endpoint = utils.get_endpoints_token()
         sysinv_client = get_sysinv_client(token=token, endpoint=endpoint)

@@ -100,7 +100,7 @@ from software.states import DEPLOY_HOST_STATES
 from software.states import DEPLOY_STATES
 from software.states import INTERRUPTION_RECOVERY_STATES
 from software.sysinv_utils import are_all_hosts_unlocked_and_online
-from software.sysinv_utils import get_active_k8s_ver
+from software.sysinv_utils import get_k8s_ver
 from software.sysinv_utils import get_system_info
 from software.sysinv_utils import is_system_controller
 from software.sysinv_utils import trigger_evaluate_apps_reapply
@@ -3032,13 +3032,6 @@ class PatchController(PatchService):
         LOG.info("release_id: %s, kube_version: %s" % (release_id, kube_version))
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-    def _get_system_deploy(self):
-        """
-        Get system deploy entity
-        :return: system deploy entity
-        """
-        return self.db_api_instance.get_system_deploy()
-
     def software_deploy_precheck_api(self, deployment: str, force: bool = False, region_name=None,
                                      **kwargs) -> dict:
         """
@@ -3081,7 +3074,7 @@ class PatchController(PatchService):
                                        "The uploaded software could have been damaged. "
                                        "Please delete the software and re-upload it")
         major_to_release = utils.get_major_release_version(to_release)
-        k8s_ver = get_active_k8s_ver()
+        k8s_ver = get_k8s_ver()
         postgresql_port = str(cfg.alt_postgresql_port)
 
         # Copy to_release_feed/pxelinux.cfg.files to /var/pxeboot/pxelinux.cfg.files
@@ -4408,9 +4401,6 @@ class PatchController(PatchService):
                 LOG.error("Fail to start deploy host")
                 deploy_host_state.deploy_failed()
                 raise
-
-        system_deploy = self._get_system_deploy()
-        additional_data["to_kubelet_version"] = system_deploy["to_k8s_version"]
 
         self.hosts_lock.acquire()
         self.hosts[ip].install_pending = True
