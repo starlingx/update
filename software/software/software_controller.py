@@ -2868,7 +2868,7 @@ class PatchController(PatchService):
 
     def _deploy_precheck(self, release_version: str, force: bool = False,
                          region_name: typing.Optional[str] = None, patch: bool = False,
-                         **kwargs) -> dict:
+                         snapshot: bool = False, **kwargs) -> dict:
         """
         Verify if system satisfy the requisites to upgrade to a specified deployment.
         :param release_version: full release name, e.g. starlingx-MM.mm.pp
@@ -2977,6 +2977,8 @@ class PatchController(PatchService):
             cmd.append("--force")
         if patch:
             cmd.append("--patch")
+        if snapshot:
+            cmd.append("--snapshot")
 
         # Call precheck from the deployment files
         precheck_return = subprocess.run(
@@ -3064,7 +3066,8 @@ class PatchController(PatchService):
                                        f" {constants.CONTROLLER_0_HOSTNAME} host.")
         if kwargs.get("options"):
             kwargs["options"] = self._parse_and_sanitize_extra_options(kwargs.get("options"))
-        ret = self._deploy_precheck(release_version, force, region_name, is_patch, **kwargs)
+        snapshot = to_bool(kwargs.get("options", {}).get("snapshot", False))
+        ret = self._deploy_precheck(release_version, force, region_name, is_patch, snapshot=snapshot, **kwargs)
         if ret:
             if ret.get("system_healthy") is None:
                 ret["error"] = "Fail to perform deploy precheck. Internal error has occurred.\n" + \
@@ -3418,9 +3421,11 @@ class PatchController(PatchService):
         thread = threading.Thread(target=run)
         thread.start()
 
-    def _precheck_before_start(self, deployment, release_version, is_patch, force=False, **kwargs):
+    def _precheck_before_start(self, deployment, release_version, is_patch, force=False,
+                               snapshot=False, **kwargs):
         LOG.info("Running deploy precheck.")
-        precheck_result = self._deploy_precheck(release_version, patch=is_patch, force=force, **kwargs)
+        precheck_result = self._deploy_precheck(release_version, patch=is_patch, force=force,
+                                                snapshot=snapshot, **kwargs)
         if precheck_result.get('system_healthy') is None:
             precheck_result["error"] = (
                 f"Fail to perform deploy precheck. Internal error has occurred.\n"
@@ -3529,6 +3534,7 @@ class PatchController(PatchService):
                 to_release,
                 is_patch=is_patch,
                 force=force,
+                snapshot=to_bool(kwargs.get("options", {}).get("snapshot", False)),
                 **kwargs
             ):
                 return precheck_result

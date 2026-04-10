@@ -280,6 +280,13 @@ def get_deployment_data():
         return deployment.get("deploy")[0]
 
 
+def get_system_deploy_data():
+    """Get the current system deploy data from system_deploy.json"""
+    with open("/opt/software/system_deploy.json", "r") as fp:
+        data = json.loads(fp.read())
+        return data.get("system_deploy")
+
+
 def to_bool(value):
     if isinstance(value, bool):
         return value

@@ -23,10 +23,14 @@ class DeployManager(base.Manager):
     resource_class = Deploy
 
     def precheck(self, args):
-        # args.deployment is a string
-        deployment = args.deployment
+        # Resolve deployment: positional or None
+        deployment = getattr(args, 'deployment', None)
 
-        path = "/v1/deploy/%s/precheck" % (deployment)
+        if deployment:
+            path = "/v1/deploy/%s/precheck" % deployment
+        else:
+            path = "/v1/deploy/precheck"
+
         body = {}
         if args.force:
             body["force"] = "true"

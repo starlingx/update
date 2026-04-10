@@ -73,9 +73,17 @@ class DeployController(RestController):
         return result
 
     @expose(method='POST', template='json')
-    def precheck(self, release, force=None, region_name=None, **kwargs):
+    def precheck(self, release=None, force=None, region_name=None, **kwargs):
         _force = force is not None
         reload_release_data()
+
+        if not release:
+            deploy_data = sc.software_system_deploy_show_api()
+            if not deploy_data:
+                response.status = 400
+                return dict(error="No active deployment found. "
+                            "Please specify a release or start a deployment.")
+            release = deploy_data.get("to_release")
 
         result = sc.software_deploy_precheck_api(release, _force, region_name, **kwargs)
         if result and 'error' in result and result["error"] != "":

@@ -22,6 +22,7 @@ import requests
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 
 from lxml import etree as ElementTree
 
@@ -111,6 +112,49 @@ class HealthCheck(object):
 
         return success, missing_patches
 
+    def _check_kube_upgrade_state(self):
+        # note(lvieira) 1 API call to make sure a k8s upgrade in in progress
+        # is there an way to simplify it using _sysinv_client.kube_host_upgrade.list()?
+        if not self._sysinv_client.kube_upgrade.list():
+            return True, ('No kube upgrade entity')
+
+        # note(lvieira): 1 extra API call to get the correct controller-0
+        ihosts = self._sysinv_client.ihost.list()
+        kube_host_upgrades = self._sysinv_client.kube_host_upgrade.list()
+        controller_0 = next((h for h in ihosts if h.hostname == 'controller-0'), None)
+        kube_upgrade = next(
+            (h for h in kube_host_upgrades if controller_0 and h.host_id == controller_0.id),
+            None
+        )
+        if not kube_upgrade:
+            return True, ("No kube upgrade entity in controller-0")
+
+        try:
+            system_deploy = upgrade_utils.get_system_deploy_data()
+        except Exception:
+            system_deploy = None
+
+        if not system_deploy:
+            return False, ("Kubernetes upgrade is in progress, but no system-deploy "
+                           "entity was found. Finish the upgrade before proceeding.")
+
+        if kube_upgrade.target_version != kube_upgrade.control_plane_version or kube_upgrade.status is not None:
+            return False, ("Kubernetes control-plane upgrade not finished, 'target_version=%s' must "
+                           "match the 'control_plane_version=%s' and 'status' must be 'None'. "
+                           "Check 'system kube-host-upgrade-list'."
+                           % (kube_upgrade.target_version, kube_upgrade.control_plane_version,
+                              kube_upgrade.status))
+
+        to_k8s_version = system_deploy.get('to_k8s_version')
+        if not to_k8s_version:
+            return True, ("system-deploy entity does not have the optional to_k8s_version.")
+        if to_k8s_version != kube_upgrade.target_version:
+            return False, ("Kubernetes upgrade target_version '%s' does not match "
+                        "system-deploy to_k8s_version '%s'."
+                        % (kube_upgrade.target_version, to_k8s_version))
+
+        return True, None
+
     def run_general_health_check(self):
         """Run general health check using sysinv client"""
         force = self._config.get("force", False)
@@ -123,6 +167,18 @@ class HealthCheck(object):
                              "280.005", # subcloud peer group managed with lower priority
                              "900.201", # Software upgrade auto apply in progress
                              ]
+
+        kube_upgrade_state_success, msg = self._check_kube_upgrade_state()
+        output = 'Kubernetes upgrade does not block deployment: [%s]\n' \
+                  % (HealthCheck.SUCCESS_MSG if kube_upgrade_state_success else HealthCheck.FAIL_MSG)
+        if not kube_upgrade_state_success:
+            output += '-> %s\n' % msg
+        health_ok = health_ok and kube_upgrade_state_success
+
+        # if running combined Platform & K8s upgrade, ignore 900.007 alarm
+        if kube_upgrade_state_success and msg is None:
+            alarm_ignore_list.append("900.007") # k8s upgrade in progress
+
         # Don't call api if pre bootstrap scenario
         if not self._config.get("pre_bootstrap"):
             api_cmd = self._sysinv_endpoint + "/health/kube-upgrade"
@@ -131,16 +187,17 @@ class HealthCheck(object):
                 api_cmd += '/relaxed'
 
             if alarm_ignore_list:
-                api_cmd += f'?alarm_ignore_list={alarm_ignore_list}'
+                api_cmd += '?alarm_ignore_list=%s' % urllib.parse.quote(str(alarm_ignore_list))
 
             method = 'GET'
             try:
-                output = upgrade_utils.call_api(self._sysinv_token, method, api_cmd)
+                output += upgrade_utils.call_api(self._sysinv_token, method, api_cmd,
+                                                timeout_in_secs=120)
             except Exception as e:
                 msg = "Failed to get system health status. Error: %s" % str(e)
                 raise Exception(msg)
         else:
-            output = 'System Health:\n'
+            output += 'System Health:\n'
 
         # check hosts are patch current
         deploy_in_progress = self._config.get("deploy_in_progress", "{}")
@@ -347,8 +404,7 @@ class UpgradeHealthCheck(HealthCheck):
         health_ok = health_ok and success
 
         # check for LVM snapshot health checks
-        use_lvm_snapshot = self._check_snapshot_option()
-        if use_lvm_snapshot:
+        if self._config.get("snapshot", False):
             success = self._check_system_simplex()
             output += '(LVM snapshots) System is AIO-SX: [%s]\n' \
                        % (HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
@@ -497,6 +553,9 @@ def parse_config(args=None):
                         action="store_true")
     parser.add_argument("--patch",
                         help="Set precheck to run against a patch release",
+                        action="store_true")
+    parser.add_argument("--snapshot",
+                        help="Run LVM snapshot health checks",
                         action="store_true")
     parser.add_argument("--options",
                         help="Additional parameters in key=value format.")
