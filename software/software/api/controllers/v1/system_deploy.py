@@ -33,4 +33,4 @@ class SystemDeployController(RestController):
     @expose(method='GET', template='json')
     def get_all(self):
         result = sc.software_system_deploy_show_api()
-        return result
+        return [result] if result else []

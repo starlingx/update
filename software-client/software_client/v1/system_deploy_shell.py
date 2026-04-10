@@ -4,7 +4,11 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+import re
+
 from software_client.common import utils
+
+KUBE_VERSION_RE = re.compile(r'^v?\d{1,2}\.\d{1,2}\.\d{1,2}$')
 
 
 @utils.arg('release_id',
@@ -16,6 +20,10 @@ from software_client.common import utils
            help='Target Kubernetes version for the upgrade')
 def do_init(cc, args):
     """Initialize a system deploy for the given release"""
+    if args.kube_version and not KUBE_VERSION_RE.match(args.kube_version):
+        print("Error:\nInvalid kube_version '%s': must match '[v]n.n.n'" % args.kube_version)
+        return 1
+
     resp, data = cc.system_deploy.init(args)
     if args.debug:
         utils.print_result_debug(resp, data)
