@@ -1529,7 +1529,7 @@ def validate_host_deploy_order(hostname, is_major_release: bool, rollback: bool 
     ordered_list = controllers_list + ordered_storage_list + workers_list
 
     # in a rollback scenario the deploy order should be inverted
-    if is_major_release and rollback:
+    if rollback:
         ordered_list.reverse()
 
     for host in db_api_instance.get_deploy_host():
