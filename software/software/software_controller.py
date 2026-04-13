@@ -1539,18 +1539,16 @@ class PatchController(PatchService):
             LOG.info(msg)
             raise SoftwareServiceError(error=msg)
 
-        max_major_releases = 2
+        max_major_releases = 3
         major_releases = []
         for rel in self.release_collection.iterate_releases():
             major_rel = rel.sw_version
             if major_rel not in major_releases:
                 major_releases.append(major_rel)
 
-        # Only system controller can have 2 major releases (N+1 and N-1)
-        max_releases = max_major_releases + 1 if is_system_controller() else max_major_releases
-        if len(major_releases) >= max_releases:
-            msg = f"Major releases {major_releases} have already been uploaded{' in system controller' if is_system_controller() else ''}. " + \
-                f"Max major releases is {max_releases}"
+        # System controller doesn't have a limit anymore, but the actual limit for standalone is 3 major releases (N, N+1 and N+2)
+        if not is_system_controller() and len(major_releases) >= max_major_releases:
+            msg = f"Major releases {major_releases} have already been uploaded. Max major releases is {max_major_releases}"
             LOG.info(msg)
             raise MaxReleaseExceeded(msg)
 
