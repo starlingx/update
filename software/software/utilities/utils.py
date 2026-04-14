@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+from contextlib import contextmanager
 import logging
 import os
 import subprocess
@@ -11,6 +12,7 @@ import sys
 import tempfile
 import traceback
 import yaml
+import importlib.util
 
 import keyring
 from psycopg2.extras import RealDictCursor
@@ -59,35 +61,37 @@ def configure_logging():
     root_logger.addHandler(main_log_handler)
 
 
-def get_migration_scripts(migration_script_dir):
-    if not os.path.isdir(migration_script_dir):
-        msg = "Folder %s does not exist" % migration_script_dir
+@contextmanager
+def temporary_lib_path(path):
+    if path not in sys.path:
+        to_remove = True
+        sys.path.insert(0, path)
+    else:
+        to_remove = False
+    try:
+        yield
+    finally:
+        if to_remove and path in sys.path:
+            sys.path.remove(path)
+
+
+def get_migration_scripts(plugin_dir, from_release, action):
+    def get_plugins_mgr(plugin_dir):
+        module_path = os.path.dirname(plugin_dir)
+        with temporary_lib_path(module_path):
+            sys.path.append(module_path)
+            plugins_mgr = importlib.import_module("upgrade-scripts")
+
+        return plugins_mgr
+
+    if not os.path.isdir(plugin_dir):
+        msg = "Folder %s does not exist" % plugin_dir
         LOG.exception(msg)
         raise Exception(msg)
 
-    files = [f for f in os.listdir(migration_script_dir)
-             if os.path.isfile(os.path.join(migration_script_dir, f)) and
-             os.access(os.path.join(migration_script_dir, f), os.X_OK)]
-    return files
-
-
-def sort_migration_scripts(scripts, action):
-    reversed_actions = ['activate-rollback']
-    # From file name, get the number to sort the calling sequence,
-    # abort when the file name format does not follow the pattern
-    # "nnn-*.*", where "nnn" string shall contain only digits, corresponding
-    # to a valid unsigned integer (first sequence of characters before "-")
-    try:
-        scripts.sort(key=lambda x: int(x.split("-")[0]))
-        if action in reversed_actions:
-            scripts = scripts[::-1]
-            LOG.info(f"Executing deployment scripts for {action} in reversed order")
-    except Exception:
-        LOG.exception("Deployment script sequence validation failed, invalid "
-                      "file name format")
-        raise
-
-    return scripts
+    plugins_mgr = get_plugins_mgr(plugin_dir)
+    result = plugins_mgr.get_plugins(from_release, action)
+    return result
 
 
 # This file is currently categorized as independent from framework,
@@ -182,8 +186,7 @@ def execute_migration_scripts(from_release, to_release, action, port=None,
                               migration_script_dir="/usr/local/share/upgrade.d"):
     LOG.info("Executing deployment scripts from: %s with from_release: %s, to_release: %s, "
              "action: %s" % (migration_script_dir, from_release, to_release, action))
-    scripts = get_migration_scripts(migration_script_dir)
-    scripts = sort_migration_scripts(scripts, action)
+    scripts = get_migration_scripts(migration_script_dir, from_release, action)
 
     execute_scripts(scripts, from_release, to_release, action, port, migration_script_dir)
 
