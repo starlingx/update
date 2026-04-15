@@ -19,5 +19,6 @@ from patch_alarm import patch_alarm_manager  # noqa: E402  pylint: disable=wrong
 
 class PatchAlarmTestCase(testtools.TestCase):
 
-    def test_patch_alarm_instantiate(self):
+    @mock.patch('patch_alarm.patch_alarm_manager.get_platform_conf', return_value=None)
+    def test_patch_alarm_instantiate(self, mock_dummy):  # pylint: disable=unused-argument
         patch_alarm_manager.PatchAlarmDaemon()
