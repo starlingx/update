@@ -29,3 +29,8 @@ class SystemDeployController(RestController):
         if result and 'error' in result and result['error'] != '':
             response.status = 406
         return result
+
+    @expose(method='GET', template='json')
+    def get_all(self):
+        result = sc.software_system_deploy_show_api()
+        return result

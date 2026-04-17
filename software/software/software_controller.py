@@ -3037,6 +3037,14 @@ class PatchController(PatchService):
         """
         return self.db_api_instance.get_system_deploy()
 
+    def software_system_deploy_show_api(self):
+        """
+        Get system deploy state from database
+        :return: current system deploy state
+        """
+        system_deploy = self._get_system_deploy()
+        return system_deploy
+
     def software_deploy_precheck_api(self, deployment: str, force: bool = False, region_name=None,
                                      **kwargs) -> dict:
         """

@@ -162,6 +162,6 @@ INTERRUPTION_RECOVERY_STATES = [
 
 
 class SYSTEM_DEPLOY_STATES(Enum):
-    START = 'start'
-    START_DONE = 'start-done'
-    START_FAILED = 'start-failed'
+    START = 'init'
+    START_DONE = 'init-done'
+    START_FAILED = 'init-failed'

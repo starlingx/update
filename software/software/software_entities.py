@@ -301,7 +301,7 @@ class SystemDeployHandler(SystemDeploy):
     def query(self):
         super().query()
         data = get_software_filesystem_data(data_file=constants.SYSTEM_DEPLOY_JSON_FILE)
-        return data.get("system_deploy", {})
+        return data.get("system_deploy", [])
 
     def update(self, state: SYSTEM_DEPLOY_STATES):
         super().update(state)
