@@ -19,13 +19,11 @@ from fm_api import constants as fm_constants
 from fm_api import fm_api
 
 import software.config as cfg
-from software.constants import DISTRIBUTED_CLOUD_ROLE_SYSTEMCONTROLLER
 from software.constants import ENABLE_DEV_CERTIFICATE_PATCH_IDENTIFIER
 from software.software_functions import configure_logging
 from software.software_functions import LOG
 from software.software_functions import SW_VERSION
 from software.utils import get_major_release_version
-from software.utils import get_platform_conf
 
 ###################
 # CONSTANTS
@@ -61,7 +59,7 @@ def start_polling():
 ###################
 # CLASSES
 ###################
-class PatchAlarmDaemon(object):  # pylint: disable=too-many-instance-attributes
+class PatchAlarmDaemon(object):
     """ Daemon process representation of
         the patch monitoring program
     """
@@ -76,9 +74,6 @@ class PatchAlarmDaemon(object):  # pylint: disable=too-many-instance-attributes
         self.api_addr = "127.0.0.1:%d" % cfg.api_port
 
         self.fm_api = fm_api.FaultAPIs()
-
-        self._is_system_controller = (get_platform_conf("distributed_cloud_role") ==
-                                      DISTRIBUTED_CLOUD_ROLE_SYSTEMCONTROLLER)
 
     def run(self):
         configure_logging()
@@ -121,8 +116,6 @@ class PatchAlarmDaemon(object):  # pylint: disable=too-many-instance-attributes
                         raise_obs_alarm = True
                         if 'sw_version' in rel_metadata and \
                            get_major_release_version(rel_metadata['sw_version']) == SW_VERSION:
-                            raise_obs_alarm = False
-                        elif self._is_system_controller:
                             raise_obs_alarm = False
                 if 'release_id' in rel_metadata and ENABLE_DEV_CERTIFICATE_PATCH_IDENTIFIER in rel_metadata['release_id']:
                     raise_cert_alarm = True
