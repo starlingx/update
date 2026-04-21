@@ -22,3 +22,7 @@ class SystemDeployManager(base.Manager):
         if hasattr(args, 'kube_version') and args.kube_version:
             body['kube_version'] = args.kube_version
         return self._post(path, body=body)
+
+    def show(self, args):
+        path = "/v1/system_deploy"
+        return self._list(path)

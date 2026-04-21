@@ -22,3 +22,25 @@ def do_init(cc, args):
 
     utils.display_info(resp)
     return utils.check_rc(resp, data)
+
+
+def do_show(cc, args):
+    """Show the current system deploy state"""
+    resp, data = cc.system_deploy.show(args)
+    if args.debug:
+        utils.print_result_debug(resp, data)
+
+    rc = utils.check_rc(resp, data)
+
+    if rc == 0:
+        if len(data) == 0:
+            print("No system deploy in progress.")
+        else:
+            header_data_list = {
+                "System Deploy ID": "id",
+                "To Release": "to_release",
+                "To K8S Release": "to_k8s_version",
+                "State": "state"}
+            utils.display_result_list(header_data_list, data)
+
+    return rc
