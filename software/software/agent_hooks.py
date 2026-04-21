@@ -19,6 +19,7 @@ import configparser
 import contextlib
 import filecmp
 import glob
+import json
 import logging as LOG
 import os
 import re
@@ -879,6 +880,40 @@ class OOTDriverHook(BaseHook):
             )
 
 
+class KubeletUpgradeHook(BaseHook):
+    "Hook to write target kubelet version to be upgraded to"
+
+    KUBELET_VERSION_FILE = '/etc/kubernetes/kubelet_version'
+
+    def _write_version_details(self, to_kubelet_version):
+        data = {
+            "from_release": self._from_release,
+            "to_release": self._to_release,
+            "to_kubelet_version": to_kubelet_version,
+        }
+        version_file = "%s/%s" % (self.TO_RELEASE_OSTREE_DIR, self.KUBELET_VERSION_FILE)
+        with open(version_file, "w") as file:
+            json.dump(data, file)
+
+    def run(self):
+        try:
+            # No need to check for AIO-SX. If to_kubelet_version is present, it is a simplex
+            to_kubelet_version = self._additional_data.get("to_kubelet_version", None)
+            if not to_kubelet_version:
+                LOG.warning("'to_kubelet_version' not found in the additional data. Combined "
+                            "platform and k8s upgrade may fail if it is being attempted.")
+                return
+
+            self._write_version_details(to_kubelet_version)
+
+            LOG.info("Successfully written target kubelet version details to %s"
+                     % self.KUBELET_VERSION_FILE)
+
+        except Exception as ex:
+            LOG.error("Failed to write target kubelet version details. Error: %s" % (ex))
+            raise ex
+
+
 # TODO(rjosemat): Only required in stx 11 and 12. Remove in future releases.
 class PuppetControllerYamlCopier(BaseHook):
 
@@ -959,6 +994,7 @@ class HookManager(object):
             EnableNewServicesHook,
             DeleteControllerFeedRemoteHook,
             FixedEtcMergeHook,
+            KubeletUpgradeHook,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
