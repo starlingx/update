@@ -53,7 +53,7 @@ class HealthCheck(object):
         self._config = config
 
         # get target release from script directory location
-        self._target_release = re.match("^.*/rel-(\d\d.\d\d.\d+)/", __file__).group(1)
+        self._target_release = re.match(r"^.*/rel-(\d\d.\d\d.\d+)/", __file__).group(1)
         self._major_release = self._target_release.rsplit(".", 1)[0]
         if not self._config.get("pre_bootstrap"):
             # get sysinv token, endpoint and client
