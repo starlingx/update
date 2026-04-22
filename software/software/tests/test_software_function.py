@@ -278,25 +278,23 @@ class TestSoftwareFunction(unittest.TestCase):
 
         assert res is True
 
-    @unittest.mock.patch('software.software_controller.os.path.isfile')
-    @unittest.mock.patch('software.software_controller.json.load')
+    @unittest.mock.patch('software.software_functions.get_instance')
+    @unittest.mock.patch('software.software_functions.os.path.isfile')
     def test_is_deploy_state_not_in_sync(self,
-                                         mock_json_load,
-                                         mock_isfile
+                                         mock_isfile,
+                                         mock_get_instance
                                          ):
-        mock_isfile.side_effect = [True, True]
-        state_1 = {"deploy_host": [{"hostname": "controller-0", "state": "deployed"}, {"hostname": "controller-1", "state": "deployed"}],
-                   "deploy": [{"from_release": "22.12.0", "to_release": "24.09.0", "feed_repo": "/var/www/pages/feed/rel-24.09/ostree_repo",
-                               "commit_id": "67d36b8f06cf3ddca871612012b283b540d118c7c738afd2b7839458eb3db42d", "reboot_required": True,
-                               "state": "activate"}]}
-        state_2 = {"deploy_host": [{"hostname": "controller-0", "state": "deployed"}, {"hostname": "controller-1", "state": "deployed"}],
-                   "deploy": [{"from_release": "22.12.0", "to_release": "24.09.0", "feed_repo": "/var/www/pages/feed/rel-24.09/ostree_repo",
-                               "commit_id": "67d36b8f06cf3ddca871612012b283b540d118c7c738afd2b7839458eb3db42d", "reboot_required": True,
-                               "state": "activate-failed"}]}
-        mock_json_load.side_effect = [state_1, state_2]
-        m = unittest.mock.mock_open()
-        with unittest.mock.patch('builtins.open', m):
-            res = is_deploy_state_in_sync()
+        mock_isfile.return_value = True
+        state_1 = [{"from_release": "22.12.0", "to_release": "24.09.0", "state": "activate"}]
+        state_2 = [{"from_release": "22.12.0", "to_release": "24.09.0", "state": "activate-failed"}]
+        host_state = [{"hostname": "controller-0", "state": "deployed"}, {"hostname": "controller-1", "state": "deployed"}]
+        mock_dbapi = unittest.mock.MagicMock()
+        mock_dbapi.get_deploy_all.return_value = state_1
+        mock_dbapi.get_deploy_all_synced.return_value = state_2
+        mock_dbapi.get_deploy_host.return_value = host_state
+        mock_dbapi.get_deploy_host_synced.return_value = host_state
+        mock_get_instance.return_value = mock_dbapi
+        res = is_deploy_state_in_sync()
 
         assert res is False
 
