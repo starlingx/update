@@ -21,6 +21,13 @@ class SystemDeployController(RestController):
         'init': ['POST'],
     }
 
+    @expose(method='DELETE', template='json')
+    def delete(self):
+
+        result = sc.software_system_deploy_delete_api()
+        sc.software_sync()
+        return result
+
     @expose(method='POST', template='json')
     def init(self, release_id, kube_version=None):
         kube_ver = kube_version if kube_version else ""

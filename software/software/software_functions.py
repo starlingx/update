@@ -1474,6 +1474,16 @@ def is_deployment_in_progress():
     return len(deploys) > 0
 
 
+def is_system_deploy_in_progress():
+    """
+    Check if a system deploy is in progress
+    :return: bool true if in progress, false otherwise
+    """
+    dbapi = get_instance()
+    system_deploy = dbapi.get_system_deploy()
+    return len(system_deploy) > 0
+
+
 def deploy_host_validations(hostname, is_major_release: bool, rollback: bool = False):
     """
     Check the conditions below:

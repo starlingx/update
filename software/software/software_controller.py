@@ -83,6 +83,7 @@ from software.software_functions import get_release_from_patch
 from software.software_functions import get_to_release_from_metadata_file
 from software.software_functions import is_deploy_state_in_sync
 from software.software_functions import is_deployment_in_progress
+from software.software_functions import is_system_deploy_in_progress
 from software.software_functions import mount_iso_load
 from software.software_functions import package_dir
 from software.software_functions import parse_release_metadata
@@ -3013,6 +3014,52 @@ class PatchController(PatchService):
         release_info["apply_operation"] = release > running_release
 
         return release_info
+
+    def _remove_backup_files(self, bkp_info):
+        for bkp_path, fail_warning_msg in bkp_info.items():
+            if os.path.isdir(bkp_path):
+                shutil.rmtree(bkp_path)
+                LOG.info("Deleted existing %s", bkp_path)
+            else:
+                try:
+                    os.remove(bkp_path)
+                    LOG.info("Deleted existing %s", bkp_path)
+                except OSError as e:
+                    LOG.warning(fail_warning_msg + e)
+
+    def software_system_deploy_delete_api(self) -> dict:
+        """
+        Delete system deployment.
+        :return: dict of info, warning and error messages
+        """
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
+        files_to_delete = {"/etc/kubernetes/manifests.bkp": "Failed to delete Kubernetes manifests backups: ",
+                           "/etc/containerd/config.toml.bkp": "Failed to delete Containerd config backups: ",
+                           "/opt/backups/k8s-control-plane": "Failed to delete K8s control plane backups: "}
+
+        try:
+            # Check if there is a system_deploy in progress
+            if is_system_deploy_in_progress():
+                self.db_api_instance.delete_system_deploy()
+            else:
+                msg_error = "There is no system deploy in progress"
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+            # Deleting existing LVM snapshot
+            manager = lvm_snapshot.LVMSnapshotManager()
+            manager.delete_snapshots()
+
+            # Deleting backup /etc/kubernetes/manifests.bkp, /etc/containerd/config.toml.bkp
+            # and backup /opt/backups/k8s-control-plane
+            self._remove_backup_files(files_to_delete)
+        except Exception as e:
+            msg = "Failed on deleting system-deploy"
+            msg_error += msg + ".\n"
+            LOG.exception("%s: %s", msg, str(e))
+
+        return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     def software_system_deploy_init_api(self, release_id: str, kube_version: str = "") -> dict:
         """

@@ -14,6 +14,8 @@ SYSTEM_DEPLOY_COMMAND_MODULES = [
 
 # system-deploy commands:
 #     - init
+#     - show
+#     - delete
 UN_RESTRICTED_COMMANDS = []
 
 

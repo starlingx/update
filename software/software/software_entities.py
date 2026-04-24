@@ -325,7 +325,7 @@ class SystemDeployHandler(SystemDeploy):
 
     def delete(self):
         super().delete()
-        data = get_software_filesystem_data()
+        data = get_software_filesystem_data(data_file=constants.SYSTEM_DEPLOY_JSON_FILE)
         if data.get("system_deploy"):
             data.pop("system_deploy")
             save_to_json_file(constants.SYSTEM_DEPLOY_JSON_FILE, data)
