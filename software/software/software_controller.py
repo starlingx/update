@@ -89,6 +89,7 @@ from software.software_functions import is_system_deploy_in_progress
 from software.software_functions import mount_iso_load
 from software.software_functions import package_dir
 from software.software_functions import parse_release_metadata
+from software.software_functions import ComponentPatchFile
 from software.software_functions import PatchFile
 from software.software_functions import read_upgrade_support_versions
 from software.software_functions import repo_dir
@@ -1865,66 +1866,95 @@ class PatchController(PatchService):
             patch_id = None
             thispatch = None
 
-            try:
+            # Check if release contains metapackages (26.09 onwards)
+            # TODO(heitormatsui): revisit when non-metapackage
+            #  releases are no longer supported for DC subclouds
+            metapackages_enabled = get_release_from_patch(patch_file, key="metapackages")
+            if metapackages_enabled:
                 if release:
-                    if release.state == states.COMMITTED:
-                        msg = "%s is committed. Metadata not updated" % release_id
-                        LOG.info(msg)
-                        local_info += msg + "\n"
-                    elif release.state != states.AVAILABLE:
-                        msg = "%s is not currently in available state to be deployed." % release_id
-                        LOG.info(msg)
-                        local_info += msg + "\n"
+                    msg = f"Release {release_id} already exists, delete it first"
+                    LOG.error(msg)
+                    local_error += msg + "\n"
+                    continue
+                try:
+                    patch_inst = ComponentPatchFile(patch_file)
+                    patch_id, patch_metadata, error_msg = patch_inst.extract_patch(
+                        base_pkgdata=self.base_pkgdata)
+                except Exception as e:
+                    msg = f"Failed to upload release {release_id}: {str(e)}"
+                    local_error += msg + "\n"
+                    LOG.error(msg)
+                    continue
+
+                if error_msg:
+                    raise ReleaseValidationFailure(error=error_msg)
+
+                local_info += f"Uploaded {release_id} product release\n"
+                for metapackage in patch_metadata.metadata[patch_id]["metapackages"]:
+                    local_info += f"Uploaded {metapackage} metapackage release\n"
+
+                reload_release_data()
+            else:
+                try:
+                    if release:
+                        if release.state == states.COMMITTED:
+                            msg = "%s is committed. Metadata not updated" % release_id
+                            LOG.info(msg)
+                            local_info += msg + "\n"
+                        elif release.state != states.AVAILABLE:
+                            msg = "%s is not currently in available state to be deployed." % release_id
+                            LOG.info(msg)
+                            local_info += msg + "\n"
+                        else:
+                            # todo(abailey) PatchFile / extract_patch should be renamed
+                            patch_id, thispatch, error_msg = PatchFile.extract_patch(
+                                patch_file,
+                                metadata_dir=states.AVAILABLE_DIR,
+                                metadata_only=True,
+                                existing_content=release.contents,
+                                base_pkgdata=self.base_pkgdata)
+
+                            if error_msg:
+                                raise ReleaseValidationFailure(error=error_msg)
+
+                            PatchFile.unpack_patch(patch_file)
+                            reload_release_data()
+                            msg = "%s is already uploaded. Updated metadata only" % release_id
+                            LOG.info(msg)
+                            local_info += msg + "\n"
                     else:
-                        # todo(abailey) PatchFile / extract_patch should be renamed
                         patch_id, thispatch, error_msg = PatchFile.extract_patch(
                             patch_file,
                             metadata_dir=states.AVAILABLE_DIR,
-                            metadata_only=True,
-                            existing_content=release.contents,
                             base_pkgdata=self.base_pkgdata)
 
                         if error_msg:
                             raise ReleaseValidationFailure(error=error_msg)
 
                         PatchFile.unpack_patch(patch_file)
+                        local_info += "%s is now uploaded\n" % release_id
                         reload_release_data()
-                        msg = "%s is already uploaded. Updated metadata only" % release_id
-                        LOG.info(msg)
-                        local_info += msg + "\n"
-                else:
-                    patch_id, thispatch, error_msg = PatchFile.extract_patch(
-                        patch_file,
-                        metadata_dir=states.AVAILABLE_DIR,
-                        base_pkgdata=self.base_pkgdata)
 
-                    if error_msg:
-                        raise ReleaseValidationFailure(error=error_msg)
+                        # NOTE(bqian) Below check an exception raise should be revisit,
+                        # if applicable, should be applied to the beginning of all requests.
+                        if len(self.hosts) == 0:
+                            msg = "service is running in incorrect state. No registered host"
+                            raise InternalError(msg)
+                except Exception as e:
+                    msg = "Failed to upload release %s" % release_id
+                    LOG.exception("%s: %s" % (msg, e))
+                    local_error += msg + "\n"
 
-                    PatchFile.unpack_patch(patch_file)
-                    local_info += "%s is now uploaded\n" % release_id
-                    reload_release_data()
+                    if patch_id and thispatch:
+                        PatchFile.delete_extracted_patch(patch_id, thispatch)
 
-                    # NOTE(bqian) Below check an exception raise should be revisit,
-                    # if applicable, should be applied to the beginning of all requests.
-                    if len(self.hosts) == 0:
-                        msg = "service is running in incorrect state. No registered host"
-                        raise InternalError(msg)
-            except Exception as e:
-                msg = "Failed to upload release %s" % release_id
-                LOG.exception("%s: %s" % (msg, e))
-                local_error += msg + "\n"
-
-                if patch_id and thispatch:
-                    PatchFile.delete_extracted_patch(patch_id, thispatch)
-
-                    try:
-                        release_sw_version = thispatch.metadata[patch_id]["sw_version"]
-                        pkg_feed_dir = "%s/rel-%s" % (constants.PACKAGE_FEED_DIR, release_sw_version)
-                        apt_utils.component_remove(pkg_feed_dir, release_sw_version)
-                    except Exception:
-                        LOG.info("Could not delete apt-ostree component, does not exist")
-                continue
+                        try:
+                            release_sw_version = thispatch.metadata[patch_id]["sw_version"]
+                            pkg_feed_dir = "%s/rel-%s" % (constants.PACKAGE_FEED_DIR, release_sw_version)
+                            apt_utils.component_remove(pkg_feed_dir, release_sw_version)
+                        except Exception:
+                            LOG.info("Could not delete apt-ostree component, does not exist")
+                    continue
 
             release = self.release_collection.get_release_by_id(release_id)
             if release:
@@ -1932,6 +1962,7 @@ class PatchController(PatchService):
                     base_patch_filename: {
                         "id": release_id,
                         "sw_release": release.sw_release,  # MM.mm.pp release version
+                        "is_product_release": release.is_product_release,
                     }
                 })
 
@@ -1940,6 +1971,9 @@ class PatchController(PatchService):
         # create versioned precheck for uploaded patches
         for patch in upload_patch_info:
             filename, values = list(patch.items())[0]
+            # product releases directory is created when extracting the patch
+            if values.get("is_product_release"):
+                continue
             LOG.info("Creating precheck for release %s..." % values.get("id"))
             for pf in patch_files:
                 if filename in pf:
@@ -2271,76 +2305,86 @@ class PatchController(PatchService):
         # Handle operation
         for release_id in release_list:
             release = self.release_collection.get_release_by_id(release_id)
-            release_sw_version = release.sw_version
-
-            # Delete ostree content if it exists.
-            # RPM based patches (from upgrades) will not have ostree contents
-            ostree_tar_filename = self.get_ostree_tar_filename(release_sw_version, release_id)
-            if os.path.isfile(ostree_tar_filename):
+            if release.is_product_release:
                 try:
-                    os.remove(ostree_tar_filename)
-                except OSError:
-                    msg = "Failed to remove ostree tarball %s" % ostree_tar_filename
-                    LOG.exception(msg)
-                    raise OSTreeTarFail(msg)
-            is_major_release = ReleaseState(release_ids=[release.id]).is_major_release_deployment()
-            if not is_major_release:
-                package_repo_dir = "%s/rel-%s" % (constants.PACKAGE_FEED_DIR, release_sw_version)
-                apt_utils.component_remove(package_repo_dir, release.sw_release)
+                    ComponentPatchFile.delete_patch_product_release(release_id)
+                    for metapackage in release.metapackages:
+                        msg = f"Deleted {metapackage} metapackage release\n"
+                        msg_info += msg
+                except Exception as e:
+                    msg = f"Error deleting release {release_id}: {str(e)}\n"
+                    LOG.error(msg)
+                    msg_error += msg
+                    continue
+            else:
+                release_sw_version = release.sw_version
 
-            # Delete upgrade iso file in folder
-            # TODO(heitormatsui): treat the prepatched iso scenario
-            metadata_file = "%s-metadata.xml" % release_id
-            delete_feed = False
-            to_release_iso_dir = os.path.join(constants.FEED_OSTREE_BASE_DIR, ("rel-%s" % release_sw_version))
-
-            if os.path.isdir(to_release_iso_dir):
-                # check if the release being deleted is related to this feed
-                if os.path.isfile("%s/upgrades/%s" % (to_release_iso_dir, metadata_file)):
-                    delete_feed = True
-                if delete_feed:
+                # Delete ostree content if it exists
+                ostree_tar_filename = self.get_ostree_tar_filename(release_sw_version, release_id)
+                if os.path.isfile(ostree_tar_filename):
                     try:
-                        shutil.rmtree(to_release_iso_dir)
+                        os.remove(ostree_tar_filename)
                     except OSError:
-                        msg = "Failed to remove release iso %s folder" % to_release_iso_dir
+                        msg = "Failed to remove ostree tarball %s" % ostree_tar_filename
                         LOG.exception(msg)
-                        raise ReleaseIsoDeleteFailure(msg)
-                    msg = "Deleted feed directory %s" % to_release_iso_dir
-                    LOG.info(msg)
-                    msg_info += msg + "\n"
+                        raise OSTreeTarFail(msg)
+                is_major_release = ReleaseState(release_ids=[release.id]).is_major_release_deployment()
+                if not is_major_release:
+                    package_repo_dir = "%s/rel-%s" % (constants.PACKAGE_FEED_DIR, release_sw_version)
+                    apt_utils.component_remove(package_repo_dir, release.sw_release)
 
-            # TODO(lbonatti): treat the upcoming versioning changes
-            PatchFile.delete_versioned_directory(release.sw_release)
+                # Delete upgrade iso file in folder
+                metadata_file = "%s-metadata.xml" % release_id
+                delete_feed = False
+                to_release_iso_dir = os.path.join(constants.FEED_OSTREE_BASE_DIR, ("rel-%s" % release_sw_version))
 
-            try:
-                # Delete the metadata
-                metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[release.state]
-                os.remove("%s/%s" % (metadata_dir, metadata_file))
-            except OSError:
-                msg = "Failed to remove metadata for %s" % release_id
-                LOG.exception(msg)
-                raise MetadataFail(msg)
+                if os.path.isdir(to_release_iso_dir):
+                    # check if the release being deleted is related to this feed
+                    if os.path.isfile("%s/upgrades/%s" % (to_release_iso_dir, metadata_file)):
+                        delete_feed = True
+                    if delete_feed:
+                        try:
+                            shutil.rmtree(to_release_iso_dir)
+                        except OSError:
+                            msg = "Failed to remove release iso %s folder" % to_release_iso_dir
+                            LOG.exception(msg)
+                            raise ReleaseIsoDeleteFailure(msg)
+                        msg = "Deleted feed directory %s" % to_release_iso_dir
+                        LOG.info(msg)
+                        msg_info += msg + "\n"
 
-            # We need to clean up all N-1 release related scripts before
-            # reload_release_data() run to remove the N-1 from the release_collection
-            self.delete_start_install_script(release_id)
-            self.delete_patch_activate_scripts(release_id)
+                # TODO(lbonatti): treat the upcoming versioning changes
+                PatchFile.delete_versioned_directory(release.sw_release)
 
-            # Delete N-1 load on system controller, if it is the latest N-1 release
-            if is_system_controller() and release_sw_version < SW_VERSION:
-                reload_release_data()
-                latest_n_1_release = True
-                for sys_release in list(self.release_collection.iterate_releases()):
-                    if sys_release.sw_version < SW_VERSION:
-                        LOG.info("Detected an inactive release")
-                        latest_n_1_release = False
-                        break
-                if latest_n_1_release:
-                    LOG.info("Latest inactive release, cleaning up inactive load import")
-                    self._clean_up_inactive_load_import(release_sw_version)
+                try:
+                    # Delete the metadata
+                    metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[release.state]
+                    os.remove("%s/%s" % (metadata_dir, metadata_file))
+                except OSError:
+                    msg = "Failed to remove metadata for %s" % release_id
+                    LOG.exception(msg)
+                    raise MetadataFail(msg)
+
+                # We need to clean up all N-1 release related scripts before
+                # reload_release_data() run to remove the N-1 from the release_collection
+                self.delete_start_install_script(release_id)
+                self.delete_patch_activate_scripts(release_id)
+
+                # Delete N-1 load on system controller, if it is the latest N-1 release
+                if is_system_controller() and release_sw_version < SW_VERSION:
+                    reload_release_data()
+                    latest_n_1_release = True
+                    for sys_release in list(self.release_collection.iterate_releases()):
+                        if sys_release.sw_version < SW_VERSION:
+                            LOG.info("Detected an inactive release")
+                            latest_n_1_release = False
+                            break
+                    if latest_n_1_release:
+                        LOG.info("Latest inactive release, cleaning up inactive load import")
+                        self._clean_up_inactive_load_import(release_sw_version)
 
             reload_release_data()
-            msg = "%s has been deleted" % release_id
+            msg = f"Deleted {release_id} product release"
             LOG.info(msg)
             msg_info += msg + "\n"
 

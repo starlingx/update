@@ -6,12 +6,14 @@ SPDX-License-Identifier: Apache-2.0
 """
 
 import contextlib
+import functools
 import getopt
 import glob
 import hashlib
 import importlib.util
 import logging
 import os
+from pathlib import Path
 import platform
 import re
 import shutil
@@ -1302,6 +1304,241 @@ class PatchFile(object):
             LOG.info("Versioned directory %s deleted." % opt_release_folder)
         except Exception as e:
             LOG.exception("Failed to delete versioned precheck: %s", e)
+
+
+def ensure_state_dirs(*dirs):
+    """Decorator that creates the specified directories before calling the function."""
+    def decorator(func):
+        @functools.wraps(func)  # Preserve the original function's metadata
+        def wrapper(*args, **kwargs):
+            # Create each directory (including parents) if it doesn't exist
+            for d in dirs:
+                Path(d).mkdir(parents=True, exist_ok=True)
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+class ComponentPatchFile:
+    # common patch file values
+    METADATA_TAR = "metadata.tar"
+    METADATA_XML = "metadata.xml"
+    SOFTWARE_TAR = "software.tar"
+    EXTRA_TAR = "extra.tar"
+    PACKAGE_LIST_SIZE = 25
+
+    # signature values
+    EXPECTED_SIG = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+    SIGNED_FILES = [METADATA_TAR, SOFTWARE_TAR, EXTRA_TAR]
+    SIGNATURE_FILE = "signature"
+    DETACHED_SIGNATURE_FILE = "signature.v2"
+
+    def __init__(self, patch_file: str):
+        self._patch_file = patch_file
+
+    @ensure_state_dirs(*states.COMPONENT_RELEASE_STATE_TO_DIR_MAP.values())
+    def extract_patch(self, **kwargs):
+        """
+        Extract the patch contents into the local filesystem:
+        - Verify the signature of the patch
+        - Parse the product release metadata and copy to filesystem
+        - Extract metapackage deb packages and copy contents and metadata to filesystem
+        """
+        product_id = None
+        release_data = ReleaseData()
+        error_msg = ""
+        base_pkgdata = kwargs.get("base_pkgdata")
+
+        try:
+            # extract patch content
+            with (extract_tar(self._patch_file, prefix="patch-") as patch_dir):
+                LOG.info(f"Extracted {self._patch_file}")
+
+                # verify patch signature
+                ComponentPatchFile.verify_signature(patch_dir)
+
+                # extract product release metadata
+                metadata_tar = Path(patch_dir) / self.METADATA_TAR
+                with extract_tar(metadata_tar, prefix="metadata-") as metadata_dir:
+                    LOG.info(f"Extracted {metadata_tar}")
+                    metadata_file = Path(metadata_dir) / self.METADATA_XML
+                    # parse the product release metadata
+                    with open(metadata_file, "r") as fd:
+                        text = fd.read()
+                        product_id = release_data.parse_metadata_string(text)
+                    _, release_version, sw_version, _ = utils.get_component_and_versions(product_id)
+                    # check if feed exists
+                    if not base_pkgdata.check_release(sw_version):
+                        msg = f"Software feed {sw_version} for release {product_id} doesn't exist"
+                        LOG.error(msg)
+                        raise ReleaseValidationFailure(msg)
+                    # copy product release metadata to software directory
+                    product_md = f"{product_id}-{self.METADATA_XML}"
+                    shutil.copy(metadata_file, Path(constants.COMPONENT_SOFTWARE_METADATA_STORAGE_DIR) / product_md)
+                    LOG.info(f"Copied {product_md} to {constants.COMPONENT_SOFTWARE_METADATA_STORAGE_DIR}")
+
+                # extract deb packages
+                software_tar = Path(patch_dir) / self.SOFTWARE_TAR
+                with extract_tar(software_tar, prefix="software-") as software_dir:
+                    # fetch all deb packages and metapackages
+                    deb_pkgs = list(Path(software_dir).glob("*.deb"))
+                    deb_metapkgs = [d for d in deb_pkgs if d.name.startswith("meta-")]
+                    # copy metapackages contents
+                    for deb in deb_metapkgs:
+                        # confirm the deb package corresponds to a metapackage
+                        if not is_metapackage_deb(deb):
+                            LOG.warning(f"{deb} is not a metapackage, skipping file...")
+                            continue
+                        mp = deb.name[5:].split("_")[0]
+                        with extract_deb(deb) as deb_dir:
+                            LOG.info(f"Extracted metapackage {deb.name}")
+                            metapkg_dir = Path(constants.COMPONENT_SOFTWARE_STORAGE_DIR) / release_version / mp
+                            metapkg_dir.mkdir(parents=True, exist_ok=True)
+                            mp_content = list(Path(deb_dir).rglob(f"*/metapackages/{release_version}/{mp}*"))
+                            # copy full metapackage directory
+                            shutil.copytree(mp_content[0], metapkg_dir, dirs_exist_ok=True)
+                            LOG.info(f"Created metapackage directory: {metapkg_dir}")
+                            # copy metapackage metadata to correct location
+                            metapkg_md_name = f"{mp}_{release_version}-{self.METADATA_XML}"
+                            metapkg_md_src = Path(metapkg_dir) / self.METADATA_XML
+                            metapkg_md_dst = Path(states.COMPONENT_AVAILABLE_DIR) / metapkg_md_name
+                            shutil.move(metapkg_md_src, metapkg_md_dst)
+                            LOG.info(f"Copied metapackage metadata: {metapkg_md_name}")
+                    # create apt-ostree repo and load deb packages in it
+                    package_repo_dir = Path(constants.PACKAGE_FEED_DIR) / f"rel-{sw_version}"
+                    if not package_repo_dir.exists():
+                        apt_utils.initialize_apt_ostree(package_repo_dir)
+                    package_list = []
+                    for deb in deb_pkgs:
+                        msg = f"Adding deb package to the upload list: {deb.name}"
+                        LOG.info(msg)
+                        package_list.append(str(deb))
+                        if len(package_list) == self.PACKAGE_LIST_SIZE:
+                            apt_utils.package_list_upload(package_repo_dir, release_version,
+                                                          package_list)
+                            package_list.clear()
+                    if package_list:
+                        apt_utils.package_list_upload(package_repo_dir, release_version,
+                                                      package_list)
+        except Exception as e:
+            error_detail = e.error if hasattr(e, 'error') else str(e)
+            msg = f"Error extracting patch: {error_detail}"
+            LOG.error(msg)
+            error_msg += msg
+            # if product_id was assigned, delete already extracted files
+            if product_id:
+                LOG.info("Deleting extracted resources...")
+                ComponentPatchFile.delete_patch_product_release(product_id)
+
+        return product_id, release_data, error_msg
+
+    @staticmethod
+    def delete_patch_product_release(product_id):
+        """
+        Delete contents related to a patch product release:
+        - All metadata (product and metapackage releases)
+        - Versioned release directory
+        - .deb package repository
+        """
+        _, release_version, sw_version, _ = utils.get_component_and_versions(product_id)
+
+        # delete the metadata
+        metadata_path = Path(constants.COMPONENT_SOFTWARE_METADATA_STORAGE_DIR)
+        for metadata in metadata_path.rglob(f"*{release_version}*.xml"):
+            metadata.unlink()
+            LOG.info(f"Removed metadata: {metadata.name}")
+
+        # delete the release directory
+        release_path = Path(constants.COMPONENT_SOFTWARE_STORAGE_DIR) / release_version
+        shutil.rmtree(release_path, ignore_errors=True)
+        LOG.info(f"Removed release directory: {release_path}")
+
+        # delete the apt-repo (if patch product release)
+        package_repo_dir = Path(constants.PACKAGE_FEED_DIR) / f"rel-{sw_version}"
+        apt_utils.component_remove(package_repo_dir, release_version)
+        LOG.info(f"Removed package repository: {package_repo_dir}")
+
+    @staticmethod
+    def verify_signature(patch_dir, cert_type=None):
+        """
+        Verify the signature based on the patch content, by checking which files
+        are contained in the patch and using them to verify the provided signature.
+
+        NOTE:
+        - Signature checking is enabled, by default
+        - cert_type=None is required to enforce no dev-patches installed in a formal load
+        """
+        file_list = [f for f in Path(patch_dir).iterdir() if f.name in ComponentPatchFile.SIGNED_FILES]
+
+        # Verify the data integrity signature
+        with open(Path(patch_dir) / ComponentPatchFile.SIGNATURE_FILE, "r") as fd:
+            sig = int(fd.read(), 16)
+        for file in file_list:
+            sig ^= get_md5(file)
+        if sig != ComponentPatchFile.EXPECTED_SIG:
+            msg = "Patch signature verify failed"
+            LOG.error(msg)
+            raise ReleaseValidationFailure(error=msg)
+
+        # Verify detached signature
+        sig_file = Path(patch_dir) / ComponentPatchFile.DETACHED_SIGNATURE_FILE
+        if os.path.exists(sig_file):
+            sig_valid = verify_files(
+                file_list,
+                sig_file,
+                cert_type=cert_type)
+            if sig_valid is True:
+                msg = "Patch has been signed and signature verified"
+                if cert_type is None:
+                    LOG.info(msg)
+            else:
+                msg = "Signature verify failed"
+                if cert_type is None:
+                    LOG.error(msg)
+                raise ReleaseValidationFailure(error=msg)
+        else:
+            msg = "Patch has not been signed"
+            if cert_type is None:
+                LOG.error(msg)
+            raise ReleaseValidationFailure(error=msg)
+
+
+@contextlib.contextmanager
+def extract_tar(tar_path, prefix="software-"):
+    """Extract a tar file to a temporary directory, yielding the path."""
+    with tempfile.TemporaryDirectory(prefix=prefix) as tmpdir:
+        try:
+            with tarfile.open(tar_path) as tar:
+                tar.extractall(tmpdir)
+        except (tarfile.TarError, OSError) as e:
+            raise RuntimeError(f"Failed to extract {tar_path}: {e}") from e
+        yield tmpdir
+
+
+@contextlib.contextmanager
+def extract_deb(deb_path, prefix="deb-"):
+    """Extract a .deb package to a temporary directory, yielding the path."""
+    with tempfile.TemporaryDirectory(prefix=prefix) as tmpdir:
+        try:
+            subprocess.run(
+                ["dpkg-deb", "--extract", deb_path, tmpdir],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            raise ValueError(f"Failed to extract deb: {deb_path}: {e.stderr}") from e
+        yield tmpdir
+
+
+def is_metapackage_deb(deb_path):
+    """Query the deb package metadata 'Section' field and check if its value is 'metapackages'"""
+    output = subprocess.run(["dpkg-deb", "-f", deb_path], check=True,
+                            capture_output=True, text=True).stdout
+    for line in output.splitlines():
+        if "Section:" in line:
+            return line.lower().strip().split(" ")[1] == "metapackages"
+    return False
 
 
 def patch_build():
