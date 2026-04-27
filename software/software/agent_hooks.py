@@ -26,6 +26,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 
 from packaging import version
 from ruamel.yaml import YAML
@@ -972,6 +973,92 @@ class LdapConfigHook(BaseHook):
     LDAP server files are replaced, and it is reconfigured from scratch by puppet.
     """
     LDAP_DIR = "etc/ldap"
+    LDAP_PASSWD_FILE = "/etc/ldapscripts/ldapscripts.passwd"
+    POLICY_DN = "cn=default,ou=policies,dc=cgcs,dc=local"
+
+    def _get_ldap_admin_pw(self):
+        with open(self.LDAP_PASSWD_FILE, "r") as f:
+            return f.read().strip()
+
+    def _policy_has_attr(self, attr):
+        try:
+            admin_pw = self._get_ldap_admin_pw()
+            result = subprocess.run(
+                ["ldapsearch", "-x", "-H", "ldap:///",
+                 "-D", "cn=ldapadmin,dc=cgcs,dc=local",
+                 "-w", admin_pw, "-b", self.POLICY_DN,
+                 "-s", "base", attr],
+                capture_output=True, text=True, check=True)
+            return "%s:" % attr in result.stdout
+        except Exception:
+            LOG.exception("Failed to check attribute %s", attr)
+            return False
+
+    def _rollback_ppm_policy_trixie(self):
+        """TODO: Remove after stx 13 upgrade.
+        On rollback, remove pwdUseCheckModule and pwdCheckModuleArg and
+        restore old password policy module 'check_password.so' on rollback.
+        """
+        config_dir = "/%s/schema" % self.LDAP_DIR
+        needs_inject = False
+        try:
+            admin_pw = self._get_ldap_admin_pw()
+
+            del_ops = []
+            for attr in ("pwdUseCheckModule", "pwdCheckModuleArg"):
+                if self._policy_has_attr(attr):
+                    del_ops.append("delete: %s\n" % attr)
+            if del_ops:
+                ldif = (
+                    "dn: %s\n"
+                    "changetype: modify\n" % self.POLICY_DN
+                    + "-\n".join(del_ops) + "\n"
+                )
+                subprocess.run(
+                    ["ldapmodify", "-x", "-H", "ldap:///",
+                     "-D", "cn=ldapadmin,dc=cgcs,dc=local",
+                     "-w", admin_pw],
+                    input=ldif, check=True,
+                    capture_output=True, text=True)
+                LOG.info("Deleted new ppm attributes online")
+
+            # The Trixie schema does not define pwdCheckModule, so it cannot
+            # be added via ldapmodify, instead we need to inject it with slapmodify
+            needs_inject = not self._policy_has_attr("pwdCheckModule")
+            if needs_inject:
+                subprocess.run(["systemctl", "stop", "slapd"],
+                               check=True, capture_output=True, text=True)
+                LOG.info("Stopped slapd for offline ppm injection")
+
+                inject_ldif = (
+                    "dn: %s\n"
+                    "changetype: modify\n"
+                    "add: pwdCheckModule\n"
+                    "pwdCheckModule: check_password.so\n" % self.POLICY_DN
+                )
+
+                # Don't need to delete this, rollback requires rebooting
+                with tempfile.NamedTemporaryFile(
+                        mode="w", suffix=".ldif", delete=False) as f:
+                    f.write(inject_ldif)
+                    ldif_path = f.name
+
+                subprocess.run(["slapmodify", "-F", config_dir,
+                               "-b", "dc=cgcs,dc=local", "-l", ldif_path],
+                               check=True, capture_output=True, text=True)
+                LOG.info("Injected pwdCheckModule via slapmodify")
+
+                subprocess.run(["systemctl", "start", "slapd"],
+                               check=True, capture_output=True, text=True)
+
+            LOG.info("Rolled back ppm policy to use check_password.so")
+        except Exception:
+            LOG.exception("Failed to rollback ppm policy")
+        finally:
+            if needs_inject:
+                # start slapd in case of exception
+                subprocess.run(["systemctl", "start", "slapd"],
+                               check=False, capture_output=True, text=True)
 
     def run(self):
         # No need to reconfigure if both sides are running the same debian release
@@ -980,6 +1067,12 @@ class LdapConfigHook(BaseHook):
             return
 
         LOG.info("Running LdapConfigHook")
+
+        # Rollback ppm policy before replacing LDAP config files
+        if self._action == HookManager.MAJOR_RELEASE_ROLLBACK:
+            if self.get_from_release_debian_codename() == "trixie":
+                self._rollback_ppm_policy_trixie()
+
         src = os.path.join(self.TO_RELEASE_OSTREE_DIR, "usr", self.LDAP_DIR)
         dst = os.path.join(self.TO_RELEASE_OSTREE_DIR, self.LDAP_DIR)
         if os.path.isdir(src):
