@@ -4,10 +4,10 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+import os
 import sys
 import logging
 import importlib.util
-import os
 
 
 LOG = logging.getLogger('main_logger')
@@ -23,6 +23,7 @@ ACTION_ACTIVATE = "activate"
 ACTION_ACTIVATE_ROLLBACK = "activate-rollback"
 ACTION_DELETE = "delete"
 PLUGIN_ACTIONS = [ACTION_MIGRATE, ACTION_ACTIVATE, ACTION_ACTIVATE_ROLLBACK, ACTION_DELETE]
+
 FRAMEWORK_INIT = "framework_init"
 FEATURE_PRE_APPS = "feature_pre_apps"
 K8S_APP_UPDATE = "k8s_apps_update"
@@ -33,7 +34,7 @@ PLUGIN_STAGES = [FRAMEWORK_INIT, FEATURE_PRE_APPS, K8S_APP_UPDATE,
 
 # Plugins for each action are organized as 3 parts,
 # framework initialize, feature, and framework finalize
-# however in activate and activate-rollback, feature plugins are divided
+# however in activate and activate-rollback, feature plugins are devided
 # into 2 groups, pre k8s apps update and post k8s apps update, therefore
 # feature plugins are grouped into 2 groups
 # in total, all plugins are grouped as:
@@ -45,6 +46,9 @@ PLUGINS = {
         ],
         FEATURE_PRE_APPS: [
             "11-update-static-hieradata.py",
+            "04-remove-out-of-tree-service-parameter.py",
+            "05-add-autoreapply-service-parameter.py",
+            "13-registry-central-as-local-scope.py",
         ],
         K8S_APP_UPDATE: [],
         FEATURE_POST_APPS: [],
@@ -58,13 +62,17 @@ PLUGINS = {
             "08-activate-keystone.py",
             "23-resize-systemcontroller-filesystems.sh",],
         FEATURE_PRE_APPS: [
-            "18-disable-portieris-webhook.py",],
+            "10-add-cluster-host-ip-to-kube-apiserver-cert.py",
+        ],
         K8S_APP_UPDATE: [
+            "18-disable-portieris-webhook.py",
             "19-assert-docker-health.sh",
             "20-enable-fluxcd-controllers.py",
             "21-k8s-app-upgrade.py",
         ],
-        FEATURE_POST_APPS: [],
+        FEATURE_POST_APPS: [
+            "41-ensure-oidc-service-parameters.py",
+        ],
         FRAMEWORK_FINALIZE: [
             "198-update-isystem-data.py",
         ],
@@ -76,15 +84,18 @@ PLUGINS = {
         K8S_APP_UPDATE: [
             "22-rollback-fluxcd-controllers.py",
             "21-k8s-app-upgrade.py",
-            "18-disable-portieris-webhook.py"
+            "18-disable-portieris-webhook.py",
         ],
         FEATURE_POST_APPS: [],
         FRAMEWORK_FINALIZE: []
     },
     ACTION_DELETE: {
         FRAMEWORK_INIT: [
-            "26-clean-up-deployment-data.py",],
-        FEATURE_PRE_APPS: [],
+            "26-clean-up-deployment-data.py",
+        ],
+        FEATURE_PRE_APPS: [
+            "40-clean-apiserver-certsan-parameter.py"
+        ],
         K8S_APP_UPDATE: [],
         FEATURE_POST_APPS: [],
         FRAMEWORK_FINALIZE: [
@@ -100,7 +111,7 @@ ACTIVATE_ROLLBACK_PLUGINS = PLUGINS[ACTION_ACTIVATE_ROLLBACK]
 DELETE_PLUGINS = PLUGINS[ACTION_DELETE]
 
 # supported n-2 from release version. None if unsupported.
-PREV_RELEASE = "25.09"
+PREV_RELEASE = None
 
 
 def get_plugin_mgr():
@@ -120,11 +131,13 @@ def format_path(plugins):
 
 
 def join_plugins(prev_release_plugins, plugins):
+    print(prev_release_plugins)
+    print(plugins)
     result = {
         FRAMEWORK_INIT: plugins[FRAMEWORK_INIT],
-        FEATURE_PRE_APPS: format_path(prev_release_plugins[FEATURE_PRE_APPS]) + plugins[FEATURE_PRE_APPS],
+        FEATURE_PRE_APPS: prev_release_plugins[FEATURE_PRE_APPS] + plugins[FEATURE_PRE_APPS],
         K8S_APP_UPDATE: plugins[K8S_APP_UPDATE],
-        FEATURE_POST_APPS: format_path(prev_release_plugins[FEATURE_POST_APPS]) + plugins[FEATURE_POST_APPS],
+        FEATURE_POST_APPS: prev_release_plugins[FEATURE_POST_APPS] + plugins[FEATURE_POST_APPS],
         FRAMEWORK_FINALIZE: plugins[FRAMEWORK_FINALIZE]
     }
     LOG.info(f"list of scripts {result}")
