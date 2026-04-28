@@ -13,6 +13,7 @@
         - patch-alarm-tox-py39
         - software-tox-flake8
         - software-tox-pylint
+        - software-tox-py39
         - software-client-tox-flake8
         - software-client-tox-pylint
     gate:
@@ -47,6 +48,20 @@
     vars:
       tox_envlist: flake8
 
+
+- job:
+    name: software-tox-py39
+    parent: tox
+    nodeset: debian-bullseye
+    required-projects:
+      - starlingx/config
+      - starlingx/fault
+      - starlingx/utilities
+    files:
+      - software/*
+    vars:
+      tox_envlist: py39
+      tox_extra_args: -c software/tox.ini
 
 - job:
     name: software-tox-flake8

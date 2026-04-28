@@ -9,11 +9,11 @@ import socket
 import subprocess
 import unittest
 
+from software.tests import base  # pylint: disable=unused-import # noqa: F401
 from software.exceptions import HostNotFound
 from software.exceptions import UpgradeNotSupported
 from software.software_controller import PatchController
 from software.software_controller import AgentNeighbour
-from software.tests import base  # pylint: disable=unused-import # noqa: F401
 from software import constants
 from software import states
 
@@ -144,21 +144,33 @@ class TestSoftwareController(unittest.TestCase):
     @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
     @unittest.mock.patch('os.path.isfile', return_value=False)
     @unittest.mock.patch('os.path.join', return_value="/usr/sbin/software-deploy/major-release-upload")
+    @unittest.mock.patch('software.software_controller.PatchController.get_release_meta_info')
     @unittest.mock.patch('software.software_controller.reload_release_data')
     @unittest.mock.patch('shutil.copyfile')
     @unittest.mock.patch('subprocess.run')
+    @unittest.mock.patch('shutil.copytree')
+    @unittest.mock.patch('shutil.rmtree')
+    @unittest.mock.patch('software.software_controller.ostree_utils.add_gpg_verify_false')
     @unittest.mock.patch('os.path.exists')
     def test_run_load_import_success_without_usm_script(self,
                                                         mock_path_exists,
+                                                        mock_add_gpg_verify_false,   # pylint: disable=unused-argument
+                                                        mock_rmtree,   # pylint: disable=unused-argument
+                                                        mock_copytree,   # pylint: disable=unused-argument
                                                         mock_subprocess_run,
                                                         mock_copyfile,     # pylint: disable=unused-argument
                                                         mock_reload_release_data,      # pylint: disable=unused-argument
+                                                        mock_get_release_meta_info,
                                                         mock_join,    # pylint: disable=unused-argument
                                                         mock_isfile,   # pylint: disable=unused-argument
                                                         mock_init):    # pylint: disable=unused-argument
         # Setup
         mock_path_exists.return_value = True
         mock_subprocess_run.return_value = unittest.mock.MagicMock(returncode=0, stdout="Load import successful")
+        mock_get_release_meta_info.return_value = {
+            "test.iso": {"id": "starlingx-22.12", "sw_release": "22.12"},
+            "test.sig": {"id": None, "sw_release": None}
+        }
 
         controller = PatchController()
         from_release = None
@@ -196,9 +208,11 @@ class TestSoftwareController(unittest.TestCase):
     @unittest.mock.patch('subprocess.run')
     @unittest.mock.patch('shutil.copytree')
     @unittest.mock.patch('shutil.rmtree')
+    @unittest.mock.patch('software.software_controller.ostree_utils.add_gpg_verify_false')
     @unittest.mock.patch('os.path.exists')
     def test_run_load_import_success_with_usm_script(self,
                                                      mock_path_exists,
+                                                     mock_add_gpg_verify_false,   # pylint: disable=unused-argument
                                                      mock_rmtree,
                                                      mock_copytree,
                                                      mock_subprocess_run,
@@ -235,7 +249,7 @@ class TestSoftwareController(unittest.TestCase):
         self.assertEqual(release_meta_info, {"test.iso": {"id": "123", "sw_version": "2.0.0"}})
         mock_rmtree.assert_called_once_with("/opt/software/rel-2.0.0/bin")
         mock_copytree.assert_called_once_with(
-            "/mnt/iso/upgrades/software-deploy", "/opt/software/rel-2.0.0/bin")
+            "/mnt/iso/upgrades/software-deploy", "/opt/software/rel-2.0.0/bin", symlinks=True)
 
     @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
     @unittest.mock.patch('os.path.isfile', return_value=True)
@@ -245,9 +259,11 @@ class TestSoftwareController(unittest.TestCase):
     @unittest.mock.patch('subprocess.run')
     @unittest.mock.patch('shutil.copytree')
     @unittest.mock.patch('shutil.rmtree')
+    @unittest.mock.patch('software.software_controller.ostree_utils.add_gpg_verify_false')
     @unittest.mock.patch('os.path.exists')
     def test_run_load_import_script_with_usm_script_failure(self,
                                                             mock_path_exists,
+                                                            mock_add_gpg_verify_false,   # pylint: disable=unused-argument
                                                             mock_rmtree,
                                                             mock_copytree,
                                                             mock_subprocess_run,
@@ -284,7 +300,7 @@ class TestSoftwareController(unittest.TestCase):
         self.assertEqual(release_meta_info, {})
         mock_rmtree.assert_called_once_with("/opt/software/rel-2.0.0/bin")
         mock_copytree.assert_called_once_with(
-            "/mnt/iso/upgrades/software-deploy", "/opt/software/rel-2.0.0/bin")
+            "/mnt/iso/upgrades/software-deploy", "/opt/software/rel-2.0.0/bin", symlinks=True)
 
     @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
     @unittest.mock.patch('os.path.isfile', return_value=True)
@@ -294,9 +310,11 @@ class TestSoftwareController(unittest.TestCase):
     @unittest.mock.patch('subprocess.run')
     @unittest.mock.patch('shutil.copytree')
     @unittest.mock.patch('shutil.rmtree')
+    @unittest.mock.patch('software.software_controller.ostree_utils.add_gpg_verify_false')
     @unittest.mock.patch('os.path.exists')
     def test_run_load_import_script_with_usm_script_exception(self,
                                                               mock_path_exists,
+                                                              mock_add_gpg_verify_false,   # pylint: disable=unused-argument
                                                               mock_rmtree,
                                                               mock_copytree,
                                                               mock_subprocess_run,
@@ -326,19 +344,13 @@ class TestSoftwareController(unittest.TestCase):
         self.assertTrue("Unexpected error" in str(context.exception))
         mock_rmtree.assert_called_once_with("/opt/software/rel-2.0.0/bin")
         mock_copytree.assert_called_once_with(
-            "/mnt/iso/upgrades/software-deploy", "/opt/software/rel-2.0.0/bin")
+            "/mnt/iso/upgrades/software-deploy", "/opt/software/rel-2.0.0/bin", symlinks=True)
 
-    @unittest.mock.patch('software.software_controller.json.load')
-    @unittest.mock.patch('software.software_controller.open', new_callable=unittest.mock.mock_open)
-    @unittest.mock.patch('software.software_controller.utils.get_platform_conf', return_value='simplex')
-    @unittest.mock.patch('software.software_controller.open', new_callable=unittest.mock.mock_open)
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
     def test_get_software_host_upgrade_deployed(self,
-                                                mock_dummy_open_config,  # pylint: disable=unused-argument
-                                                mock_dummy,  # pylint: disable=unused-argument
-                                                mock_dummy_open,  # pylint: disable=unused-argument
-                                                mock_json_load,  # pylint: disable=unused-argument
-                                                ):
+                                                mock_init):  # pylint: disable=unused-argument
         controller = PatchController()
+        controller.db_api_instance = unittest.mock.MagicMock()
         controller._get_software_upgrade = unittest.mock.MagicMock(return_value={  # pylint: disable=protected-access
             "from_release": "1.0.0",
             "to_release": "2.0.0"
@@ -357,17 +369,11 @@ class TestSoftwareController(unittest.TestCase):
             "host_state": states.DEPLOYED
         }])
 
-    @unittest.mock.patch('software.software_controller.json.load')
-    @unittest.mock.patch('software.software_controller.open', new_callable=unittest.mock.mock_open)
-    @unittest.mock.patch('software.software_controller.utils.get_platform_conf', return_value='simplex')
-    @unittest.mock.patch('software.software_controller.open', new_callable=unittest.mock.mock_open)
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
     def test_get_software_host_upgrade_deploying(self,
-                                                 mock_dummy_open_config,  # pylint: disable=unused-argument
-                                                 mock_dummy,  # pylint: disable=unused-argument
-                                                 mock_dummy_open,  # pylint: disable=unused-argument
-                                                 mock_json_load,  # pylint: disable=unused-argument
-                                                 ):
+                                                 mock_init):  # pylint: disable=unused-argument
         controller = PatchController()
+        controller.db_api_instance = unittest.mock.MagicMock()
         controller._get_software_upgrade = unittest.mock.MagicMock(return_value={  # pylint: disable=protected-access
             "from_release": "1.0.0",
             "to_release": "2.0.0"
@@ -386,17 +392,11 @@ class TestSoftwareController(unittest.TestCase):
             "host_state": states.DEPLOYING
         }])
 
-    @unittest.mock.patch('software.software_controller.json.load')
-    @unittest.mock.patch('software.software_controller.open', new_callable=unittest.mock.mock_open)
-    @unittest.mock.patch('software.software_controller.utils.get_platform_conf', return_value='simplex')
-    @unittest.mock.patch('software.software_controller.open', new_callable=unittest.mock.mock_open)
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
     def test_get_all_software_host_upgrade_deploying(self,
-                                                     mock_dummy_open_config,  # pylint: disable=unused-argument
-                                                     mock_dummy,  # pylint: disable=unused-argument
-                                                     mock_dummy_open,  # pylint: disable=unused-argument
-                                                     mock_json_load,  # pylint: disable=unused-argument
-                                                     ):
+                                                     mock_init):  # pylint: disable=unused-argument
         controller = PatchController()
+        controller.db_api_instance = unittest.mock.MagicMock()
         controller._get_software_upgrade = unittest.mock.MagicMock(return_value={  # pylint: disable=protected-access
             "from_release": "1.0.0",
             "to_release": "2.0.0"
@@ -420,17 +420,11 @@ class TestSoftwareController(unittest.TestCase):
             "host_state": states.DEPLOYING
         }])
 
-    @unittest.mock.patch('software.software_controller.json.load')
-    @unittest.mock.patch('software.software_controller.open', new_callable=unittest.mock.mock_open)
-    @unittest.mock.patch('software.software_controller.utils.get_platform_conf', return_value='simplex')
-    @unittest.mock.patch('software.software_controller.open', new_callable=unittest.mock.mock_open)
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
     def test_get_software_host_upgrade_none_state(self,
-                                                  mock_dummy_open_config,  # pylint: disable=unused-argument
-                                                  mock_dummy,  # pylint: disable=unused-argument
-                                                  mock_dummy_open,  # pylint: disable=unused-argument
-                                                  mock_json_load,  # pylint: disable=unused-argument
-                                                  ):
+                                                  mock_init):  # pylint: disable=unused-argument
         controller = PatchController()
+        controller.db_api_instance = unittest.mock.MagicMock()
 
         # Test when the deploy or deploy_hosts is None
         controller._get_software_upgrade = unittest.mock.MagicMock(  # pylint: disable=protected-access
@@ -439,16 +433,9 @@ class TestSoftwareController(unittest.TestCase):
         result = controller.get_one_software_host_upgrade("host1")
         self.assertIsNone(result)
 
-    @unittest.mock.patch('software.software_controller.json.load')
-    @unittest.mock.patch('software.software_controller.open', new_callable=unittest.mock.mock_open)
-    @unittest.mock.patch('software.software_controller.utils.get_platform_conf', return_value='simplex')
-    @unittest.mock.patch('software.software_controller.open', new_callable=unittest.mock.mock_open)
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
     def test_get_software_upgrade_get_deploy_all(self,
-                                                 mock_dummy_open_config,  # pylint: disable=unused-argument
-                                                 mock_dummy,  # pylint: disable=unused-argument
-                                                 mock_dummy_open,  # pylint: disable=unused-argument
-                                                 mock_json_load,  # pylint: disable=unused-argument
-                                                 ):
+                                                 mock_init):  # pylint: disable=unused-argument
 
         controller = PatchController()
 
@@ -474,16 +461,9 @@ class TestSoftwareController(unittest.TestCase):
         }
         self.assertEqual(result, expected_result)
 
-    @unittest.mock.patch('software.software_controller.json.load')
-    @unittest.mock.patch('software.software_controller.open', new_callable=unittest.mock.mock_open)
-    @unittest.mock.patch('software.software_controller.utils.get_platform_conf', return_value='simplex')
-    @unittest.mock.patch('software.software_controller.open', new_callable=unittest.mock.mock_open)
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
     def test_get_software_upgrade_get_deploy_all_none(self,
-                                                      mock_dummy_open_config,  # pylint: disable=unused-argument
-                                                      mock_dummy,  # pylint: disable=unused-argument
-                                                      mock_dummy_open,  # pylint: disable=unused-argument
-                                                      mock_json_load,  # pylint: disable=unused-argument
-                                                      ):
+                                                      mock_init):  # pylint: disable=unused-argument
 
         controller = PatchController()
 
@@ -508,6 +488,7 @@ class TestSoftwareController(unittest.TestCase):
                                             mock_gethostbyname,     # pylint: disable=unused-argument
                                             mock_init):  # pylint: disable=unused-argument
         controller = PatchController()
+        controller.db_api_instance = unittest.mock.MagicMock()
         hostname = "nonexistent_host"
         force = False
         async_req = False
@@ -544,12 +525,12 @@ class TestSoftwareController(unittest.TestCase):
     @unittest.mock.patch('software.software_controller.utils.gethostbyname', return_value='192.168.1.1')
     @unittest.mock.patch('software.software_controller.DeployState.get_instance')
     @unittest.mock.patch('software.software_controller.DeployHostState')
-    @unittest.mock.patch('software.software_controller.set_host_target_load',
+    @unittest.mock.patch('software.software_controller.copy_pxeboot_update_file',
                          side_effect=subprocess.CalledProcessError(returncode=1, cmd='ls'))
     @unittest.mock.patch('software.software_controller.AgentNeighbour.is_alive', new_callable=unittest.mock.PropertyMock)
     def test_deploy_host_set_host_target_load_exception(self,
                                                         mock_is_alive,
-                                                        mock_set_host_target_load,  # pylint: disable=unused-argument
+                                                        mock_copy_pxeboot_update_file,  # pylint: disable=unused-argument
                                                         mock_deploy_host_state,
                                                         mock_deploy_state,
                                                         mock_gethostbyname,     # pylint: disable=unused-argument
@@ -572,6 +553,7 @@ class TestSoftwareController(unittest.TestCase):
             {'to_release': '2.1.1', 'commit_id': 'commit_1'}]
         controller.allow_insvc_patching = False
         controller.install_local = True
+        controller.pre_bootstrap = False
         controller.check_upgrade_in_progress = unittest.mock.MagicMock(return_value=True)
         controller.get_software_upgrade = unittest.mock.MagicMock(return_value={'to_release': '2.1.1'})
         controller.manage_software_alarm = unittest.mock.MagicMock()
@@ -584,13 +566,11 @@ class TestSoftwareController(unittest.TestCase):
     @unittest.mock.patch('software.software_controller.utils.gethostbyname', return_value='192.168.1.1')
     @unittest.mock.patch('software.software_controller.DeployState.get_instance')
     @unittest.mock.patch('software.software_controller.DeployHostState')
-    @unittest.mock.patch('software.software_controller.set_host_target_load')
     @unittest.mock.patch('software.software_controller.copy_pxeboot_update_file', side_effect=FileNotFoundError)
     @unittest.mock.patch('software.software_controller.AgentNeighbour.is_alive', new_callable=unittest.mock.PropertyMock)
     def test_copy_pxeboot_update_file_exception(self,
                                                 mock_is_alive,
                                                 mock_copy_pxeboot_update_file,  # pylint: disable=unused-argument
-                                                mock_set_host_target_load,  # pylint: disable=unused-argument
                                                 mock_deploy_host_state,
                                                 mock_deploy_state,
                                                 mock_gethostbyname,     # pylint: disable=unused-argument
@@ -613,6 +593,7 @@ class TestSoftwareController(unittest.TestCase):
             {'to_release': '2.1.1', 'commit_id': 'commit_1'}]
         controller.allow_insvc_patching = False
         controller.install_local = True
+        controller.pre_bootstrap = False
         controller.check_upgrade_in_progress = unittest.mock.MagicMock(return_value=True)
         controller.get_software_upgrade = unittest.mock.MagicMock(return_value={'to_release': '2.1.1'})
         controller.manage_software_alarm = unittest.mock.MagicMock()

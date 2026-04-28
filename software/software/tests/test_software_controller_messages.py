@@ -6,6 +6,7 @@ import unittest
 
 import testtools
 
+from software.tests import base  # pylint: disable=unused-import # noqa: F401
 from software.messages import PatchMessage
 from software.states import DEPLOY_HOST_STATES
 from software.software_controller import PatchMessageAgentInstallReq
@@ -138,7 +139,10 @@ class SoftwareControllerMessagesTestCase(testtools.TestCase):
         for message_class in SoftwareControllerMessagesTestCase.message_classes:
             mock_sock.reset_mock()
             test_obj = message_class()
-            test_obj.send(mock_sock)
+            if message_class == PatchMessageSendLatestFeedCommit:
+                test_obj.send(mock_sock, FAKE_OSTREE_FEED_COMMIT)
+            else:
+                test_obj.send(mock_sock)
             if message_class in send_to:
                 mock_sock.sendto.assert_called()
             if message_class in send_all:

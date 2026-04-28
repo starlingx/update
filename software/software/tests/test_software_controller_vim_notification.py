@@ -6,10 +6,10 @@
 
 import unittest
 
-from software.software_controller import PatchController
-from software.states import DEPLOY_STATES
 # This import has to be first
 from software.tests import base  # pylint: disable=unused-import # noqa: F401
+from software.software_controller import PatchController
+from software.states import DEPLOY_STATES
 
 
 class TestSoftwareControllerVimNotification(unittest.TestCase):
@@ -70,9 +70,10 @@ class TestSoftwareControllerVimNotification(unittest.TestCase):
             mock_trigger_vim_host_audit.assert_not_called()
 
     @unittest.mock.patch("software.software_controller.PatchController.__init__", return_value=None)
+    @unittest.mock.patch("software.software_controller.DeployHostState")
     @unittest.mock.patch("software.software_controller.DeployState")
     def test_register_deploy_state_change_listeners(
-        self, mock_deploy_state, mock_init
+        self, mock_deploy_state, mock_deploy_host_state, mock_init
     ):  # pylint: disable=unused-argument
         """Test that the VIM notification listener is registered."""
         controller = PatchController()
