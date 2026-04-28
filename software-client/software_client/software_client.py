@@ -295,6 +295,13 @@ class SoftwareClientShell(object):
         utils.define_commands_from_module(subparsers3, self, self.subcommands,
                                           cmd_area='system-deploy')
         self._add_bash_completion_subparser(subparsers3)
+
+        subparsers4 = self._add_metapackage_subparser(subparsers)
+        metapackage_submodule = utils.import_versioned_module(version, 'metapackage_cmd')
+        metapackage_submodule.enhance_parser(parser, subparsers4, self.subcommands)
+        utils.define_commands_from_module(subparsers4, self, self.subcommands,
+                                          cmd_area='metapackage')
+        self._add_bash_completion_subparser(subparsers4)
         return parser
 
     def _add_bash_completion_subparser(self, subparsers):
@@ -305,6 +312,33 @@ class SoftwareClientShell(object):
         )
         self.subcommands['bash_completion'] = subparser
         subparser.set_defaults(func=self.do_bash_completion)
+
+    def _add_metapackage_subparser(self, subparsers):
+        """metapackage commands
+        - list
+        non root/sudo users can run:
+        - list
+        """
+
+        cmd_area = 'metapackage'
+        cmd_parser = subparsers.add_parser(
+            cmd_area,
+            help='Software Metapackage',
+            description="StarlingX Software Metapackage Module",
+            add_help=False
+        )
+        cmd_parser.set_defaults(cmd_area=cmd_area)
+        self.subcommands['metapackage'] = cmd_parser
+
+        cmd_parser.set_defaults(region_restricted=False)
+
+        sub_cmds = cmd_parser.add_subparsers(
+            title='Software Metapackage Commands',
+            metavar='<subcommand>'
+        )
+        sub_cmds.required = True
+
+        return sub_cmds
 
     def _add_deploy_subparser(self, subparsers):
         """deploy commands
@@ -450,11 +484,14 @@ class SoftwareClientShell(object):
         """Prints all of the commands and options to stdout.
         """
         commands = set()
+        metapackage_commands = set()
         deploy_commands = set()
         system_deploy_commands = set()
         options = set()
+        metapackage_options = set()
         deploy_options = set()
         system_deploy_options = set()
+        software_metapackage_prog = "software metapackage"
         software_deploy_prog = "software deploy"
         software_system_deploy_prog = "software system-deploy"
         unlisted_commands = ["bash-completion", "bash_completion"]
@@ -474,6 +511,13 @@ class SoftwareClientShell(object):
                 deploy_commands.add(opt)
                 for option in list(sc._optionals._option_string_actions):
                     deploy_options.add(option)
+            elif sc.prog.startswith(software_metapackage_prog):
+                if sc_str in unlisted_commands:
+                    continue
+                opt = sc_str[len("metapackage "):]
+                metapackage_commands.add(opt)
+                for option in list(sc._optionals._option_string_actions):
+                    metapackage_options.add(option)
             else:
                 commands.add(sc_str)
                 for option in list(sc._optionals._option_string_actions):
@@ -484,9 +528,12 @@ class SoftwareClientShell(object):
             print(' '.join(system_deploy_commands | system_deploy_options))
         elif cmd_area == 'deploy':
             print(' '.join(deploy_commands | deploy_options))
+        elif cmd_area == 'metapackage':
+            print(' '.join(metapackage_commands | metapackage_options))
         else:
             commands.add('deploy')
             commands.add('system-deploy')
+            commands.add('metapackage')
             print(' '.join(commands | options))
 
     @utils.arg('command', metavar='<subcommand>', nargs='?',

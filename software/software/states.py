@@ -6,9 +6,10 @@ SPDX-License-Identifier: Apache-2.0
 """
 
 from enum import Enum
-import os
 
+from pathlib import Path
 from software.constants import SOFTWARE_STORAGE_DIR
+from software.constants import COMPONENT_SOFTWARE_STORAGE_DIR
 
 
 # TODO(lbonatti) Remove this diagram once it is mapped in the documentation
@@ -49,13 +50,13 @@ from software.constants import SOFTWARE_STORAGE_DIR
 #                     |-------------------------------------------/
 
 
-# Release states
-AVAILABLE_DIR = os.path.join(SOFTWARE_STORAGE_DIR, "metadata/available")
-UNAVAILABLE_DIR = os.path.join(SOFTWARE_STORAGE_DIR, "metadata/unavailable")
-DEPLOYING_DIR = os.path.join(SOFTWARE_STORAGE_DIR, "metadata/deploying")
-DEPLOYED_DIR = os.path.join(SOFTWARE_STORAGE_DIR, "metadata/deployed")
-REMOVING_DIR = os.path.join(SOFTWARE_STORAGE_DIR, "metadata/removing")
-COMMITTED_DIR = os.path.join(SOFTWARE_STORAGE_DIR, "metadata/committed")
+# Legacy release states
+AVAILABLE_DIR = Path(SOFTWARE_STORAGE_DIR, "metadata/available")
+UNAVAILABLE_DIR = Path(SOFTWARE_STORAGE_DIR, "metadata/unavailable")
+DEPLOYING_DIR = Path(SOFTWARE_STORAGE_DIR, "metadata/deploying")
+DEPLOYED_DIR = Path(SOFTWARE_STORAGE_DIR, "metadata/deployed")
+REMOVING_DIR = Path(SOFTWARE_STORAGE_DIR, "metadata/removing")
+COMMITTED_DIR = Path(SOFTWARE_STORAGE_DIR, "metadata/committed")
 
 DEPLOY_STATE_METADATA_DIR = [
     AVAILABLE_DIR,
@@ -97,6 +98,30 @@ RELEASE_STATE_VALID_TRANSITION = {
 VALID_DEPLOY_START_STATES = [
     AVAILABLE,
     DEPLOYED,
+]
+
+# Component States
+COMPONENT_AVAILABLE_DIR = Path(COMPONENT_SOFTWARE_STORAGE_DIR, "metadata/available")
+COMPONENT_UNAVAILABLE_DIR = Path(COMPONENT_SOFTWARE_STORAGE_DIR, "metadata/unavailable")
+COMPONENT_DEPLOYING_DIR = Path(COMPONENT_SOFTWARE_STORAGE_DIR, "metadata/deploying")
+COMPONENT_DEPLOYED_DIR = Path(COMPONENT_SOFTWARE_STORAGE_DIR, "metadata/deployed")
+COMPONENT_REMOVING_DIR = Path(COMPONENT_SOFTWARE_STORAGE_DIR, "metadata/removing")
+COMPONENT_COMMITTED_DIR = Path(COMPONENT_SOFTWARE_STORAGE_DIR, "metadata/committed")
+COMPONENT_DEPLOY_SELECTED_DIR = Path(COMPONENT_SOFTWARE_STORAGE_DIR, "metadata/deploy-selected")
+COMPONENT_REMOVE_SELECTED_DIR = Path(COMPONENT_SOFTWARE_STORAGE_DIR, "metadata/remove-selected")
+
+DEPLOYED_PARTIAL = 'deployed-partial'
+DEPLOY_SELECTED = 'deploy-selected'
+REMOVE_SELECTED = 'remove-selected'
+
+COMPONENT_RELEASE_STATE_TO_DIR_MAP = RELEASE_STATE_TO_DIR_MAP | {
+    DEPLOY_SELECTED: COMPONENT_DEPLOY_SELECTED_DIR,
+    REMOVE_SELECTED: COMPONENT_REMOVE_SELECTED_DIR,
+}
+
+COMPONENT_VALID_RELEASE_STATES = VALID_RELEASE_STATES + [
+    DEPLOY_SELECTED,
+    REMOVE_SELECTED,
 ]
 
 
