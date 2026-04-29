@@ -5,6 +5,7 @@
 #
 
 from contextlib import contextmanager
+import functools
 import logging
 import os
 import subprocess
@@ -42,6 +43,16 @@ ACTION_MIGRATE = "migrate"
 ACTION_ACTIVATE = "activate"
 ACTION_ACTIVATE_ROLLBACK = "activate-rollback"
 ACTION_DELETE = "delete"
+
+
+@functools.lru_cache(maxsize=1)
+def get_debian_version_codename():
+    os_release = "/usr/lib/os-release"
+    with open(os_release, "r") as f:
+        for line in f:
+            if line.strip().startswith("VERSION_CODENAME="):
+                return line.strip().split("=", 1)[1].strip("'\"")
+    raise ValueError("VERSION_CODENAME not found in %s" % os_release)
 
 
 def configure_logging():

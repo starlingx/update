@@ -18,6 +18,7 @@ SPDX-License-Identifier: Apache-2.0
 import configparser
 import contextlib
 import filecmp
+import functools
 import glob
 import json
 import logging as LOG
@@ -83,6 +84,25 @@ class BaseHook(object):
             except subprocess.CalledProcessError as e:
                 LOG.exception("Error enabling %s: %s" % (service, str(e)))
                 raise
+
+    @staticmethod
+    def _get_debian_codename(root_dir='/'):
+        os_release = os.path.join(root_dir, "usr/lib/os-release")
+        with open(os_release, "r") as f:
+            for line in f:
+                if line.strip().startswith("VERSION_CODENAME="):
+                    return line.strip().split("=", 1)[1].strip("'\"")
+        raise ValueError("VERSION_CODENAME not found in %s" % os_release)
+
+    @staticmethod
+    @functools.lru_cache(maxsize=1)
+    def get_from_release_debian_codename():
+        return BaseHook._get_debian_codename(BaseHook.FROM_RELEASE_OSTREE_DIR)
+
+    @staticmethod
+    @functools.lru_cache(maxsize=1)
+    def get_to_release_debian_codename():
+        return BaseHook._get_debian_codename(BaseHook.TO_RELEASE_OSTREE_DIR)
 
     @staticmethod
     def get_new_deploy_path(relative_path):
