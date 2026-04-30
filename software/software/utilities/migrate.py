@@ -516,6 +516,28 @@ def import_databases(target_port, from_path=None):
         LOG.exception("Failed to grant fm schema permissions, return code: %d" % ex.returncode)
         raise
 
+    role = get_system_role(target_port)
+    if role == constants.DISTRIBUTED_CLOUD_ROLE_SYSTEMCONTROLLER:
+        try:
+            LOG.info("Granting permissions on public schema to admin-dcmanager")
+            subprocess.check_call(
+                ['sudo -u postgres psql --port=%s -d dcmanager -c '
+                 '"GRANT ALL ON SCHEMA public TO \\"admin-dcmanager\\";"' % target_port],
+                shell=True, stdout=devnull, stderr=sout)
+        except subprocess.CalledProcessError as ex:
+            LOG.exception("Failed to grant dcmanager schema permissions, return code: %d" % ex.returncode)
+            raise
+
+        try:
+            LOG.info("Granting permissions on public schema to admin-dcorch")
+            subprocess.check_call(
+                ['sudo -u postgres psql --port=%s -d dcorch -c '
+                 '"GRANT ALL ON SCHEMA public TO \\"admin-dcorch\\";"' % target_port],
+                shell=True, stdout=devnull, stderr=sout)
+        except subprocess.CalledProcessError as ex:
+            LOG.exception("Failed to grant dcorch schema permissions, return code: %d" % ex.returncode)
+            raise
+
 
 def migrate_vim_database(from_release, to_release):
     """Migrates the VIM DB."""
