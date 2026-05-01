@@ -32,10 +32,15 @@ PUPPET_PATH = PLATFORM_PATH + "/puppet/" + SW_VERSION + "/"
 HIERADATA_PERMDIR = PUPPET_PATH + 'hieradata'
 
 # Keyring path
+LUKS_FS = "/var/luks/stx/luks_fs/controller"
 KEYRING_WORKDIR = '/tmp/python_keyring'
-KEYRING_DIR_PATH = PLATFORM_PATH + "/.keyring"
-KEYRING_PATH = PLATFORM_PATH + "/.keyring/" + SW_VERSION
-KEYRING_PERMDIR = KEYRING_PATH
+KEYRING_DIR_PATH = LUKS_FS + "/.keyring"
+KEYRING_PATH = LUKS_FS + "/.keyring/" + SW_VERSION
+KEYRING_SECRET_PATH = KEYRING_PATH + "/python_keyring/" + ".keyring_secret"
+
+KEYRING_SCRIPT_BASE = PLATFORM_PATH + "/.keyring/"
+KEYRING_SCRIPT_DIR = KEYRING_SCRIPT_BASE + SW_VERSION
+KEYRING_SCRIPT_FILE = KEYRING_SCRIPT_DIR + '/.CREDENTIAL'
 
 # Kubernetes path
 KUBERNETES_CONF_PATH = "/etc/kubernetes"

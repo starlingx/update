@@ -57,11 +57,26 @@ def main():
     if action == 'delete':
         try:
             clean_up_deployment_data(major_release)
+            clean_up_luks_keyring(major_release)
             restart_etcd_service()
         except Exception as e:
             LOG.exception("Error: {}".format(e))
             res = 1
     return res
+
+
+def clean_up_luks_keyring(major_release):
+    """
+    Clean up old LUKS keyring data after deployment deletion.
+    :param major_release: Major release to be deleted.
+    """
+    luks_keyring_path = os.path.join(
+        "/var/luks/stx/luks_fs/controller/.keyring",
+        major_release
+    )
+    if os.path.exists(luks_keyring_path):
+        shutil.rmtree(luks_keyring_path)
+        LOG.info("LUKS keyring removed: %s", luks_keyring_path)
 
 
 def clean_up_deployment_data(major_release):

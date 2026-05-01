@@ -127,9 +127,9 @@ class DeployStart:
             script_path = "/usr/bin/software-migrate"
             cmd = ["/usr/sbin/chroot", self.SYSROOT_DIR, script_path,
                    self._from_version, self._to_version, self._postgres_port]
-            subprocess.run(cmd, check=True)
-        except subprocess.CalledProcessError:
-            LOG.error("Failed to migrate data")
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            LOG.error(f"Failed to migrate data: {e.stderr}")
             raise
         LOG.info("Data migration completed")
 

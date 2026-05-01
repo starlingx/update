@@ -22,7 +22,6 @@ import psycopg2
 # have been applied, so only the static entries from tsconfig can be used.
 # (the platform.conf file will not have been updated with dynamic values).
 import software.config as cfg
-from software.utilities.constants import KEYRING_PERMDIR
 from software.utilities.constants import PLATFORM_PATH
 from software.utilities import constants
 
@@ -201,7 +200,6 @@ def get_db_connection(hiera_db_records, database):
 def get_password_from_keyring(service, username):
     """Retrieve password from keyring"""
     password = ""
-    os.environ["XDG_DATA_HOME"] = KEYRING_PERMDIR
     try:
         password = keyring.get_password(service, username)
     except Exception as e:
@@ -209,8 +207,6 @@ def get_password_from_keyring(service, username):
                       "for service %s, username %s: %s" %
                       (service, username, e))
         raise
-    finally:
-        del os.environ["XDG_DATA_HOME"]
     return password
 
 
