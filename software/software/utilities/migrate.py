@@ -842,16 +842,20 @@ def migrate_databases(shared_services, db_credentials, port,
                 # superset of what both the previous and next release can
                 # utilize, and create triggers to facilitate the live
                 # migration process.
-                #
-                # MIGRATE - will perform the data migration, while still]
-                # preserving the old schema
                 ('keystone',
                  'keystone-manage --config-file ' +
-                 '/etc/keystone/keystone-dbsync.conf db_sync --expand'),
-                ('keystone',
-                 'keystone-manage --config-file ' +
-                 '/etc/keystone/keystone-dbsync.conf db_sync --migrate'),
+                 '/etc/keystone/keystone-dbsync.conf db_sync --expand')
             ]
+            # MIGRATE - will perform the data migration, while still
+            # preserving the old schema. Only needed on bullseye.
+            # In migrate, 'software' is running on the to_side filesystem,
+            # so get_debian_version_codename will give use the to_side codename.
+            if utils.get_debian_version_codename() == "bullseye":
+                migrate_commands += [
+                    ('keystone',
+                     'keystone-manage --config-file ' +
+                     '/etc/keystone/keystone-dbsync.conf db_sync --migrate')
+                ]
         else:
             migrate_commands += [
                 # In simplex we're the only node so we can do an offline
