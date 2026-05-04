@@ -53,7 +53,9 @@ def do_host_list(cc, args):
 
 
 @utils.arg('deployment',
-           help='Verify if prerequisites are met for this Deployment ID')
+           nargs='?',
+           default=None,
+           help='Deployment ID (can be none if exists a system-deploy entity)')
 @utils.arg('-f',
            '--force',
            action='store_true',
