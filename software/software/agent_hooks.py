@@ -762,23 +762,6 @@ class CreateUSMUpgradeInProgressFlag(BaseHook):
             LOG.info("Created %s flag" % flag_file)
 
 
-# TODO(mdecastr): Only required in stx 12. Remove in future releases.
-# NOTE(bqian): this may still be applicable for 26.09 rollback to 25.09
-class CreateKubeApiserverPortUpdatedFlag(BaseHook):
-    def __init__(self, attrs):
-        super().__init__(attrs)
-        self.KUBE_APISERVER_PORT_UPDATED_FLAG = \
-            os.path.join(BaseHook.PLATFORM_CONF_PATH, ".upgrade_kube_apiserver_port_updated")
-
-    def run(self):
-        if (self._to_release == '25.09' and
-                self.get_platform_conf("nodetype") == self.CONTROLLER):
-            flag_file = "%s/%s" % (self.TO_RELEASE_OSTREE_DIR,
-                                   self.KUBE_APISERVER_PORT_UPDATED_FLAG)
-            with open(flag_file, "w") as _:
-                LOG.info("Created %s flag" % flag_file)
-
-
 class DeleteControllerFeedRemoteHook(BaseHook):
     """
     This hook deletes the controller-feed ostree remote for non-controller
@@ -914,63 +897,53 @@ class KubeletUpgradeHook(BaseHook):
             raise ex
 
 
-# TODO(rjosemat): Only required in stx 11 and 12. Remove in future releases.
-class PuppetControllerYamlCopier(BaseHook):
+class PuppetHieradataUpdate(BaseHook):
+    """
+    Replace puppet hieradata files with the to-release versions.
+    """
 
-    def __init__(self, attrs):
-        super().__init__(attrs)
-        self.source_file = ("%s/usr/etc/puppet/hieradata/controller.yaml"
-                            % self.TO_RELEASE_OSTREE_DIR)
-        self.destination_file = ("%s/etc/puppet/hieradata/controller.yaml"
-                                 % self.TO_RELEASE_OSTREE_DIR)
-        self.current_file = "/etc/puppet/hieradata/controller.yaml"
+    HIERADATA_DIR = "etc/puppet/hieradata"
+    USR_HIERADATA_DIR = os.path.join("usr", HIERADATA_DIR)
 
-    def should_run_update(self):
-        with open(self.destination_file) as f:
-            data = yaml.load(f)
-            large_limit = data.get("platform::memcached::params::max_memory_large")
-            small_limit = data.get("platform::memcached::params::max_memory_small")
-            if small_limit is None or large_limit is None:
-                LOG.info(f"File {self.destination_file} is missing memcached memory "
-                         "limit parameters. Will run update.")
-                return True
-            else:
-                LOG.info(f"File {self.destination_file} has memcached memory "
-                         "limit parameters. Skipping update.")
-                return False
-
-    def copy_file(self):
+    # Exception: region keys in controller.yaml need to carry on
+    # the deployment-specific value.
+    def replace_region_in_controller_yaml(self):
+        current_file = os.path.join("/", self.HIERADATA_DIR, "controller.yaml")
+        destination_file = self.get_new_deploy_path(current_file)
         try:
-            LOG.info(f"Replacing {self.destination_file} with {self.source_file}")
-            shutil.copyfile(self.source_file, self.destination_file)
-        except Exception:
-            LOG.exception(f"Fail to replace file {self.destination_file} with {self.source_file}")
-            raise
-
-    def replace_region(self):
-        try:
-            LOG.info(f"Updating region to {self.destination_file}")
-            with open(self.current_file) as f:
+            LOG.info(f"Updating region in {destination_file}")
+            with open(current_file) as f:
                 data = yaml.load(f)
                 current_region = data.get("platform::mtce::params::auth_region")
 
-            with open(self.destination_file, "r") as f:
+            with open(destination_file, "r") as f:
                 data = yaml.load(f)
                 data["platform::mtce::params::auth_region"] = current_region
                 data["keystone::endpoint::region"] = current_region
 
-            with open(self.destination_file, "w") as f:
+            with open(destination_file, "w") as f:
                 yaml.dump(data, f)
 
         except Exception:
-            LOG.exception(f"Fail to replace region to {self.destination_file}")
+            LOG.exception(f"Failed to replace region in {destination_file}")
             raise
 
+    def copy_hieradata_files(self):
+        src_dir = os.path.join(self.TO_RELEASE_OSTREE_DIR, self.USR_HIERADATA_DIR)
+        dst_dir = os.path.join(self.TO_RELEASE_OSTREE_DIR, self.HIERADATA_DIR)
+        for filename in glob.glob(os.path.join(src_dir, "*.yaml")):
+            dst = os.path.join(dst_dir, os.path.basename(filename))
+            try:
+                LOG.info(f"Replacing {dst} with {filename}")
+                shutil.copyfile(filename, dst)
+            except Exception:
+                LOG.exception(f"Failed to copy {filename} to {dst}")
+                raise
+
     def run(self):
-        LOG.info("Running PuppetControllerYamlCopier hook")
-        if self.should_run_update():
-            self.copy_file()
-            self.replace_region()
+        LOG.info("Running PuppetHieradataUpdate hook")
+        self.copy_hieradata_files()
+        self.replace_region_in_controller_yaml()
 
 
 class HookManager(object):
@@ -995,10 +968,10 @@ class HookManager(object):
             DeleteControllerFeedRemoteHook,
             FixedEtcMergeHook,
             KubeletUpgradeHook,
+            PuppetHieradataUpdate,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
-            PuppetControllerYamlCopier,
         ],
         MAJOR_RELEASE_ROLLBACK: [
             ReconfigureKernelHook,
@@ -1006,11 +979,10 @@ class HookManager(object):
             UpdateGrubConfigHook,
             DeleteControllerFeedRemoteHook,
             FixedEtcMergeRollBackHook,
-            CreateKubeApiserverPortUpdatedFlag,
+            PuppetHieradataUpdate,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
-            PuppetControllerYamlCopier,
         ],
     }
 
