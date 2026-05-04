@@ -109,14 +109,14 @@ PLUGINS = {
         FRAMEWORK_INIT: [
             SetServiceUserOptions(),
             ActivateKeystone(),
-            _shell_script_plugin("23-resize-systemcontroller-filesystems.sh",
+            _shell_script_plugin("23-resize-systemcontroller-filesystems.py",
                                  ACTION_ACTIVATE),
         ],
         FEATURE_PRE_APPS: [
             DisablePortierisWebhook(),
         ],
         K8S_APP_UPDATE: [
-            _shell_script_plugin("19-assert-docker-health.sh", ACTION_ACTIVATE),
+            _shell_script_plugin("19-assert-docker-health.py", ACTION_ACTIVATE),
             EnableFluxcdControllers(),
             K8sAppUpgrade(),
         ],
