@@ -966,6 +966,30 @@ class PuppetHieradataUpdate(BaseHook):
         self.replace_region_in_controller_yaml()
 
 
+class LdapConfigHook(BaseHook):
+    """
+    Update LDAP configurations during upgrade and rollback.
+    LDAP server files are replaced, and it is reconfigured from scratch by puppet.
+    """
+    LDAP_DIR = "etc/ldap"
+
+    def run(self):
+        # No need to reconfigure if both sides are running the same debian release
+        if self.get_from_release_debian_codename() == self.get_to_release_debian_codename():
+            LOG.info("Same Debian release, skipping LdapConfigHook")
+            return
+
+        LOG.info("Running LdapConfigHook")
+        src = os.path.join(self.TO_RELEASE_OSTREE_DIR, "usr", self.LDAP_DIR)
+        dst = os.path.join(self.TO_RELEASE_OSTREE_DIR, self.LDAP_DIR)
+        if os.path.isdir(src):
+            shutil.rmtree(dst, ignore_errors=True)
+            shutil.copytree(src, dst, symlinks=True)
+            LOG.info("Replaced %s with contents from %s", dst, src)
+        else:
+            LOG.warning("Source not found: %s", src)
+
+
 class HookManager(object):
     """
     Object to manage the execution of agent hooks
@@ -988,6 +1012,7 @@ class HookManager(object):
             DeleteControllerFeedRemoteHook,
             FixedEtcMergeHook,
             KubeletUpgradeHook,
+            LdapConfigHook,
             PuppetHieradataUpdate,
             # enable usm-initialize service for next
             # reboot only if everything else is done
@@ -999,6 +1024,7 @@ class HookManager(object):
             UpdateGrubConfigHook,
             DeleteControllerFeedRemoteHook,
             FixedEtcMergeRollBackHook,
+            LdapConfigHook,
             PuppetHieradataUpdate,
             # enable usm-initialize service for next
             # reboot only if everything else is done
