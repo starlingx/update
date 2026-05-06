@@ -283,10 +283,16 @@ class UpgradeHealthCheck(HealthCheck):
         """
         kube_versions = self._sysinv_client.kube_version.list()
         active_version = None
+        partial_versions = []
         for kv in kube_versions:
             if kv.state == "active":
                 active_version = kv.version
                 break
+            elif kv.state == "partial":
+                partial_versions.append(kv.version)
+        if active_version is None and partial_versions:
+            active_version = max(partial_versions)
+        LOG.info("Active (or greatest partial) k8s version: %s", active_version)
         supported_versions = self._get_supported_k8s_versions()
         success = active_version in supported_versions
         return success, active_version, supported_versions
