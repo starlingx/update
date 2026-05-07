@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-from contextlib import contextmanager
 import functools
 import logging
 import os
@@ -71,28 +70,21 @@ def configure_logging():
     root_logger.addHandler(main_log_handler)
 
 
-@contextmanager
-def temporary_lib_path(path):
-    if path not in sys.path:
-        to_remove = True
-        sys.path.insert(0, path)
-    else:
-        to_remove = False
-    try:
-        yield
-    finally:
-        if to_remove and path in sys.path:
-            sys.path.remove(path)
-
-
 def get_migration_scripts(plugin_dir, from_release, action):
     def get_plugins_mgr(plugin_dir):
-        module_path = os.path.dirname(plugin_dir)
-        with temporary_lib_path(module_path):
-            sys.path.append(module_path)
-            plugins_mgr = importlib.import_module("upgrade-scripts")
-
-        return plugins_mgr
+        module_init = os.path.join(plugin_dir, "__init__.py")
+        if os.path.isfile(module_init):
+            spec = importlib.util.spec_from_file_location(
+                "plugin_scripts",
+                module_init,
+            )
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
+            return module
+        else:
+            # In a patching deploy, plugin is optional.
+            return None
 
     if not os.path.isdir(plugin_dir):
         msg = "Folder %s does not exist" % plugin_dir
@@ -100,7 +92,10 @@ def get_migration_scripts(plugin_dir, from_release, action):
         raise Exception(msg)
 
     plugins_mgr = get_plugins_mgr(plugin_dir)
-    result = plugins_mgr.get_plugins(from_release, action)
+    if plugins_mgr:
+        result = plugins_mgr.get_plugins(from_release, action)
+    else:
+        result = []
     return result
 
 
