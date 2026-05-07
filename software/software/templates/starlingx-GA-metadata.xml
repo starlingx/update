@@ -1,10 +1,11 @@
 <?xml version="1.0" ?>
-<patch>
+<product>
   <id>starlingx-xxxPLATFORM_RELEASExxx.0</id>
   <sw_version>xxxPLATFORM_RELEASExxx.0</sw_version>
   <component>starlingx</component>
   <summary>STX xxxPLATFORM_RELEASExxx GA release</summary>
   <description>STX xxxPLATFORM_RELEASExxx major GA release</description>
+  <!-- TODO(heitormatsui) Remove legacy fields below after stx-13 -->
   <install_instructions/>
   <warnings/>
   <status>REL</status>
@@ -28,5 +29,8 @@
   <requires>
   </requires>
   <semantics/>
+  <metapackages>
+    xxxMETAPACKAGESxxx
+  </metapackages>
   <packages>xxxPACKAGESxxx</packages>
-</patch>
+</product>

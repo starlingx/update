@@ -14,7 +14,7 @@ export METADATA_FILE="starlingx-${PLATFORM_RELEASE}.0-metadata.xml"
 	dh $@ --with python3 --buildsystem=pybuild
 
 override_dh_auto_build:
-	cp service-files/starlingx-GA-metadata.xml ${METADATA_FILE}
+	cp software/templates/starlingx-GA-metadata.xml ${METADATA_FILE}
 	sed -i "s/xxxPLATFORM_RELEASExxx/${PLATFORM_RELEASE}/g" ${METADATA_FILE}
 	sed -i "s/xxxPLATFORM_RELEASExxx/${PLATFORM_RELEASE}/g" software/utilities/constants.py
 
