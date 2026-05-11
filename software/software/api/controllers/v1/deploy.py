@@ -30,6 +30,8 @@ class DeployController(RestController):
         'delete': ['DELETE'],
         'software_upgrade': ['GET'],
         'software_sync': ['POST'],
+        'select': ['POST'],
+        'unselect': ['POST'],
     }
 
     @expose(method='POST', template='json')
@@ -130,3 +132,17 @@ class DeployController(RestController):
         reload_release_data()
         result = sc.software_sync()
         return {"result": result}
+
+    @expose(method='POST', template='json')
+    def select(self, **kwargs):
+        reload_release_data()
+        result = sc.software_deploy_select_api(**kwargs)
+        sc.software_sync()
+        return result
+
+    @expose(method='POST', template='json')
+    def unselect(self, **kwargs):
+        reload_release_data()
+        result = sc.software_deploy_unselect_api(**kwargs)
+        sc.software_sync()
+        return result

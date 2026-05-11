@@ -50,49 +50,59 @@ class SWRelease(object):
         if self.is_product_release:
             state = self.metapackage_based_state()
         else:
-            state = self.legacy_based_state()
+            state = self.directory_based_state()
         return state
 
     def metapackage_based_state(self):
         mp_states = []
-        mp_deployable = []
         for _, metadata in self.metapackages.items():
             mp_states.append(metadata["state"])
-            mp_deployable.append(metadata["deployable"] == "Y")
 
-        if all(state == states.AVAILABLE for state in mp_states):
+        if all(state in [states.AVAILABLE, states.DEPLOY_SELECTED] for state in mp_states):
             return states.AVAILABLE
         elif all(state == states.UNAVAILABLE for state in mp_states):
             return states.UNAVAILABLE
-        elif all(state == states.DEPLOYED for state in mp_states):
+        elif all(state in [states.DEPLOYED, states.REMOVE_SELECTED] for state in mp_states):
             return states.DEPLOYED
         elif states.DEPLOYING in mp_states:
             return states.DEPLOYING
         elif states.REMOVING in mp_states:
             return states.REMOVING
-        elif states.AVAILABLE in mp_states and states.DEPLOYED in mp_states:
+        elif (any(mp in mp_states for mp in (states.AVAILABLE, states.DEPLOY_SELECTED)) and
+              states.DEPLOYED in mp_states):
+            return states.DEPLOYED_PARTIAL
+        elif (any(mp in mp_states for mp in (states.DEPLOYED, states.REMOVE_SELECTED)) and
+              states.AVAILABLE in mp_states):
             return states.DEPLOYED_PARTIAL
         return None  # unexpected combination of metapackage states
 
-    def legacy_based_state(self):
+    def directory_based_state(self):
         return self.metadata.get('state')
 
     @staticmethod
     def _ensure_state_transition(to_state):
-        to_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP[to_state]
-        if not os.path.isdir(to_dir):
-            try:
-                os.makedirs(to_dir, mode=0o755, exist_ok=True)
-            except FileExistsError:
-                error = "Cannot create directory %s" % to_dir
-                raise FileSystemError(error)
+        # Ignore non-existing states on the dictionaries
+        dirs = filter(None, [
+            states.RELEASE_STATE_TO_DIR_MAP.get(to_state),
+            states.COMPONENT_RELEASE_STATE_TO_DIR_MAP.get(to_state),
+        ])
+        for to_dir in dirs:
+            if not os.path.isdir(to_dir):
+                try:
+                    os.makedirs(to_dir, mode=0o755, exist_ok=True)
+                except FileExistsError:
+                    error = "Cannot create directory %s" % to_dir
+                    raise FileSystemError(error)
 
     def update_state(self, state):
         LOG.info("%s state from %s to %s" % (self.id, self.state, state))
         SWRelease._ensure_state_transition(state)
+        state_dir_map = states.RELEASE_STATE_TO_DIR_MAP
+        if self.is_metapackage_release:
+            state_dir_map = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP
 
-        to_dir = states.RELEASE_STATE_TO_DIR_MAP[state]
-        from_dir = states.RELEASE_STATE_TO_DIR_MAP[self.state]
+        to_dir = state_dir_map[state]
+        from_dir = state_dir_map[self.state]
         try:
             shutil.move("%s/%s-metadata.xml" % (from_dir, self.id),
                         "%s/%s-metadata.xml" % (to_dir, self.id))
@@ -268,7 +278,7 @@ class SWRelease(object):
 
     @property
     def deployable(self):
-        return self._get_by_key('deployable')
+        return self._get_by_key('deployable') == "Y"
 
     @property
     def metapackages(self):
@@ -433,6 +443,8 @@ class SWReleaseCollection(object):
     def get_release_by_id(self, rel_id):
         if rel_id in self._sw_releases:
             return self._sw_releases[rel_id]
+        if rel_id in self._sw_metapackages:
+            return self._sw_metapackages[rel_id]
         return None
 
     def __getitem__(self, rel_id):
@@ -450,6 +462,25 @@ class SWReleaseCollection(object):
             rel_data = self._sw_releases[rel_id]
             if rel_data.sw_release == sw_release:
                 return rel_data.id
+        return None
+
+    def get_product_release_by_id(self, product_id):
+        if product_id in self._sw_releases:
+            return self._sw_releases[product_id]
+        return None
+
+    def get_metapackage_release_by_id(self, metapackage_id):
+        if metapackage_id in self._sw_metapackages:
+            return self._sw_metapackages[metapackage_id]
+        return None
+
+    def get_metapackages_id_by_product_id(self, product_id):
+        if product_id in self._sw_releases:
+            product_data = self._sw_releases[product_id]
+            metapackages = []
+            for mp in product_data.metapackages:
+                metapackages.append(mp)
+            return metapackages
         return None
 
     def iterate_releases_by_state(self, state):
@@ -508,6 +539,19 @@ class SWReleaseCollection(object):
                         latest_deployed[mp_data.component] = mp_data
             for mp in latest_deployed:
                 yield latest_deployed[mp]
+
+    def iterate_metapackages_by_state(self, filter_states):
+        '''
+        Return iteration of metapackage releases matching specified state.
+        Sorted by id in ascending order
+        '''
+        if not isinstance(filter_states, list):
+            filter_states = [filter_states]
+        sorted_list = sorted(self._sw_metapackages)
+        for rel_id in sorted_list:
+            rel_data = self._sw_metapackages[rel_id]
+            if rel_data.state in filter_states:
+                yield rel_data
 
     def update_state(self, list_of_releases, state):
         for release_id in list_of_releases:

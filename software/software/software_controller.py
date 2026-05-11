@@ -49,6 +49,7 @@ from software.deploy_host_state import DeployHostState
 from software.deploy_state import DeployState
 from software.deploy_state import require_deploy_state
 from software.exceptions import APTOSTreeCommandFail
+from software.exceptions import FileSystemError
 from software.exceptions import HostAgentUnreachable
 from software.exceptions import HostNotFound
 from software.exceptions import InternalError
@@ -3269,6 +3270,241 @@ class PatchController(PatchService):
         """
         system_deploy = self._get_system_deploy()
         return system_deploy
+
+    def _validate_releases_for_select(self, releases):
+        """
+        Validate if a release list is valid for deployment selection
+        """
+        product_releases = []
+        metapackage_releases = []
+        invalid_releases = []
+
+        LOG.info(f"Validating release list for select: {', '.join(releases)}")
+
+        # verify if release list was passed to select
+        if not releases:
+            raise ReleaseInvalidRequest("Release list must not be empty")
+
+        # verify if releases are valid
+        for release in releases:
+            if self.release_collection.get_product_release_by_id(release):
+                product_releases.append(release)
+            elif self.release_collection.get_metapackage_release_by_id(release):
+                metapackage_releases.append(release)
+            else:
+                invalid_releases.append(release)
+        if invalid_releases:
+            raise ReleaseInvalidRequest(
+                f"Releases not found: {', '.join(invalid_releases)}")
+
+        # verify if release list doesn't contain both product and metapackage releases
+        if product_releases and metapackage_releases:
+            raise ReleaseInvalidRequest(
+                f"Cannot mix product releases ({', '.join(product_releases)}) "
+                f"and metapackages ({', '.join(metapackage_releases)}) "
+                f"in a single select request")
+
+        # verify if a single product release was passed
+        if len(product_releases) > 1:
+            raise ReleaseInvalidRequest(
+                f"Only one product release can be selected at a time, "
+                f"but received {len(product_releases)}: {', '.join(product_releases)}")
+
+        # verify if product release has metapackages and get its metapackages
+        product_metapackages = []
+        for release in product_releases:
+            release_data = self.release_collection.get_release_by_id(release)
+            if not release_data.is_product_release:
+                raise ReleaseInvalidRequest(f"Product release {release} doesn't have metapackage support")
+            product_metapackages = self.release_collection.get_metapackages_id_by_product_id(release)
+
+        metapackage_releases.extend(product_metapackages)
+
+        # metapackage release specific checks
+        apply = True
+        if metapackage_releases:
+            metapackage_versions = set()
+            undeployable_metapackages = []
+
+            # verify if metapackages state is in a valid expected state
+            for mp in metapackage_releases:
+                mp_data = self.release_collection.get_metapackage_release_by_id(mp)
+                metapackage_versions.add(mp_data.sw_release)
+                # verify if metapackage is undeployable
+                if not mp_data.deployable and mp not in product_metapackages:
+                    undeployable_metapackages.append(mp)
+
+            if undeployable_metapackages:
+                raise ReleaseInvalidRequest(
+                    f"Metapackages {', '.join(sorted(undeployable_metapackages))} "
+                    "can be deployed only by selecting its product release"
+                )
+
+            # verify if all metapackages belong to the same product release
+            if len(metapackage_versions) > 1:
+                raise ReleaseInvalidRequest(
+                    f"Selected metapackages must belong to the same product release, "
+                    f"but found versions: {', '.join(sorted(metapackage_versions))}")
+
+            # verify if the user is selecting to apply or remove metapackages
+            apply = True
+            current_version = self.release_collection.running_release.sw_release
+            target_version = version.parse(metapackage_versions.pop())
+            if target_version < version.parse(current_version):
+                apply = False
+
+        LOG.info(f"Metapackage release list validated successfully: {', '.join(metapackage_releases)}")
+        return metapackage_releases, apply
+
+    # TODO(heitormatsui): add support for the pre-upgrade-deploy parameter for
+    #  the upgrade scenario using product releases containing metapackages
+    def _deploy_select(self, **kwargs):
+        """
+        Select metapackages to be deployed
+        """
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
+
+        releases = list(set(kwargs.get("releases", [])))  # Remove duplicates
+
+        if not releases:
+            msg_error += "No releases were passed for select, unable to proceed"
+            return None, dict(info=msg_info, warning=msg_warning, error=msg_error)
+        else:
+            # Validate provided releases
+            try:
+                metapackage_releases, apply = self._validate_releases_for_select(releases)
+            except ReleaseInvalidRequest as e:
+                LOG.error(f"Error validating releases for select: {str(e)}")
+                msg_error += f"{str(e)}\n"
+                return None, dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Get selected metapackages and determine which ones need unselect
+        selected_metapackages = self.release_collection.iterate_metapackages_by_state(
+            states.COMPONENT_SELECTED_STATES)
+        unselect_metapackages = [mp.id for mp in selected_metapackages if mp.id not in metapackage_releases]
+
+        # Unselect previously selected metapackages
+        if unselect_metapackages:
+            _, unselect_dict = self._deploy_unselect(**{"releases": unselect_metapackages})
+            msg_info += unselect_dict.get("info")
+            msg_warning += unselect_dict.get("warning")
+            msg_error += unselect_dict.get("error")
+
+        # Select metapackages
+        for mp in metapackage_releases:
+            mp_data = self.release_collection.get_metapackage_release_by_id(mp)
+            rel_state = ReleaseState(release_ids=[mp])
+            actions = {
+                (states.AVAILABLE, True): rel_state.deploy_selected,
+                (states.DEPLOYED, False): rel_state.remove_selected,
+            }
+            try:
+                actions[(mp_data.state, apply)]()
+            except KeyError:
+                if mp_data.state in states.COMPONENT_SELECTED_STATES:
+                    msg = f"Metapackage {mp} is already selected"
+                    LOG.info(msg)
+                    msg_info += msg + "\n"
+                else:
+                    msg = f"Metapackage {mp} is not in a valid state for select"
+                    LOG.error(msg)
+                    msg_error += msg + "\n"
+            except FileSystemError as e:
+                msg = f"General failure while selecting the metapackages: {str(e)}"
+                LOG.error(msg)
+                msg_error += msg + "\n"
+            else:
+                msg = f"Selected {mp} metapackage for deployment"
+                LOG.info(msg)
+                msg_info += msg + "\n"
+
+        return metapackage_releases, dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+    def software_deploy_select_api(self, **kwargs):
+        _, result = self._deploy_select(**kwargs)
+        return result
+
+    def _validate_releases_for_unselect(self, releases):
+        metapackage_releases = []
+        invalid_releases = []
+
+        LOG.info(f"Validating release list for unselect: {', '.join(releases)}")
+
+        for release in releases:
+            rel_data = self.release_collection.get_release_by_id(release)
+            # Verify if release is invalid
+            if rel_data is None:
+                invalid_releases.append(release)
+            else:
+                # Get metapackages
+                if rel_data.is_product_release:
+                    prd_metapackages = self.release_collection.get_metapackages_id_by_product_id(release)
+                    metapackage_releases.extend(prd_metapackages)
+                elif rel_data.is_metapackage_release:
+                    metapackage_releases.append(release)
+
+        if invalid_releases:
+            raise ReleaseInvalidRequest(f"Releases not found: {', '.join(invalid_releases)}")
+
+        LOG.info(f"Metapackage release list validated successfully: {', '.join(metapackage_releases)}")
+
+        return metapackage_releases
+
+    def _deploy_unselect(self, **kwargs):
+        """
+        Unselect metapackages to be deployed
+        """
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
+
+        releases = list(set(kwargs.get("releases", [])))  # Remove duplicates
+        unselect_all = kwargs.get("unselect_all")
+
+        # Get metapackages to unselect
+        if unselect_all:
+            metapackage_releases = []
+            for mp_data in self.release_collection.iterate_metapackages_by_state(states.COMPONENT_SELECTED_STATES):
+                metapackage_releases.append(mp_data.id)
+        else:
+            # Validate the provided releases
+            try:
+                metapackage_releases = self._validate_releases_for_unselect(releases)
+            except ReleaseInvalidRequest as e:
+                LOG.error(f"Error validating releases for unselect: {str(e)}")
+                msg_error += f"{str(e)}\n"
+                return None, dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Unselect metapackages
+        for mp in metapackage_releases:
+            mp_data = self.release_collection.get_metapackage_release_by_id(mp)
+            rel_state = ReleaseState(release_ids=[mp])
+            actions = {
+                states.DEPLOY_SELECTED: rel_state.deploy_unselected,
+                states.REMOVE_SELECTED: rel_state.remove_unselected,
+            }
+            try:
+                actions[mp_data.state]()
+            except KeyError:
+                msg = f"Metapackage {mp} is not selected"
+                LOG.info(msg)
+                msg_info += msg + "\n"
+            except FileSystemError as e:
+                msg = f"General failure while unselecting the metapackages: {str(e)}"
+                LOG.error(msg)
+                msg_error += msg + "\n"
+            else:
+                msg = f"Unselected metapackage {mp} for deployment"
+                LOG.info(msg)
+                msg_info += msg + "\n"
+
+        return metapackage_releases, dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+    def software_deploy_unselect_api(self, **kwargs):
+        _, result = self._deploy_unselect(**kwargs)
+        return result
 
     def software_deploy_precheck_api(self, deployment: str, force: bool = False, region_name=None,
                                      **kwargs) -> dict:

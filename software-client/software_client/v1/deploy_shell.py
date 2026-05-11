@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024 Wind River Systems, Inc.
+# Copyright (c) 2024-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -50,6 +50,45 @@ def do_host_list(cc, args):
         utils.display_info(resp)
 
     return rc
+
+
+@utils.arg('releases',
+           nargs='+',
+           help='List of releases (metapackages or product) to select for deployment')
+@utils.arg('--pre-upgrade-deploy',
+           default=False,
+           required=False,
+           action='store_true',
+           help='Select metapackages required to deploy before upgrading to the specified release')
+def do_select(cc, args):
+    """Select metapackages to deploy"""
+    resp, data = cc.deploy.select(args)
+    if args.debug:
+        utils.print_result_debug(resp, data)
+
+    utils.display_info(resp)
+
+    return utils.check_rc(resp, data)
+
+
+@utils.arg('releases',
+           nargs='*',
+           default=None,
+           help='List of releases (metapackages or product) to unselect for deployment')
+@utils.arg('--all',
+           default=False,
+           required=False,
+           action='store_true',
+           help='Unselect all selected metapackages')
+def do_unselect(cc, args):
+    """Unselect metapackages to deploy"""
+    resp, data = cc.deploy.unselect(args)
+    if args.debug:
+        utils.print_result_debug(resp, data)
+
+    utils.display_info(resp)
+
+    return utils.check_rc(resp, data)
 
 
 @utils.arg('deployment',
