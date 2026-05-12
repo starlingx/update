@@ -54,7 +54,7 @@ PLUGINS = {
     },
     ACTION_ACTIVATE: {
         FRAMEWORK_INIT: [
-            "31-set-ignore-lockout-failure-attempts.py",
+            "31-set-service-user-options.py",
             "08-activate-keystone.py",
             "23-resize-systemcontroller-filesystems.sh",],
         FEATURE_PRE_APPS: [
