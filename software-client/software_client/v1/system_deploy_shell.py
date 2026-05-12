@@ -24,6 +24,11 @@ def do_init(cc, args):
     return utils.check_rc(resp, data)
 
 
+@utils.arg('--uuid',
+           dest='uuid',
+           action='store_true',
+           required=False,
+           help='Boolean value for showing the uuid of the system deploy state')
 def do_show(cc, args):
     """Show the current system deploy state"""
     resp, data = cc.system_deploy.show(args)
@@ -35,9 +40,15 @@ def do_show(cc, args):
     if rc == 0:
         if len(data) == 0:
             print("No system deploy in progress.")
-        else:
+        elif args.uuid:
             header_data_list = {
                 "System Deploy ID": "id",
+                "To Release": "to_release",
+                "To K8S Release": "to_k8s_version",
+                "State": "state"}
+            utils.display_result_list(header_data_list, data)
+        else:
+            header_data_list = {
                 "To Release": "to_release",
                 "To K8S Release": "to_k8s_version",
                 "State": "state"}
