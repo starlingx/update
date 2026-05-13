@@ -25,6 +25,15 @@ from software import utils
 LOG = logging.getLogger('main_logger')
 
 
+class MetapackageController(RestController):
+    @expose(method='GET', template='json')
+    def get_all(self, **kwargs):
+        reload_release_data()
+        kwargs["metapackages"] = True
+        sd = sc.software_release_query_cached(**kwargs)
+        return sd
+
+
 class ReleaseController(RestController):
     _custom_actions = {
         'commit': ['POST'],
@@ -33,6 +42,7 @@ class ReleaseController(RestController):
         'is_committed': ['GET'],
         'is_deployed': ['GET'],
     }
+    metapackage = MetapackageController()
 
     @expose(method='GET', template='json')
     def get_all(self, **kwargs):

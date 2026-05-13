@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2015-2024 Wind River Systems, Inc.
+# Copyright (c) 2015-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -28,7 +28,7 @@ def do_list(cc, args):
     rc = utils.check_rc(resp, data)
     if rc == 0:
         header_data_list = {"Release": "release_id", "RR": "reboot_required", "State": "state"}
-        sorted_data = sorted(data, key=lambda x: x['release_id'].translate(
+        sorted_data = sorted(data, key=lambda x: x["release_id"].translate(
             dict.fromkeys(map(ord, "-_."), "-")))
         utils.display_result_list(header_data_list, sorted_data)
     else:
@@ -45,6 +45,11 @@ def do_list(cc, args):
            default=False,
            action='store_true',
            help='list packages contained in the release')
+@utils.arg('--metapackages',
+           required=False,
+           default=False,
+           action='store_true',
+           help='list metapackages contained in the release')
 def do_show(cc, args):
     """Show the software release"""
     resp, data = cc.release.show(args)
@@ -55,6 +60,8 @@ def do_show(cc, args):
     if rc == 0:
         if not args.packages and 'packages' in data:
             del data['packages']
+        if not args.metapackages and 'metapackages' in data:
+            del data['metapackages']
         utils.display_detail_result(data)
     else:
         utils.display_info(resp)
@@ -148,7 +155,6 @@ def _print_upload_result(resp, data, debug):
 
     rc = utils.check_rc(resp, data)
 
-    utils.display_info(resp)
     if rc == 0:
         if data["upload_info"]:
             upload_info = data["upload_info"]
@@ -158,6 +164,7 @@ def _print_upload_result(resp, data, debug):
 
             header_data_list = {"Uploaded File": "file", "Release": "release"}
             utils.display_result_list(header_data_list, data_list)
+    utils.display_info(resp)
     return rc
 
 

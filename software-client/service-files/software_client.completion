@@ -15,6 +15,8 @@ _software_deploy_opts="" # lazy init
 _software_deploy_flags="" # lazy init
 _software_system_deploy_opts="" # lazy init
 _software_system_deploy_flags="" # lazy init
+_software_metapackage_opts="" # lazy init
+_software_metapackage_flags="" # lazy init
 _software_opts_exp="" # lazy init
 
 _software()
@@ -46,6 +48,12 @@ _software()
         _software_system_deploy_flags="`echo " $kbc" | sed -e "s/ [^-][^-][a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
     fi
 
+    if [ "x$_software_metapackage_opts" == "x" ] && [ "$cmd" == "metapackage" ] ; then
+        kbc="`software metapackage bash-completion | sed -e "s/ -h / /"`"
+        _software_metapackage_opts="`echo "$kbc" | sed -e "s/--[a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
+        _software_metapackage_opts="`echo " $kbc" | sed -e "s/ [^-][^-][a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
+    fi
+
     if [ "$cmd" == "system-deploy" ] ; then
         if [[ " ${_software_system_deploy_opts} " == *" $prev "* && "$prev" != "help" ]] ; then
             COMPREPLY=($(compgen -W "${_software_system_deploy_flags}" -- ${cur}))
@@ -57,6 +65,12 @@ _software()
             COMPREPLY=($(compgen -W "${_software_deploy_flags}" -- ${cur}))
         else
             COMPREPLY=($(compgen -W "${_software_deploy_opts}" -- ${cur}))
+        fi
+    elif [ "$cmd" == "metapackage" ] ; then
+        if [[ " ${_software_metapackage_opts} " == *" $prev "* && "$prev" != "help" ]] ; then
+            COMPREPLY=($(compgen -W "${_software_metapackage_flags}" -- ${cur}))
+        else
+            COMPREPLY=($(compgen -W "${_software_metapackage_opts}" -- ${cur}))
         fi
     else
         if [[ " ${COMP_WORDS[@]} " =~ " "$_software_opts_exp" " && "$prev" != "help" ]] ; then

@@ -16,6 +16,7 @@
 
 
 from software_client.v1 import release
+from software_client.v1 import metapackage
 from software_client.v1 import deploy
 from software_client.v1 import system_deploy
 
@@ -31,5 +32,6 @@ class Client(object):
         self.http_client = http_adaptor
 
         self.release = release.ReleaseManager(self.http_client)
+        self.metapackage = metapackage.MetapackageManager(self.http_client)
         self.deploy = deploy.DeployManager(self.http_client)
         self.system_deploy = system_deploy.SystemDeployManager(self.http_client)

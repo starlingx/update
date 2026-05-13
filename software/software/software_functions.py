@@ -232,6 +232,21 @@ class ReleaseData(object):
     """
 
     def __init__(self):
+        #
+        #  The state map defines each state for the respective legacy or component directory
+        #  where the release metadata is stored.
+        #
+        self.state_map = {
+            # Legacy States
+            states.AVAILABLE: [states.AVAILABLE_DIR, states.COMPONENT_AVAILABLE_DIR],
+            states.UNAVAILABLE: [states.UNAVAILABLE_DIR, states.COMPONENT_UNAVAILABLE_DIR],
+            states.DEPLOYING: [states.DEPLOYING_DIR, states.COMPONENT_DEPLOYING_DIR],
+            states.DEPLOYED: [states.DEPLOYED_DIR, states.COMPONENT_DEPLOYED_DIR],
+            states.REMOVING: [states.REMOVING_DIR, states.COMPONENT_REMOVING_DIR],
+            # Component States
+            states.DEPLOY_SELECTED: [states.COMPONENT_DEPLOY_SELECTED_DIR],
+            states.REMOVE_SELECTED: [states.COMPONENT_REMOVE_SELECTED_DIR],
+        }
         self._reset()
 
     def _reset(self):
@@ -312,9 +327,78 @@ class ReleaseData(object):
 
         return self.parse_metadata_string(text, state)
 
+    def _parse_metadata_tag(self, file, tag, target_dict, true_value="Y", default_value="N"):
+        """
+        Parse a specific tag from a XML file to a dictionary. If the tag value differs from the
+        expected value, the default value is addressed in the dictionary
+        :param file: XML file
+        :param tag: XML tag
+        :param target_dict: Dictionary updated with the parsed data
+        :param true_value: Expected value
+        :param default_value: Default value
+        """
+        value = file.findtext(tag)
+        target_dict[tag] = true_value if value == true_value else default_value
+
+    def _parse_metadata_array_tag(self, file, tag, tag_id, target_dict):
+        """
+        Parse a specific array tag from a XML file to a dictionary
+        :param file: XML file
+        :param tag: XML tag
+        :param tag_id: XML tag identifier
+        :param target_dict: Dictionary updated with the parsed data
+        """
+        for xml_tag in file.findall(tag):
+            for xml_tag_id in xml_tag.findall(tag_id):
+                target_dict[tag].append(xml_tag_id.text)
+
+    def _bulk_parse_metadata_tags(self, file, tags: list, target_dict):
+        """
+        Parse multiple tags in a specific XML file to a dictionary
+        :param file: XML file
+        :param tags: list of XML tags
+        :param target_dict: Dictionary updated with the parsed data
+        """
+        for tag in tags:
+            value = file.findtext(tag)
+            if value is not None:
+                target_dict[tag] = value
+
+    def _parse_ostree_contents(self, file, target_dict):
+        """
+        Parse the ostree section in a specific XML file
+        :param file: XML file
+        :param target_dict: Dictionary updated with the parsed data
+        """
+        for content in file.findall("contents/ostree"):
+            target_dict["number_of_commits"] = content.findtext("number_of_commits")
+            target_dict["base"] = {
+                "commit": content.findtext("base/commit"),
+                "checksum": content.findtext("base/checksum"),
+            }
+            for i in range(int(target_dict["number_of_commits"])):
+                key = "commit%s" % (i + 1)
+                target_dict[key] = {
+                    "commit": content.findtext("%s/commit" % key),
+                    "checksum": content.findtext("%s/checksum" % key),
+                }
+
+    def _get_release_by_sw_version(self, sw_version):
+        """Search and return release matching given sw_version"""
+        for release_id in self.metadata:
+            if self.metadata[release_id]["sw_version"] == sw_version:
+                return release_id
+        return None
+
     def parse_metadata_string(self, text, state=None):
-        root = ElementTree.fromstring(text)
+        """
+        Parse the metadata.xml file based in the Legacy, Product or
+        Metapackage releases structure
+        :param text: XML text
+        :param state: Release state
+        """
         #
+        #    Legacy Patch Release (before stx.13.0):
         #    <patch>
         #        <id>PATCH_0001</id>
         #        <summary>Brief description</summary>
@@ -326,25 +410,106 @@ class ReleaseData(object):
         #        <reboot_required/>
         #    </patch>
         #
+        #    Product Release (stx.13.0 onwards):
+        #    <product>
+        #      <id>starlingx-13.0</id>
+        #      <sw_version>13.0</sw_version>
+        #      <metapackages>
+        #        <pkg>k8s</pkg>
+        #        <pkg>base</pkg>
+        #        <pkg>infra</pkg>
+        #        <pkg>distcloud</pkg>
+        #      </metapackages>
+        #    </product>
+        #
+        #    Metapackage Release (stx.13.0 onwards):
+        #    <id>swmgmt_13.0</id>
+        #    <sw_version>13.0<sw_version>
+        #    <summary/>
+        #    <description/>
+        #    <reboot_required>Y</reboot_required>
+        #    <deployable>Y</deployable>
+        #    <data_migration>Y</data_migration>
+        #    <ostree>
+        #        <base>
+        #        <commit/>
+        #        <checksum/>
+        #        </base>
+        #        <commit1>
+        #        <commit>44.....3d42e</commit>
+        #        <checksum>17cd4d.....77</checksum>
+        #        </commit1>
+        #    </ostree>
+        #    <requires/>
+        #    <packages>
+        #        <deb>pkg1.deb</deb>
+        #        <deb>pkg2.deb</deb>
+        #        <deb>pkg3.deb</deb>
+        #        ...
+        #    </packages>
+        xml_file = ElementTree.fromstring(text)
+        release_id = None
+        metapackages = xml_file.find("metapackages")
+        if xml_file.tag == "product" and metapackages is not None:
+            # Product Release
+            release_id = xml_file.findtext("id")
+            if release_id is None:
+                LOG.error("Product metadata does not contain id tag")
+                return None
 
-        release_id = root.findtext("id")
-        if release_id is None:
-            LOG.error("Release metadata contains no id tag")
-            return None
+            self.metadata[release_id] = {}
+            self.contents[release_id] = {}
+            if state:
+                self.metadata[release_id]["state"] = state
+            sw_version = xml_file.findtext("sw_version")
+            if sw_version is None:
+                sw_version = "unknown"
 
-        self.metadata[release_id] = {}
+            self.metadata[release_id]["sw_version"] = sw_version
+            self.metadata[release_id]["metapackages"] = {}
+            metapackages = xml_file.find("metapackages")
+            if metapackages is not None:
+                for pkg in metapackages.findall("pkg"):
+                    if pkg.text is not None:
+                        self.metadata[release_id]["metapackages"][pkg.text] = {}
+        else:
+            # Legacy or Metapackage Release
+            xml_tags = ["status", "summary", "description"]
+            metadata_dict = {}
+            contents_dict = {}
+            if xml_file.tag == "metapackage":
+                # Metapackage Release
+                metapackage_id = xml_file.findtext("id")
+                if metapackage_id is None:
+                    LOG.error("Metapackage metadata does not contain id tag")
+                    return None
+                metapackage_name = metapackage_id.split("_")[0]
 
-        self.metadata[release_id]["state"] = state
+                sw_version = xml_file.findtext("sw_version")
+                if sw_version is None:
+                    LOG.error("Metapackage metadata does not contain sw_version tag")
+                    return None
+                release_id = self._get_release_by_sw_version(sw_version)
+                if release_id is None:
+                    LOG.error(f"No existing release matches {sw_version} version")
+                    return None
 
-        self.metadata[release_id]["sw_version"] = "unknown"
+                self.metadata[release_id]["metapackages"][metapackage_name] = {}
 
-        # commit is derived from apt-ostree command run in software deploy start
+                self.contents[release_id] = {}
+                self.contents[release_id]["metapackages"] = {}
+                self.contents[release_id]["metapackages"][metapackage_name] = {}
 
-        for key in ["status",
+                metadata_dict = self.metadata[release_id]["metapackages"][metapackage_name]
+                contents_dict = self.contents[release_id]["metapackages"][metapackage_name]
+
+                metadata_dict["state"] = state
+                self._parse_metadata_tag(xml_file, "deployable", metadata_dict)
+                self._parse_metadata_tag(xml_file, "data_migration", metadata_dict)
+            else:
+                # Legacy Release
+                xml_tags = xml_tags + [
                     "unremovable",
-                    "sw_version",
-                    "summary",
-                    "description",
                     "install_instructions",
                     "pre_start",
                     "post_start",
@@ -353,71 +518,57 @@ class ReleaseData(object):
                     "warnings",
                     "apply_active_release_only",
                     "commit",
-                    "component"]:
-            value = root.findtext(key)
-            if value is not None:
-                self.metadata[release_id][key] = value
+                    "component"
+                ]
+                release_id = xml_file.findtext("id")
+                if release_id is None:
+                    LOG.error("Legacy metadata does not contain id tag")
+                    return None
 
-        # Default reboot_required to Y
-        rr_value = root.findtext("reboot_required")
-        if rr_value is None or rr_value != "N":
-            self.metadata[release_id]["reboot_required"] = "Y"
-        else:
-            self.metadata[release_id]["reboot_required"] = "N"
+                sw_version = xml_file.findtext("sw_version")
+                if sw_version is None:
+                    LOG.error("Legacy metadata does not contain sw_version tag")
+                    return None
 
-        # Default prepatched_iso to N
-        prepatched_iso = root.findtext("prepatched_iso")
-        if prepatched_iso is None or prepatched_iso != "Y":
-            self.metadata[release_id]["prepatched_iso"] = "N"
-        else:
-            self.metadata[release_id]["prepatched_iso"] = "Y"
+                self.metadata[release_id] = {}
+                if state:
+                    self.metadata[release_id]["state"] = state
 
-        release_sw_version = utils.get_major_release_version(
-            self.metadata[release_id]["sw_version"])
-        global package_dir
-        if release_sw_version not in package_dir:
-            package_dir[release_sw_version] = "%s/%s" % (root_package_dir, release_sw_version)
-            repo_dir[release_sw_version] = "%s/rel-%s" % (repo_root_dir, release_sw_version)
+                self.contents[release_id] = {}
+                contents_dict = self.contents[release_id]
+                metadata_dict = self.metadata[release_id]
 
-        self.metadata[release_id]["preinstalled_patches"] = []
-        for req in root.findall("preinstalled_patches"):
-            for patch_id in req.findall("id"):
-                self.metadata[release_id]["preinstalled_patches"].append(patch_id.text)
+            global package_dir
+            metadata_dict["sw_version"] = sw_version
+            release_sw_version = utils.get_major_release_version(metadata_dict["sw_version"])
+            if release_sw_version not in package_dir:
+                package_dir[release_sw_version] = "%s/%s" % (root_package_dir, release_sw_version)
+                repo_dir[release_sw_version] = "%s/rel-%s" % (repo_root_dir, release_sw_version)
 
-        self.metadata[release_id]["requires"] = []
-        for req in root.findall("requires"):
-            for req_release in req.findall("req_patch_id"):
-                self.metadata[release_id]["requires"].append(req_release.text)
+            # Default reboot_required to Y
+            self._parse_metadata_tag(xml_file, "reboot_required", metadata_dict, "N", "Y")
+            # Default prepatched_iso to N
+            self._parse_metadata_tag(xml_file, "prepatched_iso", metadata_dict)
 
-        self.metadata[release_id]["packages"] = []
-        for req in root.findall("packages"):
-            for deb in req.findall("deb"):
-                self.metadata[release_id]["packages"].append(deb.text)
+            metadata_dict["preinstalled_patches"] = []
+            metadata_dict["requires"] = []
+            metadata_dict["packages"] = []
+            metadata_dict["activation_scripts"] = []
+            self._parse_metadata_array_tag(xml_file, "preinstalled_patches", "id", metadata_dict)
+            self._parse_metadata_array_tag(xml_file, "requires", "req_patch_id", metadata_dict)
+            self._parse_metadata_array_tag(xml_file, "packages", "deb", metadata_dict)
+            self._parse_metadata_array_tag(xml_file, "activation_scripts", "script", metadata_dict)
 
-        self.metadata[release_id]["activation_scripts"] = []
-        for req in root.findall("activation_scripts"):
-            for script in req.findall("script"):
-                self.metadata[release_id]["activation_scripts"].append(script.text)
+            self._bulk_parse_metadata_tags(xml_file, xml_tags, metadata_dict)
 
-        self.contents[release_id] = {}
-
-        for content in root.findall("contents/ostree"):
-            self.contents[release_id]["number_of_commits"] = content.findall("number_of_commits")[0].text
-            self.contents[release_id]["base"] = {}
-            self.contents[release_id]["base"]["commit"] = content.findall("base/commit")[0].text
-            self.contents[release_id]["base"]["checksum"] = content.findall("base/checksum")[0].text
-            for i in range(int(self.contents[release_id]["number_of_commits"])):
-                self.contents[release_id]["commit%s" % (i + 1)] = {}
-                self.contents[release_id]["commit%s" % (i + 1)]["commit"] = \
-                    content.findall("commit%s/commit" % (i + 1))[0].text
-                self.contents[release_id]["commit%s" % (i + 1)]["checksum"] = \
-                    content.findall("commit%s/checksum" % (i + 1))[0].text
+            self._parse_ostree_contents(xml_file, contents_dict)
 
         return release_id
 
     def _read_all_metafile(self, path):
         """
-        Load metadata from all xml files in the specified path
+        Load metadata from all xml files in the specified path and
+        its subdirectory.
         :param path: path of directory that xml files is in
         """
         for filename in glob.glob("%s/*.xml" % path):
@@ -426,18 +577,25 @@ class ReleaseData(object):
             yield filename, text
 
     def load_all(self):
+        """
+        Load all metadata files under the software metadata storage directory
+        """
         # Reset the data
-        self.__init__()
+        self._reset()
 
-        state_map = {
-            states.AVAILABLE: states.AVAILABLE_DIR,
-            states.UNAVAILABLE: states.UNAVAILABLE_DIR,
-            states.DEPLOYING: states.DEPLOYING_DIR,
-            states.DEPLOYED: states.DEPLOYED_DIR,
-            states.REMOVING: states.REMOVING_DIR,
-        }
+        # This function firstly parses the Product metadata and secondly Metapackage
+        # and Legacy metadatas.
+        # metadata_state_map = [(path, state)]
+        metadata_state_map = [
+            (constants.COMPONENT_SOFTWARE_METADATA_STORAGE_DIR, None)
+        ]
 
-        for state, path in state_map.items():
+        for state, paths in self.state_map.items():
+            for path in paths:
+                metadata_state_map.append((path, state))
+
+        for path, state in metadata_state_map:
+            # Parse product metadata.xml
             for filename, text in self._read_all_metafile(path):
                 try:
                     self.parse_metadata_string(text, state=state)

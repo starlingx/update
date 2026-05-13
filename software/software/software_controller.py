@@ -2520,12 +2520,16 @@ class PatchController(PatchService):
         query_state = None
         if "show" in kwargs:
             valid_query_states = [
+                # Legacy States
                 states.AVAILABLE,
                 states.UNAVAILABLE,
                 states.DEPLOYED,
                 states.REMOVING,
                 states.COMMITTED,
-                states.DEPLOYING
+                states.DEPLOYING,
+                # Component States
+                states.DEPLOY_SELECTED,
+                states.REMOVE_SELECTED
             ]
             if kwargs["show"] in valid_query_states:
                 query_state = kwargs["show"]
@@ -2534,8 +2538,17 @@ class PatchController(PatchService):
         if "release" in kwargs:
             query_release = kwargs["release"]
 
+        query_all = False
+        query_metapackages = False
+        if "metapackages" in kwargs:
+            query_metapackages = True
+            # The parameter "all" is supported only for metapackage filters
+            if "all" in kwargs:
+                query_all = True
+
         results = []
 
+        # Legacy filters
         def filter_by_version():
             for r in self.release_collection.iterate_releases():
                 if r.sw_version in query_release:
@@ -2545,16 +2558,25 @@ class PatchController(PatchService):
             for rel in self.release_collection.iterate_releases_by_state(query_state):
                 yield rel
 
-        if query_state is not None:
+        # Metapackage filters
+        def filter_by_metapackages():
+            for mp in self.release_collection.iterate_metapackages(query_state, query_all):
+                yield mp
+
+        if query_metapackages:
+            iterator = filter_by_metapackages
+        elif query_state is not None:
             iterator = filter_by_state
         elif query_release is not None:
             iterator = filter_by_version
         else:
             iterator = self.release_collection.iterate_releases
 
-        for i in iterator():
-            data = i.to_query_dict()
-            results.append(data)
+        for release in iterator():
+            if query_metapackages:
+                results.append(release)
+            else:
+                results.append(release.to_query_dict())
 
         return results
 

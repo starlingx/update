@@ -21,10 +21,15 @@ from software import utils
 class SWRelease(object):
     '''wrapper class to group matching metadata and contents'''
 
-    def __init__(self, rel_id, metadata, contents):
+    def __init__(self, rel_id: str, metadata, contents):
+        # id: The release identifier string
+        # metadata: The release metadata dictionary
+        # contents: The release contents dictionary
         self._id = rel_id
         self._metadata = metadata
         self._contents = contents
+
+        # sw_version: The release software version MM.mm.pp
         self._sw_version = None
         self._release = None
 
@@ -42,11 +47,42 @@ class SWRelease(object):
 
     @property
     def state(self):
-        return self.metadata['state']
+        if "metapackages" in self.metadata:
+            state = self.metapackage_based_state()
+        else:
+            state = self.legacy_based_state()
+        return state
+
+    def metapackage_based_state(self):
+        mp_states = []
+        mp_deployable = []
+        for _, metadata in self.metapackages.items():
+            mp_states.append(metadata["state"])
+            mp_deployable.append(metadata["deployable"] == "Y")
+
+        iso_release = all(m is False for m in mp_deployable)
+        if all(state == states.AVAILABLE for state in mp_states):
+            return states.AVAILABLE
+        elif all(state == states.UNAVAILABLE for state in mp_states):
+            if iso_release:
+                return states.AVAILABLE
+            return states.UNAVAILABLE
+        elif all(state == states.DEPLOYED for state in mp_states):
+            return states.DEPLOYED
+        elif states.DEPLOYING in mp_states:
+            return states.DEPLOYING
+        elif states.REMOVING in mp_states:
+            return states.REMOVING
+        elif states.AVAILABLE in mp_states and states.DEPLOYED in mp_states:
+            return states.DEPLOYED_PARTIAL
+        return None  # unexpected combination of metapackage states
+
+    def legacy_based_state(self):
+        return self.metadata.get('state')
 
     @staticmethod
     def _ensure_state_transition(to_state):
-        to_dir = states.RELEASE_STATE_TO_DIR_MAP[to_state]
+        to_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP[to_state]
         if not os.path.isdir(to_dir):
             try:
                 os.makedirs(to_dir, mode=0o755, exist_ok=True)
@@ -158,6 +194,29 @@ class SWRelease(object):
 
     @property
     def reboot_required(self):
+        if self.metapackage_enabled:
+            rr = self._metapackage_based_rr()
+        else:
+            rr = self._legacy_based_rr()
+        return rr
+
+    def _metapackage_based_rr(self):
+        reboot_required = True
+        for mp in self.metapackages:
+            mp_data = self.metapackages[mp]
+            if mp_data["reboot_required"] == "Y":
+                # If at least one metapackages is Reboot Required,
+                # the release is Reboot Required.
+                reboot_required = True
+                break
+            if mp_data["deployable"] == "Y":
+                # If the product release was uploaded as an ISO,
+                # i.e. the metapackages are all deployable=False,
+                # the release is Reboot Required.
+                reboot_required = False
+        return reboot_required
+
+    def _legacy_based_rr(self):
         return self._get_by_key('reboot_required') == "Y"
 
     @property
@@ -174,11 +233,11 @@ class SWRelease(object):
 
     @property
     def packages(self):
-        return self._get_by_key('packages')
+        return self._get_by_key('packages') or []
 
     @property
     def activation_scripts(self):
-        return self._get_by_key('activation_scripts')
+        return self._get_by_key('activation_scripts') or []
 
     @property
     def pre_start(self):
@@ -209,6 +268,16 @@ class SWRelease(object):
             # may consider raise InvalidRelease exception when iso comes with
             # latest commit
             return None
+
+    @property
+    def metapackage_enabled(self):
+        if self._get_by_key('metapackages'):
+            return True
+        return False
+
+    @property
+    def metapackages(self):
+        return self._get_by_key('metapackages')
 
     def get_all_dependencies(self, filter_states=None):
         """
@@ -280,8 +349,21 @@ class SWRelease(object):
                 "prepatched_iso": self.prepatched_iso,
                 "preinstalled_patches": self.preinstalled_patches[:],
                 "requires": self.requires_release_ids[:],
-                "packages": self.packages[:],
-                "activation_scripts": self.activation_scripts[:]}
+                "activation_scripts": self.activation_scripts[:],
+                "metapackages": [],
+                "packages": []}
+        if self.metapackage_enabled:
+            # For product releases, the pkg section is present only in
+            # the metapackage metadata.
+            data["metapackages"] = list(self.metapackages)
+            for metapackage in self.metapackages:
+                metapackage_data = self.metapackages[metapackage]
+                if "packages" in metapackage_data:
+                    data["packages"].extend(metapackage_data["packages"])
+        elif self.packages:
+            # Legacy releases have a pkg section in their metadata
+            data["packages"] = self.packages[:]
+
         return data
 
 
@@ -331,20 +413,73 @@ class SWReleaseCollection(object):
         return None
 
     def iterate_releases_by_state(self, state):
-        '''return iteration of releases matching specified state.
-        sorted by id in ascending order
+        '''
+        Return iteration of releases matching specified state.
+        Sorted by id in ascending order
         '''
         sorted_list = sorted(self._sw_releases)
         for rel_id in sorted_list:
             rel_data = self._sw_releases[rel_id]
-            if rel_data.metadata['state'] == state:
+            if rel_data.state == state:
                 yield rel_data
 
     def iterate_releases(self):
-        '''return iteration of all releases sorted by id in ascending order'''
+        '''
+        Return iteration of all releases sorted by id in ascending order
+        '''
         sorted_list = sorted(self._sw_releases)
         for rel_id in sorted_list:
             yield self._sw_releases[rel_id]
+
+    def iterate_metapackages(self, state=None, query_all=False):
+        '''
+        Return iteration of metapackage data dicts. Can be filtered by state
+        or all metapackages. Default output is the latest deployed version of
+        each metapackage.
+
+        Conditions:
+        1) If state is provided, yield metapackages matching that state
+           (regardless of query_all).
+        2) If query_all is True and state is None, yield all metapackages.
+        3) If state is None and query_all is False, for each metapackage name
+           yield only the one from the latest release version that is in
+           DEPLOYED state.
+        '''
+        if state is not None:
+            # Case 1: filter by state
+            for rel_id in self._sw_releases:
+                rel_data = self._sw_releases[rel_id]
+                if rel_data.metapackage_enabled:
+                    for mp in rel_data.metapackages:
+                        mp_data = rel_data.metapackages[mp]
+                        if mp_data["state"] == state:
+                            mp_data["release_id"] = mp
+                            yield mp_data
+        elif query_all:
+            # Case 2: yield all metapackages
+            for rel_id in self._sw_releases:
+                rel_data = self._sw_releases[rel_id]
+                if rel_data.metapackage_enabled:
+                    for mp in rel_data.metapackages:
+                        mp_data = rel_data.metapackages[mp]
+                        mp_data["release_id"] = mp
+                        yield mp_data
+        else:
+            # Case 3: for each metapackage name, yield only the instance
+            # from the latest release version that is in DEPLOYED state.
+            latest_deployed = {}
+            for rel_id in self._sw_releases:
+                rel_data = self._sw_releases[rel_id]
+                if rel_data.metapackage_enabled:
+                    for mp in rel_data.metapackages:
+                        mp_data = rel_data.metapackages[mp]
+                        if mp_data["state"] == states.DEPLOYED:
+                            if mp not in latest_deployed or rel_data > latest_deployed[mp][0]:
+                                mp_data["release_id"] = mp
+                                latest_deployed[mp] = (rel_data, mp_data)
+            for mp_name in latest_deployed:
+                mp_data = latest_deployed[mp_name][1]
+                yield mp_data
 
     def update_state(self, list_of_releases, state):
         for release_id in list_of_releases:
