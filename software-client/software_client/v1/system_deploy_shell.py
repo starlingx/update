@@ -52,3 +52,15 @@ def do_show(cc, args):
             utils.display_result_list(header_data_list, data)
 
     return rc
+
+
+def do_delete(cc, args):
+    """Delete the system deploy"""
+    resp, data = cc.system_deploy.delete(args)
+
+    if args.debug:
+        utils.print_result_debug(resp, data)
+
+    utils.display_info(resp)
+
+    return utils.check_rc(resp, data)

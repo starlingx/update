@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+import signal
+
 from software_client.common import base
 
 
@@ -26,3 +28,12 @@ class SystemDeployManager(base.Manager):
     def show(self, args):
         path = "/v1/system_deploy"
         return self._list(path)
+
+    def delete(self, args):
+        # Ignore interrupts during this function
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+        # Issue deploy delete request
+        path = "/v1/system_deploy/"
+
+        return self._delete(path)
