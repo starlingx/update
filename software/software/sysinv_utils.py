@@ -7,6 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 
 import logging
 
+from packaging.version import Version
 from software.exceptions import SysinvClientNotInitialized
 from software import constants
 from software import utils
@@ -43,6 +44,58 @@ def get_active_k8s_ver():
         if k8s_ver.state == "active":
             return k8s_ver.version
     raise Exception("Failed to get current k8s version")
+
+
+def validate_kube_version_upgradeable(kube_version):
+    """Validate that kube_version is available and higher than the active k8s version.
+
+    :param kube_version: target k8s version string, e.g. 'v1.29.3'
+    :returns: error message string if invalid, None if valid
+    """
+    try:
+        token, endpoint = utils.get_endpoints_token()
+        sysinv_client = get_sysinv_client(token=token, endpoint=endpoint)
+        k8s_vers = sysinv_client.kube_version.list()
+    except Exception as err:
+        LOG.error("Error getting k8s versions: %s", err)
+        return "Failed to retrieve k8s versions: %s" % str(err)
+
+    active_ver = None
+    available_versions = []
+    for k8s_ver in k8s_vers:
+        available_versions.append(k8s_ver.version)
+        if k8s_ver.state == "active":
+            active_ver = k8s_ver.version
+
+    if kube_version not in available_versions:
+        return "kube_version '%s' is not available. Available versions: %s" % (
+            kube_version, ', '.join(available_versions))
+
+    if active_ver and Version(kube_version) <= Version(active_ver):
+        return "kube_version '%s' must be higher than the active k8s version '%s'" % (
+            kube_version, active_ver)
+
+    return None
+
+
+def is_kube_upgrade_in_progress():
+    """Check if a Kubernetes upgrade is already in progress.
+
+    :raises SoftwareServiceError: if a kube-upgrade is in progress.
+    :returns: True if a K8s upgrade is in progress, otherwise False.
+    """
+    try:
+        token, endpoint = utils.get_endpoints_token()
+        sysinv_client = get_sysinv_client(token=token, endpoint=endpoint)
+        kube_upgrades = sysinv_client.kube_upgrade.list()
+        LOG.info("kube upgrades: %s", str(kube_upgrades))
+
+        if kube_upgrades:
+            return True
+        return False
+    except Exception as err:
+        LOG.error("K8s upgrade in-progress check failed: %s", err)
+        raise
 
 
 def get_ihost_list():

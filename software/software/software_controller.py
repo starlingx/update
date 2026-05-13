@@ -24,6 +24,7 @@ import tempfile
 import threading
 import time
 import typing
+import uuid
 import wsgiref.simple_server as simple_server
 import xml.etree.ElementTree as ET
 
@@ -69,6 +70,7 @@ import software.ostree_utils as ostree_utils
 from software.plugin import DeployPluginRunner
 from software.release_data import get_SWReleaseCollection
 from software.release_data import reload_release_data
+from software.release_data import SWReleaseCollection
 from software.release_state import ReleaseState
 from software.release_verify import verify_files
 from software.software_functions import audit_log_info
@@ -83,6 +85,7 @@ from software.software_functions import get_release_from_patch
 from software.software_functions import get_to_release_from_metadata_file
 from software.software_functions import is_deploy_state_in_sync
 from software.software_functions import is_deployment_in_progress
+from software.software_functions import is_system_deploy_in_progress
 from software.software_functions import mount_iso_load
 from software.software_functions import package_dir
 from software.software_functions import parse_release_metadata
@@ -102,10 +105,12 @@ from software.states import INTERRUPTION_RECOVERY_STATES
 from software.sysinv_utils import are_all_hosts_unlocked_and_online
 from software.sysinv_utils import get_active_k8s_ver
 from software.sysinv_utils import get_system_info
+from software.sysinv_utils import is_kube_upgrade_in_progress
 from software.sysinv_utils import is_system_controller
 from software.sysinv_utils import trigger_evaluate_apps_reapply
 from software.sysinv_utils import trigger_vim_host_audit
 from software.sysinv_utils import update_host_sw_version
+from software.sysinv_utils import validate_kube_version_upgradeable
 import software.utils as utils
 from software import states
 
@@ -1202,7 +1207,7 @@ class PatchController(PatchService):
         # TODO(jkraitbe): Add host-deploy when that becomes async
 
     @property
-    def release_collection(self):
+    def release_collection(self) -> SWReleaseCollection:
         swrc = get_SWReleaseCollection()
         return swrc
 
@@ -3025,11 +3030,120 @@ class PatchController(PatchService):
         msg_warning = ""
         msg_error = ""
 
-        # TODO(jli14) the id should be a constant across different files
-        self.db_api_instance.create_system_deploy(
-            id='default', to_release=release_id, to_k8s_version=kube_version)
+        LOG.info("System deploy init, release_id: %s, kube_version: %s" % (release_id, kube_version))
 
-        LOG.info("release_id: %s, kube_version: %s" % (release_id, kube_version))
+        try:
+            # 1a. Must be SX
+            if not is_simplex():
+                msg_error = "'system-deploy init' is only supported on simplex systems"
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+            # 1b. No system_deploy in progress
+            if is_system_deploy_in_progress():
+                msg_error = "A system deploy is already in progress"
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+            # 1c. No deploy in progress
+            if is_deployment_in_progress():
+                msg_error = "A software deployment is already in progress"
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+            # 1d. No kube-upgrade in progress
+            # Note(lvieira): deploy-precheck allows kube-upgrade in certain finished states,
+            # but system-deploy init requires no kube-upgrade at all.
+            if is_kube_upgrade_in_progress():
+                msg_error = "A kubernetes upgrade is already in progress"
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+            # 1e. Validate kube_version format
+            if kube_version and not re.match(r'^v?\d{1,2}\.\d{1,2}\.\d{1,2}$', kube_version):
+                msg_error = "Invalid kube_version '%s': must match '[v]n.n.n'" % kube_version
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+            if kube_version and not kube_version.startswith('v'):
+                kube_version = 'v' + kube_version
+
+            # 1f. Validate kube_version is available and upgradeable
+            if kube_version:
+                err = validate_kube_version_upgradeable(kube_version)
+                if err:
+                    msg_error = err
+                    return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+            # 2. Run deploy precheck;
+            release = self._release_basic_checks(release_id)
+            precheck_script = utils.get_precheck_script(release.sw_release)
+            if os.path.isfile(precheck_script):
+                if self._should_run_precheck_prior_deploy_start(release.sw_release, False, False):
+                    LOG.info("Executing software deploy precheck prior to system deploy init")
+                    if precheck_result := self._precheck_before_start(
+                        release.id,
+                        release.sw_release,
+                        is_patch=False,
+                        force=False,
+                        snapshot=True,
+                    ):
+                        return precheck_result
+                self._safe_remove_precheck_result_file(release.sw_release)
+            else:
+                LOG.warning("No precheck script for %s", release.id)
+
+            # 3. Create system deploy with a unique deploy ID
+            system_deploy_id = str(uuid.uuid4())
+            self.db_api_instance.create_system_deploy(
+                id=system_deploy_id, to_release=release.id, to_k8s_version=kube_version)
+            msg = "Created system-deploy entity"
+            msg_info += msg + "\n"
+            LOG.info(msg)
+
+            # 4. Create LVM snapshot
+            manager = lvm_snapshot.LVMSnapshotManager()
+            success = manager.create_snapshots(tag_id=system_deploy_id)
+            if not success:
+                msg_error = "Failed to create LVM snapshots"
+                LOG.error(msg_error)
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+            msg_info += "LVM snapshots created successfully\n"
+
+            # 5. Backup /etc/kubernetes/manifests/
+            manifests_src = "/etc/kubernetes/manifests"
+            manifests_bkp = "/etc/kubernetes/manifests.bkp"
+            if os.path.isdir(manifests_src):
+                if os.path.exists(manifests_bkp):
+                    shutil.rmtree(manifests_bkp)
+                    LOG.info("Deleted existing %s", manifests_bkp)
+                shutil.copytree(manifests_src, manifests_bkp)
+                LOG.info("Backed up %s to %s", manifests_src, manifests_bkp)
+                msg_info += "Backed up K8s manifest\n"
+            else:
+                msg = f"Kubernetes manifests directory {manifests_src} does not exist"
+                msg_warning += msg + "\n"
+                LOG.warning(msg)
+
+            # 6. Backup /etc/containerd/config.toml
+            containerd_cfg_src = "/etc/containerd/config.toml"
+            containerd_cfg_bkp = "/etc/containerd/config.toml.bkp"
+            if os.path.isfile(containerd_cfg_src):
+                if os.path.exists(containerd_cfg_bkp):
+                    os.remove(containerd_cfg_bkp)
+                    LOG.info("Deleted existing %s", containerd_cfg_bkp)
+                shutil.copy2(containerd_cfg_src, containerd_cfg_bkp)
+                LOG.info("Backed up %s to %s", containerd_cfg_src, containerd_cfg_bkp)
+                msg_info += "Backed up containerd config\n"
+            else:
+                msg = f"Containerd config {containerd_cfg_src} does not exist"
+                msg_warning += msg + "\n"
+                LOG.warning(msg)
+
+            LOG.info("system-deploy init completed. Deploy ID: %s, "
+                     "release: %s, k8s: %s" % (
+                        system_deploy_id, release.id, kube_version))
+
+        except Exception as e:
+            msg = "Failed to init system-deploy"
+            msg_error += msg + ".\n"
+            LOG.exception("%s: %s", msg, str(e))
+            # TODO(lvieira) call "software_system_deploy_init" to cleanup
+
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     def _get_system_deploy(self):
