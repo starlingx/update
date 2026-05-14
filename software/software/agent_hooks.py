@@ -851,6 +851,44 @@ class FixedEtcMergeRollBackHook(FixedEtcMergeHook):
         LOG.info("FixedEtcMergeRollBackHook finished.")
 
 
+class SSSDCacheCleanupRollBackHook(BaseHook):
+    """Clean up SSSD cache database files during rollback.
+
+    The SSSD cache database schema is upgraded in-place by newer SSSD
+    versions (e.g., v0.22 -> v0.25 when going from Bullseye to Trixie).
+    This migration is one-way — older SSSD versions cannot read a newer
+    schema. During rollback, the older SSSD will fail to start with
+    "Sysdb version is too new", breaking all user lookups via NSS/SSS
+    and preventing kubelet and other services from starting.
+
+    This hook removes the SSSD cache files so that SSSD rebuilds them
+    from LDAP on the next start.
+    """
+
+    SSSD_DB_DIR = "/var/lib/sss/db"
+    SSSD_CACHE_PATTERNS = [
+        "cache_*.ldb",
+        "timestamps_*.ldb",
+    ]
+
+    def _delete_file(self, file_path):
+        with contextlib.suppress(Exception):
+            LOG.info(f"Attempting to delete '{file_path}'.")
+            if not os.path.exists(file_path):
+                LOG.info(f"File not found: '{file_path}'.")
+                return
+            os.remove(file_path)
+            LOG.info(f"Successfully deleted '{file_path}'.")
+
+    def run(self):
+        LOG.info("Starting SSSDCacheCleanupRollBackHook.")
+        for pattern in self.SSSD_CACHE_PATTERNS:
+            full_pattern = os.path.join(self.SSSD_DB_DIR, pattern)
+            for db_file in glob.glob(full_pattern):
+                self._delete_file(db_file)
+        LOG.info("SSSDCacheCleanupRollBackHook finished.")
+
+
 class OOTDriverHook(BaseHook):
     """
     Hook to remove out-of-tree driver kernel parameters during upgrade.
@@ -1119,6 +1157,7 @@ class HookManager(object):
             FixedEtcMergeRollBackHook,
             LdapConfigHook,
             PuppetHieradataUpdate,
+            SSSDCacheCleanupRollBackHook,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
