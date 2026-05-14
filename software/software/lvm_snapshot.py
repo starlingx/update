@@ -358,6 +358,8 @@ class LVMSnapshotManager:
     """
     # LVM snapshot default constants
     VOLUME_GROUP = "cgts-vg"
+    # The restore progress file is deleted at a reboot time
+    RESTORE_PROGRESS_FILE = "/run/lvm_snapshot_restore_progress.json"
     # NOTE: snapshots store the changes between the state when they were taken and
     # the current state of the LV, so how much and how fast it fills up relates to
     # how much and how fast data is changing in each LV during the upgrade
@@ -429,51 +431,54 @@ class LVMSnapshotManager:
             return False
         return True
 
-    def _restore_snapshots(self):
+    def _load_restore_progress(self):
+        """Return set of LV names already successfully restored"""
+        try:
+            return set(json.loads(pathlib.Path(self.RESTORE_PROGRESS_FILE).read_text()))
+        except Exception:
+            return set()
+
+    def _save_restore_progress(self, restored):
+        """Persist the set of successfully restored LV names"""
+        pathlib.Path(self.RESTORE_PROGRESS_FILE).write_text(json.dumps(list(restored)))
+
+    def _restore_snapshots(self, pending):
         """Activate LVM snapshots and prepare the system for rollback"""
-        LOG.info("Restoring all active snapshots...")
-        for lv_name in self.lvs.keys():
-            snapshot = self.create_instance(lv_name)
-            if not snapshot.exists():
-                LOG.info("Snapshot %s for %s does not exist. Skipping", snapshot.name, lv_name)
-                continue
-            LOG.info("Restoring snapshot for %s: %s", lv_name, snapshot.name)
+        LOG.info("Restoring snapshots for: %s", [s.lv_name for s in pending])
+        already_restored = self._load_restore_progress()
+        for pending_snapshot in pending:
+            snapshot = self.create_instance(pending_snapshot.lv_name)
+            LOG.info("Restoring snapshot for %s: %s", snapshot.lv_name, snapshot.name)
             snapshot.restore()
+            already_restored.add(snapshot.lv_name)
+            self._save_restore_progress(already_restored)
         LOG.info("Snapshots restored, reboot is needed to apply the changes")
 
     def restore_snapshots(self, expected_tag_id=None):
         """
         Restore snapshots, but only after doing sanity checks:
-        - If all expected snapshots exists
         - If snapshots are valid (if a snapshot reaches it's maximum size it is invalidated)
+        - If snapshots are tagged with the expected ID
         """
-        # check for snapshot existence
-        # TODO(heitormatsui) optimize by calling one single command and check all
-        #  existing snapshots from its output instead of calling it for each LV
-        snapshots = self.list_snapshots()
-        snapshots_lv_name = [snapshot.lv_name for snapshot in snapshots]
-        all_snapshots_found = all(lv_name in snapshots_lv_name
-                                  for lv_name in self._lvs)
-        if all_snapshots_found:
-            LOG.info("All expected snapshots found")
-        else:
-            LOG.error("Cannot proceed with snapshot restore, missing snapshots for %s",
-                      set(self._lvs) - set(snapshots_lv_name))
-            return False
+        already_restored = self._load_restore_progress()
+        all_snapshots = self.list_snapshots()
+        pending = [s for s in all_snapshots if s.lv_name not in already_restored]
 
-        # check for invalid or expired snapshots
-        # validate snapshots against the given ID
-        invalid_snapshots = self._get_invalid_snapshots(snapshots, expected_tag_id)
+        if not pending:
+            LOG.info("All snapshots already restored, skipping")
+            return True
 
+        if already_restored:
+            LOG.info("Resuming partial restore, already restored: %s", already_restored)
+
+        invalid_snapshots = self._get_invalid_snapshots(pending, expected_tag_id)
         if invalid_snapshots:
             LOG.error("Cannot proceed with snapshot restore, "
                       "invalid snapshots: %s", invalid_snapshots)
             return False
 
-        # restore snapshots
-        LOG.info("All snapshots validated")
         try:
-            self._restore_snapshots()
+            self._restore_snapshots(pending)
         except Exception:
             return False
         return True

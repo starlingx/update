@@ -3101,15 +3101,13 @@ class PatchController(PatchService):
         msg_info = ""
         msg_warning = ""
         msg_error = ""
-        files_to_delete = {"/etc/kubernetes/manifests.bkp": "Failed to delete Kubernetes manifests backups: ",
-                           "/etc/containerd/config.toml.bkp": "Failed to delete Containerd config backups: ",
-                           "/opt/backups/k8s-control-plane": "Failed to delete K8s control plane backups: "}
+        files_to_delete = {constants.KUBERNETES_MANIFESTS_BKP: "Failed to delete Kubernetes manifests backups: ",
+                           constants.CONTAINERD_CONFIG_TOML_BKP: "Failed to delete Containerd config backups: ",
+                           constants.K8S_CONTROL_PLANE_BACKUPS_DIR: "Failed to delete K8s control plane backups: "}
 
         try:
             # Check if there is a system_deploy in progress
-            if is_system_deploy_in_progress():
-                self.db_api_instance.delete_system_deploy()
-            else:
+            if not is_system_deploy_in_progress():
                 msg_error = "There is no system deploy in progress"
                 return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
@@ -3120,6 +3118,8 @@ class PatchController(PatchService):
             # Deleting backup /etc/kubernetes/manifests.bkp, /etc/containerd/config.toml.bkp
             # and backup /opt/backups/k8s-control-plane
             msg_info += self._remove_backup_files(files_to_delete)
+
+            self.db_api_instance.delete_system_deploy()
         except Exception as e:
             msg = "Failed on deleting system-deploy"
             msg_error += msg + ".\n"
@@ -3213,8 +3213,8 @@ class PatchController(PatchService):
             msg_info += "LVM snapshots created successfully\n"
 
             # 5. Backup /etc/kubernetes/manifests/
-            manifests_src = "/etc/kubernetes/manifests"
-            manifests_bkp = "/etc/kubernetes/manifests.bkp"
+            manifests_src = constants.KUBERNETES_MANIFESTS_DIR
+            manifests_bkp = constants.KUBERNETES_MANIFESTS_BKP
             if os.path.isdir(manifests_src):
                 if os.path.exists(manifests_bkp):
                     shutil.rmtree(manifests_bkp)
@@ -3228,8 +3228,8 @@ class PatchController(PatchService):
                 LOG.warning(msg)
 
             # 6. Backup /etc/containerd/config.toml
-            containerd_cfg_src = "/etc/containerd/config.toml"
-            containerd_cfg_bkp = "/etc/containerd/config.toml.bkp"
+            containerd_cfg_src = constants.CONTAINERD_CONFIG_TOML
+            containerd_cfg_bkp = constants.CONTAINERD_CONFIG_TOML_BKP
             if os.path.isfile(containerd_cfg_src):
                 if os.path.exists(containerd_cfg_bkp):
                     os.remove(containerd_cfg_bkp)
@@ -3250,7 +3250,7 @@ class PatchController(PatchService):
             msg = "Failed to init system-deploy"
             msg_error += msg + ".\n"
             LOG.exception("%s: %s", msg, str(e))
-            # TODO(lvieira) call "software_system_deploy_init" to cleanup
+            self.software_system_deploy_delete_api()
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
@@ -4685,6 +4685,47 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
+    def _restore_system_deploy_snapshots(self, system_deploy_id):
+        """
+        Restore system state using LVM snapshots and backups created during system-deploy init.
+        This is an idempotent function, so it can be called multiple times.
+        system_deploy_id: ID of the system-deploy entity
+        """
+        # 1. Restore /etc/kubernetes/manifests from /etc/kubernetes/manifests.bkp
+        k8s_dir = constants.KUBERNETES_MANIFESTS_DIR
+        k8s_bkp = constants.KUBERNETES_MANIFESTS_BKP
+        if os.path.isdir(k8s_bkp):
+            try:
+                if os.path.isdir(k8s_dir):
+                    shutil.rmtree(k8s_dir)
+                shutil.copytree(k8s_bkp, k8s_dir)
+                LOG.info("Restored %s from %s", k8s_dir, k8s_bkp)
+            except OSError as e:
+                raise SoftwareServiceError(
+                    "Failed to restore kubernetes manifests (a manual intervention may fix it): %s" % e)
+        else:
+            LOG.warning("%s does not exist, skipping kubernetes restore", k8s_bkp)
+
+        # 2. Restore /etc/containerd/config.toml from backup
+        containerd_cfg = constants.CONTAINERD_CONFIG_TOML
+        containerd_cfg_bkp = constants.CONTAINERD_CONFIG_TOML_BKP
+        if os.path.isfile(containerd_cfg_bkp):
+            try:
+                shutil.copy2(containerd_cfg_bkp, containerd_cfg)
+                LOG.info("Restored %s from %s", containerd_cfg, containerd_cfg_bkp)
+            except OSError as e:
+                raise SoftwareServiceError(
+                    "Failed to restore containerd config (a manual intervention may fix it): %s" % e)
+        else:
+            LOG.warning("%s does not exist, skipping containerd config restore", containerd_cfg_bkp)
+
+        # 3. Restore LVM snapshots
+        lvm_manager = lvm_snapshot.LVMSnapshotManager()
+        if not lvm_manager.restore_snapshots(expected_tag_id=system_deploy_id):
+            raise SoftwareServiceError(
+                "LVM snapshot restore failed or tag mismatch for system-deploy ID %s" % system_deploy_id)
+        LOG.info("LVM snapshots restored successfully")
+
     def _activate_rollback_major_release(self, deploy):
         cmd_path = "/usr/bin/software-deploy-activate-rollback"
         from_release = utils.get_major_release_version(deploy.get("from_release"))
@@ -4766,6 +4807,26 @@ class PatchController(PatchService):
 
         deploy_state = DeployState.get_instance()
         deploy_state.activate_rollback()
+
+        system_deploy = self._get_system_deploy()
+        if system_deploy:
+            system_deploy_id = system_deploy.get("id")
+            LOG.info("system-deploy entity found (ID: %s), trying to restore through snapshots",
+                     system_deploy_id)
+            try:
+                self._restore_system_deploy_snapshots(system_deploy_id)
+                msg_info += "System deploy snapshots and backups restored\n"
+                deploy_state.activate_rollback_done()
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+            except Exception as e:
+                msg = "Failed to restore system deploy: %s" % str(e)
+                if system_deploy.get("to_k8s_version"):
+                    deploy_state.activate_rollback_failed()
+                    LOG.exception(msg)
+                    msg_error += msg + "\n"
+                    return dict(info=msg_info, warning=msg_warning, error=msg_error)
+                LOG.warning(msg)
+                LOG.info("Falling-back to normal activate-rollback procedure, since there is no K8s upgrade")
 
         try:
             self._activate_rollback()
@@ -4873,6 +4934,25 @@ class PatchController(PatchService):
         self.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_DEPLOY_HOST_FAILURE,
                                    fm_constants.FM_ALARM_STATE_CLEAR,
                                    entity_instance_id)
+
+        system_deploy = self._get_system_deploy()
+        if rollback and system_deploy:
+            system_deploy_id = system_deploy.get("id")
+            LOG.info("system-deploy entity found (ID: %s), trying to restore snapshots before host-rollback",
+                     system_deploy_id)
+            try:
+                self._restore_system_deploy_snapshots(system_deploy_id)
+                msg = "System-deploy snapshots and backups restored, continuing to rollback the host"
+                msg_info += msg + "\n"
+                LOG.info(msg)
+            except Exception as e:
+                msg = "Failed to restore system-deploy snapshots: %s" % str(e)
+                if system_deploy.get("to_k8s_version"):
+                    LOG.exception(msg)
+                    deploy_host_state.deploy_failed()
+                    raise
+                LOG.warning(msg)
+                LOG.info("Falling-back to normal host-rollback procedure, since there is no K8s upgrade")
 
         msg = "Running software deploy host for %s (%s), force=%s, async_req=%s" % (
             hostname, ip, force, async_req)
