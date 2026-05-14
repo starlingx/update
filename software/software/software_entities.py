@@ -311,7 +311,7 @@ class SystemDeployHandler(SystemDeploy):
             raise SystemDeployNotExist(
                 "Error to update system deploy state. No system deploy in progress.")
 
-        data = get_software_filesystem_data()
+        data = get_software_filesystem_data(data_file=constants.SYSTEM_DEPLOY_JSON_FILE)
 
         new_system_deploy = {
             "id": system_deploy["id"],

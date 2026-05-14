@@ -87,7 +87,9 @@ def do_precheck(cc, args):
 
 
 @utils.arg('deployment',
-           help='Deployment ID to start')
+           nargs='?',
+           default=None,
+           help='Deployment ID to start (Optional when system deploy in progress)')
 @utils.arg('-f',
            '--force',
            action='store_true',

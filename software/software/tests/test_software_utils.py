@@ -7,6 +7,7 @@ import unittest
 
 from software.utils import find_file_by_regex
 from software.utils import get_component_and_versions
+from software.utils import get_major_release_version
 
 
 class TestSoftwareUtils(unittest.TestCase):
@@ -16,6 +17,30 @@ class TestSoftwareUtils(unittest.TestCase):
 
     def tearDown(self):
         pass
+
+    def test_major_release_standard_version(self):
+        self.assertEqual(get_major_release_version("22.12.0"), "22.12")
+
+    def test_major_release_without_patch(self):
+        self.assertEqual(get_major_release_version("22.12"), "22.12")
+
+    def test_major_release_str_without_patch(self):
+        self.assertEqual(get_major_release_version("starlingx-22.12"), "22.12")
+
+    def test_major_release_with_str_patch(self):
+        self.assertEqual(get_major_release_version("starlingx-22.12.2"), "22.12")
+
+    def test_major_release_none_input(self):
+        self.assertIsNone(get_major_release_version(None))
+
+    def test_major_release_empty_string(self):
+        self.assertIsNone(get_major_release_version(""))
+
+    def test_major_release_invalid_input(self):
+        self.assertIsNone(get_major_release_version("invalid"))
+
+    def test_major_release_partial_version(self):
+        self.assertIsNone(get_major_release_version("22"))
 
     def test_full_version_with_component(self):
         result = get_component_and_versions("component-22.12.0")

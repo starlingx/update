@@ -463,14 +463,7 @@ class LVMSnapshotManager:
 
         # check for invalid or expired snapshots
         # validate snapshots against the given ID
-        invalid_snapshots = []
-        for snapshot in snapshots:
-            try:
-                snapshot.validate_for_rollback(expected_tag_id)
-                LOG.info("Snapshot %s validated for ID %s", snapshot.name, expected_tag_id)
-            except ValueError as e:
-                LOG.error("%s", e)
-                invalid_snapshots.append(snapshot.name)
+        invalid_snapshots = self._get_invalid_snapshots(snapshots, expected_tag_id)
 
         if invalid_snapshots:
             LOG.error("Cannot proceed with snapshot restore, "
@@ -484,6 +477,23 @@ class LVMSnapshotManager:
         except Exception:
             return False
         return True
+
+    def _get_invalid_snapshots(self, snapshots, expected_tag_id):
+        """
+         Given a tag id, return invalid snapshot if there is any
+         :param snapshots: snapshots to be validated
+         :param expected_tag_id: tag id for validation
+         :return: array of invalid snapshot names
+        """
+        invalid_snapshots = []
+        for snapshot in snapshots:
+            try:
+                snapshot.validate_for_rollback(expected_tag_id)
+            except ValueError as e:
+                LOG.error("%s", e)
+                invalid_snapshots.append(snapshot.name)
+
+        return invalid_snapshots
 
     def delete_snapshots(self):
         """Delete any active snapshots"""

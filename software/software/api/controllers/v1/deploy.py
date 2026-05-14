@@ -91,9 +91,17 @@ class DeployController(RestController):
         return result
 
     @expose(method='POST', template='json')
-    def start(self, release, force=None, **kwargs):
+    def start(self, release=None, force=None, **kwargs):
         reload_release_data()
         _force = force is not None
+
+        if not release:
+            deploy_data = sc.software_system_deploy_show_api()
+            if not deploy_data:
+                response.status = 400
+                return dict(error="No active deployment found. "
+                            "Please specify a release or start a deployment.")
+            release = deploy_data.get("to_release")
 
         if sc.any_patch_host_installing():
             raise SoftwareServiceError(error="Rejected: One or more nodes are installing a release.")

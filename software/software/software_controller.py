@@ -3272,7 +3272,6 @@ class PatchController(PatchService):
                                        "The uploaded software could have been damaged. "
                                        "Please delete the software and re-upload it")
         major_to_release = utils.get_major_release_version(to_release)
-        k8s_ver = get_active_k8s_ver()
         postgresql_port = str(cfg.alt_postgresql_port)
 
         # Copy to_release_feed/pxelinux.cfg.files to /var/pxeboot/pxelinux.cfg.files
@@ -3287,6 +3286,19 @@ class PatchController(PatchService):
                                                                'pxelinux.cfg.files',
                                                                os.path.basename(pxeboot_cfg_file)))
                 LOG.info("Copied %s to %s", pxeboot_cfg_file, var_pxeboot_dir)
+
+        # If a system_deploy entity exists, use the system_deploy entity's
+        # k8s version and release info, and skip snapshot creation since
+        # precheck already took and validated them.
+        system_deploy = self._get_system_deploy()
+        if system_deploy:
+            k8s_ver = system_deploy["to_k8s_version"]
+            major_to_release = utils.get_major_release_version(system_deploy["to_release"])
+            # snapshot is skipped as it was taken and validated during precheck
+            kwargs["snapshot"] = False
+            LOG.info("System deploy in progress. Snapshot is skipped in deploy start.")
+        else:
+            k8s_ver = get_active_k8s_ver()
 
         feed = os.path.join(constants.FEED_DIR,
                             "rel-%s/ostree_repo" % major_to_release)

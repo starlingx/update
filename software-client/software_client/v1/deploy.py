@@ -43,14 +43,18 @@ class DeployManager(base.Manager):
         return res
 
     def start(self, args):
-        # args.deployment is a string
-        deployment = args.deployment
+        # Resolve deployment: positional or None
+        deployment = getattr(args, 'deployment', None)
 
         # Ignore interrupts during this function
         signal.signal(signal.SIGINT, signal.SIG_IGN)
 
         # Issue deploy_start request
-        path = "/v1/deploy/%s/start" % (deployment)
+        if deployment:
+            path = "/v1/deploy/%s/start" % deployment
+        else:
+            path = "/v1/deploy/start"
+
         body = {}
         if args.force:
             body["force"] = "true"
