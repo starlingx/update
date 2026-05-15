@@ -3,7 +3,7 @@
 #
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 #
-# Copyright (c) 2023-2024 Wind River Systems, Inc.
+# Copyright (c) 2023-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -16,28 +16,42 @@ to the controller.
 
 import argparse
 import configparser
-import glob
 import logging
-import os
+from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
+
+from packaging import version
 
 import upgrade_utils
 
 LOG = logging.getLogger('main_logger')
 
-AVAILABLE_DIR = "/opt/software/metadata/available"
-UNAVAILABLE_DIR = "/opt/software/metadata/unavailable"
-COMMITTED_DIR = "/opt/software/metadata/committed"
-PATCHING_COMMITTED_DIR = "/opt/patching/metadata/committed"
-FEED_OSTREE_BASE_DIR = "/var/www/pages/feed"
+LEGACY_SOFTWARE_STORAGE_DIR = Path("/opt/software")
+LEGACY_SOFTWARE_METADATA_STORAGE_DIR = LEGACY_SOFTWARE_STORAGE_DIR / "metadata"
+LEGACY_AVAILABLE_DIR = LEGACY_SOFTWARE_METADATA_STORAGE_DIR / "available"
+LEGACY_UNAVAILABLE_DIR = LEGACY_SOFTWARE_METADATA_STORAGE_DIR / "unavailable"
+SOFTWARE_RELEASES_STORAGE_DIR = Path("/opt/software/releases")
+SOFTWARE_RELEASES_METADATA_STORAGE_DIR = SOFTWARE_RELEASES_STORAGE_DIR / "metadata"
+AVAILABLE_DIR = SOFTWARE_RELEASES_METADATA_STORAGE_DIR / "available"
+UNAVAILABLE_DIR = SOFTWARE_RELEASES_METADATA_STORAGE_DIR / "unavailable"
+FEED_OSTREE_BASE_DIR = Path("/var/www/pages/feed")
 RELEASE_GA_NAME = "starlingx-%s"
-SOFTWARE_STORAGE_DIR = "/opt/software"
-TMP_DIR = "/tmp"
-VAR_PXEBOOT_DIR = "/var/pxeboot"
+SOFTWARE_STORAGE_DIR = Path("/opt/software")
+TMP_DIR = Path("/tmp")
+VAR_PXEBOOT_DIR = Path("/var/pxeboot")
 FEED_REMOTE = "starlingx"
 FEED_BRANCH = "starlingx"
+METAPACKAGES_DIR = "/usr/local/share/metapackages"
+PACKAGE_FEED_DIR = Path("/var/www/pages/updates/debian")
+MIN_METAPACKAGE_RELEASE = "26.10.0"
+
+# Ensure the metapackage base directories exist
+# This will create the parents and metapackage state directories
+for state_dir in [LEGACY_AVAILABLE_DIR, LEGACY_UNAVAILABLE_DIR, AVAILABLE_DIR, UNAVAILABLE_DIR, ]:
+    state_dir.mkdir(parents=True, exist_ok=True)
 
 
 def setup_from_release_load(from_release, to_feed_dir):
@@ -55,78 +69,78 @@ def setup_from_release_load(from_release, to_feed_dir):
         from_major_rel = upgrade_utils.get_major_release_version(from_release)
 
         # Copy install_uuid to /var/www/pages/feed/rel-<release>
-        from_feed_dir = os.path.join(FEED_OSTREE_BASE_DIR, ("rel-%s" % from_major_rel))
-        shutil.copyfile(os.path.join(from_feed_dir, "install_uuid"),
-                        os.path.join(to_feed_dir, "install_uuid"))
+        from_feed_dir = FEED_OSTREE_BASE_DIR / f"rel-{from_major_rel}"
+        shutil.copyfile(from_feed_dir / "install_uuid",
+                        to_feed_dir / "install_uuid")
         LOG.info("Copied install_uuid to %s", to_feed_dir)
 
         # Copy pxeboot-update-${from_major_release}.sh to from-release feed /upgrades
-        from_iso_upgrades_dir = os.path.join(from_feed_dir, "upgrades")
-        os.makedirs(from_iso_upgrades_dir, exist_ok=True)
-        shutil.copyfile(os.path.join("/etc", "pxeboot-update-%s.sh" % from_major_rel),
-                        os.path.join(from_iso_upgrades_dir, "pxeboot-update-%s.sh" % from_major_rel))
+        from_iso_upgrades_dir = from_feed_dir / "upgrades"
+        from_iso_upgrades_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(Path("/etc") / f"pxeboot-update-{from_major_rel}.sh",
+                        from_iso_upgrades_dir / f"pxeboot-update-{from_major_rel}.sh")
         LOG.info("Copied pxeboot-update-%s.sh to %s", from_major_rel, from_iso_upgrades_dir)
 
         # Copy pxelinux.cfg.files to from-release feed /pxeboot
-        from_feed_pxeboot_dir = os.path.join(from_feed_dir, "pxeboot")
-        os.makedirs(from_feed_pxeboot_dir, exist_ok=True)
+        from_feed_pxeboot_dir = from_feed_dir / "pxeboot"
+        from_feed_pxeboot_dir.mkdir(parents=True, exist_ok=True)
 
         # Find from-release pxelinux.cfg.files
-        pxe_dir = os.path.join(VAR_PXEBOOT_DIR, "pxelinux.cfg.files")
-        from_pxe_files = glob.glob(os.path.join(pxe_dir, '*' + from_major_rel))
-        for from_pxe_file in from_pxe_files:
-            if os.path.isfile(from_pxe_file):
-                shutil.copyfile(from_pxe_file, os.path.join(from_feed_pxeboot_dir,
-                                                            os.path.basename(from_pxe_file)))
+        pxe_dir = VAR_PXEBOOT_DIR / "pxelinux.cfg.files"
+        for from_pxe_file in pxe_dir.glob(f"*{from_major_rel}"):
+            if from_pxe_file.is_file():
+                shutil.copyfile(from_pxe_file, from_feed_pxeboot_dir / from_pxe_file.name)
                 LOG.info("Copied %s to %s", from_pxe_file, from_feed_pxeboot_dir)
 
     except Exception:
         raise
 
 
-def load_import(from_release, to_release, iso_mount_dir):
+def load_import(from_release, to_release, iso_mount_dir, metapackages):
     """
     Import the iso files to the feed and pxeboot directories
     :param from_release: from release version (MM.mm/MM.mm.p)
     :param to_release: to release version (MM.mm.p)
     :param iso_mount_dir: iso mount dir
+    :param metapackages: determine whether metapackage content should be uploaded
     """
 
     to_major_rel = upgrade_utils.get_major_release_version(to_release)
-    to_feed_dir = os.path.join(FEED_OSTREE_BASE_DIR, ("rel-%s" % to_major_rel))
+    iso_mount_dir = Path(iso_mount_dir)
+    to_feed_dir = FEED_OSTREE_BASE_DIR / f"rel-{to_major_rel}"
     try:
         # Copy the iso file to /var/www/pages/feed/rel-<release>
-        os.makedirs(FEED_OSTREE_BASE_DIR, exist_ok=True)
-        if os.path.exists(to_feed_dir):
+        FEED_OSTREE_BASE_DIR.mkdir(parents=True, exist_ok=True)
+        if to_feed_dir.exists():
             shutil.rmtree(to_feed_dir)
             LOG.info("Removed existing %s", to_feed_dir)
-        os.makedirs(to_feed_dir, exist_ok=True)
+        to_feed_dir.mkdir(parents=True, exist_ok=True)
 
         feed_contents = ["install_uuid", "efi.img", "kickstart",
                          "ostree_repo", "pxeboot", "upgrades"]
         for content in feed_contents:
-            src_abs_path = os.path.join(iso_mount_dir, content)
-            if os.path.isfile(src_abs_path):
-                shutil.copyfile(src_abs_path, os.path.join(to_feed_dir, content))
+            src_abs_path = iso_mount_dir / content
+            if src_abs_path.is_file():
+                shutil.copyfile(src_abs_path, to_feed_dir / content)
                 LOG.info("Copied %s to %s", src_abs_path, to_feed_dir)
-            elif os.path.isdir(src_abs_path):
-                shutil.copytree(src_abs_path, os.path.join(to_feed_dir, content,), symlinks=True)
+            elif src_abs_path.is_dir():
+                shutil.copytree(src_abs_path, to_feed_dir / content, symlinks=True)
                 LOG.info("Copied %s to %s", src_abs_path, to_feed_dir)
 
         # Add min-free-space-percent to feed ostree config file
-        config_path = os.path.join(to_feed_dir, "ostree_repo/config")
-        if os.path.exists(config_path):
+        config_path = to_feed_dir / "ostree_repo" / "config"
+        if config_path.exists():
             config = configparser.ConfigParser()
             config.read(config_path)
             config.set("core", "min-free-space-percent", "0")
 
-            with open(config_path, 'w') as file:
+            with config_path.open('w') as file:
                 config.write(file, space_around_delimiters=False)
 
         # Create 'starlingx' remote on the feed ostree_repo
         cmd = ["ostree", "remote", "add", "--no-gpg-verify",
-               "--repo=%s/ostree_repo/" % to_feed_dir, FEED_REMOTE,
-               "http://controller:8080/feed/rel-%s/ostree_repo/" % to_major_rel,
+               f"--repo={to_feed_dir}/ostree_repo/", FEED_REMOTE,
+               f"http://controller:8080/feed/rel-{to_major_rel}/ostree_repo/",
                FEED_BRANCH]
         try:
             subprocess.check_call(cmd)
@@ -136,30 +150,130 @@ def load_import(from_release, to_release, iso_mount_dir):
             raise
 
         # Converted from upgrade package extraction script
-        shutil.copyfile(os.path.join(to_feed_dir, "kickstart", "kickstart.cfg"),
-                        os.path.join(to_feed_dir, "kickstart.cfg"))
+        shutil.copyfile(to_feed_dir / "kickstart" / "kickstart.cfg",
+                        to_feed_dir / "kickstart.cfg")
 
         # Copy bzImage and initrd
-        bzimage_files = glob.glob(os.path.join(to_feed_dir, 'pxeboot', 'bzImage*'))
-        for bzimage_file in bzimage_files:
-            if os.path.isfile(bzimage_file):
-                shutil.copyfile(bzimage_file, os.path.join(VAR_PXEBOOT_DIR,
-                                                           os.path.basename(bzimage_file)))
+        for bzimage_file in (to_feed_dir / "pxeboot").glob("bzImage*"):
+            if bzimage_file.is_file():
+                shutil.copyfile(bzimage_file, VAR_PXEBOOT_DIR / bzimage_file.name)
                 LOG.info("Copied %s to %s", bzimage_file, VAR_PXEBOOT_DIR)
 
-        initrd_files = glob.glob(os.path.join(to_feed_dir, 'pxeboot', 'initrd*'))
-        for initrd_file in initrd_files:
-            if os.path.isfile(initrd_file):
-                shutil.copyfile(initrd_file, os.path.join(VAR_PXEBOOT_DIR,
-                                                          os.path.basename(initrd_file)))
+        for initrd_file in (to_feed_dir / "pxeboot").glob("initrd*"):
+            if initrd_file.is_file():
+                shutil.copyfile(initrd_file, VAR_PXEBOOT_DIR / initrd_file.name)
                 LOG.info("Copied %s to %s", initrd_file, VAR_PXEBOOT_DIR)
 
         # Copy pxeboot-update.sh to /etc
-        pxeboot_update_filename = "pxeboot-update-%s.sh" % to_major_rel
-        shutil.copyfile(os.path.join(to_feed_dir, "upgrades", pxeboot_update_filename),
-                        os.path.join("/etc", pxeboot_update_filename))
-        os.chmod(os.path.join("/etc", pxeboot_update_filename), mode=0o755)
+        pxeboot_update_filename = f"pxeboot-update-{to_major_rel}.sh"
+        pxeboot_update_dest = Path("/etc") / pxeboot_update_filename
+        shutil.copyfile(to_feed_dir / "upgrades" / pxeboot_update_filename,
+                        pxeboot_update_dest)
+        pxeboot_update_dest.chmod(0o755)
         LOG.info("Copied pxeboot-update-%s.sh to %s", to_major_rel, "/etc")
+
+        # Process metapackages contained in the iso
+        if should_upload_metapackages(from_release, metapackages):
+            ostree_repo_dir = to_feed_dir / "ostree_repo"
+            to_release_dir = SOFTWARE_RELEASES_STORAGE_DIR / to_release
+            checkout_cmd = ["ostree", f"--repo={ostree_repo_dir}", "checkout", FEED_BRANCH,
+                            f"--subpath={METAPACKAGES_DIR}/{to_release}",
+                            str(to_release_dir)]
+
+            # Checkout the metapackages content directory from ostree_repo
+            try:
+                if to_release_dir.is_dir():
+                    LOG.warning(f"Stale release directory {to_release_dir} found, removing it...")
+                    shutil.rmtree(to_release_dir, ignore_errors=True)
+                subprocess.run(checkout_cmd, check=True, capture_output=True, text=True)
+                LOG.info(f"Checked out metapackages from ostree_repo to {to_release_dir}")
+            except subprocess.CalledProcessError as e:
+                LOG.error(f"Error checking out metapackages directory: {str(e)}: {e.stderr}")
+                raise
+
+            # Get commit-id and checksum from the ostree_repo
+            ostree_log_cmd = ["ostree", f"--repo={ostree_repo_dir}", "log", FEED_BRANCH]
+            try:
+                result = subprocess.run(ostree_log_cmd, capture_output=True, check=True, text=True)
+                match = re.search(r"^commit (\S+).*?contentchecksum:\s+(\S+)", result.stdout,
+                                  re.DOTALL | re.MULTILINE | re.IGNORECASE)
+                if match:
+                    commit, checksum = match.group(1), match.group(2)
+                else:
+                    raise ValueError("Invalid commit-id/checksum format in ostree_repo")
+            except subprocess.CalledProcessError as e:
+                LOG.error("Failed getting commit-id and checksum: %s", e.output)
+                raise
+            LOG.info(f"Commit: {commit}, Checksum: {checksum}")
+
+            # Copy metapackages metadata to metadata available directory
+            dst_dir = UNAVAILABLE_DIR if from_release in ['None', None] else AVAILABLE_DIR
+            for src_md in to_release_dir.glob("*/metadata.xml"):
+                # Replace commit-id and checksum placeholders in metapackage metadata
+                content = src_md.read_text()
+                content = content.replace(
+                    "xxxBASECOMMITxxx", commit).replace(
+                    "xxxBASECHECKSUMxxx", checksum)
+                src_md.write_text(content)
+                mp_name = src_md.parent.name
+                mp_id = f"{mp_name}_{to_release}"
+                dst_md = dst_dir / f"{mp_id}-metadata.xml"
+                upgrade_utils.copy_xml_file(str(src_md), str(dst_md), {"deployable": "N"})
+                src_md.unlink()
+                LOG.info(f"Copied metadata to {dst_md}")
+                # Print output to be captured and returned by the release upload API
+                print(f"Uploaded {mp_id} metapackage release")
+
+            # Process the pre-upgrade-deploy metapackages from the iso
+            pre_upgrade_deploy_tar = iso_mount_dir / "pre-upgrade-deploy" / "software.tar"
+            if not pre_upgrade_deploy_tar.exists():
+                LOG.info("No pre-upgrade-deploy content in the product release")
+            else:
+                pre_upgrade_deploy_pkg_list = []
+                pre_upgrade_deploy_metapkg_list = []
+                with upgrade_utils.extract_tar(pre_upgrade_deploy_tar) as pud_dir:
+                    # Initialize and upload packages to apt-ostree repository
+                    for deb in Path(pud_dir).iterdir():
+                        LOG.info(f"Pre-upgrade-deploy deb package: {deb.name}")
+                        pre_upgrade_deploy_pkg_list.append(str(deb))
+                        if deb.name.startswith("meta-") and upgrade_utils.is_metapackage_deb(str(deb)):
+                            LOG.info(f"Package {deb.name} is a metapackage")
+                            pre_upgrade_deploy_metapkg_list.append(str(deb))
+                    pkg_repo_dir = PACKAGE_FEED_DIR / f"rel-{to_major_rel}"
+                    try:
+                        if not pkg_repo_dir.exists():
+                            upgrade_utils.initialize_apt_ostree(str(pkg_repo_dir))
+                            LOG.info(f"Initialized package repository: {pkg_repo_dir}")
+                        upgrade_utils.package_list_upload(str(pkg_repo_dir), to_release, pre_upgrade_deploy_pkg_list)
+                        LOG.info(f"Uploaded packages to repository")
+                    except Exception as e:
+                        LOG.error(f"Failed setting up package repository: {str(e)}")
+                        upgrade_utils.component_remove(str(pkg_repo_dir), to_release)
+                        raise
+                    # Process metapackages
+                    pre_upgrade_deploy_to_release_dir = to_release_dir / "pre-upgrade-deploy"
+                    # Copy metapackages directories from the metapackages deb packages
+                    for deb in pre_upgrade_deploy_metapkg_list:
+                        deb_name = deb.split("/")[-1]
+                        with upgrade_utils.extract_deb(deb) as deb_dir:
+                            deb_release_dir = Path(deb_dir) / "usr/local/share/metapackages" / to_release
+                            shutil.copytree(deb_release_dir, pre_upgrade_deploy_to_release_dir,
+                                            dirs_exist_ok=True)
+                            LOG.info(f"Copied pre-upgrade-deploy {deb_name} metapackage "
+                                     f"content to {pre_upgrade_deploy_to_release_dir}")
+                        # Copy the pre-upgrade-deploy metapackage metadata with prefix 'pre-'
+                        # to differentiate from the actual product release metapackage
+                        for src_md in pre_upgrade_deploy_to_release_dir.rglob("*/metadata.xml"):
+                            mp_name = src_md.parent.name
+                            mp_id = f"{mp_name}_{to_release}"
+                            dst_md = dst_dir / f"pre-{mp_id}-metadata.xml"
+                            upgrade_utils.remove_xml_tag(src_md, "contents")  # remove placeholders
+                            upgrade_utils.copy_xml_file(src_md, dst_md,
+                                                        {"deployable": "N", "pre_upgrade_deploy": "Y"})
+                            src_md.unlink()
+                            LOG.info(f"Copied metadata to {dst_md}")
+                            # Print output to be captured and returned by the release upload API
+                            print(f"Uploaded {mp_id} pre-upgrade-deploy metapackage release")
 
         # Setup from release load
         setup_from_release_load(from_release, to_feed_dir)
@@ -180,11 +294,16 @@ def move_metadata_file_to_target_dir(to_release, iso_mount_dir, target_dir):
     """
     try:
         # Copy all *-metadata.xml to target_dir
-        os.makedirs(target_dir, exist_ok=True)
-        for metadata_file in glob.glob(os.path.join(iso_mount_dir, "patches", "*-metadata.xml")):
-            metadata_name = os.path.basename(metadata_file)
-            shutil.copyfile(metadata_file, os.path.join(target_dir, metadata_name))
+        target_dir = Path(target_dir)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for metadata_file in Path(iso_mount_dir).glob("patches/*-metadata.xml"):
+            metadata_name = metadata_file.name
+            upgrade_utils.copy_xml_file(str(metadata_file), str(target_dir / metadata_name))
             LOG.info("Copied %s to %s", metadata_name, target_dir)
+            # # Print output to be captured and returned by the release upload API
+            release_id = upgrade_utils.get_xml_tag_value(metadata_file, "id",
+                                                         default=metadata_name)
+            print(f"Uploaded {release_id} product release")
     except shutil.Error:
         LOG.exception("Failed to copy the %s metadata files to %s" % (to_release, target_dir))
         raise
@@ -197,18 +316,25 @@ def sync_inactive_load_standby_controller(to_release):
     :param to_release: release version
     """
     to_major_rel = upgrade_utils.get_major_release_version(to_release)
-    feed_dir = os.path.join(FEED_OSTREE_BASE_DIR, ("rel-%s" % to_major_rel))
+    feed_dir = FEED_OSTREE_BASE_DIR / f"rel-{to_major_rel}"
     sync_cmd = [
         "rsync",
         "-ac",
         "--delete",
         "--exclude", "tmp",
-        feed_dir,
+        str(feed_dir),
         "rsync://controller-1/feed"]
     LOG.info("Syncing inactive load to controllers %s", ' '.join(sync_cmd))
     subprocess.run(sync_cmd, stdout=subprocess.PIPE,
                    stderr=subprocess.STDOUT, check=True, text=True)
     LOG.info("Sync controllers completed")
+
+
+# TODO(heitormatsui): remove when non-metapackage releases are deprecated
+def should_upload_metapackages(from_release, metapackages=False):
+    if from_release in [None, 'None']:
+        return True
+    return version.parse(from_release) >= version.parse(MIN_METAPACKAGE_RELEASE) or metapackages
 
 
 def main():
@@ -231,17 +357,29 @@ def main():
         required=True,
         help="The mounted iso image directory.",
     )
+    parser.add_argument(
+        "--metapackages",
+        default=False,
+        action="store_true",
+        help="Define if metapackage information must be retrieved from the iso",
+    )
     args = parser.parse_args()
 
     try:
         LOG.info("Load import from %s to %s started", args.from_release, args.to_release)
-        load_import(args.from_release, args.to_release, args.iso_dir)
+        load_import(args.from_release, args.to_release, args.iso_dir, args.metapackages)
 
-        if args.from_release in ['None', None]:  # This is N-1 load
-            move_metadata_file_to_target_dir(args.to_release, args.iso_dir, UNAVAILABLE_DIR)
-            sync_inactive_load_standby_controller(args.to_release)
+        legacy_release = args.from_release in ['None', None]
+        if should_upload_metapackages(args.from_release, args.metapackages):
+            target_dir = SOFTWARE_RELEASES_METADATA_STORAGE_DIR
+        elif legacy_release:
+            target_dir = LEGACY_UNAVAILABLE_DIR
         else:
-            move_metadata_file_to_target_dir(args.to_release, args.iso_dir, AVAILABLE_DIR)
+            target_dir = LEGACY_AVAILABLE_DIR
+        move_metadata_file_to_target_dir(args.to_release, args.iso_dir, target_dir)
+
+        if legacy_release:  # This is N-1 load
+            sync_inactive_load_standby_controller(args.to_release)
 
     except Exception as e:
         LOG.exception(e)

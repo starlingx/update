@@ -8,13 +8,17 @@
 #
 
 import configparser
+import contextlib
 import json
 import logging
+from lxml import etree as ET
 import os
 import re
 import requests
 import subprocess
 import sys
+import tarfile
+import tempfile
 import time
 import yaml
 
@@ -30,6 +34,9 @@ CONF = cfg.CONF
 logging_default_format_string = None
 software_conf_mtime = 0
 software_conf = '/etc/software/software.conf'
+
+DEBIAN_ORIGIN = "updates"
+DEBIAN_RELEASE = "bullseye"
 
 
 def get_token_endpoint(config, service_type="platform"):
@@ -310,3 +317,187 @@ def get_major_release_version(sw_release_version):
         return f"{v.major:02d}.{v.minor:02d}"
     except Exception:
         return None
+
+
+def add_text_tag_to_xml(parent, name, text=None):
+    """
+    Utility function for adding a text tag to an XML object
+    :param parent: Parent element
+    :param name: Element name
+    :param text: Text value
+    :return:The created element
+    """
+    element = parent.find(name)
+    if element is None:
+        element = ET.SubElement(parent, name)
+    if text is not None:
+        element.text = text
+    return element
+
+
+def get_xml_tag_value(filepath, tag, default=None):
+    """Get the text value of a tag from an XML file.
+
+    :param filepath: path to the XML file
+    :param tag: tag name to find
+    :param default: value to return if tag not found or file doesn't exist
+    :return: text content of the tag, or default
+    """
+    try:
+        tree = ET.parse(str(filepath))
+        root = tree.getroot()
+        node = root.find(tag)
+        if node is not None and node.text:
+            return node.text
+    except (ET.ParseError, FileNotFoundError, OSError):
+        pass
+    return default
+
+
+def remove_xml_tag(filepath, tag):
+    """Remove a tag and its children from an XML file.
+
+    :param filepath: path to the XML file
+    :param tag: tag name to remove
+    """
+    tree = ET.parse(str(filepath))
+    root = tree.getroot()
+    element = root.find(tag)
+    if element is not None:
+        root.remove(element)
+        ET.indent(tree, space="  ")
+        tree.write(str(filepath))
+
+
+def copy_xml_file(src, dst, additional_data=None):
+    """
+    Parse xml file, add additional data to its content, format and write to another file
+
+    :param src: source xml file
+    :param dst: destination xml file
+    :param additional_data: dict with additional data {<tag>: <value>} to add to the content
+    """
+    additional_data = additional_data or {}
+
+    tree = ET.parse(str(src))
+    root = tree.getroot()
+    for tag in additional_data:
+        add_text_tag_to_xml(root, tag, additional_data[tag])
+    ET.indent(tree, space="  ")
+    tree.write(str(dst))
+
+
+@contextlib.contextmanager
+def extract_tar(tar_path, prefix="software-"):
+    """Extract a tar file to a temporary directory, yielding the path."""
+    with tempfile.TemporaryDirectory(prefix=prefix) as tmpdir:
+        try:
+            with tarfile.open(tar_path) as tar:
+                tar.extractall(tmpdir)
+        except (tarfile.TarError, OSError) as e:
+            raise RuntimeError(f"Failed to extract {tar_path}: {e}") from e
+        yield tmpdir
+
+
+@contextlib.contextmanager
+def extract_deb(deb_path, prefix="deb-"):
+    """Extract a .deb package to a temporary directory, yielding the path."""
+    with tempfile.TemporaryDirectory(prefix=prefix) as tmpdir:
+        try:
+            subprocess.run(
+                ["dpkg-deb", "--extract", deb_path, tmpdir],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            raise ValueError(f"Failed to extract deb: {deb_path}: {e.stderr}") from e
+        yield tmpdir
+
+
+def is_metapackage_deb(deb_path):
+    """Query the deb package metadata 'Section' field and check if its value is 'metapackages'"""
+    output = subprocess.run(["dpkg-deb", "-f", deb_path], check=True,
+                            capture_output=True, text=True).stdout
+    for line in output.splitlines():
+        if "Section:" in line:
+            return line.lower().strip().split(" ")[1] == "metapackages"
+    return False
+
+
+def initialize_apt_ostree(feed_dir):
+    """
+    Initialize an apt Debian package archive.
+
+    :param feed_dir: apt package feed directory
+    """
+    try:
+        subprocess.run(
+            ["apt-ostree", "repo", "init",
+             "--feed", str(feed_dir),
+             "--release", DEBIAN_RELEASE,
+             "--origin", DEBIAN_ORIGIN],
+            check=True,
+            capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to initialize apt-ostree repo"
+        info_msg = "\"apt-ostree repo init\" error: return code %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.error(info_msg)
+        raise OSError(msg)
+
+
+def package_list_upload(feed_dir, sw_release, package_list):
+    """
+    Upload a Debian package to an apt repository.
+
+    :param feed_dir: apt package feed directory
+    :param sw_release: Uploading patch release version (MM.mm.pp)
+    :param package_list: Debian package list
+    """
+    try:
+        subprocess.run(
+            ["apt-ostree", "repo", "add",
+             "--feed", str(feed_dir),
+             "--release", DEBIAN_RELEASE,
+             "--component", sw_release,
+             *package_list],
+            check=True,
+            capture_output=True)
+
+        LOG.info("package list uploaded")
+    except subprocess.CalledProcessError as e:
+        packages = " ".join(package_list)
+        msg = "Failed to upload package list: %s" % packages
+        info_msg = "\"apt-ostree repo add\" error: return code %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.error(info_msg)
+        raise OSError(msg)
+
+
+def component_remove(pkg_feed_dir, component):
+    """
+    Remove the component with all packages from the
+    apt repository.
+
+    :param pkg_feed_dir: apt package feed directory
+    :param component: Component name in format MM.mm.pp
+    """
+
+    try:
+        msg = "Removing component: %s" % component
+        LOG.info(msg)
+
+        subprocess.run(
+            ["apt-ostree", "repo", "remove",
+                "--feed", str(pkg_feed_dir),
+                "--release", DEBIAN_RELEASE,
+                "--component", component],
+            check=True,
+            capture_output=True)
+    except subprocess.CalledProcessError as e:
+        msg = "Failed to remove component."
+        info_msg = "\"apt-ostree repo remove component\" error: return code %s , Output: %s" \
+                   % (e.returncode, e.stderr.decode("utf-8"))
+        LOG.error(info_msg)
+        raise OSError(msg)
