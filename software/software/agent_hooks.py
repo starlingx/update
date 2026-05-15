@@ -184,6 +184,141 @@ class EtcMerger(BaseHook):
         self.copy_files()
 
 
+class NtpToNtpsecMigrationHook(BaseHook):
+    """
+    Handle ntp->ntpsec transition during bullseye->trixie upgrade.
+    Upgrade: Replace ntp with ntpsec in user/group files, migrate drift file,
+             copy ntp defaults to ntpsec path, remove old ntp artifacts.
+    Rollback: Restore ntp user/group, copy defaults back, remove ntpsec
+              artifacts and stale systemd symlinks.
+    """
+
+    # Files where ntp->ntpsec replacement is needed
+    USER_FILES = ["passwd", "group", "shadow", "gshadow"]
+    NTP_DEFAULT_BACKUP = os.path.join(BaseHook.BACKUP_DIR, "etc_default_ntp")
+
+    def _replace_user_entry(self, src_file, dst_file, old_name, new_name):
+        """Replace old_name entry with new_name in dst_file, using src_file as source."""
+        with open(src_file, "r") as f:
+            new_line = next((ln for ln in f if ln.startswith(new_name + ":")), None)
+        if not new_line:
+            return
+        if not new_line.endswith("\n"):
+            new_line += "\n"
+        with open(dst_file, "r") as f:
+            lines = f.readlines()
+        # Replace old entry in-place, skip if new already exists
+        lines = [new_line if ln.startswith(old_name + ":") else ln
+                 for ln in lines if not ln.startswith(new_name + ":")]
+        # Append if neither old nor new was found
+        if not any(ln.startswith(new_name + ":") for ln in lines):
+            lines.append(new_line)
+        with open(dst_file, "w") as f:
+            f.writelines(lines)
+        LOG.info("Replaced %s with %s in %s" % (old_name, new_name, dst_file))
+
+    def _remove_paths(self, paths):
+        """Remove files, directories, or symlinks."""
+        for path in paths:
+            if os.path.isdir(path) and not os.path.islink(path):
+                shutil.rmtree(path)
+                LOG.info("Removed %s" % path)
+            elif os.path.exists(path) or os.path.islink(path):
+                os.remove(path)
+                LOG.info("Removed %s" % path)
+
+    def _upgrade(self):
+        LOG.info("Running NtpToNtpsecMigrationHook (upgrade)")
+        new_etc = os.path.join(self.TO_RELEASE_OSTREE_DIR, "etc")
+        new_usr_etc = os.path.join(self.TO_RELEASE_OSTREE_DIR, "usr", "etc")
+        # Replace ntp with ntpsec in all user/group files
+        for filename in self.USER_FILES:
+            self._replace_user_entry(
+                os.path.join(new_usr_etc, filename),
+                os.path.join(new_etc, filename),
+                "ntp", "ntpsec")
+        # Ensure ntpsec drift directory exists with correct ownership
+        new_drift_dir = "/var/lib/ntpsec"
+        os.makedirs(new_drift_dir, exist_ok=True)
+        os.chown(new_drift_dir, 174, 174)
+        # Migrate drift file if it exists
+        old_drift = "/var/lib/ntp/drift"
+        new_drift = os.path.join(new_drift_dir, "ntp.drift")
+        if os.path.exists(old_drift) and not os.path.exists(new_drift):
+            shutil.copy2(old_drift, new_drift)
+            os.chown(new_drift, 174, 174)
+            LOG.info("Migrated drift file to %s" % new_drift)
+        # Backup /etc/default/ntp for potential rollback
+        current_default = "/etc/default/ntp"
+        if os.path.exists(current_default):
+            os.makedirs(self.BACKUP_DIR, exist_ok=True)
+            shutil.copy2(current_default, self.NTP_DEFAULT_BACKUP)
+            LOG.info("Backed up %s" % current_default)
+        # Remove old ntp artifacts
+        self._remove_paths([
+            os.path.join(new_etc, "default", "ntp"),
+            os.path.join(new_etc, "ntp.conf"),
+            os.path.join(new_etc, "systemd", "system",
+                         "multi-user.target.wants", "ntp.service"),
+            "/var/lib/ntp",
+            "/var/log/ntpstats",
+        ])
+        LOG.info("NtpToNtpsecMigrationHook (upgrade) completed")
+
+    def _rollback(self):
+        LOG.info("Running NtpToNtpsecMigrationHook (rollback)")
+        new_etc = os.path.join(self.TO_RELEASE_OSTREE_DIR, "etc")
+        new_usr_etc = os.path.join(self.TO_RELEASE_OSTREE_DIR, "usr", "etc")
+        # Restore ntp user/group from bullseye image base
+        for filename in self.USER_FILES:
+            self._replace_user_entry(
+                os.path.join(new_usr_etc, filename),
+                os.path.join(new_etc, filename),
+                "ntpsec", "ntp")
+        # Restore /etc/default/ntp from backup
+        dst_default = os.path.join(new_etc, "default", "ntp")
+        if os.path.exists(self.NTP_DEFAULT_BACKUP):
+            os.makedirs(os.path.dirname(dst_default), exist_ok=True)
+            shutil.copy2(self.NTP_DEFAULT_BACKUP, dst_default)
+            os.remove(self.NTP_DEFAULT_BACKUP)
+            LOG.info("Restored %s from backup" % dst_default)
+        # Restore /etc/ntp.conf from image base if missing
+        for filename in ["ntp.conf"]:
+            src = os.path.join(new_usr_etc, filename)
+            dst = os.path.join(new_etc, filename)
+            if os.path.exists(src) and not os.path.exists(dst):
+                shutil.copy2(src, dst)
+                LOG.info("Restored %s" % dst)
+        # Restore /var/lib/ntp with drift file from ntpsec if available
+        old_ntp_dir = "/var/lib/ntp"
+        os.makedirs(old_ntp_dir, exist_ok=True)
+        os.chown(old_ntp_dir, 174, 174)
+        ntpsec_drift = "/var/lib/ntpsec/ntp.drift"
+        old_drift = os.path.join(old_ntp_dir, "drift")
+        if os.path.exists(ntpsec_drift) and not os.path.exists(old_drift):
+            shutil.copy2(ntpsec_drift, old_drift)
+            os.chown(old_drift, 174, 174)
+            LOG.info("Restored drift file to %s" % old_drift)
+        # Remove all ntpsec artifacts
+        systemd_dir = os.path.join(new_etc, "systemd", "system")
+        self._remove_paths([
+            os.path.join(systemd_dir, "ntp.service"),
+            os.path.join(systemd_dir, "ntpd.service"),
+            os.path.join(systemd_dir, "multi-user.target.wants", "ntpsec.service"),
+            os.path.join(new_etc, "ntpsec"),
+            os.path.join(new_etc, "cron.d", "ntpsec"),
+            os.path.join(new_etc, "default", "ntpsec"),
+            "/var/lib/ntpsec",
+        ])
+        LOG.info("NtpToNtpsecMigrationHook (rollback) completed")
+
+    def run(self):
+        if self.get_to_release_debian_codename() == "trixie":
+            self._upgrade()
+        elif self.get_from_release_debian_codename() == "trixie":
+            self._rollback()
+
+
 class EnableNewServicesHook(BaseHook):
     """
     Find the new services between FROM and TO release
@@ -1134,6 +1269,7 @@ class HookManager(object):
         MAJOR_RELEASE_UPGRADE: [
             CreateUSMUpgradeInProgressFlag,
             EtcMerger,
+            NtpToNtpsecMigrationHook,
             CopyPxeFilesHook,
             UpdateKernelParametersHook,
             ReconfigureKernelHook,
@@ -1155,6 +1291,7 @@ class HookManager(object):
             UpdateGrubConfigHook,
             DeleteControllerFeedRemoteHook,
             FixedEtcMergeRollBackHook,
+            NtpToNtpsecMigrationHook,
             LdapConfigHook,
             PuppetHieradataUpdate,
             SSSDCacheCleanupRollBackHook,
