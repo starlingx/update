@@ -5414,7 +5414,7 @@ class PatchControllerMainThread(threading.Thread):
                     if s == sc.sock_in:
                         # Receive from UDP
                         sc.socket_lock.acquire()
-                        data, addr = s.recvfrom(1024)
+                        data, addr = s.recvfrom(65535)
                         sc.socket_lock.release()
                     else:
                         # Receive from TCP
@@ -5450,7 +5450,12 @@ class PatchControllerMainThread(threading.Thread):
                         # Get the TCP endpoint address
                         addr = s.getpeername()
 
-                    msgdata = json.loads(data)
+                    try:
+                        msgdata = json.loads(data)
+                    except json.JSONDecodeError:
+                        LOG.error("Failed to decode message from %s, "
+                                  "discarding: %s", addr, data[:200])
+                        continue
 
                     # For now, discard any messages that are not msgversion==1
                     if 'msgversion' in msgdata and msgdata['msgversion'] != 1:
