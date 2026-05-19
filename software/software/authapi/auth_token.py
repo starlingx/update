@@ -49,7 +49,7 @@ class OIDCTokenMiddleware():
 
     def _authenticate(self, token):
         try:
-            claims = oidc_utils.get_oidc_token_claims(token, self._token_cache)
+            claims = oidc_utils.get_oidc_token_claims(token)
             parsed_claims = oidc_utils.parse_oidc_token_claims(claims, self._domain, self._project)
         except Exception as e:
             raise exc.HTTPForbidden(str(e))
