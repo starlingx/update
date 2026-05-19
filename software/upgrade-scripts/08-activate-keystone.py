@@ -6,16 +6,14 @@
 
 import logging
 import os
-from six.moves import configparser
 import subprocess
 import sys
 
-from oslo_config import cfg
-
+from six.moves import configparser
 from cgtsclient import client as cgts_client
-from software.utilities.utils import configure_logging
 
-CONF = cfg.CONF
+from software.utilities.plugin_runner import CPlugin
+from software.utilities.utils import configure_logging
 
 LOG = logging.getLogger('main_logger')
 
@@ -37,10 +35,51 @@ class CgtsClient(object):
         return self._sysinv_client
 
 
-def main():
-    action = None
+def get_system_mode():
+    ini_str = '[DEFAULT]\n' + open('/etc/platform/platform.conf', 'r').read()
+    config_applied = configparser.RawConfigParser()
+    config_applied.read_string(ini_str)
+    if config_applied.has_option('DEFAULT', 'system_mode'):
+        return config_applied.get('DEFAULT', 'system_mode')
+    return None
+
+
+def get_shared_services():
+    client = CgtsClient()
+    isystem = client.sysinv.isystem.list()[0]
+    return isystem.capabilities.get('shared_services', '')
+
+
+def activate_keystone():
+    if get_system_mode() != "simplex":
+        shared_services = get_shared_services()
+        if 'identity' not in shared_services:
+            keystone_cmd = 'keystone-manage db_sync --contract'
+            subprocess.check_call([keystone_cmd], shell=True)
+    return 0
+
+
+class ActivateKeystone(CPlugin):
+    def __init__(self):
+        super().__init__(
+            matching_action='activate',
+            required_state=None,
+            plugin_name='activate-keystone',
+            completed_state='activate-keystone-completed'
+        )
+
+    def _run(self, from_release, to_release, action, port):
+        configure_logging()
+        LOG.info("%s invoked from_release = %s to_release = %s action = %s"
+                 % (self.name, from_release, to_release, action))
+        activate_keystone()
+
+
+if __name__ == "__main__":
     from_release = None
     to_release = None
+    action = None
+    port = None
     arg = 1
 
     while arg < len(sys.argv):
@@ -51,71 +90,13 @@ def main():
         elif arg == 3:
             action = sys.argv[arg]
         elif arg == 4:
-            # optional port parameter for USM upgrade
-            # port = sys.argv[arg]
-            pass
+            port = sys.argv[arg]
         else:
             print("Invalid option %s." % sys.argv[arg])
-            return 1
+            sys.exit(1)
         arg += 1
 
-    configure_logging()
-    LOG.info("%s invoked from_release = %s to_release = %s action = %s"
-             % (sys.argv[0], from_release, to_release, action))
-    res = 0
-    if action == "activate":
-        try:
-            res = activate_keystone()
-        except Exception:
-            LOG.error("Activate keystone action failed")
-            res = 1
-
-    return res
-
-
-def get_system_mode():
-    ini_str = '[DEFAULT]\n' + open('/etc/platform/platform.conf', 'r').read()
-
-    config_applied = configparser.RawConfigParser()
-    config_applied.read_string(ini_str)
-
-    if config_applied.has_option('DEFAULT', 'system_mode'):
-        system_mode = config_applied.get('DEFAULT', 'system_mode')
-    else:
-        system_mode = None
-
-    return system_mode
-
-
-def get_shared_services():
-    client = CgtsClient()
-    isystem = client.sysinv.isystem.list()[0]
-    shared_services = isystem.capabilities.get('shared_services', '')
-    return shared_services
-
-
-def activate_keystone():
-    if get_system_mode() != "simplex":
-        try:
-            shared_services = get_shared_services()
-        except Exception:
-            LOG.exception("Failed to get shared services")
-            return 1
-
-        if 'identity' not in shared_services:
-            keystone_cmd = ('keystone-manage db_sync --contract')
-            try:
-                subprocess.check_call([keystone_cmd], shell=True)
-            except subprocess.CalledProcessError:
-                msg = "Failed to contract Keystone databases for upgrade."
-                LOG.exception(msg)
-                return 1
-            except Exception:
-                LOG.exception("Failed to execute command %s" % keystone_cmd)
-                return 1
-
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    plugin = ActivateKeystone()
+    result = plugin.run(from_release, to_release, action, port)
+    if result and 'failed' in result:
+        sys.exit(1)

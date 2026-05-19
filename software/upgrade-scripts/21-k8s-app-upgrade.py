@@ -10,8 +10,8 @@ import sys
 import time
 
 from cgtsclient import client as cgts_client
+from software.utilities.plugin_runner import CPlugin
 from software.utilities.utils import configure_logging
-
 
 LOG = logging.getLogger('main_logger')
 TIMEOUT_LIMIT_IN_MINUTES = 30
@@ -23,7 +23,6 @@ NO_INFO_STATUS = 'no_info'
 ERROR_STATUS = 'error'
 TIMEOUT_STATUS = 'timeout'
 REVERT_ACTION = 'revert'
-# Possible app status values
 APP_UPLOAD_SUCCESS = 'uploaded'
 APP_UPDATE_STARTING = 'update-starting'
 APP_UPDATE_IN_PROGRESS = 'updating'
@@ -31,38 +30,14 @@ APP_APPLY_SUCCESS = 'applied'
 
 
 def get_sysinv_client():
-    sysinv_client = cgts_client.get_client(
+    return cgts_client.get_client(
         "1",
         os_auth_token=os.environ.get("OS_AUTH_TOKEN"),
         system_url=os.environ.get("SYSTEM_URL")
     )
-    return sysinv_client
 
 
 def log_apps_progress_via_database(client_and_release_info, action='update', short_version=False):
-    """
-    Logs the progress of application updates or reverts by querying the database.
-    This function retrieves all applications from the database using the provided client,
-    categorizes them based on their update status (updated, not updated, or update in progress),
-    and logs the progress accordingly. The log messages are tailored based on whether
-    the action is an update or a revert.
-    Args:
-        client_and_release_info (dict): A dictionary containing:
-            - 'client': The database client object with a 'kube_app.get_all_apps()' method.
-            - 'from_release': The release version the apps are being updated from.
-            - 'to_release': The release version the apps are being updated to.
-        action (str, optional): The action being performed, either 'update' or 'revert'.
-            Defaults to 'update'.
-        short_version (bool, optional): If True, logs only the updated/reverted apps.
-            Defaults to False.
-    Logs:
-        - Lists of applications that have been updated/reverted.
-        - Lists of applications that have not yet started updating/reverting.
-        - Lists of applications currently in the process of updating/reverting.
-    Returns:
-        None
-    """
-
     client = client_and_release_info['client']
     from_release = client_and_release_info['from_release']
     to_release = client_and_release_info['to_release']
@@ -90,37 +65,20 @@ def log_apps_progress_via_database(client_and_release_info, action='update', sho
             update_in_progress.append(name)
 
     if updated:
-        if action == REVERT_ACTION:
-            LOG.info(f"Reverted apps up to now: {', '.join(updated)}")
-        else:
-            LOG.info(f"Updated apps up to now: {', '.join(updated)}")
+        verb = 'Reverted' if action == REVERT_ACTION else 'Updated'
+        LOG.info(f"{verb} apps up to now: {', '.join(updated)}")
     if not_updated and not short_version:
-        if action == REVERT_ACTION:
-            LOG.info("Applications that have not yet started the reverting process: "
-                     f"{', '.join(not_updated)}")
-        else:
-            LOG.info("Applications that have not yet started the updating process: "
-                     f"{', '.join(not_updated)}")
+        verb = 'reverting' if action == REVERT_ACTION else 'updating'
+        LOG.info(f"Applications that have not yet started the {verb} process: "
+                 f"{', '.join(not_updated)}")
     if update_in_progress and not short_version:
-        if action == REVERT_ACTION:
-            LOG.info("Applications currently in the reverting process: "
-                     f"{', '.join(update_in_progress)}")
-        else:
-            LOG.info("Applications currently in the updating process: "
-                     f"{', '.join(update_in_progress)}")
+        verb = 'reverting' if action == REVERT_ACTION else 'updating'
+        LOG.info(f"Applications currently in the {verb} process: "
+                 f"{', '.join(update_in_progress)}")
 
 
-def log_progress(
-    max_attempts,
-    currently_attempt,
-    status,
-    client_and_release_info,
-    failed_apps=[],
-    updated_apps=[],
-    error_msg=None,
-    action='update'
-):
-
+def log_progress(max_attempts, currently_attempt, status, client_and_release_info,
+                 failed_apps=[], updated_apps=[], error_msg=None, action='update'):
     attempt_msg = f"{action.capitalize()} checking {currently_attempt + 1}/{max_attempts}"
     interval_msg = f"Checking again in {PROGRESS_CHECK_INTERVAL_IN_SECONDS} second(s)."
 
@@ -128,11 +86,11 @@ def log_progress(
         IN_PROGRESS_STATUS: f'{attempt_msg}: Application {action} still in progress. {interval_msg}',
         FAILED_STATUS: f'{attempt_msg}: The application {action} process failed',
         COMPLETED_STATUS: f'{attempt_msg}: Application {action} successfully finished.',
-        NO_INFO_STATUS: f'{attempt_msg}: No info from the Application Framework regarding \
-            application {action}. {interval_msg}',
+        NO_INFO_STATUS: f'{attempt_msg}: No info from the Application Framework regarding '
+                        f'application {action}. {interval_msg}',
         ERROR_STATUS: f'{attempt_msg} failed with error: {error_msg}',
-        TIMEOUT_STATUS: f'{attempt_msg}: Application {action} failed due to a timeout. \
-            For more details, check the sysinv logs at /var/log/sysinv.log'
+        TIMEOUT_STATUS: f'{attempt_msg}: Application {action} failed due to a timeout. '
+                        f'For more details, check the sysinv logs at /var/log/sysinv.log'
     }
 
     verb = 'Reverted' if action == REVERT_ACTION else 'Updated'
@@ -140,10 +98,9 @@ def log_progress(
 
     if updated_apps and status == COMPLETED_STATUS:
         apps_msg += f"{verb} apps: {', '.join(updated_apps)}."
-
     if failed_apps:
-        apps_msg += f"The following apps did not {action} correctly and require manual \
-            intervention: {', '.join(failed_apps)}."
+        apps_msg += f"The following apps did not {action} correctly and require manual " \
+                    f"intervention: {', '.join(failed_apps)}."
 
     progress_log = status_to_msg[status]
 
@@ -170,7 +127,7 @@ def log_progress(
 
 
 def check_apps_update_progress(client_and_release_info, action='update'):
-    max_attempts = int(TIMEOUT_LIMIT_IN_MINUTES*60 / PROGRESS_CHECK_INTERVAL_IN_SECONDS)
+    max_attempts = int(TIMEOUT_LIMIT_IN_MINUTES * 60 / PROGRESS_CHECK_INTERVAL_IN_SECONDS)
     currently_attempt = 0
     client = client_and_release_info['client']
     while currently_attempt < max_attempts:
@@ -179,16 +136,9 @@ def check_apps_update_progress(client_and_release_info, action='update'):
             status = NO_INFO_STATUS
             if response:
                 status = response['status']
-
-            log_progress(
-                max_attempts,
-                currently_attempt,
-                status,
-                client_and_release_info,
-                response['failed_apps'],
-                response['updated_apps'],
-                action=action
-            )
+            log_progress(max_attempts, currently_attempt, status,
+                         client_and_release_info, response['failed_apps'],
+                         response['updated_apps'], action=action)
             if status == IN_PROGRESS_STATUS:
                 time.sleep(PROGRESS_CHECK_INTERVAL_IN_SECONDS)
                 currently_attempt += 1
@@ -199,26 +149,57 @@ def check_apps_update_progress(client_and_release_info, action='update'):
             else:
                 currently_attempt += 1
         except Exception as e:
-            log_progress(
-                max_attempts,
-                currently_attempt,
-                ERROR_STATUS,
-                client_and_release_info,
-                error_msg=e,
-                action=action
-            )
+            log_progress(max_attempts, currently_attempt, ERROR_STATUS,
+                         client_and_release_info, error_msg=e, action=action)
             time.sleep(PROGRESS_CHECK_INTERVAL_IN_SECONDS)
             currently_attempt += 1
-    log_progress(
-        max_attempts, currently_attempt, TIMEOUT_STATUS, client_and_release_info, action=action)
+    log_progress(max_attempts, currently_attempt, TIMEOUT_STATUS,
+                 client_and_release_info, action=action)
     return False
 
 
-def main():
-    action = None
+class K8sAppUpgrade(CPlugin):
+    def __init__(self):
+        super().__init__(
+            matching_action=['activate', 'activate-rollback'],
+            required_state=None,
+            plugin_name='k8s-app-upgrade',
+            completed_state='k8s-app-upgrade-completed'
+        )
+
+    def _run(self, from_release, to_release, action, port):
+        configure_logging()
+        LOG.info("%s invoked from_release = %s to_release = %s action = %s"
+                 % (self.name, from_release, to_release, action))
+        client = get_sysinv_client()
+        client_and_release_info = {
+            'client': client,
+            'from_release': from_release,
+            'to_release': to_release
+        }
+        if action == 'activate':
+            client.kube_app.update_all()
+            time.sleep(5)
+            if not check_apps_update_progress(client_and_release_info):
+                raise Exception("Application update failed")
+        elif action == 'activate-rollback':
+            if client.kube_app.get_all_apps_by_status('apply-failed'):
+                raise Exception(
+                    "One or more applications are in 'apply-failed' status. "
+                    "Manual intervention is required.")
+            client.kube_app.rollback_all_apps()
+            time.sleep(5)
+            if not check_apps_update_progress(client_and_release_info, REVERT_ACTION):
+                raise Exception("Application rollback failed")
+
+
+if __name__ == "__main__":
     from_release = None
     to_release = None
+    action = None
+    port = None
     arg = 1
+
     while arg < len(sys.argv):
         if arg == 1:
             from_release = sys.argv[arg]
@@ -227,46 +208,13 @@ def main():
         elif arg == 3:
             action = sys.argv[arg]
         elif arg == 4:
-            # Optional postgres port parameter for USM upgrade (not used
-            # by this script).
-            pass
+            port = sys.argv[arg]
         else:
             print("Invalid option %s." % sys.argv[arg])
-            return 1
+            sys.exit(1)
         arg += 1
 
-    if action in ('activate', 'activate-rollback'):
-        configure_logging()
-        try:
-            client = get_sysinv_client()
-            client_and_release_info = {
-                'client': client,
-                'from_release': from_release,
-                'to_release': to_release
-            }
-            update_operation_result = False
-            if action == 'activate':
-                client.kube_app.update_all()
-                time.sleep(5)
-                update_operation_result = check_apps_update_progress(client_and_release_info)
-            elif action == 'activate-rollback':
-                if client.kube_app.get_all_apps_by_status('apply-failed'):
-                    LOG.error(
-                        "One or more applications are in 'apply-failed' status."
-                        "Manual intervention is required."
-                    )
-                    return 1
-                client.kube_app.rollback_all_apps()
-                time.sleep(5)
-                update_operation_result = check_apps_update_progress(
-                    client_and_release_info, REVERT_ACTION)
-            if update_operation_result:
-                return 0
-            return 1
-        except Exception as e:
-            LOG.error(e)
-            return 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    plugin = K8sAppUpgrade()
+    result = plugin.run(from_release, to_release, action, port)
+    if result and 'failed' in result:
+        sys.exit(1)

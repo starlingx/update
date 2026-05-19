@@ -11,7 +11,7 @@ from software.states import DEPLOY_STATES
 from software.utilities.update_deploy_state import update_deploy_state
 from software.utilities.utils import ACTION_ACTIVATE_ROLLBACK
 from software.utilities.utils import configure_logging
-from software.utilities.utils import execute_migration_scripts
+from software.utilities.plugin_runner import execute_migration_scripts
 
 LOG = log.getLogger(__name__)
 

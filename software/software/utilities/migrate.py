@@ -25,6 +25,7 @@ import psycopg2
 from software.utilities.utils import configure_logging
 import software.utilities.utils as utils
 from software.utilities import constants
+from software.utilities.plugin_runner import execute_migration_scripts
 from packaging import version
 
 
@@ -1021,7 +1022,7 @@ def upgrade_controller(from_release, to_release, target_port):
     print("Applying configuration...")
 
     # Execute migration scripts
-    utils.execute_migration_scripts(
+    execute_migration_scripts(
         from_release, to_release, utils.ACTION_MIGRATE, target_port)
 
     first_controller = get_first_controller(target_port)
