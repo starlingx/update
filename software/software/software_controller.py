@@ -2573,10 +2573,7 @@ class PatchController(PatchService):
             iterator = self.release_collection.iterate_releases
 
         for release in iterator():
-            if query_metapackages:
-                results.append(release)
-            else:
-                results.append(release.to_query_dict())
+            results.append(release.to_query_dict())
 
         return results
 

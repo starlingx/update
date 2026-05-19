@@ -47,7 +47,7 @@ class SWRelease(object):
 
     @property
     def state(self):
-        if "metapackages" in self.metadata:
+        if self.is_product_release:
             state = self.metapackage_based_state()
         else:
             state = self.legacy_based_state()
@@ -60,12 +60,9 @@ class SWRelease(object):
             mp_states.append(metadata["state"])
             mp_deployable.append(metadata["deployable"] == "Y")
 
-        iso_release = all(m is False for m in mp_deployable)
         if all(state == states.AVAILABLE for state in mp_states):
             return states.AVAILABLE
         elif all(state == states.UNAVAILABLE for state in mp_states):
-            if iso_release:
-                return states.AVAILABLE
             return states.UNAVAILABLE
         elif all(state == states.DEPLOYED for state in mp_states):
             return states.DEPLOYED
@@ -194,7 +191,7 @@ class SWRelease(object):
 
     @property
     def reboot_required(self):
-        if self.metapackage_enabled:
+        if self.is_product_release:
             rr = self._metapackage_based_rr()
         else:
             rr = self._legacy_based_rr()
@@ -270,14 +267,50 @@ class SWRelease(object):
             return None
 
     @property
-    def metapackage_enabled(self):
-        if self._get_by_key('metapackages'):
-            return True
-        return False
+    def deployable(self):
+        return self._get_by_key('deployable')
 
     @property
     def metapackages(self):
         return self._get_by_key('metapackages')
+
+    @property
+    def product(self):
+        return self._get_by_key('product')
+
+    @property
+    def is_product_release(self):
+        """Indicates whether this release is a product release.
+
+        A product release represents the top-level layer in the release hierarchy.
+        It defines a product and acts as a container for one or more metapackage
+        releases. A release is identified as a product release when it has
+        associated metapackages.
+        """
+        return self.metapackages is not None
+
+    @property
+    def is_metapackage_release(self):
+        """Indicates whether this release is a metapackage release.
+
+        A metapackage release represents the second layer in the release hierarchy.
+        Multiple metapackage releases compose a single product release, allowing
+        the system to be patched at a finer granularity than the product level.
+        A release is identified as a metapackage release when it is associated
+        with a parent product.
+        """
+        return self.product is not None
+
+    @property
+    def is_legacy_release(self):
+        """Indicates whether this release follows the legacy release model.
+
+        A legacy release predates the two-layer hierarchy. Under the legacy model,
+        only the product layer existed and could be deployed directly, with no
+        metapackage subdivision. A release is classified as legacy when it is
+        neither a product release nor a metapackage release.
+        """
+        return not self.is_metapackage_release and not self.is_product_release
 
     def get_all_dependencies(self, filter_states=None):
         """
@@ -352,7 +385,7 @@ class SWRelease(object):
                 "activation_scripts": self.activation_scripts[:],
                 "metapackages": [],
                 "packages": []}
-        if self.metapackage_enabled:
+        if self.is_product_release:
             # For product releases, the pkg section is present only in
             # the metapackage metadata.
             data["metapackages"] = list(self.metapackages)
@@ -374,10 +407,17 @@ class SWReleaseCollection(object):
 
     def __init__(self, release_data):
         self._sw_releases = {}
+        self._sw_metapackages = {}
         for rel_id in release_data.metadata:
             rel_data = release_data.metadata[rel_id]
             contents = release_data.contents[rel_id]
             sw_release = SWRelease(rel_id, rel_data, contents)
+            if sw_release.is_product_release:
+                for mp in sw_release.metapackages:
+                    mp_data = sw_release.metapackages[mp]
+                    mp_contents = sw_release.contents["metapackages"][mp]
+                    mp_release = SWRelease(mp, mp_data, mp_contents)
+                    self._sw_metapackages[mp] = mp_release
             self._sw_releases[rel_id] = sw_release
 
     @property
@@ -447,39 +487,27 @@ class SWReleaseCollection(object):
         '''
         if state is not None:
             # Case 1: filter by state
-            for rel_id in self._sw_releases:
-                rel_data = self._sw_releases[rel_id]
-                if rel_data.metapackage_enabled:
-                    for mp in rel_data.metapackages:
-                        mp_data = rel_data.metapackages[mp]
-                        if mp_data["state"] == state:
-                            mp_data["release_id"] = mp
-                            yield mp_data
+            for mp in self._sw_metapackages:
+                mp_data = self._sw_metapackages[mp]
+                if mp_data.state == state:
+                    yield mp_data
         elif query_all:
             # Case 2: yield all metapackages
-            for rel_id in self._sw_releases:
-                rel_data = self._sw_releases[rel_id]
-                if rel_data.metapackage_enabled:
-                    for mp in rel_data.metapackages:
-                        mp_data = rel_data.metapackages[mp]
-                        mp_data["release_id"] = mp
-                        yield mp_data
+            for mp in self._sw_metapackages:
+                mp_data = self._sw_metapackages[mp]
+                yield mp_data
         else:
             # Case 3: for each metapackage name, yield only the instance
             # from the latest release version that is in DEPLOYED state.
             latest_deployed = {}
-            for rel_id in self._sw_releases:
-                rel_data = self._sw_releases[rel_id]
-                if rel_data.metapackage_enabled:
-                    for mp in rel_data.metapackages:
-                        mp_data = rel_data.metapackages[mp]
-                        if mp_data["state"] == states.DEPLOYED:
-                            if mp not in latest_deployed or rel_data > latest_deployed[mp][0]:
-                                mp_data["release_id"] = mp
-                                latest_deployed[mp] = (rel_data, mp_data)
-            for mp_name in latest_deployed:
-                mp_data = latest_deployed[mp_name][1]
-                yield mp_data
+            for mp in self._sw_metapackages:
+                mp_data = self._sw_metapackages[mp]
+                if mp_data.state == states.DEPLOYED:
+                    latest_mp = latest_deployed.get(mp_data.component)
+                    if not latest_mp or mp_data > latest_mp:
+                        latest_deployed[mp_data.component] = mp_data
+            for mp in latest_deployed:
+                yield latest_deployed[mp]
 
     def update_state(self, list_of_releases, state):
         for release_id in list_of_releases:

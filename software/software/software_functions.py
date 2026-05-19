@@ -467,11 +467,12 @@ class ReleaseData(object):
 
             self.metadata[release_id]["sw_version"] = sw_version
             self.metadata[release_id]["metapackages"] = {}
+            self.contents[release_id]["metapackages"] = {}
             metapackages = xml_file.find("metapackages")
             if metapackages is not None:
                 for pkg in metapackages.findall("pkg"):
-                    if pkg.text is not None:
-                        self.metadata[release_id]["metapackages"][pkg.text] = {}
+                    if pkg.text is not None and sw_version != "unknown":
+                        self.metadata[release_id]["metapackages"][f"{pkg.text}_{sw_version}"] = {}
         else:
             # Legacy or Metapackage Release
             xml_tags = ["status", "summary", "description"]
@@ -483,7 +484,6 @@ class ReleaseData(object):
                 if metapackage_id is None:
                     LOG.error("Metapackage metadata does not contain id tag")
                     return None
-                metapackage_name = metapackage_id.split("_")[0]
 
                 sw_version = xml_file.findtext("sw_version")
                 if sw_version is None:
@@ -494,15 +494,13 @@ class ReleaseData(object):
                     LOG.error(f"No existing release matches {sw_version} version")
                     return None
 
-                self.metadata[release_id]["metapackages"][metapackage_name] = {}
+                self.metadata[release_id]["metapackages"][metapackage_id] = {}
+                self.contents[release_id]["metapackages"][metapackage_id] = {}
+                metadata_dict = self.metadata[release_id]["metapackages"][metapackage_id]
+                contents_dict = self.contents[release_id]["metapackages"][metapackage_id]
 
-                self.contents[release_id] = {}
-                self.contents[release_id]["metapackages"] = {}
-                self.contents[release_id]["metapackages"][metapackage_name] = {}
-
-                metadata_dict = self.metadata[release_id]["metapackages"][metapackage_name]
-                contents_dict = self.contents[release_id]["metapackages"][metapackage_name]
-
+                metadata_dict["component"] = metapackage_id.split("_")[0]  # metapackage name without version
+                metadata_dict["product"] = release_id  # include product release in metapackage metadata
                 metadata_dict["state"] = state
                 self._parse_metadata_tag(xml_file, "deployable", metadata_dict)
                 self._parse_metadata_tag(xml_file, "data_migration", metadata_dict)

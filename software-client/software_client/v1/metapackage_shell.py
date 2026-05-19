@@ -25,8 +25,7 @@ def do_list(cc, args):
 
     rc = utils.check_rc(resp, data)
     if rc == 0:
-        header_data_list = {"Release": "release_id", "Version": "sw_version",
-                            "RR": "reboot_required", "State": "state"}
+        header_data_list = {"Release": "release_id", "RR": "reboot_required", "State": "state"}
         sorted_data = sorted(data, key=lambda x: (x["sw_version"], x["release_id"].translate(
             dict.fromkeys(map(ord, "-_."), "-"))))
         utils.display_result_list(header_data_list, sorted_data)
