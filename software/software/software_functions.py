@@ -1468,7 +1468,14 @@ class ComponentPatchFile:
         - Signature checking is enabled, by default
         - cert_type=None is required to enforce no dev-patches installed in a formal load
         """
-        file_list = [f for f in Path(patch_dir).iterdir() if f.name in ComponentPatchFile.SIGNED_FILES]
+        # the file list doesn't matter when verifying SIGNATURE_FILE, but it matters
+        # when verifying the DETACHED_SIGNATURE_FILE and will fail if the order is
+        # not the same used as when the patch was signed
+        file_list = []
+        patch_files = [f.name for f in Path(patch_dir).iterdir() if f.is_file()]
+        for file in ComponentPatchFile.SIGNED_FILES:
+            if file in patch_files:
+                file_list.append(Path(patch_dir) / file)
 
         # Verify the data integrity signature
         with open(Path(patch_dir) / ComponentPatchFile.SIGNATURE_FILE, "r") as fd:
