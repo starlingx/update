@@ -91,10 +91,18 @@ def do_unselect(cc, args):
     return utils.check_rc(resp, data)
 
 
-@utils.arg('deployment',
-           nargs='?',
+@utils.arg('releases',
+           nargs='*',
            default=None,
-           help='Deployment ID (can be none if exists a system-deploy entity)')
+           help='Releases IDs. '
+           'Can assume an empty value, a list of metapackage releases or '
+           'a single product release. If empty, it checks the system-deploy '
+           'entity or the selected metapackage releases')
+@utils.arg('--pre-upgrade-deploy',
+           action='store_true',
+           required=False,
+           help='Run precheck only in the metapackages required to deploy '
+           'before upgrading to the specified product release')
 @utils.arg('-f',
            '--force',
            action='store_true',
@@ -117,8 +125,7 @@ def do_precheck(cc, args):
 
     rc = utils.check_rc(resp, data)
     if rc == 0:
-        if data.get("system_healthy") is False:
-            print("System is unhealthy for deploy")
+        if data.get("error"):
             rc = 1
 
     utils.display_info(resp)

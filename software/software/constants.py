@@ -186,6 +186,7 @@ UNKNOWN_SOFTWARE_VERSION = "0.0.0"
 LICENSE_FILE = "/etc/platform/.license"
 VERIFY_LICENSE_BINARY = "/usr/bin/verify-license"
 VERSIONED_SCRIPTS_DIR = "%s/rel-%%s/bin/" % SOFTWARE_STORAGE_DIR
+SUPPORT_SCRIPTS_DIR = "support-scripts"
 
 WORKER_SUMMARY_DIR = "%s/summary" % SOFTWARE_STORAGE_DIR
 WORKER_DATETIME_FORMAT = "%Y%m%dT%H%M%S%f"

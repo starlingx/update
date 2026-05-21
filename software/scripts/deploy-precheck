@@ -53,9 +53,30 @@ class HealthCheck(object):
     def __init__(self, config):
         self._config = config
 
-        # get target release from script directory location
-        self._target_release = re.match(r"^.*/rel-(\d\d.\d\d.\d+)/", __file__).group(1)
+        # Determine target release and metapackage from script directory location.
+        # New path: /opt/software/releases/{MM.mm.pp}/{metapackage}/support-scripts/deploy-precheck
+        # Legacy path: /opt/software/rel-{MM.mm.pp}/bin/deploy-precheck
+        script_path = os.path.realpath(__file__)
+
+        new_path_match = re.match(
+            r"^.*/releases/(\d\d\.\d\d\.\d+)/([^/]+)/support-scripts/", script_path)
+        legacy_path_match = re.match(
+            r"^.*/rel-(\d\d\.\d\d\.\d+)/bin/", script_path)
+
+        if new_path_match:
+            self._target_release = new_path_match.group(1)
+            self._metapackage = new_path_match.group(2)
+        elif legacy_path_match:
+            self._target_release = legacy_path_match.group(1)
+            self._metapackage = None
+        else:
+            raise RuntimeError(
+                "Unable to determine target release from script path: %s" % script_path)
+
         self._major_release = self._target_release.rsplit(".", 1)[0]
+        LOG.info("deploy-precheck: target_release=%s, major_release=%s, metapackage=%s",
+                 self._target_release, self._major_release, self._metapackage)
+
         if not self._config.get("pre_bootstrap"):
             # get sysinv token, endpoint and client
             self._sysinv_token, self._sysinv_endpoint = \

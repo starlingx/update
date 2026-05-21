@@ -52,21 +52,20 @@ class DeployManager(base.Manager):
         return res
 
     def precheck(self, args):
-        # Resolve deployment: positional or None
-        deployment = getattr(args, 'deployment', None)
+        path = "/v1/deploy/precheck"
+        releases = args.releases
 
-        if deployment:
-            path = "/v1/deploy/%s/precheck" % deployment
-        else:
-            path = "/v1/deploy/precheck"
-
-        body = {}
+        body = {
+            "releases": releases
+        }
         if args.force:
             body["force"] = "true"
         if args.options:
             body["options"] = args.options
         if args.region_name:
             body["region_name"] = args.region_name
+        if args.pre_upgrade_deploy:
+            body["pre_upgrade_deploy"] = args.pre_upgrade_deploy
 
         res = self._post(path, body=body)
         return res
