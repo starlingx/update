@@ -142,10 +142,13 @@ def do_precheck(cc, args):
     return rc
 
 
-@utils.arg('deployment',
-           nargs='?',
+@utils.arg('releases',
+           nargs='*',
            default=None,
-           help='Deployment ID to start (Optional when system deploy in progress)')
+           help='Releases IDs: '
+                'Can assume an empty value, a list of metapackage releases '
+                'separated by spaces or a product release. If empty, it checks the '
+                'system-deploy entity or the deploy-selected releases.')
 @utils.arg('-f',
            '--force',
            action='store_true',

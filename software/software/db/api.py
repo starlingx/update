@@ -40,10 +40,10 @@ class SoftwareAPI:
         self.system_deploy_handler = SystemDeployHandler()
 
     def create_deploy(self, from_release, to_release, feed_repo,
-                      commit_id, reboot_required: bool, **kwargs):
+                      commit_id, reboot_required: bool, metapackages, **kwargs):
         self.begin_update()
         self.deploy_handler.create(from_release, to_release, feed_repo,
-                                   commit_id, reboot_required, **kwargs)
+                                   commit_id, reboot_required, metapackages, **kwargs)
         self.end_update()
 
     def get_deploy(self, from_release, to_release):

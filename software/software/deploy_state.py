@@ -174,7 +174,8 @@ class DeployState(object):
             callback(target_state)
 
     # below are list of events to drive the FSM
-    def start(self, from_release, to_release, feed_repo, commit_id, reboot_required, **kwargs):
+    def start(self, from_release, to_release, feed_repo, commit_id, reboot_required, metapackages,
+              **kwargs):
         # start is special, it needs to create the deploy entity
         if isinstance(from_release, SWRelease):
             from_release = from_release.sw_release
@@ -185,7 +186,7 @@ class DeployState(object):
         LOG.info(msg)
         db_api_instance = get_instance()
         db_api_instance.create_deploy(from_release, to_release, feed_repo, commit_id,
-                                      reboot_required, **kwargs)
+                                      reboot_required, metapackages, **kwargs)
 
     def start_failed(self):
         self.transform(DEPLOY_STATES.START_FAILED)

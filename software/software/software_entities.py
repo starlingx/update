@@ -137,7 +137,8 @@ class Deploy(abc.ABC):
 
     @abc.abstractmethod
     def create(self, from_release: str, to_release: str, feed_repo: str,
-               commit_id: str, reboot_required: bool, state: DEPLOY_STATES, **kwargs):
+               commit_id: str, reboot_required: bool, metapackages: list,
+               state: DEPLOY_STATES, **kwargs):
         """
         Create a new deployment entry.
 
@@ -146,6 +147,7 @@ class Deploy(abc.ABC):
         :param feed_repo: ostree repo feed path
         :param commit_id: commit-id to deploy
         :param reboot_required: If is required to do host reboot.
+        :param metapackages: metapackage list to deploy
         :param state: The state of the deployment.
 
         """
@@ -332,8 +334,8 @@ class SystemDeployHandler(SystemDeploy):
 
 
 class DeployHandler(Deploy):
-    def create(self, from_release, to_release, feed_repo, commit_id, reboot_required,
-               state=DEPLOY_STATES.START, **kwargs):
+    def create(self, from_release, to_release, feed_repo, commit_id,
+               reboot_required, metapackages, state=DEPLOY_STATES.START, **kwargs):
         """
         Create a new deployment with given from and to release version
         :param from_release: The current release version
@@ -341,13 +343,15 @@ class DeployHandler(Deploy):
         :param feed_repo: ostree repo feed path
         :param commit_id: commit-id to deploy
         :param reboot_required: If is required to do host reboot
+        :param metapackages: metapackage list to deploy
         :param state: The state of the deployment
         """
-        super().create(from_release, to_release, feed_repo, commit_id, reboot_required, state)
+        super().create(from_release, to_release, feed_repo, commit_id, reboot_required, metapackages, state)
         deploy = self.query(from_release, to_release)
         if deploy:
             raise DeployAlreadyExist("Error to create. Deploy already exists.")
         new_deploy = {
+            "metapackages": metapackages,
             "from_release": from_release,
             "to_release": to_release,
             "feed_repo": feed_repo,

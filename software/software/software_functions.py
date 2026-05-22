@@ -500,7 +500,15 @@ class ReleaseData(object):
                                            self.metadata[release_id])
         else:
             # Legacy or Metapackage Release
-            xml_tags = ["status", "summary", "description"]
+            xml_tags = [
+                "status",
+                "summary",
+                "description",
+                "pre_start",
+                "post_start",
+                "pre_install",
+                "post_install",
+            ]
             metadata_dict = {}
             contents_dict = {}
             if xml_file.tag == "metapackage":
@@ -1824,11 +1832,11 @@ def collect_current_load_for_hosts(local_load, hostname=None):
             })
         else:
             for ihost in get_ihost_list():
-                software_load = ihost.software_load
+                sw_version = ihost.sw_version
                 hostname = ihost.hostname
                 load_data["current_loads"].append({
                     "hostname": hostname,
-                    "running_release": software_load
+                    "running_release": sw_version
                 })
         dbapi = get_instance()
         dbapi.create_current_loads(load_data)

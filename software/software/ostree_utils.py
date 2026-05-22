@@ -182,7 +182,7 @@ def get_all_feed_commits(patch_sw_version):
     """
     repo_path = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR,
                                            patch_sw_version)
-    cmd = "ostree log %s --repo=%s | grep -i commit" % (constants.OSTREE_REF, repo_path)
+    cmd = "ostree log %s --repo=%s | grep -i '^commit'" % (constants.OSTREE_REF, repo_path)
     try:
         output = subprocess.run(cmd, shell=True, check=True, capture_output=True)
     except subprocess.CalledProcessError as e:

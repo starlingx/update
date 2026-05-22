@@ -15,6 +15,7 @@ import glob
 import json
 import logging
 import os
+from pathlib import Path
 import re
 import select
 import shutil
@@ -57,6 +58,7 @@ from software.exceptions import MaxReleaseExceeded
 from software.exceptions import MetadataFail
 from software.exceptions import OSTreeCommandFail
 from software.exceptions import OSTreeTarFail
+from software.exceptions import ReleaseInvalidData
 from software.exceptions import ReleaseInvalidRequest
 from software.exceptions import ReleaseIsoDeleteFailure
 from software.exceptions import ReleasePrecheckInvalidRequest
@@ -71,6 +73,7 @@ import software.messages as messages
 import software.ostree_utils as ostree_utils
 from software.plugin import DeployPluginRunner
 from software.release_data import get_SWReleaseCollection
+from software.release_data import MetapackageDeploymentSet
 from software.release_data import reload_release_data
 from software.release_data import SWReleaseCollection
 from software.release_state import ReleaseState
@@ -78,6 +81,7 @@ from software.release_verify import verify_files
 from software.software_functions import audit_log_info
 from software.software_functions import BasePackageData
 from software.software_functions import collect_current_load_for_hosts
+from software.software_functions import ComponentPatchFile
 from software.software_functions import configure_logging
 from software.software_functions import copy_pxeboot_update_file
 from software.software_functions import copy_pxeboot_cfg_files
@@ -91,7 +95,6 @@ from software.software_functions import is_system_deploy_in_progress
 from software.software_functions import mount_iso_load
 from software.software_functions import package_dir
 from software.software_functions import parse_release_metadata
-from software.software_functions import ComponentPatchFile
 from software.software_functions import PatchFile
 from software.software_functions import read_upgrade_support_versions
 from software.software_functions import repo_dir
@@ -114,6 +117,7 @@ from software.sysinv_utils import trigger_evaluate_apps_reapply
 from software.sysinv_utils import trigger_vim_host_audit
 from software.sysinv_utils import update_host_sw_version
 from software.sysinv_utils import validate_kube_version_upgradeable
+from software.utilities import plugin_runner
 import software.utils as utils
 from software import states
 
@@ -1461,32 +1465,6 @@ class PatchController(PatchService):
             except OSError:
                 msg = "Failed to remove the activate script for %s" % patch_id
                 LOG.warning(msg)
-
-    def run_semantic_check(self, action, patch_list):
-        if not os.path.exists(INITIAL_CONFIG_COMPLETE_FLAG):
-            # Skip semantic checks if initial configuration isn't complete
-            return
-
-        # Pass the current patch state to the semantic check as a series of args
-        patch_state_args = []
-        for release in self.release_collection.iterate_releases():
-            patch_state = '%s=%s' % (release.id, release.state)
-            patch_state_args += ['-p', patch_state]
-
-        # Run semantic checks, if any
-        for patch_id in patch_list:
-            semchk = os.path.join(constants.SEMANTICS_DIR, action, patch_id)
-
-            if os.path.exists(semchk):
-                try:
-                    LOG.info("Running semantic check: %s", semchk)
-                    subprocess.check_output([semchk] + patch_state_args,
-                                            stderr=subprocess.STDOUT)
-                    LOG.info("Semantic check %s passed", semchk)
-                except subprocess.CalledProcessError as e:
-                    msg = "Semantic check failed for %s:\n%s" % (patch_id, e.output)
-                    LOG.exception(msg)
-                    raise SoftwareFail(msg)
 
     def software_install_local_api(self, delete):
         """
@@ -3893,13 +3871,41 @@ class PatchController(PatchService):
             msg = f"Received invalid deploy host state update {host_deploy_state}"
             LOG.error(msg)
 
-    def add_text_tag_to_xml(self, parent, tag, text):
-        '''Add text to tag. Create it if it does not exist'''
+    def add_text_tag_to_xml(self, parent, tag, text=None):
+        '''Add text to tag, create it if it does not exist, and return the element'''
         element = parent.find(tag)
         if element is None:
             element = ET.SubElement(parent, tag)
-        element.text = text
+        if text is not None:
+            element.text = text
         return element
+
+    def update_ostree_commit_id(self, metadata_file, latest_commit, latest_feed_commit):
+        tree = ET.parse(metadata_file)
+        root = tree.getroot()
+
+        # Get ostree tag
+        contents = self.add_text_tag_to_xml(root, constants.CONTENTS_TAG)
+        ostree = self.add_text_tag_to_xml(contents, constants.OSTREE_TAG)
+
+        # Set number of commits tag value
+        self.add_text_tag_to_xml(ostree, constants.NUMBER_OF_COMMITS_TAG, "1")
+
+        # Update the base commit with the current commit
+        base = self.add_text_tag_to_xml(ostree, constants.BASE_TAG)
+        self.add_text_tag_to_xml(base, constants.COMMIT_TAG, latest_commit)
+        self.add_text_tag_to_xml(base, constants.CHECKSUM_TAG, "")
+
+        # Update the commit1 commit with the new commit
+        commit1 = self.add_text_tag_to_xml(ostree, constants.COMMIT1_TAG)
+        self.add_text_tag_to_xml(commit1, constants.COMMIT_TAG, latest_feed_commit)
+        self.add_text_tag_to_xml(commit1, constants.CHECKSUM_TAG, "")
+
+        # Save file content
+        ET.indent(tree, '  ')
+        with open(metadata_file, "wb") as outfile:
+            tree = ET.tostring(root)
+            outfile.write(tree)
 
     def is_deployment_list_reboot_required(self, deployment_list):
         """Check if any deploy in deployment list is reboot required"""
@@ -3991,41 +3997,58 @@ class PatchController(PatchService):
         Install the debian packages, create the commit and update the metadata.
         """
 
-        try:
-            for release_id in deployment_list:
-                msg = "Starting deployment for: %s" % release_id
-                LOG.info(msg)
-                audit_log_info(msg)
+        # Cannot change the legacy behavior since in DC systemcontroller will still
+        # use this function during patch upload to pre-build the ostree commit-id
+        # for previous releases, so the metapackage support will be separated for now
+        # and the legacy behavior is preserved in the else-condition
+        # TODO(heitormatsui): remove the legacy support in the future
+        if isinstance(deployment_list, MetapackageDeploymentSet):
+            mp_deploy_set = deployment_list
 
-                deploy_release = self._release_basic_checks(release_id)
-                self.copy_patch_activate_scripts(release_id, deploy_release.activation_scripts)
+            msg = f"Starting deployment for: {mp_deploy_set}"
+            LOG.info(msg)
+            audit_log_info(msg)
 
-                # Run pre_start script
-                self._run_start_script(deploy_release.pre_start, release_id, constants.APPLY)
-                # Reload release in case pre_start script made some change
+            try:
+                # Create script runner for the provided metapackages
+                extra_args = ["--operation=apply"]
+
+                # Run pre-start script contained in each metapackage
+                LOG.info(f"Running pre-start scripts for: {mp_deploy_set}")
+                for mp in mp_deploy_set:
+                    script = mp.pre_start  # Check for pre_start script in metadata
+                    if script:
+                        mp_script_dir = Path(mp.metapackage_dir) / constants.HOST_SCRIPTS_TYPE
+                        plugin_runner.run_scripts([mp_script_dir], names=[script],
+                                                  extra_args=extra_args)
                 reload_release_data()
-                deploy_release = self._release_basic_checks(release_id)
 
-                all_commits = ostree_utils.get_all_feed_commits(deploy_release.sw_version)
+                # Check if metapackage commit exist and are in the feed (for upgrade and prestage)
+                all_commits = ostree_utils.get_all_feed_commits(mp_deploy_set.sw_version)
+                # Latest commit is the first in the list
                 latest_commit = all_commits[0]
-                target_commit = deploy_release.commit_id
+                # Target commit is either None or one commit
+                try:
+                    target_commit = next(iter(mp_deploy_set.commit_id))
+                except StopIteration:
+                    target_commit = None
                 if target_commit in all_commits:
                     # This case is for node with prestaged data where ostree
                     # commits have been pulled from system controller
                     LOG.info("Commit %s already exists in feed repo for release %s"
-                             % (deploy_release.commit_id, release_id))
+                             % (target_commit, mp_deploy_set.product))
 
                     # If this is the last deployment, and it is not the latest commit in feed
                     # delete the commits until reach this, and delete metadatas
-                    if release_id == deployment_list[-1] and target_commit != latest_commit:
+                    if target_commit != latest_commit:
                         self.cleanup_old_releases(target_commit, all_commits)
 
                         # Reset feed to last deployment release
-                        self.reset_feed_commit(deploy_release)
+                        self.reset_feed_commit(target_commit)
+                    return
 
-                    continue
-
-                packages = [pkg.split("_")[0] for pkg in deploy_release.packages]
+                # Get metapackages .deb packages, which are named 'meta-<metapackage-id>'
+                packages = [f"meta-{pkg.component}" for pkg in mp_deploy_set.metapackages]
                 if packages is None:
                     msg = "Unable to determine packages to install"
                     LOG.error(msg)
@@ -4035,8 +4058,8 @@ class PatchController(PatchService):
                 try:
                     apt_utils.run_install(
                         feed_repo,
-                        deploy_release.sw_version,
-                        deploy_release.sw_release,
+                        mp_deploy_set.sw_version,
+                        mp_deploy_set.sw_release,
                         packages,
                         self.pre_bootstrap)
                 except APTOSTreeCommandFail:
@@ -4044,59 +4067,154 @@ class PatchController(PatchService):
                     LOG.exception(msg)
                     raise APTOSTreeCommandFail(msg)
 
-                # Get the latest commit after performing "apt-ostree install".
-                latest_feed_commit = \
-                    ostree_utils.get_feed_latest_commit(deploy_release.sw_version)
-
-                deploystate = deploy_release.state
-                metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[deploystate]
-                metadata_file = "%s/%s-metadata.xml" % (metadata_dir, release_id)
-
+                # Get the latest commit after performing 'apt-ostree install'
                 reload_release_data()
-                # NOTE(bqian) Below check an exception raise should be revisit, if applicable,
-                # should be applied to the begining of all requests.
+                latest_feed_commit = ostree_utils.get_feed_latest_commit(mp_deploy_set.sw_version)
+
+                # NOTE(bqian): Below check an exception raise should be revisited,
+                # if applicable should be applied to the begining of all requests
                 if len(self.hosts) == 0:
-                    msg = "service is running in incorrect state. No registered host"
+                    msg = "Service is running in incorrect state, no registered hosts"
                     raise InternalError(msg)
 
-                with self.hosts_lock:
-                    self.interim_state[release_id] = list(self.hosts)
+                # Get the metapackage metadata files location
+                deploy_state = states.DEPLOYING
+                if mp_deploy_set.state == states.REMOVE_SELECTED:
+                    deploy_state = states.REMOVING
+                metadata_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP[deploy_state]
+                metadata_files = [Path(metadata_dir) / f"{mp.id}-metadata.xml"
+                                  for mp in mp_deploy_set]
 
-                # Update metadata
-                tree = ET.parse(metadata_file)
-                root = tree.getroot()
+                # Update metapackage metadata commit-ids
+                for md in metadata_files:
+                    self.update_ostree_commit_id(md, latest_commit, latest_feed_commit)
+                LOG.info(f"Latest feed commit {latest_feed_commit} added to metadata files")
 
-                contents = ET.SubElement(root, constants.CONTENTS_TAG)
-                ostree = ET.SubElement(contents, constants.OSTREE_TAG)
-                self.add_text_tag_to_xml(ostree, constants.NUMBER_OF_COMMITS_TAG, "1")
-                base = ET.SubElement(ostree, constants.BASE_TAG)
-                self.add_text_tag_to_xml(base, constants.COMMIT_TAG, latest_commit)
-                self.add_text_tag_to_xml(base, constants.CHECKSUM_TAG, "")
-                commit1 = ET.SubElement(ostree, constants.COMMIT1_TAG)
-                self.add_text_tag_to_xml(commit1, constants.COMMIT_TAG, latest_feed_commit)
-                self.add_text_tag_to_xml(commit1, constants.CHECKSUM_TAG, "")
+                # Run post-start script contained in each metapackage
+                LOG.info(f"Running post-start scripts for: {mp_deploy_set}")
+                for mp in mp_deploy_set:
+                    script = mp.post_start  # Check for post_start script in metadata
+                    if script:
+                        mp_script_dir = Path(mp.metapackage_dir) / constants.HOST_SCRIPTS_TYPE
+                        plugin_runner.run_scripts([mp_script_dir], names=[script],
+                                                  extra_args=extra_args)
 
-                ET.indent(tree, '  ')
-                with open(metadata_file, "wb") as outfile:
-                    tree = ET.tostring(root)
-                    outfile.write(tree)
+                # In prepatched add tombstone
+                ostree_utils.add_tombstone_commit_if_prepatched(constants.OSTREE_REF, feed_repo)
 
-                LOG.info("Latest feed commit: %s added to metadata file" % latest_feed_commit)
+                # Update the feed ostree summary
+                ostree_utils.update_repo_summary_file(feed_repo)
+            except Exception as e:
+                msg = f"Failed to install releases: {str(e)}"
+                LOG.error(msg)
+                raise SoftwareError(msg)
+        else:
+            try:
+                for release_id in deployment_list:
+                    msg = "Starting deployment for: %s" % release_id
+                    LOG.info(msg)
+                    audit_log_info(msg)
 
-                # Run post_start script
-                self._run_start_script(deploy_release.post_start, release_id, constants.APPLY)
+                    deploy_release = self._release_basic_checks(release_id)
+                    self.copy_patch_activate_scripts(release_id, deploy_release.activation_scripts)
 
-            # In prepatched add tombstone
-            ostree_utils.add_tombstone_commit_if_prepatched(constants.OSTREE_REF, feed_repo)
+                    # Run pre_start script
+                    self._run_start_script(deploy_release.pre_start, release_id, constants.APPLY)
+                    # Reload release in case pre_start script made some change
+                    reload_release_data()
+                    deploy_release = self._release_basic_checks(release_id)
 
-            # Update the feed ostree summary
-            ostree_utils.update_repo_summary_file(feed_repo)
-        except Exception as e:
-            msg = "Failed to install releases. Reason: %s" % e
-            LOG.error(msg)
-            raise SoftwareError(msg)
+                    all_commits = ostree_utils.get_all_feed_commits(deploy_release.sw_version)
+                    latest_commit = all_commits[0]
+                    target_commit = deploy_release.commit_id
+                    if target_commit in all_commits:
+                        # This case is for node with prestaged data where ostree
+                        # commits have been pulled from system controller
+                        LOG.info("Commit %s already exists in feed repo for release %s"
+                                 % (deploy_release.commit_id, release_id))
 
-    def install_releases_thread(self, deployment_list, feed_repo, upgrade=False, **kwargs):
+                        # If this is the last deployment, and it is not the latest commit in feed
+                        # delete the commits until reach this, and delete metadatas
+                        if release_id == deployment_list[-1] and target_commit != latest_commit:
+                            self.cleanup_old_releases(target_commit, all_commits)
+
+                            # Reset feed to last deployment release
+                            self.reset_feed_commit(deploy_release)
+
+                        continue
+
+                    packages = [pkg.split("_")[0] for pkg in deploy_release.packages]
+                    if packages is None:
+                        msg = "Unable to determine packages to install"
+                        LOG.error(msg)
+                        raise MetadataFail(msg)
+
+                    # Install debian package through apt-ostree
+                    try:
+                        apt_utils.run_install(
+                            feed_repo,
+                            deploy_release.sw_version,
+                            deploy_release.sw_release,
+                            packages,
+                            self.pre_bootstrap)
+                    except APTOSTreeCommandFail:
+                        msg = "Failed to install Debian packages."
+                        LOG.exception(msg)
+                        raise APTOSTreeCommandFail(msg)
+
+                    # Get the latest commit after performing "apt-ostree install".
+                    latest_feed_commit = \
+                        ostree_utils.get_feed_latest_commit(deploy_release.sw_version)
+
+                    deploystate = deploy_release.state
+                    metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[deploystate]
+                    metadata_file = "%s/%s-metadata.xml" % (metadata_dir, release_id)
+
+                    reload_release_data()
+                    # NOTE(bqian) Below check an exception raise should be revisit, if applicable,
+                    # should be applied to the begining of all requests.
+                    if len(self.hosts) == 0:
+                        msg = "service is running in incorrect state. No registered host"
+                        raise InternalError(msg)
+
+                    with self.hosts_lock:
+                        self.interim_state[release_id] = list(self.hosts)
+
+                    # Update metadata
+                    tree = ET.parse(metadata_file)
+                    root = tree.getroot()
+
+                    contents = ET.SubElement(root, constants.CONTENTS_TAG)
+                    ostree = ET.SubElement(contents, constants.OSTREE_TAG)
+                    self.add_text_tag_to_xml(ostree, constants.NUMBER_OF_COMMITS_TAG, "1")
+                    base = ET.SubElement(ostree, constants.BASE_TAG)
+                    self.add_text_tag_to_xml(base, constants.COMMIT_TAG, latest_commit)
+                    self.add_text_tag_to_xml(base, constants.CHECKSUM_TAG, "")
+                    commit1 = ET.SubElement(ostree, constants.COMMIT1_TAG)
+                    self.add_text_tag_to_xml(commit1, constants.COMMIT_TAG, latest_feed_commit)
+                    self.add_text_tag_to_xml(commit1, constants.CHECKSUM_TAG, "")
+
+                    ET.indent(tree, '  ')
+                    with open(metadata_file, "wb") as outfile:
+                        tree = ET.tostring(root)
+                        outfile.write(tree)
+
+                    LOG.info("Latest feed commit: %s added to metadata file" % latest_feed_commit)
+
+                    # Run post_start script
+                    self._run_start_script(deploy_release.post_start, release_id, constants.APPLY)
+
+                # In prepatched add tombstone
+                ostree_utils.add_tombstone_commit_if_prepatched(constants.OSTREE_REF, feed_repo)
+
+                # Update the feed ostree summary
+                ostree_utils.update_repo_summary_file(feed_repo)
+            except Exception as e:
+                msg = "Failed to install releases. Reason: %s" % e
+                LOG.error(msg)
+                raise SoftwareError(msg)
+
+    def install_releases_thread(self, metapackage_set, feed_repo, upgrade=False, **kwargs):
         """
         In a separated thread.
         Install the debian packages, create the commit and update the metadata.
@@ -4107,26 +4225,28 @@ class PatchController(PatchService):
 
             try:
                 # Process releases
-                self.install_releases(deployment_list, feed_repo)
+                self.install_releases(metapackage_set, feed_repo)
 
                 latest_feed_commit = ostree_utils.get_feed_latest_commit(SW_VERSION)
                 self.send_latest_feed_commit_to_agent(latest_feed_commit)
                 self.software_sync()
 
+                # TODO(heitormatsui) adapt upgrade for full metapackage support
                 if upgrade:
-                    base_deployment = deployment_list[-1]
-                    base_release = self._release_basic_checks(base_deployment)
-                    upgrade_commit_id = base_release.commit_id
+                    try:
+                        upgrade_commit_id = next(iter(metapackage_set.commit_id))
+                    except StopIteration:
+                        raise ValueError("Couldn't determine commit-id to upgrade")
                     self.db_api_instance.update_deploy(commit_id=upgrade_commit_id)
-                    if self._deploy_upgrade_start(base_release.sw_release, upgrade_commit_id, **kwargs):
-                        LOG.info("Finished releases %s deploy start" % deployment_list)
+                    if self._deploy_upgrade_start(metapackage_set.sw_release, upgrade_commit_id, **kwargs):
+                        LOG.info("Finished releases %s deploy start" % metapackage_set)
                     else:
                         raise ValueError("_deploy_upgrade_start failed")
                 else:
                     # move the deploy state to start-done
                     deploy_state = DeployState.get_instance()
                     deploy_state.start_done(latest_feed_commit)
-                    LOG.info("Finished releases %s deploy start" % deployment_list)
+                    LOG.info("Finished releases %s deploy start" % metapackage_set)
 
             except Exception as e:
                 msg = "Deploy start applying failed: %s" % str(e)
@@ -4145,12 +4265,13 @@ class PatchController(PatchService):
         thread = threading.Thread(target=run)
         thread.start()
 
-    def _precheck_before_start(self, deployment, release_version, is_patch, force=False,
+    def _precheck_before_start(self, metapackages, release_version, is_patch, force=False,
                                snapshot=False, **kwargs):
         LOG.info("Running deploy precheck.")
         # TODO(mbenedit): The _deploy_precheck parameter should run on each metapackage
         # release selected to be deployed/removed. Pass the metapackage name as a required
         # parameter in _deploy_precheck and remove the optional parameter from the method.
+
         precheck_result = self._deploy_precheck(release_version, patch=is_patch, force=force,
                                                 snapshot=snapshot, **kwargs)
         if precheck_result.get('system_healthy') is None:
@@ -4161,7 +4282,7 @@ class PatchController(PatchService):
             return precheck_result
         elif precheck_result.get('system_healthy') is False:
             precheck_result["error"] = (
-                f"The following issues have been detected, which prevent deploying {deployment}\n"
+                f"The following issues have been detected, which prevent deploying {', '.join(metapackages)}\n"
                 f"{precheck_result['info']}\n"
                 "Please fix above issues then retry the deploy.\n"
             )
@@ -4169,7 +4290,8 @@ class PatchController(PatchService):
         return None
 
     def _get_precheck_result_file_path(self, release_version):
-        return os.path.join("/opt/software/", f"rel-{release_version}", "precheck-result.json")
+        return os.path.join(constants.COMPONENT_SOFTWARE_STORAGE_DIR,
+                            release_version, "precheck-result.json")
 
     def _safe_remove_precheck_result_file(self, release_version):
         precheck_result_file = self._get_precheck_result_file_path(release_version)
@@ -4207,40 +4329,121 @@ class PatchController(PatchService):
 
         return not last_result["healthy"]
 
+    def _get_metapackages_to_deploy(self, releases):
+        # When no releases are provided, check system deploy first, and then selected metapackages
+        if not releases:
+            # Check if system deploy exists
+            deploy_data = self.software_system_deploy_show_api()
+            if deploy_data:
+                release_id = deploy_data.get("to_release")
+                metapackage_list = self.release_collection.get_metapackages_id_by_product_id(release_id)
+            # No system deploy exists, verify selected metapackages
+            else:
+                metapackage_list = [mp.id for mp in
+                                    self.release_collection.iterate_metapackages_by_state(
+                                        states.COMPONENT_SELECTED_STATES)]
+                if metapackage_list:
+                    msg = (f"Metapackages previously selected for "
+                           f"deployment: {', '.join(metapackage_list)}\n")
+                    return metapackage_list, dict(info=msg, warning="", error="")
+        # When releases are provided, attempt to select them for deployment
+        else:
+            metapackage_list = releases[:]
+
+        # Attempt to select the metapackages for deployment
+        selected_metapackages, select_output = self._deploy_select(**{"releases": metapackage_list})
+        select_error = select_output.get("error")
+
+        # Raise ReleaseInvalidRequest in error case
+        if select_error:
+            raise ReleaseInvalidRequest(select_error)
+
+        # Return the list of metapackages to be deployed
+        return selected_metapackages, select_output
+
+    def _get_highest_deployed(self, metapackage_data, apply=True):
+        """
+        Get the highest deployed release for each provided metapackages
+
+        :param metapackage_data: array with metapackage data
+        :param apply: indicate whether applying or removing metapackages
+        :return: array of tuples containing (metapackage-name, from-release, to-release)
+        """
+        # By default, iterate_metapackages bring the highest deployed only
+        metapackage_deploy_state = []
+        highest_deployed = list(self.release_collection.iterate_metapackages())
+        for mp in metapackage_data:
+            for hmp in highest_deployed:
+                # Get tuple with (<metapackage-name>, <from-sw-release>, <to-sw-release>)
+                if mp.component == hmp.component:
+                    if apply:
+                        metapackage_deploy_state.append(
+                            (mp.component, hmp.sw_release, mp.sw_release))
+                    # For remove, invert the versions, as the to-release will be the
+                    # highest deployed release after removing the given metapackages
+                    else:
+                        metapackage_deploy_state.append(
+                            (mp.component, mp.sw_release, hmp.sw_release)
+                        )
+        return metapackage_deploy_state
+
     @require_deploy_state([None],
                           "There is already a deployment in progress ({state.value}). "
                           "Please complete/delete the current deployment.")
-    def software_deploy_start_api(self, deployment: str, force: bool, **kwargs) -> dict:
+    def software_deploy_start_api(self, releases: list, force: bool, **kwargs) -> dict:
         """
-        to start deploy of a specified release.
-        The operation implies deploying all undeployed dependency releases of
-        the specified release. i.e, to deploy release 24.09.1, it implies
-        deploying 24.09.0 and 24.09.1 when 24.09.0 has not been deployed.
-        The operation includes steps:
-        1. find all undeployed dependency releases
-        2. ensure all releases (dependency and specified release) are ready to deployed
-        3. precheck, if last precheck was not executed or if was executed and failed or
-           if precheck result expired
-        4. transform all involved releases to deploying state
-        5. start the deploy subprocess
+        Start the deployment of a product release (patch or upgrade) or
+        a list of metapackages (patch), the steps include:
+        - Run precheck for all metapackages
+        - Transform all involved releases to deploying state
+        - Start the deploy subprocess
+
+        :param metapackages: the list of metapackage releases to deploy
+        :param force: ignore non-critical alarms to start the deployment
+        :param kwargs: optional additional parameters
         """
         msg_info = ""
         msg_warning = ""
         msg_error = ""
-        deploy_release = self._release_basic_checks(deployment)
 
+        # Get metapackage list to deploy based on provided releases
+        try:
+            # TODO(heitormatsui) integrate precheck and start to use the same function
+            metapackages, select_output = self._get_metapackages_to_deploy(releases)
+            msg_info += select_output["info"]
+            msg_warning += select_output["warning"]
+            msg_info += select_output["warning"]
+        except ReleaseInvalidRequest as e:
+            msg = str(e)
+            LOG.error(msg)
+            msg_error += msg
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Get metapackages data
+        mp_data = []
+        for mp in metapackages:
+            mp_data.append(self.release_collection.get_metapackage_release_by_id(mp))
+        try:
+            mp_deploy_set = MetapackageDeploymentSet(mp_data)
+        except ReleaseInvalidData as e:
+            msg = str(e)
+            LOG.error(msg)
+            msg_error += msg
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Get running release and deployment parameters
         running_release = self.release_collection.running_release
-        deploy_sw_version = deploy_release.sw_version  # MM.mm
+        deploy_sw_version = mp_deploy_set.sw_version
+        feed_repo = f"{constants.FEED_OSTREE_BASE_DIR}/rel-{deploy_sw_version}/ostree_repo"
+        commit_id = list(mp_deploy_set.commit_id)  # Converts into list so it is serializable
         is_patch = (not utils.is_upgrade_deploy(SW_VERSION, deploy_sw_version))
 
-        # pre-bootstrap patch removal case
+        # Pre-bootstrap patch removal case
         if not self.pre_bootstrap:
             if (not is_patch) and socket.gethostname() != constants.CONTROLLER_0_HOSTNAME:
                 raise SoftwareServiceError(f"Deploy start for major releases needs to be executed in "
                                            f"{constants.CONTROLLER_0_HOSTNAME} host.")
 
-        feed_repo = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, deploy_sw_version)
-        commit_id = deploy_release.commit_id
         # Set hostname in case of local install
         hostname = None
         if self.pre_bootstrap:
@@ -4251,13 +4454,13 @@ class PatchController(PatchService):
             if hostname not in valid_hostnames:
                 LOG.warning("Using unknown hostname for local install: %s", hostname)
 
-        to_release = deploy_release.sw_release
+        to_release = mp_deploy_set.sw_release
         if kwargs.get("options"):
             kwargs["options"] = self._parse_and_sanitize_extra_options(kwargs.get("options"))
         if self._should_run_precheck_prior_deploy_start(to_release, force, is_patch, **kwargs):
             LOG.info("Executing software deploy precheck prior to software deploy start")
             if precheck_result := self._precheck_before_start(
-                deployment,
+                metapackages,
                 to_release,
                 is_patch=is_patch,
                 force=force,
@@ -4267,222 +4470,131 @@ class PatchController(PatchService):
                 return precheck_result
         self._safe_remove_precheck_result_file(to_release)
 
-        # Patch operation: 'deploy release' major version equals 'running release' major version (MM.mm)
+        # Patch is when 'target major' version (yy.mm) equals 'running release' major version
+        # Greater or equal is because the system may have deployed-partial a product release
+        # i.e a subset but not all the metapackages from that product release have been deployed
+        apply = mp_deploy_set.state == states.DEPLOY_SELECTED
 
-        # TODO(bqian) update references of sw_release (string) to SWRelease object
-
-        if deploy_release > running_release:
-            operation = constants.APPLY
-        elif running_release > deploy_release:
-            operation = constants.REMOVE
-        else:
-            # NOTE(bqian) The error message doesn't seem right. software version format
-            # or any metadata semantic check should be done during upload. If data
-            # invalid found subsequently, data is considered damaged, should recommend
-            # delete and re-upload
-            msg_error += "The software version format for this release is not correct.\n"
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
-        # NOTE(bqian) shouldn't that patch release deploy and remove are doing the same thing
-        # in terms of ostree commit, that it deploy to a commit specified by the commit-id that
-        # associated to the release from the deploy start command?
-        # If releases are such that:
-        # R2 requires R1, R3 requires R2, R4 requires R3
-        # If current running release is R2 and command issued is "software deploy start R4"
-        # operation is "apply" with order [R3, R4]
-        # If current running release is R4 and command issued is "software deploy start R2"
-        # operation is "remove" with order [R4, R3]
-        if operation == constants.APPLY:
-            deployment_list = self.release_apply_order(deployment, deploy_sw_version)
-
-            collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
-            create_deploy_hosts(hostname=hostname)
-
-            msg = "Deploy start order for apply operation: %s" % ",".join(deployment_list)
+        # Apply a product release
+        if apply:
+            msg = f"Deploy start apply operation for metapackages: {mp_deploy_set}"
             LOG.info(msg)
             audit_log_info(msg)
 
-            # todo(jcasteli) Do we need this block below?
-            # Check for patches that can't be applied during an upgrade
-            upgrade_check = True
-            for release_id in deployment_list:
-                release = self.release_collection.get_release_by_id(release_id)
-                if release.sw_version != SW_VERSION and release.apply_active_release_only == "Y":
-                    msg = "%s cannot be created during an upgrade" % release_id
-                    LOG.error(msg)
-                    msg_error += msg + "\n"
-                    upgrade_check = False
-
-            if not upgrade_check:
-                return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
-            if kwargs.get("skip-semantic") != "yes":
-                self.run_semantic_check(constants.SEMANTIC_PREAPPLY, deployment_list)
-
-            running_release = self.release_collection.running_release
-            to_deploy_release_id = deployment_list[-1]
-            to_deploy_release = self.release_collection.get_release_by_id(to_deploy_release_id)
-            reboot_required = self.is_deployment_list_reboot_required(deployment_list)
-
-            collect_current_load_for_hosts(to_deploy_release.sw_version, hostname=hostname)
-            release_state = ReleaseState(release_ids=deployment_list)
+            # Update metapackage release states
+            release_state = ReleaseState(release_ids=mp_deploy_set.metapackage_ids)
             release_state.start_deploy()
-            # Sync release state with neighbour
+
+            # Sync release states with neighbor
             self.software_sync()
 
-            # Setting deploy state to start, so that it can transition to start-done or start-failed
+            reboot_required = mp_deploy_set.reboot_required
+            commit_id = None if is_patch else commit_id
+
+            # Get highest deployed metapackage version to populate deploy state data
+            metapackage_deploy_state = self._get_highest_deployed(mp_data, apply=apply)
+
+            # Set deploy state to start, so that it can transition to start-done or start-failed
+            collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
+            create_deploy_hosts(hostname=hostname)
             deploy_state = DeployState.get_instance()
-            to_release = to_deploy_release.sw_release
-            if is_patch:
-                deploy_state.start(running_release, to_release, feed_repo, None, reboot_required)
-            else:
-                deploy_state.start(running_release, to_release, feed_repo, commit_id,
-                                   reboot_required, **kwargs)
+            deploy_state.start(running_release, mp_deploy_set.sw_release, feed_repo, commit_id,
+                               reboot_required, metapackage_deploy_state, **kwargs)
 
             # Start applying the releases
             upgrade = not is_patch
-            self.install_releases_thread(deployment_list, feed_repo, upgrade, **kwargs)
+            self.install_releases_thread(mp_deploy_set, feed_repo, upgrade, **kwargs)
 
-            msg_info += "%s is now starting, await for the states: " \
-                        "[deploy-start-done | deploy-start-failed] in " \
-                        "'software deploy show'\n" % deployment_list
-
-        elif operation == constants.REMOVE:
-            if deploy_release.state == states.UNAVAILABLE:
-                msg = "Cannot go back to an unavailable release"
-                LOG.error(msg)
-                msg_error += msg + "\n"
-                return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
-            collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
-            create_deploy_hosts(hostname=hostname)
-            deployment_list = self.release_remove_order(deployment, running_release.id, running_release.sw_version)
-
-            msg = "Deploy start order for remove operation: %s" % ",".join(deployment_list)
+            msg_info += f"{mp_deploy_set} is now starting, await for the states: " \
+                        "[deploy-start-done | deploy-start-failed] in 'software deploy show'\n"
+        else:
+            msg = f"Deploy start remove operation for metapackages: {mp_deploy_set}"
             LOG.info(msg)
             audit_log_info(msg)
 
-            remove_unremovable = False
-
-            if kwargs.get("removeunremovable") == "yes":
-                remove_unremovable = True
-
-            # See if any of the patches are marked as unremovable
-            unremovable_verification = True
-            for release_id in deployment_list:
-                release = self.release_collection.get_release_by_id(release_id)
-                if release.unremovable:
-                    if remove_unremovable:
-                        msg = "Unremovable release %s being removed" % release_id
-                        LOG.warning(msg)
-                        msg_warning = msg + "\n"
-                    else:
-                        msg = "Release %s is not removable" % release_id
-                        LOG.error(msg)
-                        msg_error += msg + "\n"
-                        unremovable_verification = False
-                elif release.state == states.COMMITTED or release.state == states.UNAVAILABLE:
-                    msg = "Release %s is %s and cannot be removed" % (release_id, release.state)
-                    LOG.error(msg)
-                    msg_error += msg + "\n"
-                    unremovable_verification = False
-
-            if not unremovable_verification:
-                return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
-            if kwargs.get("skipappcheck") != "yes":
-                # Check application dependencies before removing
-                required_releases = {}
-                for release in deployment_list:
-                    for appname, iter_release_list in self.app_dependencies.items():
-                        if release in iter_release_list:
-                            if release not in required_releases:
-                                required_releases[release] = []
-                            required_releases[release].append(appname)
-
-                if len(required_releases) > 0:
-                    for req_release, app_list in required_releases.items():
-                        msg = "%s is required by application(s): %s" % (req_release, ", ".join(sorted(app_list)))
-                        msg_error += msg + "\n"
-                        LOG.info(msg)
-
-                    return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
-            if kwargs.get("skip-semantic") != "yes":
-                self.run_semantic_check(constants.SEMANTIC_PREREMOVE, deployment_list)
-
-            collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
-            release_state = ReleaseState(release_ids=deployment_list)
+            release_state = ReleaseState(release_ids=mp_deploy_set.metapackage_ids)
             release_state.start_remove()
 
-            reboot_required = self.is_deployment_list_reboot_required(deployment_list)
+            reboot_required = mp_deploy_set.reboot_required
 
+            # Get highest deployed metapackage version to populate deploy state data
+            metapackage_deploy_state = self._get_highest_deployed(mp_data, apply=apply)
+            deploy_sw_release = metapackage_deploy_state[0][2]
+
+            collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
+            create_deploy_hosts(hostname=hostname)
             deploy_state = DeployState.get_instance()
-            to_release = deploy_release.sw_release
-            deploy_state.start(running_release, to_release, feed_repo, commit_id, reboot_required)
+            deploy_state.start(running_release, deploy_sw_release, feed_repo, commit_id,
+                               reboot_required, metapackage_deploy_state)
 
             try:
-                for release_id in deployment_list:
-                    release = self.release_collection.get_release_by_id(release_id)
-                    msg = "Removing release: %s" % release_id
-                    LOG.info(msg)
-                    audit_log_info(msg)
+                product_id = mp_deploy_set.product
+                msg = f"Removing product release: {product_id}"
+                LOG.info(msg)
+                audit_log_info(msg)
 
-                    # Run pre_start script
-                    self._run_start_script(release.pre_start, release_id, constants.REMOVE)
-                    # Reload release in case pre_start script made some change
-                    reload_release_data()
-                    release = self.release_collection.get_release_by_id(release_id)
+                # Create script runner for the provided metapackages
+                extra_args = ["--operation=remove"]
 
-                    if release.state == states.AVAILABLE:
-                        msg = "The deployment for %s has not been created" % release_id
-                        LOG.info(msg)
-                        msg_info += msg + "\n"
-                        continue
+                # Run pre-start script contained in each metapackage
+                LOG.info(f"Running pre-start scripts for: {mp_deploy_set}")
+                for mp in mp_deploy_set:
+                    script = mp.pre_start  # Check for pre_start script in metadata
+                    if script:
+                        mp_script_dir = Path(mp.metapackage_dir) / constants.HOST_SCRIPTS_TYPE
+                        plugin_runner.run_scripts([mp_script_dir], names=[script],
+                                                  extra_args=extra_args)
+                reload_release_data()
 
-                    self.copy_patch_activate_scripts(release_id, release.activation_scripts)
+                # Base commit is fetched from the patch metadata
+                all_feed_commits = ostree_utils.get_all_feed_commits(deploy_sw_version)
+                all_feed_commits.reverse()  # Commits come in descending order, we want the oldest first
 
-                    major_release_sw_version = release.sw_version
-                    # this is an ostree patch
-                    # Base commit is fetched from the patch metadata.
-                    base_commit = release.base_commit_id
-                    feed_repo = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, major_release_sw_version)
-                    try:
-                        # Reset the ostree HEAD
-                        ostree_utils.reset_ostree_repo_head(base_commit, feed_repo)
+                # Select the oldest base commit to ensures all metapackages are removed
+                base_commit = None
+                for commit in all_feed_commits:
+                    if commit in mp_deploy_set.base_commit_id:
+                        base_commit = commit
+                        break  # Stop loop when the oldest base commit is found
 
-                        # Delete all commits that belong to this release
-                        # NOTE(bqian) there should be just one commit per release.
-                        commit_to_delete = release.commit_id
-                        ostree_utils.delete_ostree_repo_commit(commit_to_delete, feed_repo)
+                feed_repo = f"{constants.FEED_OSTREE_BASE_DIR}/rel-{deploy_sw_version}/ostree_repo"
+                try:
+                    # Reset the ostree HEAD to the base commit
+                    ostree_utils.reset_ostree_repo_head(base_commit, feed_repo)
+                    LOG.info(f"Reset ostree feed {feed_repo} to commit {base_commit}")
 
-                        # Update the feed ostree summary
-                        ostree_utils.update_repo_summary_file(feed_repo)
+                    # Delete all commits that belong to this release
+                    commits_to_delete = mp_deploy_set.commit_id
+                    for commit in commits_to_delete:
+                        ostree_utils.delete_ostree_repo_commit(commit, feed_repo)
+                        LOG.info(f"Deleted commit {commit} from the feed")
 
-                    except OSTreeCommandFail:
-                        LOG.exception("Failure while removing release %s.", release_id)
+                    # Update the feed ostree summary
+                    ostree_utils.update_repo_summary_file(feed_repo)
+                    LOG.info("Updated feed summary")
+                except OSTreeCommandFail:
+                    LOG.exception("Failure while removing release %s.", product_id)
 
-                    # Remove contents tag from metadata xml
+                # Remove contents tag from metapackage metadata xml
+                for mp in mp_deploy_set.metapackages:
+                    release = self.release_collection.get_metapackage_release_by_id(mp.id)
                     self.remove_tags_from_metadata(release, constants.CONTENTS_TAG)
+                    LOG.info(f"Removed commit from metapackage {mp.id} metadata")
 
-                    try:
-                        # Move the metadata to the deleted dir
-                        self.release_collection.update_state([release_id], states.REMOVING)
-                        msg_info += "%s has been removed from the repo\n" % release_id
-                    except shutil.Error:
-                        msg = "Failed to move the metadata for %s" % release_id
-                        LOG.Error(msg)
-                        raise MetadataFail(msg)
+                # NOTE(bqian): Below check an exception raise should be revisited,
+                # if applicable should be applied to the begining of all requests
+                if len(self.hosts) == 0:
+                    msg = "Service is running in incorrect state, no registered hosts"
+                    raise InternalError(msg)
 
-                    if len(self.hosts) == 0:
-                        msg = "service is running in incorrect state. No registered host"
-                        raise InternalError(msg)
-
-                    with self.hosts_lock:
-                        self.interim_state[release_id] = list(self.hosts)
-
-                    # Run post_start script
-                    self._run_start_script(release.post_start, release_id, constants.REMOVE)
+                # Run post-start script contained in each metapackage
+                LOG.info(f"Running post-start scripts for: {mp_deploy_set}")
+                for mp in mp_deploy_set:
+                    script = mp.post_start  # Check for post_start script in metadata
+                    if script:
+                        mp_script_dir = Path(mp.metapackage_dir) / constants.HOST_SCRIPTS_TYPE
+                        plugin_runner.run_scripts([mp_script_dir], names=[script],
+                                                  extra_args=extra_args)
 
                 # In prepatched add tombstone
                 ostree_utils.add_tombstone_commit_if_prepatched(constants.OSTREE_REF, feed_repo)
@@ -4498,13 +4610,17 @@ class PatchController(PatchService):
 
                 self.send_latest_feed_commit_to_agent(latest_feed_commit)
                 self.software_sync()
+
+                msg = f"Deploy start to remove {product_id} completed successfully"
+                LOG.info(msg)
+                msg_info += msg + "\n"
             except Exception as e:
-                msg_error = "Deploy start removing failed"
-                msg = "%s: %s" % (msg_error, e)
+                msg = f"Deploy start removing failed: {str(e)}"
                 LOG.exception(msg)
                 audit_log_info(msg)
+                msg_error += msg + "\n"
 
-                # set state to failed
+                # Set state to failed
                 deploy_state = DeployState.get_instance()
                 deploy_state.start_failed()
 
@@ -4513,7 +4629,7 @@ class PatchController(PatchService):
     def remove_tags_from_metadata(self, release, tag):
         LOG.info("Removing %s tag from %s metadata" % (tag, release.id))
 
-        metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[release.state]
+        metadata_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP[release.state]
         metadata_path = "%s/%s-metadata.xml" % (metadata_dir, release.id)
         tree = ET.parse(metadata_path)
         root = tree.getroot()

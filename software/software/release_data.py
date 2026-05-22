@@ -11,9 +11,11 @@ import threading
 from packaging import version
 
 from software.exceptions import FileSystemError
+from software.exceptions import ReleaseInvalidData
 from software.exceptions import ReleaseNotFound
 from software.software_functions import LOG
 from software.software_functions import ReleaseData
+from software import constants
 from software import states
 from software import utils
 
@@ -322,6 +324,13 @@ class SWRelease(object):
         """
         return not self.is_metapackage_release and not self.is_product_release
 
+    @property
+    def metapackage_dir(self):
+        if self.is_metapackage_release:
+            return os.path.join(constants.COMPONENT_SOFTWARE_STORAGE_DIR,
+                                self.sw_release, self.component)
+        return None
+
     def get_all_dependencies(self, filter_states=None):
         """
         :return: sorted list of all direct and indirect required releases
@@ -409,6 +418,110 @@ class SWRelease(object):
             data["packages"] = sorted(self.packages[:])
 
         return data
+
+
+class MetapackageDeploymentSet:
+    """Encapsulate a set of SWRelease instances of metapackages to be deployed"""
+
+    # TODO(heitormatsui): currently it will support only deploying metapackages
+    #  belonging to a single product release at once, remove this limitation in the future
+    def __init__(self, metapackages):
+        """
+        :param metapackages: list of SWRelease metapackages
+        """
+        if not metapackages:
+            raise ReleaseInvalidData("Cannot deploy an empty list of metapackages")
+        self._metapackages = metapackages
+
+        sw_releases = {mp.sw_release for mp in self._metapackages}
+        if len(sw_releases) > 1:
+            raise ReleaseInvalidData(f"Cannot deploy multiple releases: {', '.join(sw_releases)}")
+        self._sw_release = sw_releases.pop()
+        self._sw_version = self._metapackages[0].sw_version  # yy.mm
+        self._version_obj = version.parse(self.sw_release)
+
+        # Commit-ids stored in a set as there may be more than one when removing a product release
+        self._commit_id = {mp.commit_id for mp in self._metapackages
+                           if mp.commit_id is not None}
+        self._base_commit_id = {mp.base_commit_id for mp in self._metapackages
+                                if mp.base_commit_id is not None}
+
+        mp_states = {mp.state for mp in self._metapackages}
+        if len(mp_states) > 1:
+            raise ReleaseInvalidData(f"Cannot deploy metapackages in different "
+                                     f"states: {', '.join(mp_states)}")
+        self._state = self._metapackages[0].state
+
+        all_rr = {mp.reboot_required for mp in self._metapackages}
+        if True in all_rr:
+            self._reboot_required = True
+        else:
+            self._reboot_required = False
+
+    def __str__(self):
+        return ", ".join(self.metapackage_ids)
+
+    def __iter__(self):
+        return iter(self.metapackages)
+
+    @property
+    def product(self):
+        return self._metapackages[0].product
+
+    @property
+    def metapackage_ids(self):
+        return [mp.id for mp in self._metapackages]
+
+    @property
+    def metapackages(self):
+        return self._metapackages
+
+    @property
+    def sw_release(self):
+        return self._sw_release
+
+    @property
+    def sw_version(self):
+        return self._sw_version
+
+    @property
+    def commit_id(self):
+        return self._commit_id
+
+    @property
+    def base_commit_id(self):
+        return self._base_commit_id
+
+    @property
+    def state(self):
+        return self._state
+
+    @property
+    def reboot_required(self):
+        return self._reboot_required
+
+    @property
+    def version_obj(self):
+        """returns packaging.version object"""
+        return self._version_obj
+
+    def __lt__(self, other):
+        return self.version_obj < other.version_obj
+
+    def __le__(self, other):
+        return self.version_obj <= other.version_obj
+
+    def __eq__(self, other):
+        return self.version_obj == other.version_obj
+
+    def __ge__(self, other):
+        return self.version_obj >= other.version_obj
+
+    def __gt__(self, other):
+        return self.version_obj > other.version_obj
+
+    def __ne__(self, other):
+        return self.version_obj != other.version_obj
 
 
 class SWReleaseCollection(object):

@@ -81,6 +81,11 @@ MAJOR_RELEASE_UPLOAD_SCRIPT = "major-release-upload"
 USM_LOAD_IMPORT_SCRIPT = "usm_load_import"
 PATCH_SCRIPTS_STAGING_DIR = "/var/www/pages/updates/software-scripts"
 
+# Component script variables
+HOST_SCRIPTS_TYPE = "host-scripts"
+SUPPORT_SCRIPTS_TYPE = "support-scripts"
+UPGRADE_SCRIPTS_TYPE = "upgrade-scripts"
+
 # Status
 STATUS_DEVELOPEMENT = 'DEV'
 STATUS_OBSOLETE = 'OBS'

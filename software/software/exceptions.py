@@ -154,6 +154,11 @@ class ReleaseInvalidRequest(SoftwareError):
     pass
 
 
+class ReleaseInvalidData(SoftwareError):
+    """Release contains invalid data."""
+    pass
+
+
 class DuplicateDeployment(SoftwareError):
     """Duplicate Deployment Error."""
     pass
