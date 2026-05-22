@@ -15,56 +15,59 @@ from controllerconfig.common import constants
 from controllerconfig import utils
 from psycopg2.extras import RealDictCursor
 
+from software.utilities.plugin_runner import CPlugin
 from software.utilities.utils import configure_logging
-
 
 LOG = logging.getLogger('main_logger')
 
 
-def main():
-    action = None
+def reset_config_target(port):
+    conn = utils.connect_to_postgresql(port)
+    with conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("update i_host set config_target=NULL",)
+    LOG.info("Reset host config_target completed")
+
+
+class ResetConfigTarget(CPlugin):
+    def __init__(self):
+        super().__init__(
+            matching_action='migrate',
+            required_state=None,
+            plugin_name='reset-config-target',
+            completed_state='reset-config-target-completed'
+        )
+
+    def _run(self, from_release, to_release, action, port):
+        configure_logging()
+        LOG.info("%s invoked from_release = %s to_release = %s action = %s"
+                 % (self.name, from_release, to_release, action))
+        postgres_port = port if port else constants.POSTGRESQL_DEFAULT_PORT
+        reset_config_target(postgres_port)
+
+
+if __name__ == "__main__":
     from_release = None
     to_release = None
-    postgres_port = constants.POSTGRESQL_DEFAULT_PORT
+    action = None
+    port = None
     arg = 1
 
     while arg < len(sys.argv):
         if arg == 1:
             from_release = sys.argv[arg]
         elif arg == 2:
-            to_release = sys.argv[arg]  # noqa
+            to_release = sys.argv[arg]
         elif arg == 3:
             action = sys.argv[arg]
         elif arg == 4:
-            postgres_port = sys.argv[arg]
+            port = sys.argv[arg]
         else:
             print("Invalid option %s." % sys.argv[arg])
-            return 1
+            sys.exit(1)
         arg += 1
 
-    configure_logging()
-
-    LOG.debug("%s invoked with from_release = %s to_release = %s action = %s"
-              % (sys.argv[0], from_release, to_release, action))
-
-    # This host table data migration will likely be required for each release
-    if action == "migrate":
-        try:
-            reset_config_target(postgres_port)
-        except Exception as ex:
-            LOG.exception(ex)
-            return 1
-
-
-def reset_config_target(port):
-
-    conn = utils.connect_to_postgresql(port)
-    with conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("update i_host set config_target=NULL",)
-
-    LOG.info("Reset host config_target completed")
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    plugin = ResetConfigTarget()
+    result = plugin.run(from_release, to_release, action, port)
+    if result and 'failed' in result:
+        sys.exit(1)

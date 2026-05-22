@@ -9,6 +9,8 @@ import logging
 import importlib.util
 import os
 
+from software.utilities.plugin_runner import ScriptPlugin
+
 
 LOG = logging.getLogger('main_logger')
 SOFTWARE_LOG_FILE = "/var/log/software.log"
@@ -31,6 +33,57 @@ FRAMEWORK_FINALIZE = "framework_finalize"
 PLUGIN_STAGES = [FRAMEWORK_INIT, FEATURE_PRE_APPS, K8S_APP_UPDATE,
                  FEATURE_POST_APPS, FRAMEWORK_FINALIZE]
 
+# Import all plugin classes
+from importlib import import_module as _import_module
+
+PopulateIHostSWVersion = getattr(
+    _import_module(".07-populate-ihost-sw-version-field", __name__),
+    "PopulateIHostSWVersion")
+ActivateKeystone = getattr(
+    _import_module(".08-activate-keystone", __name__),
+    "ActivateKeystone")
+UpdateStaticHieradata = getattr(
+    _import_module(".11-update-static-hieradata", __name__),
+    "UpdateStaticHieradata")
+DisablePortierisWebhook = getattr(
+    _import_module(".18-disable-portieris-webhook", __name__),
+    "DisablePortierisWebhook")
+EnableFluxcdControllers = getattr(
+    _import_module(".20-enable-fluxcd-controllers", __name__),
+    "EnableFluxcdControllers")
+K8sAppUpgrade = getattr(
+    _import_module(".21-k8s-app-upgrade", __name__),
+    "K8sAppUpgrade")
+RollbackFluxcdControllers = getattr(
+    _import_module(".22-rollback-fluxcd-controllers", __name__),
+    "RollbackFluxcdControllers")
+CleanUpDeploymentData = getattr(
+    _import_module(".26-clean-up-deployment-data", __name__),
+    "CleanUpDeploymentData")
+SetServiceUserOptions = getattr(
+    _import_module(".31-set-service-user-options", __name__),
+    "SetServiceUserOptions")
+ResetConfigTarget = getattr(
+    _import_module(".197-reset-config-target", __name__),
+    "ResetConfigTarget")
+UpdateISystemData = getattr(
+    _import_module(".198-update-isystem-data", __name__),
+    "UpdateISystemData")
+RemoveLvmSnapshots = getattr(
+    _import_module(".202-remove-lvm-snapshots", __name__),
+    "RemoveLvmSnapshots")
+
+# Shell scripts are wrapped as ScriptPlugin instances
+_SCRIPT_DIR = os.path.dirname(__file__)
+
+
+def _shell_script_plugin(script, action, required_state=None, completed_state=None):
+    path = os.path.join(_SCRIPT_DIR, script)
+    if completed_state is None:
+        completed_state = script.rsplit('.', 1)[0] + '-completed'
+    return ScriptPlugin(action, required_state, path, completed_state)
+
+
 # Plugins for each action are organized as 3 parts,
 # framework initialize, feature, and framework finalize
 # however in activate and activate-rollback, feature plugins are divided
@@ -41,56 +94,61 @@ PLUGIN_STAGES = [FRAMEWORK_INIT, FEATURE_PRE_APPS, K8S_APP_UPDATE,
 PLUGINS = {
     ACTION_MIGRATE: {
         FRAMEWORK_INIT: [
-            "07-populate-ihost-sw-version-field.py",
+            PopulateIHostSWVersion(),
         ],
         FEATURE_PRE_APPS: [
-            "11-update-static-hieradata.py",
+            UpdateStaticHieradata(),
         ],
         K8S_APP_UPDATE: [],
         FEATURE_POST_APPS: [],
         FRAMEWORK_FINALIZE: [
-            "197-reset-config-target.py"
+            ResetConfigTarget(),
         ],
     },
     ACTION_ACTIVATE: {
         FRAMEWORK_INIT: [
-            "31-set-service-user-options.py",
-            "08-activate-keystone.py",
-            "23-resize-systemcontroller-filesystems.sh",],
+            SetServiceUserOptions(),
+            ActivateKeystone(),
+            _shell_script_plugin("23-resize-systemcontroller-filesystems.sh",
+                                 ACTION_ACTIVATE),
+        ],
         FEATURE_PRE_APPS: [
-            "18-disable-portieris-webhook.py",],
+            DisablePortierisWebhook(),
+        ],
         K8S_APP_UPDATE: [
-            "19-assert-docker-health.sh",
-            "20-enable-fluxcd-controllers.py",
-            "21-k8s-app-upgrade.py",
+            _shell_script_plugin("19-assert-docker-health.sh", ACTION_ACTIVATE),
+            EnableFluxcdControllers(),
+            K8sAppUpgrade(),
         ],
         FEATURE_POST_APPS: [],
         FRAMEWORK_FINALIZE: [
-            "198-update-isystem-data.py",
+            UpdateISystemData(),
         ],
     },
     ACTION_ACTIVATE_ROLLBACK: {
         FRAMEWORK_INIT: [
-            "198-update-isystem-data.py", ],
+            UpdateISystemData(),
+        ],
         FEATURE_PRE_APPS: [],
         K8S_APP_UPDATE: [
-            "22-rollback-fluxcd-controllers.py",
-            "21-k8s-app-upgrade.py",
-            "18-disable-portieris-webhook.py"
+            RollbackFluxcdControllers(),
+            K8sAppUpgrade(),
+            DisablePortierisWebhook(),
         ],
         FEATURE_POST_APPS: [],
-        FRAMEWORK_FINALIZE: []
+        FRAMEWORK_FINALIZE: [],
     },
     ACTION_DELETE: {
         FRAMEWORK_INIT: [
-            "26-clean-up-deployment-data.py",],
+            CleanUpDeploymentData(),
+        ],
         FEATURE_PRE_APPS: [],
         K8S_APP_UPDATE: [],
         FEATURE_POST_APPS: [],
         FRAMEWORK_FINALIZE: [
-            "202-remove-lvm-snapshots.py",
-        ]
-    }
+            RemoveLvmSnapshots(),
+        ],
+    },
 }
 
 
@@ -114,20 +172,15 @@ def get_plugin_mgr():
     return plugin_mgr
 
 
-def format_path(plugins):
-    relative_plugins = [os.path.join('n-1', p) for p in plugins]
-    return relative_plugins
-
-
 def join_plugins(prev_release_plugins, plugins):
     result = {
         FRAMEWORK_INIT: plugins[FRAMEWORK_INIT],
-        FEATURE_PRE_APPS: format_path(prev_release_plugins[FEATURE_PRE_APPS]) + plugins[FEATURE_PRE_APPS],
+        FEATURE_PRE_APPS: prev_release_plugins[FEATURE_PRE_APPS] + plugins[FEATURE_PRE_APPS],
         K8S_APP_UPDATE: plugins[K8S_APP_UPDATE],
-        FEATURE_POST_APPS: format_path(prev_release_plugins[FEATURE_POST_APPS]) + plugins[FEATURE_POST_APPS],
-        FRAMEWORK_FINALIZE: plugins[FRAMEWORK_FINALIZE]
+        FEATURE_POST_APPS: prev_release_plugins[FEATURE_POST_APPS] + plugins[FEATURE_POST_APPS],
+        FRAMEWORK_FINALIZE: plugins[FRAMEWORK_FINALIZE],
     }
-    LOG.info(f"list of scripts {result}")
+    LOG.info(f"list of plugins {result}")
     return result
 
 
@@ -137,8 +190,7 @@ def get_migrate_plugins(from_release):
         plugin_mgr = get_plugin_mgr()
         prev_release_plugins = plugin_mgr.get_migrate_plugins(from_release)
 
-    plugins = MIGRATE_PLUGINS
-    return join_plugins(prev_release_plugins, plugins)
+    return join_plugins(prev_release_plugins, MIGRATE_PLUGINS)
 
 
 def get_activate_plugins(from_release):
@@ -147,8 +199,7 @@ def get_activate_plugins(from_release):
         plugin_mgr = get_plugin_mgr()
         prev_release_plugins = plugin_mgr.get_activate_plugins(from_release)
 
-    plugins = ACTIVATE_PLUGINS
-    return join_plugins(prev_release_plugins, plugins)
+    return join_plugins(prev_release_plugins, ACTIVATE_PLUGINS)
 
 
 def get_activate_rollback_plugins(from_release):
@@ -157,8 +208,7 @@ def get_activate_rollback_plugins(from_release):
         plugin_mgr = get_plugin_mgr()
         prev_release_plugins = plugin_mgr.get_activate_rollback_plugins(from_release)
 
-    plugins = ACTIVATE_ROLLBACK_PLUGINS
-    return join_plugins(prev_release_plugins, plugins)
+    return join_plugins(prev_release_plugins, ACTIVATE_ROLLBACK_PLUGINS)
 
 
 def get_delete_plugins(from_release):
@@ -167,8 +217,7 @@ def get_delete_plugins(from_release):
         plugin_mgr = get_plugin_mgr()
         prev_release_plugins = plugin_mgr.get_delete_plugins(from_release)
 
-    plugins = DELETE_PLUGINS
-    return join_plugins(prev_release_plugins, plugins)
+    return join_plugins(prev_release_plugins, DELETE_PLUGINS)
 
 
 def get_plugins(from_release, action):
@@ -182,7 +231,7 @@ def get_plugins(from_release, action):
     elif action == ACTION_ACTIVATE_ROLLBACK:
         result = get_activate_rollback_plugins(from_release)
     else:
-        result = {action: {stage: [] for stage in PLUGIN_STAGES} for action in PLUGIN_ACTIONS}
+        result = {stage: [] for stage in PLUGIN_STAGES}
 
     return (
         result[FRAMEWORK_INIT] +
@@ -193,4 +242,5 @@ def get_plugins(from_release, action):
     )
 
 
-__all__ = ["get_migrate_plugins", "get_activate_plugins", "get_activate_rollback_plugins", "get_delete_plugins", "get_plugins"]
+__all__ = ["get_migrate_plugins", "get_activate_plugins",
+           "get_activate_rollback_plugins", "get_delete_plugins", "get_plugins"]

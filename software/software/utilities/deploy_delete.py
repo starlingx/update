@@ -12,6 +12,7 @@ import logging
 import os
 
 from software.utilities import utils
+from software.utilities.plugin_runner import execute_migration_scripts
 
 
 LOG = logging.getLogger('main_logger')
@@ -27,12 +28,12 @@ def do_deploy_delete(from_release, to_release, plugin_path, is_major_release):
     res = True
     try:
         if plugin_path:
-            utils.execute_migration_scripts(from_release, to_release,
-                                            utils.ACTION_DELETE,
-                                            migration_script_dir=plugin_path)
+            execute_migration_scripts(from_release, to_release,
+                                      utils.ACTION_DELETE,
+                                      migration_script_dir=plugin_path)
         else:
-            utils.execute_migration_scripts(from_release, to_release,
-                                            utils.ACTION_DELETE)
+            execute_migration_scripts(from_release, to_release,
+                                      utils.ACTION_DELETE)
     except Exception:
         res = False
     finally:

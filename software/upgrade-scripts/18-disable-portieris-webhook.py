@@ -4,15 +4,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # This script backups the portieris webhook and changes the failurePolicy
-# to ignore failures. This is require to upgrade portieris during platform
+# to ignore failures. This is required to upgrade portieris during platform
 # upgrades, since by default portieris will fail to create the new pods
 # when the webhook is down.
-#
-# *** THIS SCRIPT NEEDS TO BE EXECUTED BEFORE '#-k8s-app-upgrade.sh',
-# # in any platform upgrade where portieris is being upversioned. When the
-# upgrade ends, a lifecycle hook on portieris should restore the failurePolicy
-# for the webhook.
-#
 
 import logging
 import os
@@ -22,35 +16,25 @@ import tempfile
 import time
 import yaml
 
+from software.utilities.plugin_runner import CPlugin
 from software.utilities.utils import configure_logging
 from sysinv.common.kubernetes import test_k8s_health
 
 LOG = logging.getLogger('main_logger')
 
-SUCCESS = 0
-ERROR = 1
 RETRIES = 3
-
 CONFIG_DIR_PREFIX = '/opt/platform/config/'
 PORTIERIS_BACKUP_FILENAME = 'portieris_backup.yml'
 PORTIERIS_WEBHOOK_CRD = 'mutatingwebhookconfigurations image-admission-config'
 
 
 class PortierisWebhookDisabler(object):
-    """
-    The main purpose of this class is to safely apply service parameters
-    previously configured in the system.
-
-    The command: "system service-parameters-apply kubernetes" will trigger
-    many system events including the restart of kube-apiserver process.
-    """
-    def __init__(self, from_side_release) -> None:
+    def __init__(self, from_side_release):
         self.KUBE_CMD = 'kubectl --kubeconfig=/etc/kubernetes/admin.conf '
-        # Backup in old config folder, it will be erased when upgrade ends
         self.PORTIERIS_BACKUP_FILE = CONFIG_DIR_PREFIX + from_side_release + \
             '/' + PORTIERIS_BACKUP_FILENAME
 
-    def __system_cmd(self, command: str) -> str:
+    def __system_cmd(self, command):
         sub = subprocess.Popen(["bash", "-c", command],
                                stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE)
@@ -70,7 +54,6 @@ class PortierisWebhookDisabler(object):
                 os.path.getsize(self.PORTIERIS_BACKUP_FILE) > 0):
             LOG.info("Backup for portieris webhook already present.")
             return
-
         with open(self.PORTIERIS_BACKUP_FILE, 'w') as backup_file:
             yaml.safe_dump(yaml_data, backup_file, default_flow_style=False)
         LOG.info("Backup created for portieris webhook.")
@@ -109,12 +92,10 @@ class PortierisWebhookDisabler(object):
             LOG.info("No backup content for portieris webhook. Nothing to do.")
             self.__remove_portieris_webhook_backup()
             return
-
         result = self.__get_portieris_webhook_data()
         current_data = {}
         if result != '':
             current_data = yaml.safe_load(result)
-
         with open(self.PORTIERIS_BACKUP_FILE, 'r') as backup_file:
             backup_data = yaml.safe_load(backup_file)
             current_value = current_data.get(
@@ -122,11 +103,8 @@ class PortierisWebhookDisabler(object):
             backup_value = backup_data['webhooks'][0]['failurePolicy']
             if current_value != backup_value:
                 LOG.info("Using backup data to restore portieris webhook.")
-                # Drop caBundle, cert-manager ca-injector will recreate it
-                backup_data['webhooks'][0]['clientConfig'].pop('caBundle',
-                                                               None)
+                backup_data['webhooks'][0]['clientConfig'].pop('caBundle', None)
                 self.__modify_portieris_webhook(backup_data)
-
         self.__remove_portieris_webhook_backup()
 
     def apply(self):
@@ -136,14 +114,41 @@ class PortierisWebhookDisabler(object):
         self.__restore_portieris_webhook()
 
 
-def main():
-    # Initialize variables
-    action = None
+class DisablePortierisWebhook(CPlugin):
+    def __init__(self):
+        super().__init__(
+            matching_action=['activate', 'activate-rollback'],
+            required_state=None,
+            plugin_name='disable-portieris-webhook',
+            completed_state='disable-portieris-webhook-completed'
+        )
+
+    def _run(self, from_release, to_release, action, port):
+        configure_logging()
+        LOG.info("%s invoked from_release = %s to_release = %s action = %s"
+                 % (self.name, from_release, to_release, action))
+        for retry in range(RETRIES):
+            try:
+                if action == "activate":
+                    PortierisWebhookDisabler(from_release).apply()
+                elif action == "activate-rollback":
+                    PortierisWebhookDisabler(to_release).rollback()
+                return
+            except Exception as ex:
+                if retry == RETRIES - 1:
+                    raise
+                LOG.exception(ex)
+                LOG.error("Exception occurred, retrying after 5 seconds.")
+                time.sleep(5)
+
+
+if __name__ == "__main__":
     from_release = None
     to_release = None
+    action = None
+    port = None
     arg = 1
 
-    # Process command-line arguments
     while arg < len(sys.argv):
         if arg == 1:
             from_release = sys.argv[arg]
@@ -152,41 +157,13 @@ def main():
         elif arg == 3:
             action = sys.argv[arg]
         elif arg == 4:
-            # port = int(sys.argv[arg])
-            pass
+            port = sys.argv[arg]
         else:
-            print(f"Invalid option {sys.argv[arg]}.")
-            return ERROR
+            print("Invalid option %s." % sys.argv[arg])
+            sys.exit(1)
         arg += 1
 
-    configure_logging()
-    LOG.info(
-        "%s invoked from_release = %s invoked to_release = %s action = %s"
-        % (sys.argv[0], from_release, to_release, action)
-    )
-
-    for retry in range(0, RETRIES):
-        try:
-            if action == "activate":
-                PortierisWebhookDisabler(from_release).apply()
-            elif action == "activate-rollback":
-                PortierisWebhookDisabler(to_release).rollback()
-            else:
-                LOG.info("Nothing to do. "
-                         "Skipping portieris webhook disable script.")
-        except Exception as ex:
-            if retry == RETRIES - 1:
-                LOG.error("Error modifying portieris webhook. "
-                          "Please verify logs.")
-                return ERROR
-            else:
-                LOG.exception(ex)
-                LOG.error("Exception ocurred during script execution, "
-                          "retrying after 5 seconds.")
-                time.sleep(5)
-        else:
-            return SUCCESS
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    plugin = DisablePortierisWebhook()
+    result = plugin.run(from_release, to_release, action, port)
+    if result and 'failed' in result:
+        sys.exit(1)

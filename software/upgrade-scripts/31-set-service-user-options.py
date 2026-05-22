@@ -25,6 +25,7 @@ import logging
 import subprocess
 import sys
 
+from software.utilities.plugin_runner import CPlugin
 from software.utilities.utils import configure_logging
 
 LOG = logging.getLogger("main_logger")
@@ -65,17 +66,14 @@ def set_service_user_options():
             try:
                 result = subprocess.run(
                     ["openstack", "user", "set", user, option],
-                    capture_output=True,
-                    text=True,
-                    timeout=COMMAND_TIMEOUT,
+                    capture_output=True, text=True, timeout=COMMAND_TIMEOUT,
                 )
                 if result.returncode != 0:
                     # User might not exist on this system type
                     # (e.g., dcagent only on subclouds, dcorch only on SC)
                     if "No user with" in result.stderr or \
                        "not found" in result.stderr.lower():
-                        LOG.info(f"User {user} not found on this system, "
-                                 f"skipping.")
+                        LOG.info(f"User {user} not found on this system, skipping.")
                         break
                     else:
                         LOG.warning(f"Failed to set {option} for {user}: "
@@ -88,35 +86,45 @@ def set_service_user_options():
                 LOG.warning(f"Error setting {option} for {user}: {e}")
 
 
-def main():
-    argv = sys.argv
+class SetServiceUserOptions(CPlugin):
+    def __init__(self):
+        super().__init__(
+            matching_action='activate',
+            required_state=None,
+            plugin_name='set-service-user-options',
+            completed_state='set-service-user-options-completed'
+        )
 
-    if len(argv) > 5:
-        print(f"Invalid option {argv[5]}.")
-        return 1
-
-    from_release = argv[1] if len(argv) > 1 else None
-    to_release = argv[2] if len(argv) > 2 else None
-    action = argv[3] if len(argv) > 3 else None
-
-    configure_logging()
-
-    if action != "activate":
-        LOG.info(f"Nothing to do for action '{action}'.")
-        return 0
-
-    LOG.info("%s invoked with from_release %s to_release %s and action %s",
-             sys.argv[0], from_release, to_release, action)
-
-    try:
+    def _run(self, from_release, to_release, action, port):
+        configure_logging()
+        LOG.info("%s invoked from_release = %s to_release = %s action = %s"
+                 % (self.name, from_release, to_release, action))
         set_service_user_options()
-    except Exception as e:
-        LOG.error("Unexpected error setting service user options: %s", e)
-        return 1
-
-    LOG.info("Service user options set successfully.")
-    return 0
+        LOG.info("Service user options set successfully.")
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    from_release = None
+    to_release = None
+    action = None
+    port = None
+    arg = 1
+
+    while arg < len(sys.argv):
+        if arg == 1:
+            from_release = sys.argv[arg]
+        elif arg == 2:
+            to_release = sys.argv[arg]
+        elif arg == 3:
+            action = sys.argv[arg]
+        elif arg == 4:
+            port = sys.argv[arg]
+        else:
+            print("Invalid option %s." % sys.argv[arg])
+            sys.exit(1)
+        arg += 1
+
+    plugin = SetServiceUserOptions()
+    result = plugin.run(from_release, to_release, action, port)
+    if result and 'failed' in result:
+        sys.exit(1)
