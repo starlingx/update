@@ -32,7 +32,6 @@ from fm_api import constants as fm_constants
 from fm_api import fm_api
 from oslo_config import cfg as oslo_cfg
 from packaging import version
-import sh
 from tsconfig.tsconfig import INITIAL_CONFIG_COMPLETE_FLAG
 from tsconfig.tsconfig import VOLATILE_CONTROLLER_CONFIG_COMPLETE
 
@@ -1314,18 +1313,7 @@ class PatchController(PatchService):
                 if (self.hosts[neighbour].nodetype == "controller" and
                         self.hosts[neighbour].ip == host):
                     LOG.info("Starting sync controllers")
-                    # The output is a string that lists the directories
-                    # Example output:
-                    # >>> dir_names = sh.ls("/var/www/pages/feed/")
-                    # >>> dir_names.stdout
-                    # b'rel-22.12  rel-22.5\n'
-                    dir_names = sh.ls(constants.FEED_OSTREE_BASE_DIR)
-
-                    # Convert the output above into a list that can be iterated
-                    # >>> list_of_dirs = dir_names.stdout.decode().rstrip().split()
-                    # >>> print(list_of_dirs)
-                    # ['rel-22.12', 'rel-22.5']
-                    list_of_dirs = dir_names.stdout.decode("utf-8").rstrip().split()
+                    list_of_dirs = os.listdir(constants.FEED_OSTREE_BASE_DIR)
 
                     for rel_dir in list_of_dirs:
 
