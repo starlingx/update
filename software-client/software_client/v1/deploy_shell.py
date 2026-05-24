@@ -18,12 +18,22 @@ def do_show(cc, args):
         if len(data) == 0:
             print("No deploy in progress")
         else:
-            header_data_list = {"From Release": "from_release",
-                                "To Release": "to_release",
-                                "RR": "reboot_required",
-                                "State": "state"}
+            nested_tables_headers = {}  # store headers for each nested table
+            deploy = data[0]
+            if ("metapackages" in deploy and "product_deploy" in deploy
+                    and deploy["product_deploy"] is False):
+                header_data_list = {"Releases": "metapackages",
+                                    "RR": "reboot_required",
+                                    "State": "state"}
+                nested_tables_headers.update({"metapackages":
+                                             ["Metapackage", "From Release", "To Release"]})
+            else:
+                header_data_list = {"From Release": "from_release",
+                                    "To Release": "to_release",
+                                    "RR": "reboot_required",
+                                    "State": "state"}
             utils.format_data(data, header="state", format_func=lambda x: f"deploy-{x}")
-            utils.display_result_list(header_data_list, data)
+            utils.display_result_list(header_data_list, data, nested_tables_headers)
     else:
         utils.display_info(resp)
 

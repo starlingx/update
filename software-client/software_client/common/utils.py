@@ -214,13 +214,17 @@ def display_info(resp):
         _display_info(text)
 
 
-def display_result_list(header_data_list, data):
+def display_result_list(header_data_list, data, nested_tables_headers=None):
     header = [h for h in header_data_list]
     table = []
     for d in data:
         row = []
         for _, k in header_data_list.items():
-            row.append(d[k])
+            # if data is a list, tabulate it using the inner table headers
+            if isinstance(d[k], list):
+                row.append(tabulate(d[k], nested_tables_headers[k], tablefmt="simple"))
+            else:
+                row.append(d[k])
         table.append(row)
     if len(table) == 0:
         print("No data")
