@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2015-2024 Wind River Systems, Inc.
+# Copyright (c) 2015-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -21,6 +21,35 @@ class Deploy(base.Resource):
 
 class DeployManager(base.Manager):
     resource_class = Deploy
+
+    def select(self, args):
+        pre_upgrade_deploy = args.pre_upgrade_deploy
+        releases = args.releases  # releases is mandatory for select
+
+        path = "/v1/deploy/select"
+
+        body = {
+            "releases": releases,
+            "pre_upgrade_deploy": pre_upgrade_deploy,
+        }
+
+        res = self._post(path, body=body)
+        return res
+
+    def unselect(self, args):
+        releases = args.releases
+        unselect_all = args.all
+
+        body = {
+            "unselect_all": unselect_all,
+        }
+        if releases:
+            body.update({"releases": releases})
+
+        path = "/v1/deploy/unselect"
+
+        res = self._post(path, body=body)
+        return res
 
     def precheck(self, args):
         # Resolve deployment: positional or None

@@ -16,13 +16,15 @@ LOG = logging.getLogger('main_logger')
 
 # valid release state transition below will still be changed as
 # development continue
-release_state_transition = {
-    states.AVAILABLE: [states.DEPLOYING, states.UNAVAILABLE],
+RELEASE_STATE_TRANSITION = {
+    states.AVAILABLE: [states.DEPLOYING, states.UNAVAILABLE, states.DEPLOY_SELECTED],
     states.DEPLOYING: [states.DEPLOYED, states.AVAILABLE],
-    states.DEPLOYED: [states.REMOVING, states.UNAVAILABLE, states.COMMITTED],
+    states.DEPLOYED: [states.REMOVING, states.UNAVAILABLE, states.COMMITTED, states.REMOVE_SELECTED],
     states.REMOVING: [states.AVAILABLE],
     states.COMMITTED: [],
     states.UNAVAILABLE: [],
+    states.DEPLOY_SELECTED: [states.DEPLOYING, states.AVAILABLE],
+    states.REMOVE_SELECTED: [states.REMOVING, states.DEPLOYED],
 }
 
 
@@ -65,7 +67,7 @@ class ReleaseState(object):
         release_collection = get_SWReleaseCollection()
         for rel_id in self._release_ids:
             state = release_collection[rel_id].state
-            if target_state not in release_state_transition[state]:
+            if target_state not in RELEASE_STATE_TRANSITION[state]:
                 return False
         return True
 
@@ -108,6 +110,18 @@ class ReleaseState(object):
 
     def start_deploy(self):
         self.transform(states.DEPLOYING)
+
+    def deploy_selected(self):
+        self.transform(states.DEPLOY_SELECTED)
+
+    def deploy_unselected(self):
+        self.transform(states.AVAILABLE)
+
+    def remove_selected(self):
+        self.transform(states.REMOVE_SELECTED)
+
+    def remove_unselected(self):
+        self.transform(states.DEPLOYED)
 
     def deploy_completed(self):
         self.transform(states.DEPLOYED)
