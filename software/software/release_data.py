@@ -398,14 +398,15 @@ class SWRelease(object):
         if self.is_product_release:
             # For product releases, the pkg section is present only in
             # the metapackage metadata.
-            data["metapackages"] = list(self.metapackages)
+            data["metapackages"] = sorted(list(self.metapackages))
             for metapackage in self.metapackages:
                 metapackage_data = self.metapackages[metapackage]
                 if "packages" in metapackage_data:
                     data["packages"].extend(metapackage_data["packages"])
+            data["packages"].sort()
         elif self.packages:
             # Legacy releases have a pkg section in their metadata
-            data["packages"] = self.packages[:]
+            data["packages"] = sorted(self.packages[:])
 
         return data
 
