@@ -431,15 +431,26 @@ class SWReleaseCollection(object):
                     self._sw_metapackages[mp] = mp_release
             self._sw_releases[rel_id] = sw_release
 
-    @property
-    def running_release(self):
+    def _running_release(self, partial=False):
         latest = None
-        for state in (states.DEPLOYED, states.UNAVAILABLE):
+        state_filter = [states.DEPLOYED, states.UNAVAILABLE]
+        if partial:
+            state_filter += [states.DEPLOYED_PARTIAL]
+        for state in state_filter:
             for rel in self.iterate_releases_by_state(state):
                 if latest is None or rel.version_obj > latest.version_obj:
                     latest = rel
-
         return latest
+
+    @property
+    def running_release(self):
+        """Return the highest fully deployed release"""
+        return self._running_release()
+
+    @property
+    def highest_release(self):
+        """Return the highest deployed release, even if deployed-partial"""
+        return self._running_release(partial=True)
 
     def get_release_by_id(self, rel_id):
         if rel_id in self._sw_releases:
@@ -530,11 +541,12 @@ class SWReleaseCollection(object):
                 yield mp_data
         else:
             # Case 3: for each metapackage name, yield only the instance
-            # from the latest release version that is in DEPLOYED state.
+            # from the latest release version that is in DEPLOYED state
             latest_deployed = {}
             for mp in self._sw_metapackages:
                 mp_data = self._sw_metapackages[mp]
-                if mp_data.state == states.DEPLOYED:
+                # The state remove-selected is semantically deployed as well
+                if mp_data.state in [states.DEPLOYED, states.REMOVE_SELECTED]:
                     latest_mp = latest_deployed.get(mp_data.component)
                     if not latest_mp or mp_data > latest_mp:
                         latest_deployed[mp_data.component] = mp_data

@@ -475,6 +475,10 @@ class ReleaseData(object):
                 for pkg in metapackages.findall("pkg"):
                     if pkg.text is not None and sw_version != "unknown":
                         self.metadata[release_id]["metapackages"][f"{pkg.text}_{sw_version}"] = {}
+
+            self.metadata[release_id]["requires"] = []
+            self._parse_metadata_array_tag(xml_file, "requires", "req_patch_id",
+                                           self.metadata[release_id])
         else:
             # Legacy or Metapackage Release
             xml_tags = ["status", "summary", "description"]

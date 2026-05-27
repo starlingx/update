@@ -3269,89 +3269,122 @@ class PatchController(PatchService):
         system_deploy = self._get_system_deploy()
         return system_deploy
 
+    def _get_metapackages_to_remove(self, release):
+        """
+        Determine which metapackages should be removed from the system.
+
+        Collects metapackages from all deployed dependencies of the running release,
+        excluding the target release. This identifies the releases that must be removed
+        to get the system back to the target release.
+
+        :param release: The ID of the target release to be deployed.
+        :returns: List of metapackage names from the to-be-removed releases (dependencies + running - target).
+        """
+        metapackage_releases = []
+
+        # Get all dependencies from the running release that are deployed
+        highest_release = self.release_collection.highest_release
+        deps = highest_release.get_all_dependencies(filter_states=[states.DEPLOYED])
+        # TODO(heitormatsui): what should happen if the dependency chain is broken?
+        #  i.e. a release in the middle of the chain doesn't require any releases
+
+        # Include running release in the list
+        deps.append(highest_release)
+
+        # Verify if the target release is in the list and pop it
+        release = self.release_collection.get_product_release_by_id(release)
+        if release in deps:
+            deps.remove(release)
+
+        # Iterate over the remaining releases and get its metapackages
+        # Remaining releases = dependencies + running release - target release
+        for dep in deps:
+            metapackage_releases += dep.metapackages.keys()
+
+        return metapackage_releases
+
     def _validate_releases_for_select(self, releases):
         """
-        Validate if a release list is valid for deployment selection
+        Validate if a release list is valid for deployment selection.
+
+        :param releases: list of releases to be validated
         """
-        product_releases = []
-        metapackage_releases = []
-        invalid_releases = []
+        # Remove duplicates
+        releases = list(set(releases))
 
         LOG.info(f"Validating release list for select: {', '.join(releases)}")
 
-        # verify if release list was passed to select
         if not releases:
             raise ReleaseInvalidRequest("Release list must not be empty")
 
-        # verify if releases are valid
+        # Resolve all inputs into metapackage releases
+        metapackage_releases = []
+        invalid_releases = []
+
         for release in releases:
-            if self.release_collection.get_product_release_by_id(release):
-                product_releases.append(release)
+            product_data = self.release_collection.get_product_release_by_id(release)
+            if product_data:
+                product_mps = self.release_collection.get_metapackages_id_by_product_id(release)
+                metapackage_releases.extend(product_mps)
             elif self.release_collection.get_metapackage_release_by_id(release):
                 metapackage_releases.append(release)
             else:
                 invalid_releases.append(release)
+
         if invalid_releases:
             raise ReleaseInvalidRequest(
                 f"Releases not found: {', '.join(invalid_releases)}")
 
-        # verify if release list doesn't contain both product and metapackage releases
-        if product_releases and metapackage_releases:
+        if not metapackage_releases:
+            raise ReleaseInvalidRequest("No metapackages resolved from the provided releases")
+
+        # Validate metapackages belong to a single version
+        metapackage_versions = set()
+        for mp in metapackage_releases:
+            mp_data = self.release_collection.get_metapackage_release_by_id(mp)
+            metapackage_versions.add(mp_data.sw_release)
+
+        if len(metapackage_versions) > 1:
             raise ReleaseInvalidRequest(
-                f"Cannot mix product releases ({', '.join(product_releases)}) "
-                f"and metapackages ({', '.join(metapackage_releases)}) "
-                f"in a single select request")
+                f"Selected metapackages must belong to the same product release, "
+                f"but found versions: {', '.join(sorted(metapackage_versions))}")
 
-        # verify if a single product release was passed
-        if len(product_releases) > 1:
-            raise ReleaseInvalidRequest(
-                f"Only one product release can be selected at a time, "
-                f"but received {len(product_releases)}: {', '.join(product_releases)}")
+        # Full product release or partial (individual metapackages)
+        target_sw_release = metapackage_versions.pop()
+        target_product_id = self.release_collection.get_release_id_by_sw_release(target_sw_release)
+        target_release = self.release_collection.get_release_by_id(target_product_id)
+        product_mps = target_release.metapackages.keys()
+        is_full_product = all(mp in metapackage_releases for mp in product_mps)
 
-        # verify if product release has metapackages and get its metapackages
-        product_metapackages = []
-        for release in product_releases:
-            release_data = self.release_collection.get_release_by_id(release)
-            if not release_data.is_product_release:
-                raise ReleaseInvalidRequest(f"Product release {release} doesn't have metapackage support")
-            product_metapackages = self.release_collection.get_metapackages_id_by_product_id(release)
+        # Validate deployability (only for partial selections)
+        if not is_full_product:
+            undeployable = [mp for mp in metapackage_releases
+                            if not self.release_collection.get_metapackage_release_by_id(
+                                mp).deployable]
+            if undeployable:
+                raise ReleaseInvalidRequest(
+                    f"Metapackages {', '.join(sorted(undeployable))} "
+                    "can be deployed only by selecting its product release")
 
-        metapackage_releases.extend(product_metapackages)
-
-        # metapackage release specific checks
+        # Determine apply or remove operation
         apply = True
-        if metapackage_releases:
-            metapackage_versions = set()
-            undeployable_metapackages = []
+        highest_release = self.release_collection.highest_release
+        if (highest_release == target_release and
+                highest_release.state == states.DEPLOYED):
+            raise ReleaseInvalidRequest(
+                f"Cannot deploy the current running release: {highest_release.id}")
 
-            # verify if metapackages state is in a valid expected state
-            for mp in metapackage_releases:
-                mp_data = self.release_collection.get_metapackage_release_by_id(mp)
-                metapackage_versions.add(mp_data.sw_release)
-                # verify if metapackage is undeployable
-                if not mp_data.deployable and mp not in product_metapackages:
-                    undeployable_metapackages.append(mp)
-
-            if undeployable_metapackages:
+        if target_release < highest_release:
+            apply = False
+            if not is_full_product:
                 raise ReleaseInvalidRequest(
-                    f"Metapackages {', '.join(sorted(undeployable_metapackages))} "
-                    "can be deployed only by selecting its product release"
-                )
+                    f"Cannot remove metapackages {', '.join(metapackage_releases)} "
+                    "individually, removing a release is only supported by selecting "
+                    "a previous product release in deployed state")
+            metapackage_releases = self._get_metapackages_to_remove(target_release.id)
 
-            # verify if all metapackages belong to the same product release
-            if len(metapackage_versions) > 1:
-                raise ReleaseInvalidRequest(
-                    f"Selected metapackages must belong to the same product release, "
-                    f"but found versions: {', '.join(sorted(metapackage_versions))}")
-
-            # verify if the user is selecting to apply or remove metapackages
-            apply = True
-            current_version = self.release_collection.running_release.sw_release
-            target_version = version.parse(metapackage_versions.pop())
-            if target_version < version.parse(current_version):
-                apply = False
-
-        LOG.info(f"Metapackage release list validated successfully: {', '.join(metapackage_releases)}")
+        LOG.info(
+            f"Metapackage release list validated successfully: {', '.join(metapackage_releases)}")
         return metapackage_releases, apply
 
     # TODO(heitormatsui): add support for the pre-upgrade-deploy parameter for
@@ -3416,8 +3449,8 @@ class PatchController(PatchService):
                     msg_info += msg + "\n"
                 else:
                     msg = f"Metapackage {mp} is not in a valid state for select"
-                    LOG.error(msg)
-                    msg_error += msg + "\n"
+                    LOG.info(msg)
+                    msg_info += msg + "\n"
             except FileSystemError as e:
                 msg = f"General failure while selecting the metapackages: {str(e)}"
                 LOG.error(msg)
@@ -3434,29 +3467,58 @@ class PatchController(PatchService):
         return result
 
     def _validate_releases_for_unselect(self, releases):
+        """
+        Validate if a release list is valid for deployment unselection.
+
+        :param releases: list of releases to be validated
+        """
+        releases = list(set(releases))
+        LOG.info(f"Validating release list for unselect: {', '.join(releases)}")
+
+        # Resolve all inputs into metapackages
         metapackage_releases = []
         invalid_releases = []
 
-        LOG.info(f"Validating release list for unselect: {', '.join(releases)}")
-
         for release in releases:
             rel_data = self.release_collection.get_release_by_id(release)
-            # Verify if release is invalid
             if rel_data is None:
                 invalid_releases.append(release)
-            else:
-                # Get metapackages
-                if rel_data.is_product_release:
-                    prd_metapackages = self.release_collection.get_metapackages_id_by_product_id(release)
-                    metapackage_releases.extend(prd_metapackages)
-                elif rel_data.is_metapackage_release:
-                    metapackage_releases.append(release)
+            elif rel_data.is_product_release:
+                product_mps = self.release_collection.get_metapackages_id_by_product_id(release)
+                metapackage_releases.extend(product_mps)
+            elif rel_data.is_metapackage_release:
+                metapackage_releases.append(release)
 
         if invalid_releases:
             raise ReleaseInvalidRequest(f"Releases not found: {', '.join(invalid_releases)}")
 
-        LOG.info(f"Metapackage release list validated successfully: {', '.join(metapackage_releases)}")
+        # Collect metadata and determine which product releases are fully covered
+        metapackage_versions = set()
+        mp_data_map = {}
+        for mp in metapackage_releases:
+            mp_data = self.release_collection.get_metapackage_release_by_id(mp)
+            mp_data_map[mp] = mp_data  # Cache metapackage metadata
+            metapackage_versions.add(mp_data.sw_release)
 
+        full_products = set()
+        for mpv in metapackage_versions:
+            product_id = self.release_collection.get_release_id_by_sw_release(mpv)
+            product_mps = self.release_collection.get_metapackages_id_by_product_id(product_id)
+            if all(mp in metapackage_releases for mp in product_mps):
+                full_products.add(product_id)
+
+        # Validate deployability
+        undeployable = [mp for mp, data in mp_data_map.items()
+                        if not data.deployable and data.product not in full_products]
+
+        if undeployable:
+            raise ReleaseInvalidRequest(
+                f"Metapackages {', '.join(sorted(undeployable))} can be unselected "
+                f"only by unselecting all metapackages from its product release, the "
+                f"product release directly or with --all")
+
+        LOG.info(
+            f"Metapackage release list validated successfully: {', '.join(metapackage_releases)}")
         return metapackage_releases
 
     def _deploy_unselect(self, **kwargs):
