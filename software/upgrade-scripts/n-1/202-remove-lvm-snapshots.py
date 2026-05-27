@@ -6,6 +6,7 @@
 #
 
 import configparser
+import json
 import logging
 import pathlib
 import subprocess
@@ -27,6 +28,15 @@ def get_system_mode():
     if parser.has_option('DEFAULT', 'system_mode'):
         return parser.get('DEFAULT', 'system_mode')
     return None
+
+
+def get_system_deploy():
+    system_deploy_file = pathlib.Path("/opt/software/system_deploy.json")
+    if not system_deploy_file.is_file():
+        return None
+    with open(system_deploy_file, "r") as fp:
+        data = json.loads(fp.read())
+    return data.get("system_deploy")
 
 
 def delete_lvm_snapshots():
@@ -72,7 +82,11 @@ def main():
         try:
             system_mode = get_system_mode()
             if system_mode == "simplex":
-                delete_lvm_snapshots()
+                system_deploy = get_system_deploy()
+                if system_deploy:
+                    LOG.info("A system-deploy entity exists, skipping LVM snapshot deletion")
+                else:
+                    delete_lvm_snapshots()
             else:
                 LOG.info("The system_mode is %s, nothing to do", system_mode)
         except Exception as e:
