@@ -3368,8 +3368,17 @@ class PatchController(PatchService):
 
         releases = list(set(kwargs.get("releases", [])))  # Remove duplicates
 
+        # Block select operations if deployment is in progress
+        if is_deployment_in_progress():
+            msg = "Select is blocked when a deployment is in progress"
+            LOG.error(msg)
+            msg_error += msg + "\n"
+            return None, dict(info=msg_info, warning=msg_warning, error=msg_error)
+
         if not releases:
-            msg_error += "No releases were passed for select, unable to proceed"
+            msg = "No releases were passed for select, unable to proceed"
+            LOG.error(msg)
+            msg_error += msg + "\n"
             return None, dict(info=msg_info, warning=msg_warning, error=msg_error)
         else:
             # Validate provided releases
@@ -3462,6 +3471,13 @@ class PatchController(PatchService):
 
         releases = list(set(kwargs.get("releases", [])))  # Remove duplicates
         unselect_all = kwargs.get("unselect_all")
+
+        # Block unselect operations if deployment is in progress
+        if is_deployment_in_progress():
+            msg = "Unselect is blocked when a deployment is in progress"
+            LOG.error(msg)
+            msg_error += msg + "\n"
+            return None, dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         # Get metapackages to unselect
         if unselect_all:
