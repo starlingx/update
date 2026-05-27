@@ -24,6 +24,7 @@ from software.constants import ENABLE_DEV_CERTIFICATE_PATCH_IDENTIFIER
 from software.software_functions import configure_logging
 from software.software_functions import LOG
 from software.software_functions import SW_VERSION
+from software.software_functions import is_system_deploy_in_progress
 from software.utils import get_major_release_version
 from software.utils import get_platform_conf
 
@@ -110,6 +111,8 @@ class PatchAlarmDaemon(object):  # pylint: disable=too-many-instance-attributes
         raise_dip_alarm = False
         raise_obs_alarm = False
         raise_cert_alarm = False
+        system_deploy_in_progress = False
+
         if req.status_code == 200:
             data = json.loads(req.text)
 
@@ -129,7 +132,10 @@ class PatchAlarmDaemon(object):  # pylint: disable=too-many-instance-attributes
 
         dip_alarm = self.fm_api.get_fault(fm_constants.FM_ALARM_ID_USM_RELEASE_DEPLOY_IN_PROGRESS,
                                           entity_instance_id)
-        if raise_dip_alarm and dip_alarm is None:
+
+        system_deploy_in_progress = is_system_deploy_in_progress()
+
+        if (raise_dip_alarm or system_deploy_in_progress) and dip_alarm is None:
             LOG.info("Raising deploy-in-progress alarm")
             fault = fm_api.Fault(alarm_id=fm_constants.FM_ALARM_ID_USM_RELEASE_DEPLOY_IN_PROGRESS,
                                  alarm_type=fm_constants.FM_ALARM_TYPE_5,
@@ -143,7 +149,7 @@ class PatchAlarmDaemon(object):  # pylint: disable=too-many-instance-attributes
                                  service_affecting=False)
 
             self.fm_api.set_fault(fault)
-        elif not raise_dip_alarm and dip_alarm is not None:
+        elif not raise_dip_alarm and not system_deploy_in_progress and dip_alarm is not None:
             LOG.info("Clearing deploy-in-progress alarm")
             self.fm_api.clear_fault(fm_constants.FM_ALARM_ID_USM_RELEASE_DEPLOY_IN_PROGRESS,
                                     entity_instance_id)

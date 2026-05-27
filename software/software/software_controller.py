@@ -3125,6 +3125,11 @@ class PatchController(PatchService):
             msg_info += self._remove_backup_files(files_to_delete)
 
             self.db_api_instance.delete_system_deploy()
+
+            # Set deployment state to completed so the 900.023 alarm can be cleared
+            deploying_release_state = ReleaseState(release_state=states.DEPLOYING)
+            deploying_release_state.deploy_completed()
+
         except Exception as e:
             msg = "Failed on deleting system-deploy"
             msg_error += msg + ".\n"
@@ -3249,7 +3254,7 @@ class PatchController(PatchService):
 
             LOG.info("system-deploy init completed. Deploy ID: %s, "
                      "release: %s, k8s: %s" % (
-                        system_deploy_id, release.id, kube_version))
+                         system_deploy_id, release.id, kube_version))
 
         except Exception as e:
             msg = "Failed to init system-deploy"
@@ -4564,7 +4569,10 @@ class PatchController(PatchService):
                                 break
 
                 # Set deploying releases to deployed state.
-                deploying_release_state.deploy_completed()
+                # Skip transitioning releases to deployed — system-deploy delete
+                # will handle this when the system-deploy entity is cleaned up.
+                if not is_system_deploy_in_progress():
+                    deploying_release_state.deploy_completed()
             else:
                 removing_release_state = ReleaseState(release_state=states.REMOVING)
                 removing_release_state.available()
