@@ -52,10 +52,10 @@ index abf1dcb..71ac41d 100644
  from fm_api import constants as fm_constants
  from fm_api import fm_api
  
-@@ -31,29 +34,24 @@ from software.utils import get_major_release_version
+@@ -33,29 +36,24 @@ from software.utils import get_platform_conf
  PID_FILE = '/var/run/patch-alarm-manager.pid'
- 
- 
+
+
 -class DaemonRunnerWrapper(runner.DaemonRunner):
 -    # Workaround: fix the "unbuffered bytes I/O for py3" runtime
 -    # error in pyhon3 env.
@@ -91,10 +91,10 @@ index abf1dcb..71ac41d 100644
 +
 +    with context:
 +        patch_alarm_daemon.run()
- 
- 
+
+
  ###################
-@@ -64,15 +62,7 @@ class PatchAlarmDaemon(object):
+@@ -66,15 +64,7 @@ class PatchAlarmDaemon(object):  # pylint: disable=too-many-instance-attributes
          the patch monitoring program
      """
      def __init__(self):
@@ -108,8 +108,8 @@ index abf1dcb..71ac41d 100644
          self.api_addr = "127.0.0.1:%d" % cfg.api_port
 -
          self.fm_api = fm_api.FaultAPIs()
- 
-     def run(self):
+
+         self._is_system_controller = (get_platform_conf("distributed_cloud_role") ==
 diff --git a/patch_alarm/tests/test_patch_alarm.py b/patch_alarm/tests/test_patch_alarm.py
 index 2e33750..255517e 100644
 --- a/patch_alarm/tests/test_patch_alarm.py
@@ -124,13 +124,13 @@ index 2e33750..255517e 100644
  import sys
  from unittest import mock
 @@ -10,7 +10,7 @@ import testtools
- 
+
  # disable importing these modules
  sys.modules['daemon'] = mock.Mock()
 -sys.modules['daemon.runner'] = mock.Mock()
 +sys.modules['daemon.pidfile'] = mock.Mock()
  sys.modules['fm_core'] = mock.Mock()
- 
+
  # this import needs to be done after fm_core is turned off
 diff --git a/requirements.txt b/requirements.txt
 index 1ffcef9..adb306b 100644
@@ -139,9 +139,8 @@ index 1ffcef9..adb306b 100644
 @@ -2,4 +2,4 @@
  # of appearance. Changing the order has an impact on the overall integration
  # process, which may cause wedges in the gate later.
- 
+
 -python-daemon<3
 +python-daemon>=3
--- 
+--
 2.43.0
-
