@@ -3072,16 +3072,26 @@ class PatchController(PatchService):
         return release_info
 
     def _remove_backup_files(self, bkp_info):
+        msg_info = ""
+        msg = ""
         for bkp_path, fail_warning_msg in bkp_info.items():
+            msg = "Deleted existing %s" % bkp_path
             if os.path.isdir(bkp_path):
                 shutil.rmtree(bkp_path)
-                LOG.info("Deleted existing %s", bkp_path)
+                LOG.info(msg)
             else:
                 try:
-                    os.remove(bkp_path)
-                    LOG.info("Deleted existing %s", bkp_path)
+                    if os.path.exists(bkp_path):
+                        os.remove(bkp_path)
+                        LOG.info(msg)
+                    else:
+                        msg = "There is no %s to be deleted. Skipped" % bkp_path
+                        LOG.info(msg)
                 except OSError as e:
-                    LOG.warning(fail_warning_msg + e)
+                    msg = fail_warning_msg + str(e)
+                    LOG.warning(fail_warning_msg + str(e))
+            msg_info += "%s\n" % msg
+        return msg_info
 
     def software_system_deploy_delete_api(self) -> dict:
         """
@@ -3109,7 +3119,7 @@ class PatchController(PatchService):
 
             # Deleting backup /etc/kubernetes/manifests.bkp, /etc/containerd/config.toml.bkp
             # and backup /opt/backups/k8s-control-plane
-            self._remove_backup_files(files_to_delete)
+            msg_info += self._remove_backup_files(files_to_delete)
         except Exception as e:
             msg = "Failed on deleting system-deploy"
             msg_error += msg + ".\n"
