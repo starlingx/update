@@ -293,3 +293,10 @@ USR_ETC = "/usr/etc"
 # Software-agent
 BEFORE_REBOOT = "before-reboot"
 AFTER_REBOOT = "after-reboot"
+
+# Combined Platform and K8s rollback
+CONTAINERD_CONFIG_TOML = "/etc/containerd/config.toml"
+CONTAINERD_CONFIG_TOML_BKP = "%s.bkp" % CONTAINERD_CONFIG_TOML
+KUBERNETES_MANIFESTS_DIR = "/etc/kubernetes/manifests"
+KUBERNETES_MANIFESTS_BKP = "%s.bkp" % KUBERNETES_MANIFESTS_DIR
+K8S_CONTROL_PLANE_BACKUPS_DIR = "/opt/backups/k8s-control-plane"
