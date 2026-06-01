@@ -70,8 +70,9 @@ class APlugin(ABC):
 
 
 class ScriptPlugin(APlugin):
-    def __init__(self, matching_action, required_state, script, completed_state):
+    def __init__(self, matching_action, required_state, script, completed_state, extra_args=None):
         self._script = script
+        self._extra_args = extra_args or []
         plugin_name = os.path.basename(script)
         super().__init__(matching_action, required_state, plugin_name, completed_state)
 
@@ -86,6 +87,7 @@ class ScriptPlugin(APlugin):
                 cmdline = [script, from_release, to_release, action]
                 if port is not None:
                     cmdline.append(str(port))
+                cmdline.extend(self._extra_args)
 
                 # Let subprocess.run handle non-zero exit codes via check=True
                 subprocess.run(cmdline,
@@ -208,3 +210,32 @@ def execute_migration_scripts(from_release, to_release, action, port=None,
     failed = [s for s in states if s.endswith('-failed')]
     if failed:
         raise Exception(f"Deployment plugins failed: {failed}")
+
+
+def discover_scripts(script_dirs, action="run", names=None, extra_args=None):
+    """Discover shell/python scripts from one or more directories."""
+    plugins = []
+    for d in script_dirs:
+        for f in sorted(os.listdir(d)):
+            if names and f not in names:
+                continue
+            path = os.path.join(d, f)
+            if not os.path.isfile(path) or not os.access(path, os.X_OK):
+                continue
+            plugins.append(ScriptPlugin(
+                matching_action=action,
+                required_state=None,
+                script=path,
+                completed_state=f"{os.path.basename(path)}-done",
+                extra_args=extra_args,
+            ))
+    return plugins
+
+
+def run_scripts(script_dirs, action="run", names=None, extra_args=None):
+    plugins = discover_scripts(script_dirs, action, names=names, extra_args=extra_args)
+    runner = PluginRunner(plugins, max_parallel=1)
+    states = runner.run(from_release="", to_release="", action=action)
+    failed = [s for s in states if s.endswith("-failed")]
+    if failed:
+        raise Exception(f"Scripts failed: {failed}")
