@@ -59,7 +59,9 @@ from software.exceptions import OSTreeCommandFail
 from software.exceptions import OSTreeTarFail
 from software.exceptions import ReleaseInvalidRequest
 from software.exceptions import ReleaseIsoDeleteFailure
+from software.exceptions import ReleasePrecheckInvalidRequest
 from software.exceptions import ReleaseValidationFailure
+from software.exceptions import ReleaseSelectFailure
 from software.exceptions import SoftwareError
 from software.exceptions import SoftwareFail
 from software.exceptions import SoftwareServiceError
@@ -2923,12 +2925,15 @@ class PatchController(PatchService):
 
         return release
 
-    def _deploy_precheck(self, release_version: str, force: bool = False,
-                         region_name: typing.Optional[str] = None, patch: bool = False,
-                         snapshot: bool = False, **kwargs) -> dict:
+    # TODO(mbenedit): Change the metapackage field to a required parameter in _deploy_precheck
+    # once deploy start supports component releases.
+    def _deploy_precheck(self, release_version: str, metapackage: typing.Optional[str] = None,
+                         force: bool = False, region_name: typing.Optional[str] = None,
+                         patch: bool = False, snapshot: bool = False, **kwargs) -> dict:
         """
         Verify if system satisfy the requisites to upgrade to a specified deployment.
         :param release_version: full release name, e.g. starlingx-MM.mm.pp
+        :param metapackage: metapackage name, e.g. base, infra, etc
         :param force: if True will ignore minor alarms during precheck
         :param region_name: region_name
         :param patch: if True then indicate precheck is for patch release
@@ -2941,7 +2946,7 @@ class PatchController(PatchService):
 
         if region_name is None:
             region_name = utils.get_local_region_name()
-        precheck_script = utils.get_precheck_script(release_version)
+        precheck_script = utils.get_precheck_script(release_version, metapackage)
 
         if not os.path.isfile(precheck_script) and patch:
             # Precheck script may not be available for some patches
@@ -3520,37 +3525,194 @@ class PatchController(PatchService):
         _, result = self._deploy_unselect(**kwargs)
         return result
 
-    def software_deploy_precheck_api(self, deployment: str, force: bool = False, region_name=None,
-                                     **kwargs) -> dict:
+    def _validate_releases_for_precheck(self, releases: list):
         """
-        Verify if system satisfy the requisites to upgrade to a specified deployment.
-        :param deployment: full release name, e.g. starlingx-MM.mm.pp
-        :param force: if True will ignore minor alarms during precheck
-        :return: dict of info, warning and error messages
+        Validate and resolve the releases list for deploy precheck.
         """
+        # No releases are provided
+        if not releases:
+            # Resolve releases from an active system deploy
+            system_deploy_data = self._get_system_deploy()
+            if system_deploy_data:
+                metapackage_releases = self._get_metapackages_from_system_deploy(system_deploy_data)
+                return self._validate_informed_releases(metapackage_releases)
 
-        release = self._release_basic_checks(deployment)
-        release_version = release.sw_release
+            # Fall back to currently selected metapackages
+            selected_releases = list(self.release_collection.iterate_metapackages_by_state(
+                states.COMPONENT_SELECTED_STATES))
+            if not selected_releases:
+                raise ReleasePrecheckInvalidRequest(
+                    "No metapackage releases selected for deployment. "
+                    "Specify a product/metapackage release or select for deployment.")
+            return selected_releases
 
-        # Check fields (MM.mm) of release_version to set patch flag
-        is_patch = (not utils.is_upgrade_deploy(SW_VERSION, release_version))
-        if not is_patch and socket.gethostname() != constants.CONTROLLER_0_HOSTNAME:
-            raise SoftwareServiceError(f"Deploy precheck for major releases needs to be executed in"
-                                       f" {constants.CONTROLLER_0_HOSTNAME} host.")
-        if kwargs.get("options"):
-            kwargs["options"] = self._parse_and_sanitize_extra_options(kwargs.get("options"))
-        snapshot = to_bool(kwargs.get("options", {}).get("snapshot", False))
-        ret = self._deploy_precheck(release_version, force, region_name, is_patch, snapshot=snapshot, **kwargs)
-        if ret:
-            if ret.get("system_healthy") is None:
-                ret["error"] = "Fail to perform deploy precheck. Internal error has occurred.\n" + \
-                               ret.get("error")
-            elif not ret.get("system_healthy"):
-                ret["error"] = "The following issues have been detected, which prevent " \
-                               "deploying %s\n" % deployment + ret.get("info")
-        release_info = self._get_release_additional_info(release)
-        ret.update(release_info)
-        return ret
+        # Releases are informed
+        return self._validate_informed_releases(releases)
+
+    def _get_metapackages_from_system_deploy(self, system_deploy_data):
+        """Extract metapackage release IDs from an active system deploy."""
+        to_release = system_deploy_data.get("to_release")
+        product = self.release_collection.get_product_release_by_id(to_release)
+
+        if not product:
+            raise ReleasePrecheckInvalidRequest(
+                "No release found for deployment. "
+                "Specify a product/metapackage release or select for deployment.")
+
+        if not product.metapackages:
+            raise ReleasePrecheckInvalidRequest(
+                f"No valid metapackage found for deployment in {to_release} release.")
+
+        return list(product.metapackages.keys())
+
+    def _validate_informed_releases(self, release_ids: list):
+        """Validate list of release IDs."""
+        valid_releases = []
+
+        for rel_id in release_ids:
+            rel_data = self.release_collection.get_release_by_id(rel_id)
+
+            if not rel_data:
+                raise ReleasePrecheckInvalidRequest(f"Release {rel_id} does not exist.")
+
+            if rel_data.is_metapackage_release:
+                product = rel_data.product
+                if not product:
+                    raise ReleasePrecheckInvalidRequest(
+                        f"No product release was found for metapackage {rel_id}. Try deleting "
+                        "and re-uploading the software for recovery.")
+
+                product_release = self.release_collection.get_product_release_by_id(product)
+                if product_release == self.release_collection.running_release:
+                    raise ReleasePrecheckInvalidRequest(
+                        f"Cannot run precheck against current release {rel_id}.")
+
+                valid_releases.append(rel_data)
+            elif rel_data.is_product_release:
+                if rel_data == self.release_collection.running_release:
+                    raise ReleasePrecheckInvalidRequest(
+                        f"Cannot run precheck against current release {rel_id}.")
+
+                if valid_releases or len(release_ids) > 1:
+                    raise ReleasePrecheckInvalidRequest(
+                        f"Cannot process releases in {release_ids}. Only a single "
+                        "product release or a list of metapackage releases is supported.")
+
+                for mp in rel_data.metapackages:
+                    metapackage = self.release_collection.get_release_by_id(mp)
+                    if not metapackage:
+                        raise ReleasePrecheckInvalidRequest(
+                            f"Metapackage {mp} listed in product release {rel_id} "
+                            "does not exist. Try deleting and re-uploading the "
+                            "software for recovery.")
+                    valid_releases.append(metapackage)
+            else:
+                raise ReleasePrecheckInvalidRequest(
+                    f"Cannot perform componentized upgrade on legacy release {rel_id}. "
+                    "Only product and metapackage releases are allowed.")
+
+        return valid_releases
+
+    def _select_releases_for_precheck(self, releases: list):
+        """Select valid releases for precheck"""
+        valid_releases = self._validate_releases_for_precheck(releases)
+        releases_to_select = [release.id for release in valid_releases]
+
+        _, ret = self._deploy_select(releases=releases_to_select)
+        if ret['error']:
+            raise ReleaseSelectFailure(ret["error"])
+
+        return valid_releases
+
+    # TODO(mbenedit): Implement the pre-upgrade-deploy for precheck
+    def software_deploy_precheck_api(self, **kwargs) -> dict:
+        """
+        Verify if system satisfy the requisites to upgrade to a product release or list of
+        metapackage releases. The deploy precheck is executed ONLY in selected metapackage
+        releases, so if a metapackage containing in releases list is not selected, the
+        precheck API select it before running the precheck scripts.
+        :param kwargs: dict containing the request body data
+        :return: dict of info, warning, error and additional_data
+        """
+        msg_info = ""
+        msg_error = ""
+        msg_warning = ""
+        msg_additional_data = {}
+
+        healthy_releases = []
+        unhealthy_releases = []
+        releases = list(set(kwargs.get("releases", [])))
+
+        try:
+            selected_releases = self._select_releases_for_precheck(releases)
+        except ReleasePrecheckInvalidRequest as e:
+            msg = "Failed to validate release(s) for precheck. %s" % e
+            msg_error += msg
+            LOG.error(msg_error)
+            return dict(info=msg_info, error=msg_error, warning=msg_warning, additional_data=msg_additional_data)
+        except ReleaseSelectFailure as e:
+            msg = "Failed to select release(s) before precheck.\n%s" % e
+            msg_error += msg
+            LOG.error(msg_error)
+            return dict(info=msg_info, error=msg_error, warning=msg_warning, additional_data=msg_additional_data)
+
+        force = kwargs.get("force") is not None
+        region_name = kwargs.get("region_name", None)
+        options = kwargs.get("options", {})
+        if options:
+            kwargs["options"] = self._parse_and_sanitize_extra_options(options)
+            options = kwargs.get("options", {})
+        snapshot = to_bool(options.get('snapshot', False))
+
+        for release in selected_releases:
+            release_id = release.id
+            release_name = release.component
+            release_version = release.sw_release
+
+            # Check fields (MM.mm) of release_version to set patch flag
+            is_patch = (not utils.is_upgrade_deploy(SW_VERSION, release_version))
+            if not is_patch and socket.gethostname() != constants.CONTROLLER_0_HOSTNAME:
+                msg = ("Deploy precheck for major releases needs to be executed in "
+                       f"{constants.CONTROLLER_0_HOSTNAME} host")
+                msg_error += f"{release_id}:\n{msg}\n"
+                unhealthy_releases.append(release_id)
+                break
+
+            ret = self._deploy_precheck(release_version, release_name,
+                                        force, region_name, is_patch,
+                                        snapshot=snapshot, **kwargs)
+            if ret:
+                if ret.get("system_healthy") is None:
+                    msg = ("Failed to perform deploy precheck. Internal error "
+                           "has occurred.\n" + ret.get('error'))
+                    msg_error += f"{release_id}:\n{msg}\n"
+                    unhealthy_releases.append(release_id)
+                elif not ret.get("system_healthy"):
+                    msg = ("The following issues have been detected, which "
+                           "prevents deploying the release.\n" + ret.get('info'))
+                    msg_error += f"{release_id}:\n{msg}\n"
+                    unhealthy_releases.append(release_id)
+                else:
+                    healthy_releases.append(release_id)
+
+            release_info = self._get_release_additional_info(release)
+            ret.update(release_info)
+
+            msg_info += f"{release_id}:\n{ret.get('info')}\n"
+            msg_additional_data.update({release_id: ret})
+
+        if not unhealthy_releases:
+            healthy_releases = ", ".join(healthy_releases)
+            msg = "The following metapackage release(s) will be deployed:\n" + healthy_releases
+            LOG.info(msg)
+            msg_info += msg
+        else:
+            unhealthy_releases = ", ".join(unhealthy_releases)
+            msg = "The following metapackage release(s) are unhealthy:\n" + unhealthy_releases
+            LOG.error(msg)
+            msg_error += msg
+
+        return dict(info=msg_info, error=msg_error, warning=msg_warning, additional_data=msg_additional_data)
 
     def _deploy_upgrade_start(self, to_release, commit_id, **kwargs):
         LOG.info("start deploy upgrade to %s from %s" % (to_release, SW_VERSION))
@@ -3909,6 +4071,9 @@ class PatchController(PatchService):
     def _precheck_before_start(self, deployment, release_version, is_patch, force=False,
                                snapshot=False, **kwargs):
         LOG.info("Running deploy precheck.")
+        # TODO(mbenedit): The _deploy_precheck parameter should run on each metapackage
+        # release selected to be deployed/removed. Pass the metapackage name as a required
+        # parameter in _deploy_precheck and remove the optional parameter from the method.
         precheck_result = self._deploy_precheck(release_version, patch=is_patch, force=force,
                                                 snapshot=snapshot, **kwargs)
         if precheck_result.get('system_healthy') is None:

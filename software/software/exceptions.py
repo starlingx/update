@@ -139,6 +139,16 @@ class ReleaseUploadFailure(SoftwareError):
     pass
 
 
+class ReleasePrecheckInvalidRequest(SoftwareError):
+    """Release precheck invalid request."""
+    pass
+
+
+class ReleaseSelectFailure(SoftwareError):
+    """Release select error."""
+    pass
+
+
 class ReleaseInvalidRequest(SoftwareError):
     """Invalid API request."""
     pass

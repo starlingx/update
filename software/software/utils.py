@@ -15,6 +15,7 @@ import shutil
 import socket
 import time
 import traceback
+import typing
 
 from netaddr import IPAddress
 from oslo_config import cfg as oslo_cfg
@@ -137,10 +138,16 @@ def get_software_deploy_script(sw_version, script):
     return script_path
 
 
-def get_precheck_script(sw_version):
-    deploy_precheck = os.path.join("/opt/software/",
-                                   f"rel-{sw_version}",
-                                   "bin", constants.DEPLOY_PRECHECK_SCRIPT)
+def get_precheck_script(sw_version, metapackage: typing.Optional[str] = None):
+    if metapackage:
+        deploy_precheck = os.path.join(constants.COMPONENT_SOFTWARE_STORAGE_DIR,
+                                       f"{sw_version}/{metapackage}",
+                                       constants.SUPPORT_SCRIPTS_DIR,
+                                       constants.DEPLOY_PRECHECK_SCRIPT)
+    else:
+        deploy_precheck = os.path.join(constants.SOFTWARE_STORAGE_DIR,
+                                       f"rel-{sw_version}/bin",
+                                       constants.DEPLOY_PRECHECK_SCRIPT)
     return deploy_precheck
 
 
