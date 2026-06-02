@@ -11,11 +11,13 @@ import unittest
 
 from software.tests import base  # pylint: disable=unused-import # noqa: F401
 from software.exceptions import HostNotFound
+from software.exceptions import SoftwareServiceError
 from software.exceptions import UpgradeNotSupported
 from software.software_controller import PatchController
 from software.software_controller import AgentNeighbour
 from software import constants
 from software import states
+from software.states import DEPLOY_STATES
 
 
 class TestSoftwareController(unittest.TestCase):
@@ -648,3 +650,162 @@ class TestSoftwareController(unittest.TestCase):
             unittest.mock.call('/opt/software/metadata/committed/component_22.12_PATCH_002-metadata.xml')
         ]
         mock_remove.assert_has_calls(expected_remove_calls)
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
+    @unittest.mock.patch('software.software_controller.is_system_deploy_in_progress', return_value=False)
+    @unittest.mock.patch('software.software_controller.get_active_k8s_ver', return_value="v1.34.1")
+    @unittest.mock.patch('software.software_controller.DeployState.get_deploy_state',
+                         return_value=DEPLOY_STATES.HOST_DONE)
+    def test_abort_blocked_when_k8s_version_changed(self,
+                                                    mock_get_deploy_state,   # pylint: disable=unused-argument
+                                                    mock_get_k8s_ver,   # pylint: disable=unused-argument
+                                                    mock_system_deploy,   # pylint: disable=unused-argument
+                                                    mock_init):   # pylint: disable=unused-argument
+        """Abort should raise SoftwareServiceError when K8s version changed."""
+        controller = PatchController()
+        controller.db_api_instance = unittest.mock.MagicMock()
+        controller.db_api_instance.get_current_deploy.return_value = {
+            "from_release": "26.03.0",
+            "to_release": "26.09.0",
+            "initial_kube_version": "v1.32.2",
+        }
+
+        with self.assertRaises(SoftwareServiceError) as ctx:
+            controller.software_deploy_abort_api()
+
+        self.assertIn("Cannot rollback", ctx.exception.error)
+        self.assertIn("v1.32.2", ctx.exception.error)
+        self.assertIn("v1.34.1", ctx.exception.error)
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
+    @unittest.mock.patch('software.software_controller.is_system_deploy_in_progress', return_value=False)
+    @unittest.mock.patch('software.software_controller.get_active_k8s_ver', return_value="v1.32.2")
+    @unittest.mock.patch('software.software_controller.ReleaseState')
+    @unittest.mock.patch('software.software_controller.DeployState.get_instance')
+    @unittest.mock.patch('software.software_controller.DeployHostState')
+    @unittest.mock.patch('software.software_controller.get_SWReleaseCollection')
+    @unittest.mock.patch('software.software_controller.DeployState.get_deploy_state',
+                         return_value=DEPLOY_STATES.HOST_DONE)
+    def test_abort_allowed_when_k8s_version_unchanged(self,
+                                                      mock_get_deploy_state,   # pylint: disable=unused-argument
+                                                      mock_get_swrc,
+                                                      mock_deploy_host_state,   # pylint: disable=unused-argument
+                                                      mock_deploy_state,
+                                                      mock_release_state,   # pylint: disable=unused-argument
+                                                      mock_get_k8s_ver,   # pylint: disable=unused-argument
+                                                      mock_system_deploy,   # pylint: disable=unused-argument
+                                                      mock_init):   # pylint: disable=unused-argument
+        """Abort should proceed when K8s version has not changed."""
+        controller = PatchController()
+        controller.db_api_instance = unittest.mock.MagicMock()
+        controller.db_api_instance.get_current_deploy.return_value = {
+            "from_release": "26.03.0",
+            "to_release": "26.09.0",
+            "initial_kube_version": "v1.32.2",
+            "metapackages": None,
+            "pre_upgrade_deploy": False,
+        }
+        controller.db_api_instance.get_deploy_host.return_value = []
+
+        mock_release_collection = unittest.mock.MagicMock()
+        mock_release_collection.get_release_id_by_sw_release.return_value = \
+            "starlingx-26.03.0"
+        mock_release_collection.get_release_by_id.return_value = \
+            unittest.mock.MagicMock(commit_id="abc123", sw_version="26.03")
+        mock_get_swrc.return_value = mock_release_collection
+
+        mock_deploy_state.return_value = unittest.mock.MagicMock()
+
+        result = controller.software_deploy_abort_api()
+        self.assertIn("info", result)
+        self.assertIn("Deployment has been aborted", result["info"])
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
+    @unittest.mock.patch('software.software_controller.is_system_deploy_in_progress', return_value=True)
+    @unittest.mock.patch('software.software_controller.get_active_k8s_ver')
+    @unittest.mock.patch('software.software_controller.ReleaseState')
+    @unittest.mock.patch('software.software_controller.DeployState.get_instance')
+    @unittest.mock.patch('software.software_controller.DeployHostState')
+    @unittest.mock.patch('software.software_controller.get_SWReleaseCollection')
+    @unittest.mock.patch('software.software_controller.DeployState.get_deploy_state',
+                         return_value=DEPLOY_STATES.HOST_DONE)
+    def test_abort_skips_check_when_system_deploy_active(self,
+                                                         mock_get_deploy_state,   # pylint: disable=unused-argument
+                                                         mock_get_swrc,
+                                                         mock_deploy_host_state,   # pylint: disable=unused-argument
+                                                         mock_deploy_state,
+                                                         mock_release_state,   # pylint: disable=unused-argument
+                                                         mock_get_k8s_ver,
+                                                         mock_system_deploy,   # pylint: disable=unused-argument
+                                                         mock_init):   # pylint: disable=unused-argument
+        """Abort should skip K8s check when system-deploy is active."""
+        controller = PatchController()
+        controller.db_api_instance = unittest.mock.MagicMock()
+        controller.db_api_instance.get_current_deploy.return_value = {
+            "from_release": "26.03.0",
+            "to_release": "26.09.0",
+            "initial_kube_version": "v1.32.2",
+            "metapackages": None,
+            "pre_upgrade_deploy": False,
+        }
+        controller.db_api_instance.get_deploy_host.return_value = []
+
+        mock_release_collection = unittest.mock.MagicMock()
+        mock_release_collection.get_release_id_by_sw_release.return_value = \
+            "starlingx-26.03.0"
+        mock_release_collection.get_release_by_id.return_value = \
+            unittest.mock.MagicMock(commit_id="abc123", sw_version="26.03")
+        mock_get_swrc.return_value = mock_release_collection
+
+        mock_deploy_state.return_value = unittest.mock.MagicMock()
+
+        result = controller.software_deploy_abort_api()
+        self.assertIn("info", result)
+        self.assertIn("Deployment has been aborted", result["info"])
+
+        # get_active_k8s_ver should NOT be called since check was bypassed
+        mock_get_k8s_ver.assert_not_called()
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
+    @unittest.mock.patch('software.software_controller.is_system_deploy_in_progress', return_value=False)
+    @unittest.mock.patch('software.software_controller.get_active_k8s_ver',
+                         side_effect=Exception("K8s API unavailable"))
+    @unittest.mock.patch('software.software_controller.ReleaseState')
+    @unittest.mock.patch('software.software_controller.DeployState.get_instance')
+    @unittest.mock.patch('software.software_controller.DeployHostState')
+    @unittest.mock.patch('software.software_controller.get_SWReleaseCollection')
+    @unittest.mock.patch('software.software_controller.DeployState.get_deploy_state',
+                         return_value=DEPLOY_STATES.HOST_DONE)
+    def test_abort_fails_open_when_k8s_api_unavailable(self,
+                                                       mock_get_deploy_state,   # pylint: disable=unused-argument
+                                                       mock_get_swrc,
+                                                       mock_deploy_host_state,   # pylint: disable=unused-argument
+                                                       mock_deploy_state,
+                                                       mock_release_state,   # pylint: disable=unused-argument
+                                                       mock_get_k8s_ver,   # pylint: disable=unused-argument
+                                                       mock_system_deploy,   # pylint: disable=unused-argument
+                                                       mock_init):   # pylint: disable=unused-argument
+        """Abort should proceed (fail open) when K8s API is unavailable."""
+        controller = PatchController()
+        controller.db_api_instance = unittest.mock.MagicMock()
+        controller.db_api_instance.get_current_deploy.return_value = {
+            "from_release": "26.03.0",
+            "to_release": "26.09.0",
+            "initial_kube_version": "v1.32.2",
+            "metapackages": None,
+            "pre_upgrade_deploy": False,
+        }
+        controller.db_api_instance.get_deploy_host.return_value = []
+
+        mock_release_collection = unittest.mock.MagicMock()
+        mock_release_collection.get_release_id_by_sw_release.return_value = \
+            "starlingx-26.03.0"
+        mock_release_collection.get_release_by_id.return_value = \
+            unittest.mock.MagicMock(commit_id="abc123", sw_version="26.03")
+        mock_get_swrc.return_value = mock_release_collection
+
+        mock_deploy_state.return_value = unittest.mock.MagicMock()
+
+        # Should NOT raise - fails open
+        result = controller.software_deploy_abort_api()
+        self.assertIn("info", result)
