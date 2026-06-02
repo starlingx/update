@@ -133,9 +133,7 @@ def get_md5(path):
     return int(md5.hexdigest(), 16)
 
 
-def add_text_tag_to_xml(parent,
-                        name,
-                        text):
+def add_text_tag_to_xml(parent, name, text=None):
     """
     Utility function for adding a text tag to an XML object
     :param parent: Parent element
@@ -143,9 +141,12 @@ def add_text_tag_to_xml(parent,
     :param text: Text value
     :return:The created element
     """
-    tag = ElementTree.SubElement(parent, name)
-    tag.text = text
-    return tag
+    element = parent.find(name)
+    if element is None:
+        element = ElementTree.SubElement(parent, name)
+    if text is not None:
+        element.text = text
+    return element
 
 
 def write_xml_file(top,
@@ -161,6 +162,24 @@ def write_xml_file(top,
         outfile.write(rough_xml)
     else:
         outfile.write(minidom.parseString(rough_xml).toprettyxml(indent="  "))
+
+
+def copy_xml_file(src, dst, additional_data=None):
+    """
+    Parse xml file, add additional data to its content, format and write to another file
+
+    :param src: source xml file
+    :param dst: destination xml file
+    :param additional_data: dict with additional data {<tag>: <value>} to add to the content
+    """
+    additional_data = additional_data or {}
+
+    tree = ElementTree.parse(src)
+    root = tree.getroot()
+    for tag in additional_data:
+        add_text_tag_to_xml(root, tag, additional_data[tag])
+    ElementTree.indent(tree, space="  ")
+    tree.write(dst)
 
 
 def get_release_from_patch(patchfile, key="sw_version"):
@@ -1374,7 +1393,8 @@ class ComponentPatchFile:
                         raise ReleaseValidationFailure(msg)
                     # copy product release metadata to software directory
                     product_md = f"{product_id}-{self.METADATA_XML}"
-                    shutil.copy(metadata_file, Path(constants.COMPONENT_SOFTWARE_METADATA_STORAGE_DIR) / product_md)
+                    dst_metadata_file = Path(constants.COMPONENT_SOFTWARE_METADATA_STORAGE_DIR) / product_md
+                    copy_xml_file(metadata_file, dst_metadata_file, additional_data=None)
                     LOG.info(f"Copied {product_md} to {constants.COMPONENT_SOFTWARE_METADATA_STORAGE_DIR}")
 
                 # extract deb packages
@@ -1402,8 +1422,10 @@ class ComponentPatchFile:
                             metapkg_md_name = f"{mp}_{release_version}-{self.METADATA_XML}"
                             metapkg_md_src = Path(metapkg_dir) / self.METADATA_XML
                             metapkg_md_dst = Path(states.COMPONENT_AVAILABLE_DIR) / metapkg_md_name
-                            shutil.move(metapkg_md_src, metapkg_md_dst)
+                            copy_xml_file(metapkg_md_src, metapkg_md_dst,
+                                          {"deployable": "Y"})
                             LOG.info(f"Copied metapackage metadata: {metapkg_md_name}")
+
                     # create apt-ostree repo and load deb packages in it
                     package_repo_dir = Path(constants.PACKAGE_FEED_DIR) / f"rel-{sw_version}"
                     if not package_repo_dir.exists():
