@@ -3182,8 +3182,18 @@ class PatchController(PatchService):
                     msg_error = err
                     return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-            # 2. Run deploy precheck;
             release = self._release_basic_checks(release_id)
+
+            # 1g. Only allowed for platform major releases upgrade
+            # NOTE(lvieira) Remove this in the future to support combined P&K
+            # for patches, but need to handle the in-service patch use-case
+            if not utils.is_upgrade_deploy(SW_VERSION, release.sw_release):
+                msg_error = ("System deploy is supported only for major release, "
+                             "but '%s' to '%s' is not a major release upgrade"
+                             % (SW_VERSION, release.sw_release))
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+            # 2. Run deploy precheck;
             precheck_script = utils.get_precheck_script(release.sw_release)
             if os.path.isfile(precheck_script):
                 if self._should_run_precheck_prior_deploy_start(release.sw_release, False, False):
