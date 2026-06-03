@@ -918,6 +918,22 @@ class CreateUSMUpgradeInProgressFlag(BaseHook):
             LOG.info("Created %s flag" % flag_file)
 
 
+# TODO(mdecastr): Remove when stx 11 (25.09) is not supported as from side.
+class CreateKubeApiserverPortUpdatedFlag(BaseHook):
+    def __init__(self, attrs):
+        super().__init__(attrs)
+        self.KUBE_APISERVER_PORT_UPDATED_FLAG = \
+            os.path.join(BaseHook.PLATFORM_CONF_PATH, ".upgrade_kube_apiserver_port_updated")
+
+    def run(self):
+        if (self._to_release == '25.09' and
+                self.get_platform_conf("nodetype") == self.CONTROLLER):
+            flag_file = "%s/%s" % (self.TO_RELEASE_OSTREE_DIR,
+                                   self.KUBE_APISERVER_PORT_UPDATED_FLAG)
+            with open(flag_file, "w") as _:
+                LOG.info("Created %s flag" % flag_file)
+
+
 class DeleteControllerFeedRemoteHook(BaseHook):
     """
     This hook deletes the controller-feed ostree remote for non-controller
@@ -1291,6 +1307,7 @@ class HookManager(object):
             UpdateGrubConfigHook,
             DeleteControllerFeedRemoteHook,
             FixedEtcMergeRollBackHook,
+            CreateKubeApiserverPortUpdatedFlag,
             NtpToNtpsecMigrationHook,
             LdapConfigHook,
             PuppetHieradataUpdate,
