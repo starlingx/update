@@ -35,6 +35,7 @@ from software.db.api import get_instance
 
 from software.exceptions import MetadataFail
 from software.exceptions import OSTreeTarFail
+from software.exceptions import ReleaseInvalidData
 from software.exceptions import ReleaseMismatchFailure
 from software.exceptions import ReleaseUploadFailure
 from software.exceptions import ReleaseValidationFailure
@@ -1381,56 +1382,61 @@ class ComponentPatchFile:
         base_pkgdata = kwargs.get("base_pkgdata")
 
         try:
-            # extract patch content
+            # Extract patch content
             with (extract_tar(self._patch_file, prefix="patch-") as patch_dir):
                 LOG.info(f"Extracted {self._patch_file}")
 
-                # verify patch signature
+                # Verify patch signature
                 ComponentPatchFile.verify_signature(patch_dir)
 
-                # extract product release metadata
+                # Extract product release metadata
                 metadata_tar = Path(patch_dir) / self.METADATA_TAR
                 with extract_tar(metadata_tar, prefix="metadata-") as metadata_dir:
                     LOG.info(f"Extracted {metadata_tar}")
                     metadata_file = Path(metadata_dir) / self.METADATA_XML
-                    # parse the product release metadata
+                    # Parse the product release metadata
                     with open(metadata_file, "r") as fd:
                         text = fd.read()
                         product_id = release_data.parse_metadata_string(text)
                     _, release_version, sw_version, _ = utils.get_component_and_versions(product_id)
-                    # check if feed exists
+                    # Check if feed exists
                     if not base_pkgdata.check_release(sw_version):
                         msg = f"Software feed {sw_version} for release {product_id} doesn't exist"
                         LOG.error(msg)
                         raise ReleaseValidationFailure(msg)
-                    # copy product release metadata to software directory
+                    # Copy product release metadata to software directory
                     product_md = f"{product_id}-{self.METADATA_XML}"
                     dst_metadata_file = Path(constants.COMPONENT_SOFTWARE_METADATA_STORAGE_DIR) / product_md
                     copy_xml_file(metadata_file, dst_metadata_file, additional_data=None)
                     LOG.info(f"Copied {product_md} to {constants.COMPONENT_SOFTWARE_METADATA_STORAGE_DIR}")
 
-                # extract deb packages
+                # Extract deb packages
                 software_tar = Path(patch_dir) / self.SOFTWARE_TAR
                 with extract_tar(software_tar, prefix="software-") as software_dir:
-                    # fetch all deb packages and metapackages
+                    # Fetch all deb packages and metapackages
                     deb_pkgs = list(Path(software_dir).glob("*.deb"))
                     deb_metapkgs = [d for d in deb_pkgs if d.name.startswith("meta-")]
-                    # copy metapackages contents
+                    # Copy metapackages contents
                     for deb in deb_metapkgs:
-                        # confirm the deb package corresponds to a metapackage
+                        # Confirm the deb package corresponds to a metapackage
                         if not is_metapackage_deb(deb):
                             LOG.warning(f"{deb} is not a metapackage, skipping file...")
                             continue
-                        mp = deb.name[5:].split("_")[0]
+                        mp = deb.name[5:].split("_")[0]  # Skip the prefix 'meta-'
                         with extract_deb(deb) as deb_dir:
                             LOG.info(f"Extracted metapackage {deb.name}")
                             metapkg_dir = Path(constants.COMPONENT_SOFTWARE_STORAGE_DIR) / release_version / mp
                             metapkg_dir.mkdir(parents=True, exist_ok=True)
-                            mp_content = list(Path(deb_dir).rglob(f"*/metapackages/{release_version}/{mp}*"))
-                            # copy full metapackage directory
-                            shutil.copytree(mp_content[0], metapkg_dir, dirs_exist_ok=True)
+                            mp_content = next(Path(deb_dir).rglob(f"*/metapackages/{release_version}/{mp}*"), None)
+                            if not mp_content:
+                                msg = f"Metapackage {deb.name} is empty"
+                                LOG.error(msg)
+                                raise ReleaseInvalidData(msg)
+                            # Copy full metapackage directory
+                            shutil.copytree(mp_content, metapkg_dir, dirs_exist_ok=True)
+                            ComponentPatchFile.setup_metapackage_dirs_and_permissions(metapkg_dir, 0o755)
                             LOG.info(f"Created metapackage directory: {metapkg_dir}")
-                            # copy metapackage metadata to correct location
+                            # Copy metapackage metadata to correct location
                             metapkg_md_name = f"{mp}_{release_version}-{self.METADATA_XML}"
                             metapkg_md_src = Path(metapkg_dir) / self.METADATA_XML
                             metapkg_md_dst = Path(states.COMPONENT_AVAILABLE_DIR) / metapkg_md_name
@@ -1438,7 +1444,7 @@ class ComponentPatchFile:
                                           {"deployable": "Y"})
                             LOG.info(f"Copied metapackage metadata: {metapkg_md_name}")
 
-                    # create apt-ostree repo and load deb packages in it
+                    # Create apt-ostree repo and load deb packages in it
                     package_repo_dir = Path(constants.PACKAGE_FEED_DIR) / f"rel-{sw_version}"
                     if not package_repo_dir.exists():
                         apt_utils.initialize_apt_ostree(package_repo_dir)
@@ -1459,12 +1465,31 @@ class ComponentPatchFile:
             msg = f"Error extracting patch: {error_detail}"
             LOG.error(msg)
             error_msg += msg
-            # if product_id was assigned, delete already extracted files
+            # If product_id was assigned, delete already extracted files
             if product_id:
                 LOG.info("Deleting extracted resources...")
                 ComponentPatchFile.delete_patch_product_release(product_id)
 
         return product_id, release_data, error_msg
+
+    @staticmethod
+    def setup_metapackage_dirs_and_permissions(path, mode):
+        """
+        Ensures the underlying script directories exist
+        and that existing scripts have proper permissions
+
+        :param path: root of directory tree
+        :param mode: file permission mode in 0oRWX format
+        """
+        # Create script directories
+        dirs = ["host-scripts", "support-scripts", "upgrade-scripts"]
+        for d in dirs:
+            script_dir = Path(path) / d
+            script_dir.mkdir(parents=True, exist_ok=True)
+        # Set file permissions to the provided mode
+        for f in Path(path).rglob("*"):
+            if f.is_file():
+                f.chmod(mode)
 
     @staticmethod
     def delete_patch_product_release(product_id):
