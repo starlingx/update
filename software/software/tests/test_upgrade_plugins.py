@@ -20,6 +20,7 @@ for mod_name in [
     "controllerconfig", "controllerconfig.common",
     "controllerconfig.common.constants", "controllerconfig.utils",
     "sysinv", "sysinv.common", "sysinv.common.kubernetes",
+    "sysinv.common.kube_utils",
     "sysinv.common.retrying",
     "psycopg2", "psycopg2.extras",
     "oslo_config", "oslo_config.cfg",
