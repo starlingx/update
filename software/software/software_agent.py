@@ -21,7 +21,11 @@ from tsconfig.tsconfig import http_port
 from tsconfig.tsconfig import install_uuid
 from tsconfig.tsconfig import subfunctions
 from tsconfig.tsconfig import SW_VERSION
+from typing import List
+from typing import Optional
+from typing import Tuple
 
+from software import states
 from software.base import PatchService
 import software.config as cfg
 import software.constants as constants
@@ -30,9 +34,11 @@ from software.exceptions import OSTreeCommandFail
 import software.messages as messages
 import software.ostree_utils as ostree_utils
 from software.software_functions import configure_logging
-from software.software_functions import execute_agent_hooks
 from software.software_functions import LOG
 from software.software_functions import remove_major_release_deployment_flags
+from software.release_data import get_SWReleaseCollection
+from software.utilities.plugin_runner import execute_agent_hooks
+from software.utilities.plugin_runner import execute_host_scripts
 import software.utils as utils
 
 
@@ -76,50 +82,116 @@ def clearflag(fname):
             LOG.exception("Failed to clear %s flag", fname)
 
 
-def pull_install_scripts_from_controller(install_local=False):
-    # Clear install scripts folder and use an empty one
-    if os.path.exists(install_scripts):
-        shutil.rmtree(install_scripts, ignore_errors=True)
-    os.makedirs(install_scripts, 0o700)
-
-    # If the rsync fails, it raises an exception to
-    # the caller "handle_install()" and fails the
-    # host-install request for this host.
-    # The restart_scripts are optional, so if the files
-    # are not present, it should not raise any exception
+def pull_install_scripts_from_controller(metapackages: Optional[List[Tuple]] = None,
+                                         install_local=False):
+    """Rsync install scripts from the controller using componentized or legacy
+    methods. In componentized method, this function syncs host-scripts directory
+    from each metapackage under
+    /opt/software/releases/<metapackage_release>/<metapackage_name>/host-scripts/
+    on the controller node directly into the local path. If metapackages parameter
+    is not set, then the legacy path is executed to sync the software-scripts from
+    the controller repo.
+    :param metapackages: list of tuples with items following the format
+                         (metapackage.component, metapackage.release)
+    :param install_local: if True, rsync from localhost instead of controller
+    """
     host = constants.CONTROLLER
     if install_local:
         host = '127.0.0.1'
-    try:
-        output = subprocess.check_output(["rsync",
-                                          "-acv",
-                                          "--delete",
-                                          "--exclude", "tmp",
-                                          "rsync://%s/repo/software-scripts/" % host,
-                                          "%s/" % install_scripts],
-                                         stderr=subprocess.STDOUT)
-        LOG.info("Synced restart scripts from controller: %s", output)
-    except subprocess.CalledProcessError as e:
-        if "No such file or directory" in e.output.decode("utf-8"):
-            LOG.info("No restart scripts contained in the release")
-        else:
-            LOG.exception("Failed to sync restart scripts from controller")
-            raise
+
+    LOG.info("Pulling pre-install scripts from controller...")
+    if metapackages:
+        # Componentized path
+        for metapackage in metapackages:
+            LOG.info("Using componentized pre-install method for metapackage %s" % metapackage)
+
+            source = "rsync://%s/software/releases/%s/%s/%s/" % (
+                host, metapackage[1], metapackage[0], constants.HOST_SCRIPTS_TYPE)
+            dest = os.path.join(
+                constants.COMPONENT_SOFTWARE_STORAGE_DIR,
+                metapackage[1], metapackage[0],
+                constants.HOST_SCRIPTS_TYPE)
+
+            os.makedirs(dest, 0o700, exist_ok=True)
+            try:
+                output = subprocess.check_output(
+                    ["rsync", "-acv", "--delete", "--exclude", "tmp",
+                     source, "%s/" % dest],
+                    stderr=subprocess.STDOUT)
+                LOG.info("Synced host-scripts for metapackage %s from controller: %s",
+                         metapackage[0], output)
+            except subprocess.CalledProcessError as e:
+                if "No such file or directory" in e.output.decode("utf-8"):
+                    LOG.info("No host-scripts for metapackage %s", metapackage[0])
+                else:
+                    LOG.exception("Failed to sync host-scripts for metapackage %s "
+                                  "from controller. Output: %s",
+                                  metapackage[0], e.output.decode("utf-8"))
+                    raise
+    else:
+        # TODO(mbenedit): Remove legacy path once metapackage host-scripts are fully
+        # implemented.
+        # Legacy path
+        LOG.info("No metapackages available, using legacy pre-install method")
+        if os.path.exists(install_scripts):
+            shutil.rmtree(install_scripts, ignore_errors=True)
+        os.makedirs(install_scripts, 0o700)
+
+        try:
+            output = subprocess.check_output(
+                ["rsync", "-acv", "--delete", "--exclude", "tmp",
+                 "rsync://%s/repo/software-scripts/" % host,
+                 "%s/" % install_scripts],
+                stderr=subprocess.STDOUT)
+            LOG.info("Synced restart scripts from controller: %s", output)
+        except subprocess.CalledProcessError as e:
+            if "No such file or directory" in e.output.decode("utf-8"):
+                LOG.info("No restart scripts contained in the release")
+            else:
+                LOG.exception("Failed to sync restart scripts from controller")
+                raise
 
 
-def run_post_install_script(running_after_reboot=False):
+def run_post_install_script(metapackages: Optional[List[Tuple]] = None,
+                            running_after_reboot=False):
+    """Run post-install scripts using componentized or legacy methods. In
+    componentized method, the post-install scripts under the host-scripts
+    directory of each metapackage is executed by the PluginRunner. If the
+    metapackages parameter is not set, then the legacy method executes the
+    the /usr/sbin/run-software-scripts.
+    :param metapackages: list of tuples with items following the format
+                         (metapackage.component, metapackage.release)
+    :param running_after_reboot: if True, pass AFTER_REBOOT flag
+    """
     success = True
-
     running = constants.AFTER_REBOOT if running_after_reboot else constants.BEFORE_REBOOT
-    LOG.info(f"Running post-install patch-scripts {running}")
+    LOG.info("Running post-install scripts (%s)", running)
 
-    try:
-        subprocess.check_output([run_install_software_scripts_cmd, "postinstall", running],
-                                stderr=subprocess.STDOUT)
-    except subprocess.CalledProcessError as e:
-        LOG.exception("Failed to execute post-install scripts.")
-        LOG.error("Command output: %s", e.output)
-        success = False
+    if metapackages:
+        # Componentized path
+        LOG.info("Using componentized post-install method for metapackages %s" % metapackages)
+        try:
+            extra_args = ["--running=%s" % running]
+            execute_host_scripts(
+                metapackages,
+                filter_names=[constants.HOST_POST_INSTALL_SCRIPT],
+                extra_args=extra_args)
+        except Exception as e:
+            LOG.exception("Failed to execute post-install host-scripts: %s", e)
+            success = False
+    else:
+        # TODO(mbenedit): Remove legacy path once metapackage host-scripts are fully
+        # implemented.
+        # Legacy path
+        LOG.info("No metapackages available, using legacy post-install method")
+        try:
+            subprocess.check_output(
+                [run_install_software_scripts_cmd, "postinstall", running],
+                stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            LOG.exception("Failed to execute post-install scripts.")
+            LOG.error("Command output: %s", e.output)
+            success = False
 
     return success
 
@@ -291,6 +363,7 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
         messages.PatchMessage.__init__(self, messages.PATCHMSG_AGENT_INSTALL_REQ)
         self.force = False
         self.major_release = None
+        self.metapackages = []
         self.commit_id = None
         self.additional_data = {}
 
@@ -302,6 +375,8 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
             self.force = data['force']
         if 'major_release' in data:
             self.major_release = data['major_release']
+        if 'metapackages' in data:
+            self.metapackages = data['metapackages']
         if 'commit_id' in data:
             self.commit_id = data['commit_id']
         if 'additional_data' in data:
@@ -312,8 +387,8 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
         messages.PatchMessage.encode(self)
 
     def handle(self, sock, addr):
-        LOG.info("Handling host install request, force=%s, major_release=%s, commit_id=%s",
-                 self.force, self.major_release, self.commit_id)
+        LOG.info("Handling host install request, force=%s, major_release=%s, metapackages=%s, commit_id=%s",
+                 self.force, self.major_release, self.metapackages, self.commit_id)
         global pa
         resp = PatchMessageAgentInstallResp()
 
@@ -333,6 +408,7 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
                 resp.send(sock, addr)
                 return
         resp.status = pa.handle_install(major_release=self.major_release,
+                                        metapackages=self.metapackages,
                                         commit_id=self.commit_id,
                                         additional_data=self.additional_data)
         resp.send(sock, addr)
@@ -600,6 +676,7 @@ class PatchAgent(PatchService):
                        verbose_to_stdout=False,
                        disallow_insvc_patch=False,
                        major_release=None,
+                       metapackages=None,
                        commit_id=None,
                        additional_data=None):
         #
@@ -626,6 +703,13 @@ class PatchAgent(PatchService):
 
             return False
 
+        # TODO(mbenedit): When legacy path becomes deprecated, remove this
+        # parameter validation and make metapackage parameter mandatory for
+        # the handle_install method.
+        if not metapackages:
+            LOG.info("No metapackages passed during host deploy. Running the legacy "
+                     "path for install procedure.")
+
         # if commit-id is provided, check if it is already deployed
         if commit_id:
             active_commit_id = ostree_utils.get_latest_deployment_commit()
@@ -642,7 +726,7 @@ class PatchAgent(PatchService):
                     LOG.info("Major release deployment %s flag found. "
                              "Running hooks." % run_hooks_flag)
                     try:
-                        execute_agent_hooks(major_release, additional_data=additional_data)
+                        execute_agent_hooks(major_release, metapackages, additional_data=additional_data)
                         clearflag(run_hooks_flag)
                     except Exception:
                         success = False
@@ -708,10 +792,26 @@ class PatchAgent(PatchService):
                 os.path.exists(ostree_pull_completed_deployment_pending_file) or \
                 os.path.exists(mount_pending_file):
             try:
-                LOG.info("Running pre-install patch-scripts")
-                pull_install_scripts_from_controller(install_local=self.install_local)
-                subprocess.check_output([run_install_software_scripts_cmd, "preinstall"],
-                                        stderr=subprocess.STDOUT)
+                if metapackages:
+                    # Componentized path
+                    LOG.info("Running pre-install patch-scripts from metapackages")
+                    pull_install_scripts_from_controller(
+                        metapackages,
+                        install_local=self.install_local)
+                    extra_args = ["preinstall"]
+                    execute_host_scripts(
+                        metapackages,
+                        filter_names=[constants.HOST_PRE_INSTALL_SCRIPT],
+                        extra_args=extra_args)
+                else:
+                    # TODO(mbenedit): Remove legacy path once metapackage host-scripts are fully
+                    # implemented.
+                    # Legacy path
+                    LOG.info("Running legacy pre-install patch-scripts")
+                    pull_install_scripts_from_controller(install_local=self.install_local)
+                    subprocess.check_output(
+                        [run_install_software_scripts_cmd, "preinstall"],
+                        stderr=subprocess.STDOUT)
 
                 # Pull changes from remote to the sysroot ostree
                 # The remote value is configured inside
@@ -771,6 +871,9 @@ class PatchAgent(PatchService):
             except subprocess.CalledProcessError as e:
                 LOG.exception("Failed to execute pre-install scripts.")
                 LOG.error("Command output: %s", e.output)
+            except Exception as e:
+                LOG.exception("Failed to execute pre-install scripts from selected metapackages.\n"
+                              "Output: %s" % e)
 
             success = changed  # If a change was made, success is true otherwise false
 
@@ -807,7 +910,9 @@ class PatchAgent(PatchService):
 
                 if success:
                     LOG.info("Running post-install patch scripts")
-                    success = run_post_install_script()
+                    success = run_post_install_script(
+                        metapackages,
+                        running_after_reboot=False)
 
         try:
             ostree_utils.copy_updated_efi_files()
@@ -825,7 +930,7 @@ class PatchAgent(PatchService):
             # run deploy host hooks for major release
             if major_release:
                 try:
-                    execute_agent_hooks(major_release, additional_data=additional_data)
+                    execute_agent_hooks(major_release, metapackages, additional_data=additional_data)
                 except Exception:
                     setflag(run_hooks_flag)
                     self.set_install_failed_flags()
@@ -1074,7 +1179,17 @@ def main():
     # Run on reboot after the node was updated by a reboot required patch/ISO
     if os.path.exists(node_is_software_updated_rr_file):
         ostree_utils.delete_older_deployments()
-        run_post_install_script(running_after_reboot=True)
+        rc = get_SWReleaseCollection()
+        metapackages = rc.get_ordered_metapackages(
+            filter_by_states=[states.DEPLOYING], tuple_format=True)
+
+        # TODO(mbenedit): When only component-based releases become supported,
+        # raise an exception when no metapackages are found in deploying state.
+        if not metapackages:
+            LOG.info("No metapackages found in deploying state during host deploy.")
+        run_post_install_script(
+            metapackages=metapackages,
+            running_after_reboot=True)
         clearflag(node_is_software_updated_rr_file)
 
     if len(sys.argv) <= 1:

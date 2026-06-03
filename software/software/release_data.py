@@ -625,6 +625,50 @@ class SWReleaseCollection(object):
                 return self._sw_releases[metapackage_data.product]
         return None
 
+    def get_ordered_metapackages(self, **kwargs):
+        '''
+        Return a ordered list of metapackages. It can be filtered by state and formatted
+        into a tuple with metapackage component and release, or any single metapackage
+        property value.
+
+        :param filter_by_states: list of states to be filtered in release collection.
+        :param tuple_format: boolean value to format the filtered list in tuple format.
+        E.g.: [(metapackage.component, metapackage.sw_release)]
+        :param property_format: string representing a metapackage property name to
+        format the filtered list.
+        E.g.: property_format="id" -> [metapackage.id]
+        E.g.: property_format="component" -> [metapackage.component]
+        '''
+        filter_by_states = kwargs.get("filter_by_states", [])
+        if not isinstance(filter_by_states, list):
+            filter_by_states = []
+
+        filtered_metapackages = []
+        sorted_list = sorted(self._sw_metapackages)
+        if not filter_by_states:
+            # Order metapackage list
+            filtered_metapackages = [self._sw_metapackages[rel_id] for rel_id in sorted_list]
+        else:
+            # Apply filters to the ordered list
+            for rel_id in sorted_list:
+                rel_data = self._sw_metapackages[rel_id]
+                if filter_by_states and rel_data.state in filter_by_states:
+                    filtered_metapackages.append(rel_data)
+
+        # Define format
+        formatted_metapackages = []
+        if kwargs.get("tuple_format", False):
+            formatted_metapackages.extend(
+                [(metapackage.component, metapackage.sw_release) for metapackage in filtered_metapackages])
+        elif kwargs.get("property_format", None):
+            property = kwargs["property_format"]
+            formatted_metapackages.extend(
+                [getattr(metapackage, property) for metapackage in filtered_metapackages])
+        else:
+            formatted_metapackages = filtered_metapackages
+
+        return formatted_metapackages
+
     def iterate_releases_by_state(self, state):
         '''
         Return iteration of releases matching specified state.
