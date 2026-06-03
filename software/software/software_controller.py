@@ -10,7 +10,6 @@ import sys
 sys.modules['osprofiler'] = None
 
 import configparser
-import gc
 import glob
 import json
 import logging
@@ -5691,10 +5690,6 @@ class PatchControllerApiThread(threading.Thread):
                     thread_death.set()
                     break
 
-                # Call garbage collect after wsgi request is handled,
-                # to ensure any open file handles are closed in the case
-                # of an upload.
-                gc.collect()
         except Exception as ex:
             # Log all exceptions
             LOG.exception("%s: error: %s" % (self.name, str(ex)))
@@ -5766,10 +5761,6 @@ class PatchControllerAuthApiThread(threading.Thread):
                     thread_death.set()
                     break
 
-                # Call garbage collect after wsgi request is handled,
-                # to ensure any open file handles are closed in the case
-                # of an upload.
-                gc.collect()
         except Exception as ex:
             # Log all exceptions
             LOG.exception("%s: error: %s" % (self.name, str(ex)))
