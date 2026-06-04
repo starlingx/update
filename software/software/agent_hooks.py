@@ -1550,7 +1550,7 @@ class OpenstackConfHook(BaseHook):
     )
 
     # Release versions for exclusion mapping
-    RELEASE_N = "26.09"
+    RELEASE_N = "26.10"
     RELEASE_N1 = "26.03"
     RELEASE_N2 = "25.09"
 
