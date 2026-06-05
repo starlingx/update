@@ -1107,6 +1107,217 @@ class KubeletUpgradeHook(BaseHook):
             raise ex
 
 
+class CgroupBootParamsHook(BaseHook):
+    """
+    Manage cgroup v2 migration during platform upgrade/rollback.
+
+    This hook runs AFTER PuppetHieradataUpdate (which replaces hieradata
+    with static defaults from the new release). We must run after it
+    because we need to inject runtime DB values into hieradata that
+    PuppetHieradataUpdate would otherwise overwrite.
+
+    On upgrade, this hook:
+    1. Reads cgroup_v2_enabled from the live sysinv DB (port 5432).
+       This is the value the user set on the old release before upgrade.
+    2. Updates boot.env kernel params:
+       - true:  systemd.unified_cgroup_hierarchy=1, cgroup_no_v1=all
+       - false/missing: keeps v1 defaults (no change)
+    3. Fixes /var/lib/kubelet/config.yaml:
+       - Renames cgroupRoot /k8s-infra -> /k8sinfra (all cases)
+       - Sets cgroupDriver to systemd (v2 only)
+    4. Updates puppet hieradata (global.yaml) with cgroup_v2_enabled
+       value so the boot puppet manifest knows whether to create
+       v1 cgroup dirs or skip them.
+
+    On rollback:
+    - Reverts boot.env to v1 kernel params
+    - Sets hieradata to cgroup_v2_enabled=false
+
+    Why each piece is needed:
+    - boot.env: Controls which cgroup hierarchy the kernel mounts
+    - config.yaml: Kubelet reads this at startup (before puppet runs)
+    - hieradata: Puppet reads this during boot manifest to decide
+      whether to create /sys/fs/cgroup/*/k8sinfra dirs (v1) or skip (v2)
+
+    Without hieradata update, puppet would always try to create v1 dirs
+    (because PuppetHieradataUpdate copies defaults without cgroup_v2_enabled),
+    causing puppet failure on a v2 boot.
+    """
+
+    def _get_cgroup_v2_enabled(self):
+        """Read cgroup_v2_enabled from the live sysinv DB.
+
+        Returns the string value ('true'/'false') or None if not found.
+        The DB is the old release's DB (port 5432) which has the user's
+        setting from before the upgrade was initiated.
+        """
+        try:
+            result = subprocess.run(
+                ['sudo', '-u', 'postgres', 'psql', '-d', 'sysinv', '-t', '-c',
+                 "SELECT value FROM service_parameter "
+                 "WHERE service='platform' AND section='config' "
+                 "AND name='cgroup_v2_enabled';"],
+                capture_output=True, text=True, check=False
+            )
+            value = result.stdout.strip()
+            if not value:
+                return None
+            LOG.info("Read cgroup_v2_enabled=%s from DB" % value)
+            return value
+        except Exception as e:
+            LOG.exception("Failed to read cgroup_v2_enabled: %s" % e)
+            return None
+
+    def _set_v2_boot_params(self):
+        """Set cgroup v2 kernel boot parameters in boot.env.
+
+        Removes v1 params and adds v2 params so the next boot
+        mounts the unified cgroup2 hierarchy.
+        Uses puppet-update-grub-env.py (one param per call).
+        """
+        try:
+            subprocess.run("python /usr/local/bin/puppet-update-grub-env.py "
+                           "--remove-kernelparams systemd.unified_cgroup_hierarchy",
+                           shell=True, capture_output=True, check=False)
+            subprocess.run("python /usr/local/bin/puppet-update-grub-env.py "
+                           "--remove-kernelparams SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE",
+                           shell=True, capture_output=True, check=False)
+            subprocess.run("python /usr/local/bin/puppet-update-grub-env.py "
+                           "--add-kernelparams systemd.unified_cgroup_hierarchy=1",
+                           shell=True, capture_output=True, check=True)
+            subprocess.run("python /usr/local/bin/puppet-update-grub-env.py "
+                           "--add-kernelparams cgroup_no_v1=all",
+                           shell=True, capture_output=True, check=True)
+            LOG.info("Boot params set for cgroup v2")
+        except Exception as e:
+            LOG.exception("Failed to set v2 boot params: %s" % e)
+            raise
+
+    def _set_v1_boot_params(self):
+        """Set cgroup v1 kernel boot parameters (for rollback).
+
+        Removes v2 params and restores v1 params so the next boot
+        mounts the legacy per-controller cgroup hierarchy.
+        """
+        try:
+            subprocess.run("python /usr/local/bin/puppet-update-grub-env.py "
+                           "--remove-kernelparams systemd.unified_cgroup_hierarchy",
+                           shell=True, capture_output=True, check=False)
+            subprocess.run("python /usr/local/bin/puppet-update-grub-env.py "
+                           "--remove-kernelparams cgroup_no_v1",
+                           shell=True, capture_output=True, check=False)
+            subprocess.run("python /usr/local/bin/puppet-update-grub-env.py "
+                           "--add-kernelparams systemd.unified_cgroup_hierarchy=0",
+                           shell=True, capture_output=True, check=True)
+            subprocess.run("python /usr/local/bin/puppet-update-grub-env.py "
+                           "--add-kernelparams SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1",
+                           shell=True, capture_output=True, check=True)
+            LOG.info("Boot params set for cgroup v1 (rollback)")
+        except Exception as e:
+            LOG.exception("Failed to set v1 boot params: %s" % e)
+            raise
+
+    def _migrate_kubelet_config(self, cgroup_v2=False):
+        """Fix cgroupRoot and cgroupDriver in config.yaml before reboot.
+
+        /var/lib/kubelet/config.yaml is on persistent LVM (not ostree).
+        It survives the ostree switch and is read by kubelet at startup
+        (before puppet or sysinv can fix it). So we must fix it here.
+
+        - cgroupRoot: /k8s-infra -> /k8sinfra (rename, both v1 and v2)
+        - cgroupDriver: cgroupfs -> systemd (v2 only)
+        """
+        config_path = "/var/lib/kubelet/config.yaml"
+        if not os.path.exists(config_path):
+            LOG.info("CgroupBootParamsHook: %s not found, skipping" % config_path)
+            return
+        try:
+            with open(config_path, 'r') as f:
+                content = f.read()
+            changed = False
+            if 'cgroupRoot: /k8s-infra' in content:
+                content = content.replace('cgroupRoot: /k8s-infra',
+                                          'cgroupRoot: /k8sinfra')
+                changed = True
+                LOG.info("CgroupBootParamsHook: migrated cgroupRoot to /k8sinfra")
+            if cgroup_v2 and 'cgroupDriver: cgroupfs' in content:
+                content = content.replace('cgroupDriver: cgroupfs',
+                                          'cgroupDriver: systemd')
+                changed = True
+                LOG.info("CgroupBootParamsHook: set cgroupDriver to systemd")
+            if changed:
+                with open(config_path, 'w') as f:
+                    f.write(content)
+        except Exception as e:
+            LOG.exception("CgroupBootParamsHook: failed to update %s: %s"
+                          % (config_path, e))
+
+    def _update_hieradata(self, cgroup_v2=False):
+        """Update puppet hieradata so boot manifest knows cgroup version.
+
+        PuppetHieradataUpdate (which runs before us) replaces hieradata
+        with static defaults from the new release package. Those defaults
+        don't include cgroup_v2_enabled. Without this, puppet's
+        platform::kubernetes::cgroup class would always try to create
+        v1 cgroup dirs, failing on a v2 system.
+
+        We write to /ostree/1/etc/puppet/hieradata/global.yaml which
+        becomes /etc/puppet/hieradata/global.yaml after reboot.
+        """
+        hieradata_key = "platform::params::cgroup_v2_enabled"
+        value = "true" if cgroup_v2 else "false"
+        hieradata_path = os.path.join(self.TO_RELEASE_OSTREE_DIR,
+                                      "etc/puppet/hieradata/global.yaml")
+        try:
+            if not os.path.exists(hieradata_path):
+                LOG.info("CgroupBootParamsHook: %s not found, skipping"
+                         % hieradata_path)
+                return
+            with open(hieradata_path, 'r') as f:
+                data = yaml.load(f)
+            data[hieradata_key] = value
+            with open(hieradata_path, 'w') as f:
+                yaml.dump(data, f)
+            LOG.info("CgroupBootParamsHook: set %s: %s in hieradata"
+                     % (hieradata_key, value))
+        except Exception as e:
+            LOG.exception("CgroupBootParamsHook: failed to update hieradata: %s"
+                          % e)
+
+    def run(self):
+        LOG.info("CgroupBootParamsHook: STARTED")
+        action = self._action
+        LOG.info("CgroupBootParamsHook: action=%s" % action)
+
+        if action == HookManager.MAJOR_RELEASE_ROLLBACK:
+            LOG.info("CgroupBootParamsHook: Rollback - reverting to v1")
+            self._set_v1_boot_params()
+            self._migrate_kubelet_config(cgroup_v2=False)
+            self._update_hieradata(cgroup_v2=False)
+            LOG.info("CgroupBootParamsHook: COMPLETED (rollback)")
+            return
+
+        # Upgrade path — always fix cgroupRoot rename
+        value = self._get_cgroup_v2_enabled()
+        LOG.info("CgroupBootParamsHook: DB value=%s" % repr(value))
+
+        # Determine cgroup version intent
+        cgroup_v2 = (value is not None and value.lower() == 'true')
+
+        # Set boot params based on intent
+        if cgroup_v2:
+            LOG.info("CgroupBootParamsHook: setting v2 boot params")
+            self._set_v2_boot_params()
+        else:
+            LOG.info("CgroupBootParamsHook: setting v1 boot params")
+            self._set_v1_boot_params()
+
+        self._migrate_kubelet_config(cgroup_v2=cgroup_v2)
+        self._update_hieradata(cgroup_v2=cgroup_v2)
+
+        LOG.info("CgroupBootParamsHook: COMPLETED")
+
+
 class PuppetHieradataUpdate(BaseHook):
     """
     Replace puppet hieradata files with the to-release versions.
@@ -1297,6 +1508,7 @@ class HookManager(object):
             KubeletUpgradeHook,
             LdapConfigHook,
             PuppetHieradataUpdate,
+            CgroupBootParamsHook,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
@@ -1311,6 +1523,7 @@ class HookManager(object):
             NtpToNtpsecMigrationHook,
             LdapConfigHook,
             PuppetHieradataUpdate,
+            CgroupBootParamsHook,
             SSSDCacheCleanupRollBackHook,
             # enable usm-initialize service for next
             # reboot only if everything else is done
