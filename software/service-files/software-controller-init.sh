@@ -29,6 +29,11 @@ GROUPS_FILE=$REPO_DIR/comps.xml
 PATCHING_DIR=/opt/software
 RELEASE=bullseye
 SYNCED_SOFTWARE_FILESYSTEM_DIR=${PATCHING_DIR}/synced
+METAPACKAGE_INITIAL_SETUP_FLAG="/etc/platform/.metapackage_initial_setup"
+COMPONENT_SOFTWARE_DIR="/opt/software/releases"
+COMPONENT_METADATA_DIR="${COMPONENT_SOFTWARE_DIR}/metadata"
+COMPONENT_METADATA_STATES=("available" "unavailable" "deployed" "deploying" "removing" "deploy-selected" "remove-selected")
+COMPONENT_METAPACKAGES_DIR="/usr/local/share/metapackages"
 
 logfile=/var/log/software.log
 
@@ -39,6 +44,44 @@ function LOG {
 
 function LOG_TO_FILE {
     echo "`date "+%FT%T.%3N"`: $NAME: $*" >> $logfile
+}
+
+function do_metapackage_setup {
+    # Copy metadata contents for a fresh installed or upgraded system
+    if [ ! -f $METAPACKAGE_INITIAL_SETUP_FLAG ]; then
+        LOG "Executing initial metapackage setup..."
+
+        # Ensure metadata directories are created
+        for STATE in "${COMPONENT_METADATA_STATES[@]}"; do
+            STATE_DIR="${COMPONENT_METADATA_DIR}/${STATE}"
+            mkdir -p $STATE_DIR
+            LOG "Created ${STATE_DIR}"
+        done
+
+        # Copy product release content
+        cp -rfv ${COMPONENT_METAPACKAGES_DIR}/* $COMPONENT_SOFTWARE_DIR
+        LOG "Copied content from metapackages directory"
+
+        # Copy metadata from metapackage releases
+        while IFS= read -r -d '' METADATA; do
+            METAPACKAGE_ID=$(grep '<id>' "$METADATA" | sed 's/.*<id>//;s/<\/id>.*//')
+            METAPACKAGE_METADATA="${METAPACKAGE_ID}-metadata.xml"
+            mv $METADATA "${COMPONENT_METADATA_DIR}/deployed/${METAPACKAGE_METADATA}"
+            LOG "Copied ${METAPACKAGE_METADATA}"
+        done < <(find $COMPONENT_SOFTWARE_DIR -name metadata.xml -print0)
+
+        # Replace the ostree commit-id placeholder in metapackages metadata for actual commit-id
+        COMMIT_ID=$(ostree log "starlingx" | grep -i "^commit" | awk '{ print $2; }')
+        CHECKSUM=$(ostree log "starlingx" | grep -i "^contentchecksum" | awk '{ print $2; }')
+        LOG "OSTree commit-id=${COMMIT_ID} checksum=${CHECKSUM}"
+
+        find "$COMPONENT_METADATA_DIR/deployed" -name "*-metadata.xml" -exec \
+            sed -i -e "s/xxxBASECOMMITxxx/${COMMIT_ID}/g" -e "s/xxxBASECHECKSUMxxx/${CHECKSUM}/g" {} +
+
+        # Create initial setup flag
+        touch $METAPACKAGE_INITIAL_SETUP_FLAG
+        LOG "Finished initial metapackage setup"
+    fi
 }
 
 function do_setup {
@@ -109,6 +152,7 @@ function do_setup {
 case "$1" in
     start)
         do_setup
+        do_metapackage_setup
         ;;
     status)
         ;;
@@ -117,6 +161,7 @@ case "$1" in
         ;;
     restart)
         do_setup
+        do_metapackage_setup
         ;;
     *)
         echo "Usage: $0 {status|start|stop|restart}"
