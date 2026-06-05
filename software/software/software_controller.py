@@ -5082,6 +5082,19 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
+    def _is_product_deploy(self, metapackages):
+        """
+        Return if product release is being fully deployed, i.e. if all
+        its metapackages are being deployed in a single operation
+        :param metapackages: list of metapackages being deployed
+        :return: True if is a full product release deployment, False otherwise
+        """
+        product = self.release_collection.get_product_release_by_metapackage_id(metapackages[0])
+        if not product:
+            return False
+        product_metapackages = self.release_collection.get_metapackages_id_by_product_id(product.id)
+        return all(mp in metapackages for mp in product_metapackages)
+
     def software_deploy_show_api(self, from_release=None, to_release=None):
         # Retrieve deploy state from db
         if from_release and to_release:
@@ -5096,6 +5109,20 @@ class PatchController(PatchService):
                 return deploy_data
             release_deployment = deploy_data[0]["to_release"]
 
+        # Verify if deployment is for a full or partial product release
+        dd = deploy_data
+        if isinstance(deploy_data, list):
+            dd = deploy_data[0]
+        # Deploy data metapackages returns as: [<metapackage-name>, <from-release>, <to-release>]
+        if "metapackages" in dd:
+            metapackages = []
+            for mp in dd["metapackages"]:
+                mp_name, _, to_version = mp
+                metapackages.append(f"{mp_name}_{to_version}")
+            product_deploy = self._is_product_deploy(metapackages)
+            dd.update({"product_deploy": product_deploy})
+
+        # Get release additional data
         release_id = self.release_collection.get_release_id_by_sw_release(release_deployment)
         release = self._release_basic_checks(release_id)
         release_info = self._get_release_additional_info(release)

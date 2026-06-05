@@ -495,6 +495,13 @@ class SWReleaseCollection(object):
             return metapackages
         return None
 
+    def get_product_release_by_metapackage_id(self, metapackage_id):
+        if metapackage_id in self._sw_metapackages:
+            metapackage_data = self._sw_metapackages[metapackage_id]
+            if metapackage_data.product in self._sw_releases:
+                return self._sw_releases[metapackage_data.product]
+        return None
+
     def iterate_releases_by_state(self, state):
         '''
         Return iteration of releases matching specified state.
