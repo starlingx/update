@@ -30,6 +30,7 @@ PATCHING_DIR=/opt/software
 RELEASE=bullseye
 SYNCED_SOFTWARE_FILESYSTEM_DIR=${PATCHING_DIR}/synced
 METAPACKAGE_INITIAL_SETUP_FLAG="/etc/platform/.metapackage_initial_setup"
+USM_UPGRADE_IN_PROGRESS_FLAG="/etc/platform/.usm_upgrade_in_progress"
 COMPONENT_SOFTWARE_DIR="/opt/software/releases"
 COMPONENT_METADATA_DIR="${COMPONENT_SOFTWARE_DIR}/metadata"
 COMPONENT_METADATA_STATES=("available" "unavailable" "deployed" "deploying" "removing" "deploy-selected" "remove-selected")
@@ -66,7 +67,11 @@ function do_metapackage_setup {
         while IFS= read -r -d '' METADATA; do
             METAPACKAGE_ID=$(grep '<id>' "$METADATA" | sed 's/.*<id>//;s/<\/id>.*//')
             METAPACKAGE_METADATA="${METAPACKAGE_ID}-metadata.xml"
-            mv $METADATA "${COMPONENT_METADATA_DIR}/deployed/${METAPACKAGE_METADATA}"
+            DST_DIR="${COMPONENT_METADATA_DIR}/deployed"
+            if [[ -f $USM_UPGRADE_IN_PROGRESS_FLAG ]]; then
+                DST_DIR="${COMPONENT_METADATA_DIR}/deploying"
+            fi
+            mv "$METADATA" "${DST_DIR}/${METAPACKAGE_METADATA}"
             LOG "Copied ${METAPACKAGE_METADATA}"
         done < <(find $COMPONENT_SOFTWARE_DIR -name metadata.xml -print0)
 
