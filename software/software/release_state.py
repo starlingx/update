@@ -33,12 +33,27 @@ class ReleaseState(object):
 
     def __init__(self, release_ids=None, release_state=None):
         not_found_list = []
+        release_list = []
+
+        self._release_ids = []
+
         release_collection = get_SWReleaseCollection()
+        if release_state:
+            release_ids = [rel.id for rel in
+                           release_collection.iterate_releases_by_state(release_state)]
+
         if release_ids:
-            self._release_ids = release_ids[:]
-            not_found_list = [rel_id for rel_id in release_ids if release_collection[rel_id] is None]
-        elif release_state:
-            self._release_ids = [rel.id for rel in release_collection.iterate_releases_by_state(release_state)]
+            for rel_id in release_ids:
+                rel = release_collection[rel_id]
+                if rel is None:
+                    not_found_list.append(rel_id)
+                # If product release, return its metapackages
+                elif rel.is_product_release:
+                    release_list.extend(rel.metapackages.keys())
+                # If legacy release, return the release itself
+                else:
+                    release_list.append(rel_id)
+            self._release_ids = release_list[:]
 
         if len(not_found_list) > 0:
             raise ReleaseNotFound(not_found_list)
