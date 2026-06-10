@@ -199,6 +199,7 @@ class HealthCheck(object):
         # if running combined Platform & K8s upgrade, ignore 900.007 alarm
         if kube_upgrade_state_success and msg is None:
             alarm_ignore_list.append("900.007") # k8s upgrade in progress
+            alarm_ignore_list.append("900.023") # Release deploy in progress by system-deploy init
 
         # Don't call api if pre bootstrap scenario
         if not self._config.get("pre_bootstrap"):
