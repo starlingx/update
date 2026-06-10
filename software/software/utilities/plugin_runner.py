@@ -194,7 +194,13 @@ def get_migration_scripts(plugin_dir, from_release, action):
         LOG.exception(msg)
         raise Exception(msg)
 
-    plugins_mgr = get_plugins_mgr(plugin_dir)
+    try:
+        plugins_mgr = get_plugins_mgr(plugin_dir)
+    except Exception as e:
+        msg = f"Error getting plugins: {str(e)}"
+        LOG.exception(msg)
+        raise
+
     if plugins_mgr:
         return plugins_mgr.get_plugins(from_release, action)
     return []
@@ -212,12 +218,12 @@ def execute_migration_scripts(from_release, to_release, action, port=None,
         raise Exception(f"Deployment plugins failed: {failed}")
 
 
-def discover_scripts(script_dirs, action="run", names=None, extra_args=None):
+def discover_scripts(script_dirs, action="run", filter_names=None, extra_args=None):
     """Discover shell/python scripts from one or more directories."""
     plugins = []
     for d in script_dirs:
         for f in sorted(os.listdir(d)):
-            if names and f not in names:
+            if filter_names and f not in filter_names:
                 continue
             path = os.path.join(d, f)
             if not os.path.isfile(path) or not os.access(path, os.X_OK):
@@ -232,10 +238,11 @@ def discover_scripts(script_dirs, action="run", names=None, extra_args=None):
     return plugins
 
 
-def run_scripts(script_dirs, action="run", names=None, extra_args=None):
-    plugins = discover_scripts(script_dirs, action, names=names, extra_args=extra_args)
+def run_scripts(script_dirs, action="run", from_release=None, to_release=None,
+                filter_names=None, extra_args=None):
+    plugins = discover_scripts(script_dirs, action, filter_names=filter_names, extra_args=extra_args)
     runner = PluginRunner(plugins, max_parallel=1)
-    states = runner.run(from_release="", to_release="", action=action)
+    states = runner.run(from_release=from_release, to_release=to_release, action=action)
     failed = [s for s in states if s.endswith("-failed")]
     if failed:
         raise Exception(f"Scripts failed: {failed}")
