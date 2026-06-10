@@ -1483,6 +1483,372 @@ class LdapConfigHook(BaseHook):
             LOG.warning("Source not found: %s", src)
 
 
+class OpenstackConfHook(BaseHook):
+    """
+    Generate and install updated openstack conf files into the
+    to-release deployment during deploy-host.
+
+    Updates OpenStack conf files to use the RELEASE_N template content
+    while preserving existing configuration values, except for
+    filtered/deprecated configurations.
+
+    Conf files handled:
+    - /etc/keystone/keystone.conf
+    - /etc/barbican/barbican.conf
+    """
+    TEMPLATE_BASE = (
+        "usr/share/ansible/stx-ansible/playbooks/roles/bootstrap/"
+        "apply-manifest/templates"
+    )
+
+    # Release versions for exclusion mapping
+    RELEASE_N = "26.09"
+    RELEASE_N1 = "26.03"
+    RELEASE_N2 = "25.09"
+
+    # Staging area for generated conf files and backups.
+    BACKUP_SUFFIX = ".pre-upgrade"
+
+    # Conf files handled, keyed by filename.
+    # Each value: (live_path, template_relative_path)
+    # template_relative_path is relative to TEMPLATE_BASE.
+    CONF_FILE_MAP = {
+        "keystone.conf": (
+            "/etc/keystone/keystone.conf",
+            "keystone/keystone.conf-trixie.j2",
+        ),
+        "barbican.conf": (
+            "/etc/barbican/barbican.conf",
+            "barbican.conf-trixie.j2",
+        ),
+    }
+
+    # Values to exclude when carrying forward old config into new
+    # template.  Keyed by (from_release, to_release), each mapping conf
+    # filename to a list of (section, option, reason) tuples.
+    EXCLUSIONS = {
+        (RELEASE_N1, RELEASE_N): {
+            "keystone.conf": [
+                # ldap pool options default to True in RELEASE_N and are not
+                # recommended to be set False (per upstream conf comments).
+                ("ldap", "use_pool",
+                 "defaults to True; setting False not recommended"),
+                ("ldap", "use_auth_pool",
+                 "defaults to True; setting False not recommended"),
+                # policy_file not set on bootstrap in RELEASE_N; The n-1
+                # upgrade uses its absolute path. Remove for consistency.
+                ("oslo_policy", "policy_file",
+                 "not set on trixie bootstrap; template default applies"),
+            ],
+            "barbican.conf": [
+                # sql_connection removed; replaced by [database]/connection
+                # via oslo.db migration.
+                ("DEFAULT", "sql_connection",
+                 "removed; replaced by [database]/connection"),
+            ],
+        },
+        (RELEASE_N2, RELEASE_N): {
+            "keystone.conf": [
+                # ldap pool options default True in RELEASE_N and are not
+                # recommended to be set False (per upstream conf comments).
+                ("ldap", "use_pool",
+                 "defaults to True; setting False not recommended"),
+                ("ldap", "use_auth_pool",
+                 "defaults to True; setting False not recommended"),
+                # policy_file not set on bootstrap in RELEASE_N; old .json
+                # should not carry forward. Template default is policy.yaml.
+                ("oslo_policy", "policy_file",
+                 "not set on trixie bootstrap; template default applies"),
+            ],
+            "barbican.conf": [
+                # sql_connection removed; replaced by [database]/connection
+                # via oslo.db migration.
+                ("DEFAULT", "sql_connection",
+                 "removed; replaced by [database]/connection"),
+            ],
+        },
+    }
+
+    def _get_exclusions(self, from_release, to_release, conf_name):
+        """Get the exclusion list for a given upgrade path and conf file.
+
+        Combines exclusions from intermediate releases for N-2 upgrades.
+        Returns a list of (section, option, reason) tuples.
+        """
+        result = []
+        key = (from_release, to_release)
+        if key in self.EXCLUSIONS:
+            result.extend(self.EXCLUSIONS[key].get(conf_name, []))
+        return result
+
+    def _apply_exclusions(self, values, exclusions, conf_name):
+        """Remove excluded values and log warnings.
+
+        Logs a warning for each exclusion that was not found in the values
+        (filter not activated).
+        """
+        for section, option, reason in exclusions:
+            if section in values and option in values[section]:
+                del values[section][option]
+                if not values[section]:
+                    del values[section]
+                LOG.info("Excluded [%s]/%s from %s: %s",
+                         section, option, conf_name, reason)
+            else:
+                LOG.warning("Exclusion not activated for [%s]/%s in %s: "
+                            "value not present", section, option, conf_name)
+
+    def _read_config_values(self, conf_path):
+        """Read all non-default config values from an INI file.
+
+        Returns a dict of {section: {option: value}} containing only
+        values explicitly set in each section (not inherited from DEFAULT).
+        DEFAULT section values are returned under the key 'DEFAULT'.
+        """
+        parser = configparser.RawConfigParser()
+        parser.read(conf_path)
+
+        values = {}
+
+        # Capture DEFAULT section values
+        defaults = dict(parser.defaults())
+        if defaults:
+            values['DEFAULT'] = defaults
+
+        # Capture section-specific values (excluding inherited defaults)
+        for section in parser.sections():
+            own_items = {
+                k: v for k, v in parser.items(section)
+                if k not in defaults or defaults[k] != v
+            }
+            if own_items:
+                values[section] = own_items
+
+        return values
+
+    def _write_config(self, values, dest_path, template_path):
+        """Write a conf file using the new template as the base.
+
+        Uses the new template file (preserving comments and structure),
+        then replaces matching option lines with the preserved config
+        values from the old release.
+        """
+        with open(template_path, 'r') as f:
+            template_lines = f.readlines()
+
+        output_lines = []
+        current_section = None
+        values_written = set()
+
+        for line in template_lines:
+            stripped = line.strip()
+
+            # Track current section
+            section_match = re.match(r'^\[(.+)\]$', stripped)
+            if section_match:
+                # Before leaving current section, append values that
+                # belong to this section but not matched to a template line
+                if current_section is not None:
+                    section_values = values.get(current_section, {})
+                    for opt in sorted(section_values):
+                        key = (current_section, opt)
+                        if key not in values_written:
+                            output_lines.append('%s = %s\n' % (
+                                opt, section_values[opt]))
+                            values_written.add(key)
+
+                current_section = section_match.group(1)
+                output_lines.append(line)
+                continue
+
+            # Before the first section header, treat as DEFAULT
+            if current_section is None:
+                output_lines.append(line)
+                continue
+
+            # Check if this line sets a config option (commented or uncommented)
+            # Also handles Jinja2 template lines like: connection = {{ var }}
+            opt_match = re.match(
+                r'^(#?)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*=', stripped
+            )
+
+            if opt_match:
+                is_commented = opt_match.group(1) == '#'
+                option_name = opt_match.group(2).lower()
+                key = (current_section, option_name)
+                section_values = values.get(current_section, {})
+                if option_name in section_values and key not in values_written:
+                    if is_commented:
+                        # Keep the commented default
+                        output_lines.append(line)
+                    # Insert the active value
+                    output_lines.append('%s = %s\n' % (
+                        option_name, section_values[option_name]))
+                    values_written.add(key)
+                    continue
+
+            output_lines.append(line)
+
+        # Append any remaining values for the last section
+        section_values = values.get(current_section, {})
+        for opt in sorted(section_values):
+            key = (current_section, opt)
+            if key not in values_written:
+                output_lines.append('%s = %s\n' % (opt, section_values[opt]))
+                values_written.add(key)
+
+        # Append values for sections not present in the template
+        for section in sorted(values):
+            section_values = values[section]
+            has_unwritten = any(
+                (section, opt) not in values_written for opt in section_values
+            )
+            if not has_unwritten:
+                continue
+            if section != 'DEFAULT':
+                output_lines.append('\n[%s]\n' % section)
+            for opt in sorted(section_values):
+                key = (section, opt)
+                if key not in values_written:
+                    output_lines.append('%s = %s\n' %
+                                        (opt, section_values[opt]))
+                    values_written.add(key)
+
+        fd = os.open(dest_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o640)
+        with os.fdopen(fd, 'w') as f:
+            f.writelines(output_lines)
+
+    def _generate_conf(self, live_path, template_path, dest_path,
+                       from_release, to_release):
+        """Generate an updated conf file from live conf + new template.
+
+        Reads values from live_path, applies exclusions, writes the result
+        to dest_path using template_path as the base.
+        """
+        conf_name = os.path.basename(live_path)
+
+        values = self._read_config_values(live_path)
+        if not values:
+            LOG.error("No config values read from %s", live_path)
+            raise RuntimeError("No config values read from %s" % live_path)
+
+        # Apply exclusions
+        if from_release and to_release:
+            exclusions = self._get_exclusions(from_release,
+                                              to_release,
+                                              conf_name)
+            if exclusions:
+                self._apply_exclusions(values, exclusions, conf_name)
+
+        # Write the new config
+        self._write_config(values, dest_path, template_path)
+
+        # Warn if any Jinja2 placeholders survived
+        with open(dest_path, 'r') as f:
+            if '{{' in f.read():
+                LOG.warning("Jinja2 placeholders remain in %s", dest_path)
+
+        LOG.info("%s generated successfully", conf_name)
+
+    def _deploy_host_install(self, ostree_dir, from_release, to_release):
+        """Called by OpenstackConfHook during deploy-host upgrade.
+
+        For each conf file: reads live conf, generates updated conf,
+        backs up and installs to ostree deployment.
+        """
+        # to_release barrier
+        if to_release != self.RELEASE_N:
+            LOG.info("Release is not affected (%s), skipping", to_release)
+            return
+
+        for conf_name, (live_path, tmpl_rel) in self.CONF_FILE_MAP.items():
+            template_path = os.path.join(ostree_dir,
+                                         self.TEMPLATE_BASE,
+                                         tmpl_rel)
+            dst = os.path.join(ostree_dir,
+                               os.path.dirname(live_path).lstrip('/'),
+                               conf_name)
+
+            if not os.path.exists(live_path):
+                LOG.warning("Live conf not found: %s", live_path)
+                continue
+            if not os.path.exists(template_path):
+                LOG.warning("Template not found: %s", template_path)
+                continue
+
+            # Backup ostree destination
+            backup_path = dst + self.BACKUP_SUFFIX
+            dst_stat = os.stat(dst)
+            shutil.copy2(dst, backup_path)
+            os.chown(backup_path, dst_stat.st_uid, dst_stat.st_gid)
+            LOG.info("Backed up %s to %s", dst, backup_path)
+
+            # Generate and install
+            self._generate_conf(live_path, template_path, dst,
+                                from_release, to_release)
+
+            # Preserve original permissions and ownership
+            os.chmod(dst, dst_stat.st_mode & 0o7777)
+            os.chown(dst, dst_stat.st_uid, dst_stat.st_gid)
+            LOG.info("Installed updated %s", conf_name)
+
+    def _deploy_host_restore(self, ostree_dir):
+        """Called by OpenstackConfHook during deploy-host rollback.
+
+        Restores backed-up conf files into the ostree deployment.
+        """
+        for conf_name, (live_path, _) in self.CONF_FILE_MAP.items():
+            dst = os.path.join(ostree_dir,
+                               os.path.dirname(live_path).lstrip('/'),
+                               conf_name)
+            backup = dst + self.BACKUP_SUFFIX
+            if os.path.exists(backup):
+                st = os.stat(backup)
+                shutil.copy2(backup, dst)
+                os.chown(dst, st.st_uid, st.st_gid)
+                LOG.info("Restored %s from %s", dst, backup)
+            else:
+                LOG.warning("Backup not found: %s", backup)
+
+    def run(self):
+        if self._action == HookManager.MAJOR_RELEASE_UPGRADE:
+            self._install()
+        elif self._action == HookManager.MAJOR_RELEASE_ROLLBACK:
+            self._restore()
+
+    def _install(self):
+        LOG.info("Running OpenstackConfHook install")
+        if self.get_platform_conf("nodetype") != self.CONTROLLER:
+            LOG.info("OpenstackConfHook: not a controller, skipping")
+            return
+        codename = self.get_to_release_debian_codename()
+        if "trixie" != codename:
+            # barrier for RELEASE_N bullseye versus trixie
+            # The current N release is in transition
+            LOG.info("OpenstackConfHook: not trixie (codename=%s), "
+                     "skipping", codename)
+            return
+
+        self._deploy_host_install(self.TO_RELEASE_OSTREE_DIR,
+                                  self._from_release,
+                                  self._to_release)
+
+    def _restore(self):
+        LOG.info("Running OpenstackConfHook restore")
+        if self.get_platform_conf("nodetype") != self.CONTROLLER:
+            LOG.info("OpenstackConfHook: not a controller, skipping")
+            return
+        codename = self.get_from_release_debian_codename()
+        if "trixie" != codename:
+            # barrier for RELEASE_N bullseye versus trixie
+            # The current N release is in transition
+            LOG.info("OpenstackConfHook: not trixie (codename=%s), "
+                     "skipping", codename)
+            return
+
+        self._deploy_host_restore(self.TO_RELEASE_OSTREE_DIR)
+
+
 class HookManager(object):
     """
     Object to manage the execution of agent hooks
@@ -1507,6 +1873,7 @@ class HookManager(object):
             FixedEtcMergeHook,
             KubeletUpgradeHook,
             LdapConfigHook,
+            OpenstackConfHook,
             PuppetHieradataUpdate,
             CgroupBootParamsHook,
             # enable usm-initialize service for next
@@ -1522,6 +1889,7 @@ class HookManager(object):
             CreateKubeApiserverPortUpdatedFlag,
             NtpToNtpsecMigrationHook,
             LdapConfigHook,
+            OpenstackConfHook,
             PuppetHieradataUpdate,
             CgroupBootParamsHook,
             SSSDCacheCleanupRollBackHook,
