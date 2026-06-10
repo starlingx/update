@@ -919,6 +919,19 @@ class PatchAgent(PatchService):
         except Exception:
             success = False
 
+        # Copy kickstart/miniboot from the deployment to the feed directory
+        # Only run on controllers
+        # during patch deployments (major release already handles this via ISO).
+        if success and not major_release:
+            try:
+                nodetype = utils.get_platform_conf("nodetype")
+                if nodetype == "controller":
+                    ostree_utils.copy_kickstart_to_feed(
+                        utils.get_major_release_version(SW_VERSION))
+            except Exception:
+                LOG.exception("Failed to copy kickstart to feed")
+                success = False
+
         if os.path.exists(insvc_software_flags):
             shutil.rmtree(insvc_software_flags, ignore_errors=True)
 

@@ -115,6 +115,11 @@ PACKAGE_FEED_DIR = "/var/www/pages/updates/debian"
 UPGRADE_FEED_DIR = FEED_DIR
 OSTREE_LOCK = "/run/.ostree_lock"
 
+# Kickstart/miniboot
+# Source path pattern inside the ostree deployment where the deb package installs kickstart files
+# Full path: /var/www/pages/feed/rel-<version>/kickstart/
+KICKSTART_FEED_SUBDIR = "kickstart"
+
 # Ostree
 OSTREE_BASE_DEPLOYMENT_DIR = "/ostree/deploy/debian/deploy/"
 OSTREE_REF = "starlingx"
