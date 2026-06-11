@@ -32,16 +32,19 @@ class ReleaseState(object):
     _callbacks = []
 
     def __init__(self, release_ids=None, release_state=None):
+        self._release_ids = []
+
+        # If no parameter is passed return directly
+        if not release_ids and not release_state:
+            return
+
+        release_collection = get_SWReleaseCollection()
+
         not_found_list = []
         release_list = []
 
-        self._release_ids = []
-
-        release_collection = get_SWReleaseCollection()
-        if release_state:
-            release_ids = [rel.id for rel in
-                           release_collection.iterate_releases_by_state(release_state)]
-
+        # TODO(heitormatsui): revisit once legacy releases are no longer supported
+        # Check first if release_ids were passed directly
         if release_ids:
             for rel_id in release_ids:
                 rel = release_collection[rel_id]
@@ -53,10 +56,22 @@ class ReleaseState(object):
                 # If legacy release, return the release itself
                 else:
                     release_list.append(rel_id)
-            self._release_ids = release_list[:]
+        # Otherwise check for releases in specific state
+        else:
+            # Get the list of legacy releases + metapackage releases in the provided state
+            release_list = [
+                rel.id for rel in
+                release_collection.iterate_releases_by_state(release_state)
+                if rel.is_legacy_release
+            ] + [
+                mp.id for mp in
+                release_collection.iterate_metapackages_by_state(release_state)
+            ]
 
-        if len(not_found_list) > 0:
+        if not_found_list:
             raise ReleaseNotFound(not_found_list)
+
+        self._release_ids = release_list
 
     @staticmethod
     def register_event_listener(callback):
