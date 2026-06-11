@@ -1284,36 +1284,84 @@ class CgroupBootParamsHook(BaseHook):
             LOG.exception("CgroupBootParamsHook: failed to update hieradata: %s"
                           % e)
 
+    def _revert_kubelet_cgroup_config_from_2610(self):
+        """Revert cgroupRoot back to /k8s-infra for rollback.
+
+        On rollback, the system goes back to the old release which
+        uses k8s-infra as the cgroup name. The config.yaml was
+        migrated to /k8sinfra during upgrade and must be reverted,
+        otherwise kubelet will look for k8sinfra dirs that don't
+        exist on the old release.
+        """
+        config_path = "/var/lib/kubelet/config.yaml"
+        if not os.path.exists(config_path):
+            LOG.info("CgroupBootParamsHook: %s not found, skipping" % config_path)
+            return
+        try:
+            with open(config_path, 'r') as f:
+                content = f.read()
+            changed = False
+            if 'cgroupRoot: /k8sinfra' in content:
+                content = content.replace('cgroupRoot: /k8sinfra',
+                                          'cgroupRoot: /k8s-infra')
+                changed = True
+                LOG.info("CgroupBootParamsHook: reverted cgroupRoot to /k8s-infra")
+            if 'cgroupDriver: systemd' in content:
+                content = content.replace('cgroupDriver: systemd',
+                                          'cgroupDriver: cgroupfs')
+                changed = True
+                LOG.info("CgroupBootParamsHook: reverted cgroupDriver to cgroupfs")
+            if changed:
+                with open(config_path, 'w') as f:
+                    f.write(content)
+        except Exception as e:
+            LOG.exception("CgroupBootParamsHook: failed to revert %s: %s"
+                          % (config_path, e))
+
+    def _rollback_from_2610(self):
+        """Handle rollback: revert all cgroup changes to old release state.
+
+        Restores:
+        - Boot params: v1 kernel params
+        - config.yaml: cgroupRoot /k8sinfra -> /k8s-infra, cgroupDriver -> cgroupfs
+        - Hieradata: cgroup_v2_enabled=false
+        """
+        LOG.info("CgroupBootParamsHook: Rollback - reverting to v1")
+        self._set_v1_boot_params()
+        self._revert_kubelet_cgroup_config_from_2610()
+        self._update_hieradata(cgroup_v2=False)
+        LOG.info("CgroupBootParamsHook: COMPLETED (rollback)")
+
     def run(self):
         LOG.info("CgroupBootParamsHook: STARTED")
-        action = self._action
-        LOG.info("CgroupBootParamsHook: action=%s" % action)
+        LOG.info(f"CgroupBootParamsHook: action={self._action}")
 
-        if action == HookManager.MAJOR_RELEASE_ROLLBACK:
-            LOG.info("CgroupBootParamsHook: Rollback - reverting to v1")
-            self._set_v1_boot_params()
-            self._migrate_kubelet_config(cgroup_v2=False)
-            self._update_hieradata(cgroup_v2=False)
-            LOG.info("CgroupBootParamsHook: COMPLETED (rollback)")
+        if self._action == HookManager.MAJOR_RELEASE_ROLLBACK and \
+           self._from_release == "26.10":
+
+            self._rollback_from_2610()
             return
 
-        # Upgrade path — always fix cgroupRoot rename
-        value = self._get_cgroup_v2_enabled()
-        LOG.info("CgroupBootParamsHook: DB value=%s" % repr(value))
+        if self._action == HookManager.MAJOR_RELEASE_UPGRADE and \
+           self._to_release == "26.10":
 
-        # Determine cgroup version intent
-        cgroup_v2 = (value is not None and value.lower() == 'true')
+            # Upgrade path — always fix cgroupRoot rename
+            value = self._get_cgroup_v2_enabled()
+            LOG.info(f"CgroupBootParamsHook: DB value={repr(value)}")
 
-        # Set boot params based on intent
-        if cgroup_v2:
-            LOG.info("CgroupBootParamsHook: setting v2 boot params")
-            self._set_v2_boot_params()
-        else:
-            LOG.info("CgroupBootParamsHook: setting v1 boot params")
-            self._set_v1_boot_params()
+            # Determine cgroup version intent
+            cgroup_v2 = (value is not None and value.lower() == 'true')
 
-        self._migrate_kubelet_config(cgroup_v2=cgroup_v2)
-        self._update_hieradata(cgroup_v2=cgroup_v2)
+            # Set boot params based on intent
+            if cgroup_v2:
+                LOG.info("CgroupBootParamsHook: setting v2 boot params")
+                self._set_v2_boot_params()
+            else:
+                LOG.info("CgroupBootParamsHook: setting v1 boot params")
+                self._set_v1_boot_params()
+
+            self._migrate_kubelet_config(cgroup_v2=cgroup_v2)
+            self._update_hieradata(cgroup_v2=cgroup_v2)
 
         LOG.info("CgroupBootParamsHook: COMPLETED")
 
