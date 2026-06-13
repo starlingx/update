@@ -2541,7 +2541,7 @@ class PatchController(PatchService):
                 states.DEPLOYING,
                 # Component States
                 states.DEPLOY_SELECTED,
-                states.REMOVE_SELECTED
+                states.REMOVE_SELECTED,
             ]
             if kwargs["show"] in valid_query_states:
                 query_state = kwargs["show"]
