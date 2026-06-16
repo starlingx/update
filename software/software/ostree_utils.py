@@ -291,8 +291,9 @@ def pull_ostree_from_remote(remote=None):
         ref_cmd = "ostree refs --force --create=%s %s" % (ref, constants.OSTREE_REF)
 
     try:
+        cmd = cmd % ref
         LOG.info("Executing ostree pull command: %s" % cmd)
-        process = subprocess.run(cmd % ref, shell=True, check=True, text=True, capture_output=True)
+        process = subprocess.run(cmd, shell=True, check=True, text=True, capture_output=True)
     except subprocess.CalledProcessError as e:
         msg = "Failed to pull from %s remote into sysroot ostree" % ref
         err_msg = "OSTree Pull Error: return code: %s, Output: %s" \
