@@ -202,7 +202,7 @@ def migrate_keyring_data(from_release, to_release):
 
     from_ver = version.Version(from_release)
     to_ver = version.Version(to_release)
-    luks_min_version = version.Version("26.09")
+    luks_min_version = version.Version("26.10")
     if from_ver < luks_min_version <= to_ver:
         # TODO(This block can be removed post 27.03)
         shutil.rmtree(constants.KEYRING_DIR_PATH, ignore_errors=True)
