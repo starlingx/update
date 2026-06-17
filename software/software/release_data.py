@@ -402,16 +402,18 @@ class SWRelease(object):
                 "preinstalled_patches": self.preinstalled_patches[:],
                 "requires": self.requires_release_ids[:],
                 "activation_scripts": self.activation_scripts[:],
-                "metapackages": [],
+                "metapackages": {},
                 "packages": []}
         if self.is_product_release:
             # For product releases, the pkg section is present only in
             # the metapackage metadata.
-            data["metapackages"] = sorted(list(self.metapackages))
+            data["metapackages"] = {mp: {} for mp in self.metapackages}
             for metapackage in self.metapackages:
                 metapackage_data = self.metapackages[metapackage]
                 if "packages" in metapackage_data:
                     data["packages"].extend(metapackage_data["packages"])
+                if "state" in metapackage_data:
+                    data["metapackages"][metapackage]["state"] = metapackage_data["state"]
             data["packages"].sort()
         elif self.packages:
             # Legacy releases have a pkg section in their metadata
