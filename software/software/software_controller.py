@@ -2928,7 +2928,6 @@ class PatchController(PatchService):
         if not os.path.isfile(precheck_script) and patch:
             # Precheck script may not be available for some patches
             # In that case, report system as healthy with info message to proceed
-            self._save_precheck_result(release_version, healthy=True)
             msg_info = f"No deploy-precheck script available for patch version {release_version}"
             return dict(info=msg_info, warning=msg_warning, error=msg_error, system_healthy=True)
 
@@ -2939,13 +2938,11 @@ class PatchController(PatchService):
             msg_error = "Fail to perform deploy precheck. " \
                         "Uploaded release may have been damaged. " \
                         "Try delete and re-upload the release.\n"
-            self._save_precheck_result(release_version, healthy=False)
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         if self.pre_bootstrap and not patch:
             # Deploy precheck should be avoided in case of major release.
             msg_info = "Major release precheck is not valid in pre bootstrap scenario.\n"
-            self._save_precheck_result(release_version, healthy=True)
             return dict(info=msg_info, warning=msg_info, error=msg_error, system_healthy=True)
 
         if self.pre_bootstrap and not force:
@@ -2953,7 +2950,6 @@ class PatchController(PatchService):
             # script access any of services like sysinv, keystone, etc.
             msg_warning = "Pre-bootstrap environment may not support deploy precheck.\n" \
                           "Use --force option to execute deploy precheck script.\n"
-            self._save_precheck_result(release_version, healthy=True)
             return dict(info=msg_info, warning=msg_warning, error=msg_error, system_healthy=True)
 
         deploy_in_progress = self._get_software_upgrade()
@@ -2974,7 +2970,6 @@ class PatchController(PatchService):
             LOG.error(msg)
             msg_error = "Fail to perform deploy precheck. Internal error has occured." \
                         "Try lock and unlock the controller for recovery.\n"
-            self._save_precheck_result(release_version, healthy=False)
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         # Get releases info required for precheck
@@ -3030,10 +3025,8 @@ class PatchController(PatchService):
         system_healthy = None
         if precheck_return.returncode in [constants.RC_SUCCESS, constants.RC_UNHEALTHY]:
             system_healthy = precheck_return.returncode == constants.RC_SUCCESS
-            self._save_precheck_result(release_version, healthy=system_healthy)
             msg_info += precheck_return.stdout
         else:
-            self._save_precheck_result(release_version, healthy=False)
             msg_error += precheck_return.stdout
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error, system_healthy=system_healthy)
@@ -3175,13 +3168,15 @@ class PatchController(PatchService):
                              % (SW_VERSION, release.sw_release))
                 return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-            # 2. Run deploy precheck;
+            # 2. Run deploy precheck
+            metapackages = self.release_collection.get_metapackages_id_by_product_id(release_id)
             precheck_script = utils.get_precheck_script(release.sw_release)
             if os.path.isfile(precheck_script):
-                if self._should_run_precheck_prior_deploy_start(release.sw_release, False, False):
+                if self._should_run_precheck_prior_deploy_start(release.sw_release, False,
+                                                                False, metapackages):
                     LOG.info("Executing software deploy precheck prior to system deploy init")
                     if precheck_result := self._precheck_before_start(
-                        release.id,
+                        metapackages,
                         release.sw_release,
                         is_patch=False,
                         force=False,
@@ -3737,13 +3732,11 @@ class PatchController(PatchService):
                                         snapshot=snapshot, **kwargs)
             if ret:
                 if ret.get("system_healthy") is None:
-                    msg = ("Failed to perform deploy precheck. Internal error "
-                           "has occurred.\n" + ret.get('error'))
+                    msg = constants.PRECHECK_GENERIC_FAILURE + "\n" + ret.get('error')
                     msg_error += f"{release_id}:\n{msg}\n"
                     unhealthy_releases.append(release_id)
                 elif not ret.get("system_healthy"):
-                    msg = ("The following issues have been detected, which "
-                           "prevents deploying the release.\n" + ret.get('info'))
+                    msg = constants.PRECHECK_ISSUES_DETECTED_FAILURE + "\n" + ret.get('info')
                     msg_error += f"{release_id}:\n{msg}\n"
                     unhealthy_releases.append(release_id)
                 else:
@@ -3754,6 +3747,11 @@ class PatchController(PatchService):
 
             msg_info += f"{release_id}:\n{ret.get('info')}\n"
             msg_additional_data.update({release_id: ret})
+
+        release_version = next(iter({rel.sw_release for rel in selected_releases}), None)
+        healthy = not unhealthy_releases
+        self._save_precheck_result(release_version, healthy,
+                                   metapackages=[rel.id for rel in selected_releases])
 
         if not unhealthy_releases:
             healthy_releases = ", ".join(healthy_releases)
@@ -4266,26 +4264,30 @@ class PatchController(PatchService):
 
     def _precheck_before_start(self, metapackages, release_version, is_patch, force=False,
                                snapshot=False, **kwargs):
-        LOG.info("Running deploy precheck.")
+        LOG.info("Running deploy precheck...")
         # TODO(mbenedit): The _deploy_precheck parameter should run on each metapackage
         # release selected to be deployed/removed. Pass the metapackage name as a required
         # parameter in _deploy_precheck and remove the optional parameter from the method.
+        # TODO(heitormatsui): Merge this behavior with the common deploy precheck API behavior
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
 
-        precheck_result = self._deploy_precheck(release_version, patch=is_patch, force=force,
-                                                snapshot=snapshot, **kwargs)
-        if precheck_result.get('system_healthy') is None:
-            precheck_result["error"] = (
-                f"Fail to perform deploy precheck. Internal error has occurred.\n"
-                f"{precheck_result['error']}"
-            )
-            return precheck_result
-        elif precheck_result.get('system_healthy') is False:
-            precheck_result["error"] = (
-                f"The following issues have been detected, which prevent deploying {', '.join(metapackages)}\n"
-                f"{precheck_result['info']}\n"
-                "Please fix above issues then retry the deploy.\n"
-            )
-            return precheck_result
+        # Run precheck for each metapackage under /opt/software/releases/<release_version>
+        for metapackage in metapackages:
+            mp_name, _ = metapackage.split("_")
+            precheck_result = self._deploy_precheck(release_version, metapackage=mp_name,
+                                                    force=force, snapshot=snapshot, patch=is_patch,
+                                                    **kwargs)
+            if precheck_result.get("system_healthy") is None:
+                msg = constants.PRECHECK_GENERIC_FAILURE + "\n" + precheck_result.get('error')
+                msg_error += f"{metapackage}:\n{msg}\n"
+            elif precheck_result.get("system_healthy") is False:
+                msg = constants.PRECHECK_ISSUES_DETECTED_FAILURE + "\n" + precheck_result.get('info')
+                msg_error += f"{metapackage}:\n{msg}\n"
+        if msg_error:
+            msg_error += "Please fix above issues then retry the deploy.\n"
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
         return None
 
     def _get_precheck_result_file_path(self, release_version):
@@ -4297,12 +4299,16 @@ class PatchController(PatchService):
         if os.path.isfile(precheck_result_file):
             os.remove(precheck_result_file)
 
-    def _save_precheck_result(self, release_version, healthy):
+    def _save_precheck_result(self, release_version, healthy, metapackages=None):
         precheck_result_file = self._get_precheck_result_file_path(release_version)
         with open(precheck_result_file, "w") as f:
-            json.dump({"healthy": healthy, "timestamp": time.time()}, f)
+            result_dict = {"healthy": healthy,
+                           "timestamp": time.time(),
+                           "metapackages": metapackages}
+            json.dump(result_dict, f)
 
-    def _should_run_precheck_prior_deploy_start(self, release_version, force, is_patch, **kwargs):
+    def _should_run_precheck_prior_deploy_start(self, release_version, force, is_patch,
+                                                metapackages, **kwargs):
         # there is not precheck script in this state
         if self.pre_bootstrap:
             return False
@@ -4324,6 +4330,12 @@ class PatchController(PatchService):
 
         if time.time() - last_result["timestamp"] > constants.PRECHECK_RESULT_VALID_PERIOD:
             LOG.info("The precheck result expired.")
+            return True
+
+        # If previous precheck was executed against a different set
+        # of metapackages then force deploy precheck to execute again
+        last_result_metapackages = last_result.get("metapackages")
+        if last_result_metapackages and last_result_metapackages != metapackages:
             return True
 
         return not last_result["healthy"]
@@ -4456,7 +4468,8 @@ class PatchController(PatchService):
         to_release = mp_deploy_set.sw_release
         if kwargs.get("options"):
             kwargs["options"] = self._parse_and_sanitize_extra_options(kwargs.get("options"))
-        if self._should_run_precheck_prior_deploy_start(to_release, force, is_patch, **kwargs):
+        if self._should_run_precheck_prior_deploy_start(to_release, force, is_patch,
+                                                        metapackages, **kwargs):
             LOG.info("Executing software deploy precheck prior to software deploy start")
             if precheck_result := self._precheck_before_start(
                 metapackages,
