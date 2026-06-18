@@ -27,6 +27,7 @@ class ChrootMounts:
     RABBIT_PATH="/var/lib/rabbitmq"
     POSTGRES_PATH="/var/lib/postgresql"
     KUBERNETES_PATH="/var/lib/kubernetes"
+    ETCD_PATH="/var/lib/etcd"
     PLATFORM_CONF_PATH="/etc/platform"
     TMP_PATH="/tmp"
     USR_PATH="/usr"
@@ -48,6 +49,8 @@ class ChrootMounts:
                 os.path.normpath(f"{checkout_dir}/{self.POSTGRES_PATH}"),
             os.path.normpath(self.KUBERNETES_PATH):
                 os.path.normpath(f"{checkout_dir}/{self.KUBERNETES_PATH}"),
+            os.path.normpath(self.ETCD_PATH):
+                os.path.normpath(f"{checkout_dir}/{self.ETCD_PATH}"),
             os.path.normpath(self.PROC_PATH):
                 os.path.normpath(f"{checkout_dir}/{self.PROC_PATH}"),
             os.path.normpath(self.LOG_PATH):
