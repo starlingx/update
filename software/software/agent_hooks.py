@@ -409,8 +409,24 @@ class CopyPxeFilesHook(BaseHook):
                           self._to_release)
 
 
+class RestorePlatformConfPermissionHook(BaseHook):
+    """
+    Restore the platform.conf file permission to 644
+    """
+
+    def run(self):
+        try:
+            # Restore the platform.conf file permission to 644
+            os.chmod(self.PLATFORM_CONF_FILE, 0o644)
+            LOG.info("Restore platform.conf file permission to 644")
+        except Exception as e:
+            LOG.exception("Failed to restore platform.conf file permission: %s" % e)
+            raise
+
 # TODO(bqian) split the framework based kernel parameters backup and restore
 # from feature based kernel parameter pre-populate code.
+
+
 class UpdateKernelParametersHook(BaseHook):
     """
     Update the kernel parameters
@@ -1948,6 +1964,7 @@ class HookManager(object):
             PuppetHieradataUpdate,
             CgroupBootParamsHook,
             SSSDCacheCleanupRollBackHook,
+            RestorePlatformConfPermissionHook,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
