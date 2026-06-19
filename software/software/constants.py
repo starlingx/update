@@ -198,6 +198,7 @@ SUPPORT_SCRIPTS_DIR = "support-scripts"
 PRECHECK_GENERIC_FAILURE = "Failed to perform deploy precheck. Internal error has occurred."
 PRECHECK_ISSUES_DETECTED_FAILURE = ("The following issues have been detected, "
                                     "which prevents deploying the release.")
+SYSTEM_HEALTHY = 'system_healthy'
 
 WORKER_SUMMARY_DIR = "%s/summary" % SOFTWARE_STORAGE_DIR
 WORKER_DATETIME_FORMAT = "%Y%m%dT%H%M%S%f"
