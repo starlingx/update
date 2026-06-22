@@ -65,8 +65,17 @@ class ChrootMounts:
                 os.path.normpath(f"{checkout_dir}/{self.LUKS_PATH}"),
         }
 
+    # Mount points that may not exist on all upgrade paths
+    # TODO: Remove ETCD_PATH when from_release 26.09 since etcd will be
+    # provided by kubernetes-unversioned package.
+    OPTIONAL_MOUNTS = ["/var/lib/etcd"]
+
     def mount(self):
         for src, dst in self._mount_points.items():
+            if not os.path.exists(src) and src in self.OPTIONAL_MOUNTS:
+                LOG.info(f"Skipping optional bind mount, source "
+                         f"does not exist: {src}")
+                continue
             try:
                 os.makedirs(dst, exist_ok=True)
                 cmd = ["mount", "--bind", src, dst]

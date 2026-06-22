@@ -1904,6 +1904,312 @@ class OpenstackConfHook(BaseHook):
         self._deploy_host_restore(self.TO_RELEASE_OSTREE_DIR)
 
 
+class EtcdUpgradeRollbackHook(BaseHook):
+    """Manage etcd version symlink and data during upgrade/rollback.
+
+    On upgrade:
+      - Ensures /var/lib/etcd/stage0 symlink exists pointing to the
+        correct etcd binary version, using hieradata as source of truth.
+      - Creates the symlink if missing (legacy upgrade path where K8s
+        control-plane upgrade has not yet run).
+
+    On rollback:
+      - Determines the correct etcd version for the old release
+        (max installed etcd binary on old side, or fallback to 3.4.37).
+      - Updates /var/lib/etcd/stage0 symlink to point to old binary.
+      - Updates static hieradata with the old etcd version.
+      - Wipes etcd member data to avoid version incompatibility on
+        restart (etcd cannot downgrade cluster version).
+    """
+
+    ETCD_PATH = "/var/lib/etcd"
+    ETCD_STAGE0_LINK = "/var/lib/etcd/stage0"
+    ETCD_MEMBER_DIR = "/opt/etcd/db/controller.etcd/member"
+    ETCD_VERSIONED_BINARIES_ROOT = "/usr/local/etcd/"
+    # Fallback etcd versions for releases that don't have the versioned
+    # etcd infrastructure (/usr/local/etcd/, stage0 symlink, hieradata).
+    # Only 25.09 requires this; 26.03 and onwards have the infrastructure
+    # so primary detection methods (hieradata, symlink, binaries) work.
+    ETCD_FALLBACK_VERSIONS = {
+        "25.09": "3.4.37",
+    }
+
+    HIERADATA_KEY = "platform::etcd::params::etcd_version"
+
+    def _get_hieradata_path(self):
+        sw_version = self.get_platform_conf("sw_version")
+        return (f"/opt/platform/puppet/{sw_version}"
+                f"/hieradata/static.yaml")
+
+    def _get_etcd_version_from_hieradata(self):
+        """Read etcd version from puppet hieradata."""
+        hieradata_path = self._get_hieradata_path()
+        try:
+            with open(hieradata_path, "r") as f:
+                data = yaml.load(f)
+                return data.get(self.HIERADATA_KEY)
+        except Exception as e:
+            LOG.warning("Failed to read etcd version from "
+                        "hieradata %s: %s" % (hieradata_path, e))
+        return None
+
+    def _get_max_installed_etcd_version(self, root_dir="/"):
+        """Find the highest installed etcd binary version.
+
+        Etcd binaries are installed under /usr/local/etcd/<version>/
+        """
+        return self._get_installed_etcd_version(root_dir, use_max=True)
+
+    def _get_min_installed_etcd_version(self, root_dir="/"):
+        """Find the lowest installed etcd binary version.
+
+        Etcd binaries are installed under /usr/local/etcd/<version>/
+        """
+        return self._get_installed_etcd_version(root_dir, use_max=False)
+
+    def _get_installed_etcd_version(self, root_dir="/", use_max=True):
+        """Find installed etcd binary version (max or min)."""
+        etcd_dir = os.path.join(root_dir,
+                                self.ETCD_VERSIONED_BINARIES_ROOT.lstrip('/'))
+        versions = []
+        try:
+            if os.path.isdir(etcd_dir):
+                for entry in os.listdir(etcd_dir):
+                    full_path = os.path.join(etcd_dir, entry)
+                    if os.path.isdir(full_path):
+                        versions.append(entry)
+        except Exception as e:
+            LOG.warning("Failed to list etcd versions in %s: %s"
+                        % (etcd_dir, e))
+        if versions:
+            versions.sort(key=version.parse)
+            return versions[-1] if use_max else versions[0]
+        return None
+
+    def _update_stage0_symlink(self, etcd_version, check_root="/"):
+        """Create or update /var/lib/etcd/stage0 symlink.
+
+        The symlink format is:
+        /var/lib/etcd/stage0 -> /usr/local/etcd/<version>/stage0
+
+        The check_root parameter is used only to verify the target
+        exists before creating the symlink (e.g., /ostree/2 for old
+        release during rollback).
+        """
+        symlink_target = os.path.join(
+            self.ETCD_VERSIONED_BINARIES_ROOT, etcd_version, "stage0")
+        check_path = os.path.join(check_root, symlink_target.lstrip('/'))
+        if not os.path.exists(check_path):
+            LOG.warning("etcd stage0 target not found at %s" % check_path)
+            return False
+
+        os.makedirs(self.ETCD_PATH, exist_ok=True)
+        if os.path.islink(self.ETCD_STAGE0_LINK):
+            os.unlink(self.ETCD_STAGE0_LINK)
+        elif os.path.exists(self.ETCD_STAGE0_LINK):
+            os.remove(self.ETCD_STAGE0_LINK)
+
+        os.symlink(symlink_target, self.ETCD_STAGE0_LINK)
+        LOG.info("Updated etcd stage0 symlink: %s -> %s"
+                 % (self.ETCD_STAGE0_LINK, symlink_target))
+        return True
+
+    def _update_hieradata(self, etcd_version, sw_version=None):
+        """Update static hieradata with etcd version."""
+        if not sw_version:
+            sw_version = self.get_platform_conf("sw_version")
+        hieradata_path = (f"/opt/platform/puppet/{sw_version}"
+                          f"/hieradata/static.yaml")
+        try:
+            with open(hieradata_path, "r") as f:
+                data = yaml.load(f)
+            data[self.HIERADATA_KEY] = etcd_version
+            with open(hieradata_path, "w") as f:
+                yaml.dump(data, f)
+            LOG.info("Updated hieradata %s: %s = %s"
+                     % (hieradata_path, self.HIERADATA_KEY, etcd_version))
+        except Exception as e:
+            LOG.error("Failed to update hieradata: %s" % e)
+
+    def _wipe_etcd_member_data(self):
+        """Remove etcd member data to force fresh bootstrap.
+
+        etcd does not support downgrade of cluster version. When rolling
+        back to an older etcd binary, the existing member data (written
+        at a higher cluster version) is incompatible. Removing the member
+        directory forces etcd to bootstrap fresh on the rolled-back release.
+
+        Mask etcd.service before wiping to prevent pmon or any other
+        mechanism from restarting it. Using --runtime --now so the mask
+        does not persist after reboot.
+        """
+        try:
+            subprocess.run(["systemctl", "mask", "etcd.service",
+                            "--runtime", "--now"],
+                           check=True, capture_output=True, text=True)
+            LOG.info("Masked and stopped etcd.service")
+        except subprocess.CalledProcessError as e:
+            LOG.warning("Failed to mask etcd.service: %s" % e.stderr)
+        if os.path.exists(self.ETCD_MEMBER_DIR):
+            shutil.rmtree(self.ETCD_MEMBER_DIR)
+            LOG.info("Removed etcd member data: %s"
+                     % self.ETCD_MEMBER_DIR)
+        else:
+            LOG.info("etcd member data not found: %s"
+                     % self.ETCD_MEMBER_DIR)
+
+    def _upgrade(self):
+        """Ensure etcd symlink exists for upgrade path."""
+        LOG.info("Starting EtcdUpgradeRollbackHook upgrade.")
+        if os.path.exists(self.ETCD_STAGE0_LINK):
+            LOG.info("etcd stage0 symlink already exists: %s"
+                     % os.readlink(self.ETCD_STAGE0_LINK))
+            return
+
+        etcd_version = self._get_etcd_version_from_hieradata()
+        if not etcd_version:
+            etcd_version = self._get_min_installed_etcd_version()
+        if not etcd_version:
+            # On 25.09 without enabler patch, /usr/local/etcd/ does not
+            # exist and hieradata may not have the key. Use fallback.
+            fallback = self.ETCD_FALLBACK_VERSIONS.get(self._from_release)
+            if fallback:
+                etcd_version = fallback
+                LOG.info("Using fallback etcd version for from_release "
+                         "%s: %s" % (self._from_release, etcd_version))
+            else:
+                LOG.warning("Cannot determine etcd version for upgrade, "
+                            "skipping symlink creation")
+                return
+
+        self._update_stage0_symlink(etcd_version,
+                                    check_root=self.TO_RELEASE_OSTREE_DIR)
+        self._update_hieradata(etcd_version, sw_version=self._to_release)
+        LOG.info("EtcdUpgradeRollbackHook upgrade finished.")
+
+    def _get_etcd_version_from_symlink(self, root_dir="/"):
+        """Read etcd version from the stage0 symlink.
+
+        Parses the symlink target to extract the version:
+        /var/lib/etcd/stage0 -> /usr/local/etcd/<version>/stage0
+        """
+        symlink_path = os.path.join(root_dir,
+                                    self.ETCD_STAGE0_LINK.lstrip('/'))
+        try:
+            if not os.path.islink(symlink_path):
+                return None
+            target = os.readlink(symlink_path)
+            pattern = r"/usr/local/etcd/(.*)/stage0"
+            match = re.search(pattern, target)
+            if match is None:
+                LOG.warning("Unable to find etcd version in "
+                            "symlink target %s" % target)
+                return None
+            return match.group(1)
+        except Exception as e:
+            LOG.warning("Failed to read etcd version from symlink "
+                        "%s: %s" % (symlink_path, e))
+        return None
+
+    def _get_etcd_version_from_old_hieradata(self):
+        """Read etcd version from the rollback target release hieradata."""
+        hieradata_path = (f"/opt/platform/puppet/{self._to_release}"
+                          f"/hieradata/static.yaml")
+        try:
+            with open(hieradata_path, "r") as f:
+                data = yaml.load(f)
+                return data.get(self.HIERADATA_KEY)
+        except Exception as e:
+            LOG.warning("Failed to read etcd version from old "
+                        "hieradata %s: %s" % (hieradata_path, e))
+        return None
+
+    def _rollback(self):
+        """Handle etcd version rollback.
+
+        The stage0 symlink is on persistent storage (/var/lib/etcd/)
+        and may have been created/modified during upgrade. It needs
+        to be corrected or removed for the old release.
+
+        For releases that don't have versioned etcd infrastructure
+        (e.g., 25.09), remove the symlink. For releases with versioned
+        etcd (26.03+), update the symlink to the correct old version.
+
+        Hieradata update is not needed during rollback because the
+        upgrade hook only modifies the to_release hieradata, never
+        the from_release hieradata.
+        """
+        LOG.info("Starting EtcdUpgradeRollbackHook rollback.")
+
+        # In rollback context:
+        #   self._from_release = current (new) release
+        #   self._to_release = target (old) release we roll back to
+        #   TO_RELEASE_OSTREE_DIR (/ostree/1) = old release filesystem
+        #   FROM_RELEASE_OSTREE_DIR (/ostree/2) = new release filesystem
+
+        # Determine etcd version for the old (rollback target) release
+        # Priority: old hieradata > old ostree binaries > fallback
+        # NOTE: symlink is not used here because it is on persistent
+        # storage and may have been overwritten during upgrade.
+        etcd_version = self._get_etcd_version_from_old_hieradata()
+        if not etcd_version:
+            etcd_version = self._get_max_installed_etcd_version(
+                self.TO_RELEASE_OSTREE_DIR)
+        if not etcd_version:
+            fallback = self.ETCD_FALLBACK_VERSIONS.get(self._to_release)
+            if fallback:
+                etcd_version = fallback
+                LOG.warning("Could not determine etcd version from "
+                            "hieradata or binaries, using fallback "
+                            "for %s: %s" % (self._to_release, etcd_version))
+            else:
+                LOG.error(
+                    "Cannot determine etcd version for rollback "
+                    "to release %s. No hieradata, no installed "
+                    "binaries found, and no fallback defined."
+                    % self._to_release)
+                return
+
+        # Handle symlink based on whether old release has versioned
+        # etcd infrastructure. Check the actual ostree rather than
+        # release version, because enabler patch may have installed
+        # versioned etcd binaries on older releases (e.g., 25.09
+        # with combo P&K upgrade).
+        old_etcd_dir = os.path.join(
+            self.TO_RELEASE_OSTREE_DIR,
+            self.ETCD_VERSIONED_BINARIES_ROOT.lstrip('/'))
+        if os.path.isdir(old_etcd_dir):
+            # Old release has versioned etcd — update symlink
+            self._update_stage0_symlink(etcd_version,
+                                        check_root=self.TO_RELEASE_OSTREE_DIR)
+        else:
+            # No versioned etcd on old release — remove symlink
+            # (it points to a path that won't exist after reboot)
+            if os.path.islink(self.ETCD_STAGE0_LINK):
+                os.unlink(self.ETCD_STAGE0_LINK)
+                LOG.info("Removed stage0 symlink (not used by %s)"
+                         % self._to_release)
+
+        # Only wipe etcd member data if the version is changing.
+        # If etcd version is the same (K8s upgrade didn't run), the
+        # database is compatible and wipe is not needed.
+        current_etcd_version = self._get_etcd_version_from_hieradata()
+        LOG.info("Rollback etcd version: target=%s, current=%s"
+                 % (etcd_version, current_etcd_version))
+        if current_etcd_version and current_etcd_version != etcd_version:
+            self._wipe_etcd_member_data()
+        else:
+            LOG.info("etcd version unchanged, skipping member data wipe")
+
+        LOG.info("EtcdUpgradeRollbackHook rollback finished.")
+
+    def run(self):
+        if self._action == HookManager.MAJOR_RELEASE_UPGRADE:
+            self._upgrade()
+        elif self._action == HookManager.MAJOR_RELEASE_ROLLBACK:
+            self._rollback()
+
+
 class HookManager(object):
     """
     Object to manage the execution of agent hooks
@@ -1927,6 +2233,7 @@ class HookManager(object):
             DeleteControllerFeedRemoteHook,
             FixedEtcMergeHook,
             KubeletUpgradeHook,
+            EtcdUpgradeRollbackHook,
             LdapConfigHook,
             OpenstackConfHook,
             PuppetHieradataUpdate,
@@ -1943,6 +2250,7 @@ class HookManager(object):
             FixedEtcMergeRollBackHook,
             CreateKubeApiserverPortUpdatedFlag,
             NtpToNtpsecMigrationHook,
+            EtcdUpgradeRollbackHook,
             LdapConfigHook,
             OpenstackConfHook,
             PuppetHieradataUpdate,
