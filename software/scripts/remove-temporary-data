@@ -66,7 +66,7 @@ class RemoveTemporaryData:
                 LOG.info("Database is not running")
                 return
             try:
-                cmd = [os.path.join(self._checkout_dir, "usr/bin/pgconfig"), "--bindir"]
+                cmd = [os.path.join(self._checkout_dir, "usr/bin/pg_config"), "--bindir"]
                 process = subprocess.run(cmd, check=True, text=True, capture_output=True)
                 db_bin_dir = process.stdout.strip()
 
