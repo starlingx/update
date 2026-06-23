@@ -3793,15 +3793,20 @@ class PatchController(PatchService):
         return dict(info=msg_info, error=msg_error, warning=msg_warning, **release_info, additional_data=msg_additional_data)
 
     def _deploy_upgrade_start(self, to_release, commit_id, **kwargs):
-        LOG.info("start deploy upgrade to %s from %s" % (to_release, SW_VERSION))
+        LOG.info("Start deploy upgrade from %s to %s" % (SW_VERSION, to_release))
         deploy_script_name = constants.DEPLOY_START_SCRIPT
         cmd_path = utils.get_software_deploy_script(to_release, deploy_script_name)
-        if not os.path.isfile(cmd_path):
-            msg = f"{deploy_script_name} was not found"
+        if not cmd_path:
+            msg = (f"The {deploy_script_name} script was not found under "
+                   f"{to_release} release directory")
             LOG.error(msg)
-            raise SoftwareServiceError(f"{deploy_script_name} was not found. "
-                                       "The uploaded software could have been damaged. "
-                                       "Please delete the software and re-upload it")
+            raise SoftwareServiceError(msg)
+        if len(cmd_path) > 1:
+            msg = (f"Found multiple {deploy_script_name} scripts on the release directory: "
+                   f"{', '.join(cmd_path)}")
+            LOG.error(msg)
+            raise SoftwareServiceError(msg)
+        cmd_path = cmd_path[0]  # Pop the script from the list
         major_to_release = utils.get_major_release_version(to_release)
         postgresql_port = str(cfg.alt_postgresql_port)
 
@@ -3834,29 +3839,32 @@ class PatchController(PatchService):
         feed = os.path.join(constants.FEED_DIR,
                             "rel-%s/ostree_repo" % major_to_release)
         LOG.info("k8s version %s" % k8s_ver)
-        upgrade_start_cmd = [cmd_path, SW_VERSION, major_to_release, k8s_ver, postgresql_port,
-                             feed]
 
-        upgrade_start_cmd.append(commit_id if commit_id is not None else 0)
-        upgrade_start_cmd.append(json.dumps(kwargs.get("options")) if kwargs.get("options") is not None else "")
+        options = kwargs.get("options") or dict()
+        options.update({
+            "release_directory": str(Path(constants.COMPONENT_SOFTWARE_STORAGE_DIR) / to_release)
+        })
+        upgrade_start_cmd = [cmd_path, SW_VERSION, major_to_release, k8s_ver, postgresql_port,
+                             feed, commit_id or "0", json.dumps(options)]
+
         # pass in keystone auth through environment variables
         # OS_AUTH_URL, OS_USERNAME, OS_PASSWORD, OS_PROJECT_NAME, OS_USER_DOMAIN_NAME,
         # OS_PROJECT_DOMAIN_NAME, OS_REGION_NAME are in env variables.
         keystone_auth = CONF.get('keystone_authtoken')
-        env = {}
-        env["OS_AUTH_URL"] = keystone_auth["auth_url"] + '/v3'
-        env["OS_USERNAME"] = keystone_auth["username"]
-        env["OS_PASSWORD"] = keystone_auth["password"]
-        env["OS_PROJECT_NAME"] = keystone_auth["project_name"]
-        env["OS_USER_DOMAIN_NAME"] = keystone_auth["user_domain_name"]
-        env["OS_PROJECT_DOMAIN_NAME"] = keystone_auth["project_domain_name"]
-        env["OS_REGION_NAME"] = keystone_auth["region_name"]
-        env["IGNORE_ERRORS"] = self.ignore_errors
-
+        env = {
+            "OS_AUTH_URL": keystone_auth["auth_url"] + '/v3',
+            "OS_USERNAME": keystone_auth["username"],
+            "OS_PASSWORD": keystone_auth["password"],
+            "OS_PROJECT_NAME": keystone_auth["project_name"],
+            "OS_USER_DOMAIN_NAME": keystone_auth["user_domain_name"],
+            "OS_PROJECT_DOMAIN_NAME": keystone_auth["project_domain_name"],
+            "OS_REGION_NAME": keystone_auth["region_name"],
+            "IGNORE_ERRORS": self.ignore_errors,
+        }
         try:
-            LOG.info("starting subprocess %s" % ' '.join(upgrade_start_cmd))
+            LOG.info("Starting subprocess %s" % ' '.join(upgrade_start_cmd))
             subprocess.Popen(upgrade_start_cmd, start_new_session=True, shell=False, env=env)
-            LOG.info("subprocess started")
+            LOG.info("Subprocess started")
             return True
         except subprocess.SubprocessError as e:
             LOG.error("Failed to start command: %s. Error %s" % (' '.join(upgrade_start_cmd), e))

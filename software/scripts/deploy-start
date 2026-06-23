@@ -125,8 +125,9 @@ class DeployStart:
         LOG.info("Starting data migration...")
         try:
             script_path = "/usr/bin/software-migrate"
-            cmd = ["/usr/sbin/chroot", self.SYSROOT_DIR, script_path,
-                   self._from_version, self._to_version, self._postgres_port]
+            release_directory = self._options.get("release_directory") or ""
+            cmd = ["/usr/sbin/chroot", self.SYSROOT_DIR, script_path, self._from_version,
+                   self._to_version, self._postgres_port, release_directory]
             subprocess.run(cmd, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
             LOG.error(f"Failed to migrate data: {e.stderr}")
@@ -218,7 +219,7 @@ if __name__ == "__main__":
 
     if any(x is None for x in [from_version, to_version, k8s_version, postgres_port, feed_ostree_repo_dir]):
         usage_msg = (f"usage: {sys.argv[0]} <from_version> <to_version> <k8s_version> "
-                     f"<postgresql_port> <feed_ostree_repo_dir> [commit_id] <options>")
+                     f"<postgresql_port> <feed_ostree_repo_dir> [commit_id] [options]")
         print(usage_msg)
         LOG.info(usage_msg)
         sys.exit(1)

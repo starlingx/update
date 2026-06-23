@@ -2068,7 +2068,13 @@ def run_remove_temporary_data_script(release):
 
     :param release: Release to be cleaned.
     """
-    cmd_path = utils.get_software_deploy_script(release, constants.REMOVE_TEMPORARY_DATA_SCRIPT)
+    cleanup_script_name = constants.REMOVE_TEMPORARY_DATA_SCRIPT
+    cmd_path = utils.get_software_deploy_script(release, cleanup_script_name)
+    if not cmd_path:
+        msg = f"No {cleanup_script_name} found"
+        LOG.error(msg)
+        raise FileNotFoundError(msg)
+    cmd_path = cmd_path[0]  # Pop the script from the list
     if os.path.exists(constants.ROOT_DIR):
         try:
             subprocess.check_output([cmd_path, constants.ROOT_DIR], stderr=subprocess.STDOUT)
