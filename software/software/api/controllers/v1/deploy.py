@@ -92,8 +92,6 @@ class DeployController(RestController):
         if sc.any_patch_host_installing():
             raise SoftwareServiceError(error="Rejected: One or more nodes are installing a release.")
 
-        if releases:
-            releases = releases.split(",")
         result = sc.software_deploy_start_api(releases, _force, **kwargs)
 
         if result and 'error' in result and result["error"] != "":

@@ -149,6 +149,11 @@ def do_precheck(cc, args):
                 'Can assume an empty value, a list of metapackage releases '
                 'separated by spaces or a product release. If empty, it checks the '
                 'system-deploy entity or the deploy-selected releases.')
+@utils.arg('--pre-upgrade-deploy',
+           action='store_true',
+           required=False,
+           help='Run start only in the metapackages required to deploy '
+           'before upgrading to the specified product release')
 @utils.arg('-f',
            '--force',
            action='store_true',

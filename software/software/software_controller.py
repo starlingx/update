@@ -4409,7 +4409,7 @@ class PatchController(PatchService):
         - Transform all involved releases to deploying state
         - Start the deploy subprocess
 
-        :param metapackages: the list of metapackage releases to deploy
+        :param releases: the list of releases to deploy
         :param force: ignore non-critical alarms to start the deployment
         :param kwargs: optional additional parameters
         """

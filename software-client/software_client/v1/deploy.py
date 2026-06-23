@@ -75,14 +75,14 @@ class DeployManager(base.Manager):
         signal.signal(signal.SIGINT, signal.SIG_IGN)
 
         path = "/v1/deploy/start"
-        if args.releases:
-            path = path + "?releases=" + ",".join(args.releases)
 
         body = {}
         if args.force:
             body["force"] = "true"
         if args.options:
             body["options"] = args.options
+        if args.releases:
+            body["releases"] = args.releases
 
         return self._post(path, body=body)
 
