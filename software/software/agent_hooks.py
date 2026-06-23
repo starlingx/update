@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 """
 Copyright (c) 2024-2026 Wind River Systems, Inc.
 
@@ -15,6 +16,7 @@ SPDX-License-Identifier: Apache-2.0
 #          python environments
 #####################################################################
 
+import argparse
 import configparser
 import contextlib
 import filecmp
@@ -26,10 +28,14 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 
 from packaging import version
 from ruamel.yaml import YAML
+
+from software.constants import SW_VERSION
+from software.software_functions import load_module
 
 log_format = ('%(asctime)s: ' + '[%(process)s]: '
               '%(filename)s(%(lineno)s): %(levelname)s: %(message)s')
@@ -49,6 +55,7 @@ class BaseHook(object):
     PLATFORM_CONF_PATH = "/etc/platform/"
     PLATFORM_CONF_FILE = os.path.join(PLATFORM_CONF_PATH, "platform.conf")
     BACKUP_DIR = "/sysroot/upgrade/backup"
+    INSTALLATION_PATH = "/usr/lib/python3/dist-packages/software/agent_hooks.py"
 
     # keywords
     CONTROLLER = "controller"
@@ -1984,3 +1991,53 @@ class HookManager(object):
                  sw_version, software_version, additional_data))
         hook_attrs['hook_action'] = HookManager.MAJOR_RELEASE_ROLLBACK
         return HookManager(HookManager.MAJOR_RELEASE_ROLLBACK, attrs=hook_attrs)
+
+
+def parse_config(args=None):
+    """Parse the parameters passed to the script"""
+    parser = argparse.ArgumentParser(description="Run agent hooks.")
+    parser.add_argument("--software-version",
+                        help="Software version",
+                        required=True)
+    parser.add_argument("--additional-data",
+                        help="Additional data (JSON format)",
+                        required=False,
+                        action='append')
+
+    # if args was not passed will use sys.argv by default
+    parsed_args = parser.parse_args(args)
+    return vars(parsed_args)
+
+
+def main(argv=None):
+    config = parse_config(argv)
+    software_version = config.get('software_version')
+    additional_data_raw = config.get('additional_data')
+    if additional_data_raw:
+        additional_data = json.loads(additional_data_raw)
+    else:
+        additional_data = None
+
+    # determine if it is a rollback and set the source directory
+    # of the agent hook file accordingly
+    if version.Version(software_version) > version.Version(SW_VERSION):
+        ostree_path = BaseHook.TO_RELEASE_OSTREE_DIR
+    else:
+        ostree_path = BaseHook.FROM_RELEASE_OSTREE_DIR
+
+    # load the agent hooks module dynamically
+    agent_hooks_path = os.path.normpath(ostree_path + BaseHook.INSTALLATION_PATH)
+    agent_hooks = load_module(agent_hooks_path, "agent_hooks")
+    hook_manager = agent_hooks.HookManager.create_hook_manager(software_version,
+                                                               additional_data=additional_data)
+    # execute the agent hooks
+    try:
+        hook_manager.run_hooks()
+        LOG.info("Agent hooks executed successfully.")
+    except Exception as e:
+        LOG.exception("Error running agent hooks: %s" % str(e))
+        raise
+
+
+if __name__ == '__main__':
+    sys.exit(main())
