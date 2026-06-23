@@ -433,6 +433,13 @@ class MetapackageDeploymentSet:
         """
         if not metapackages:
             raise ReleaseInvalidData("Cannot deploy an empty list of metapackages")
+
+        # Filter out no-op metapackages (already in target state) that won't be in selected state
+        metapackages = [mp for mp in metapackages if mp.state in states.COMPONENT_SELECTED_STATES]
+
+        if not metapackages:
+            raise ReleaseInvalidData("All metapackages are already in the target state")
+
         self._metapackages = metapackages
 
         sw_releases = {mp.sw_release for mp in self._metapackages}
@@ -448,6 +455,7 @@ class MetapackageDeploymentSet:
         self._base_commit_id = {mp.base_commit_id for mp in self._metapackages
                                 if mp.base_commit_id is not None}
 
+        # Review the filtered set of metapackages states
         mp_states = {mp.state for mp in self._metapackages}
         if len(mp_states) > 1:
             raise ReleaseInvalidData(f"Cannot deploy metapackages in different "
