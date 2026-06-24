@@ -59,6 +59,13 @@ def configure_logging():
 
     root_logger = logging.getLogger()
 
+    # This function may be invoked multiple times from each upgrade
+    # plugin, but it only needs to add the log file handler once
+    if any(isinstance(h, logging.FileHandler) and
+           h.baseFilename == os.path.abspath(SOFTWARE_LOG_FILE)
+           for h in root_logger.handlers):
+        return
+
     root_logger.setLevel(logging.INFO)
     main_log_handler = logging.FileHandler(SOFTWARE_LOG_FILE)
     main_log_handler.setFormatter(formatter)
