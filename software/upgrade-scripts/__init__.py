@@ -75,9 +75,9 @@ UpdateISystemData = getattr(
 RemoveLvmSnapshots = getattr(
     _import_module(".202-remove-lvm-snapshots", __name__),
     "RemoveLvmSnapshots")
-AddPlatformTlsParameters = getattr(
-    _import_module(".42-add-platform-tls-parameters", __name__),
-    "AddPlatformTlsParameters")
+AddTlsParameters = getattr(
+    _import_module(".42-add-tls-parameters", __name__),
+    "AddTlsParameters")
 AddMissingServiceParameters = getattr(
     _import_module(".43-add-missing-service-parameters", __name__),
     "AddMissingServiceParameters")
@@ -128,7 +128,7 @@ PLUGINS = {
                                  ACTION_ACTIVATE),
         ],
         FEATURE_PRE_APPS: [
-            AddPlatformTlsParameters(),
+            AddTlsParameters(),
             AddMissingServiceParameters(),
             DisablePortierisWebhook(),
             NetappTridentMigration(),
