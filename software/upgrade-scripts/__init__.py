@@ -75,6 +75,9 @@ RemoveLvmSnapshots = getattr(
 AddPlatformTlsParameters = getattr(
     _import_module(".42-add-platform-tls-parameters", __name__),
     "AddPlatformTlsParameters")
+AddMissingServiceParameters = getattr(
+    _import_module(".43-add-missing-service-parameters", __name__),
+    "AddMissingServiceParameters")
 NetappTridentMigration = getattr(
     _import_module(".203-netapp-trident-migration", __name__),
     "NetappTridentMigration")
@@ -122,6 +125,7 @@ PLUGINS = {
         ],
         FEATURE_PRE_APPS: [
             AddPlatformTlsParameters(),
+            AddMissingServiceParameters(),
             DisablePortierisWebhook(),
             NetappTridentMigration(),
         ],
