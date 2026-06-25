@@ -31,6 +31,10 @@ USM_PLUGIN_PATH = "/usr/local/share/upgrade.d"
 # TODO(bqian) at this point the patching behaviour of delete action is not
 # defined. When determined, the ostree pull command should include proper
 # commit-id in order to pull the right release.
+# TODO(heitormatsui) This class is deprecated for metapackage-enabled releases.
+# Per-metapackage scripts are stored under /opt/software/releases/<version>/<mp>/upgrade-scripts/
+# and executed directly via plugin_runner.run_scripts(). Remove this class once all
+# supported releases ship metapackages.
 class DeployPluginRunner(object):
     def __init__(self, deploy, plugin_path=None):
         self._deploy = deploy

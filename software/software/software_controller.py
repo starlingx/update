@@ -4662,11 +4662,47 @@ class PatchController(PatchService):
         deploy = self.db_api_instance.get_current_deploy()
         to_release = deploy.get("to_release")
         from_release = deploy.get("from_release")
+        metapackages = deploy.get("metapackages")
 
-        delete_cmd = f"/usr/bin/software-deploy-delete {from_release} {to_release} --is_major_release"
+        is_major_release = utils.is_upgrade_deploy(
+            utils.get_major_release_version(from_release),
+            utils.get_major_release_version(to_release))
 
-        runner = DeployPluginRunner(deploy)
-        runner.execute(delete_cmd)
+        if metapackages:
+            # Per-metapackage delete: build scripts dict and call directly
+            metapackages_scripts = {}
+            for mp_name, _, to_version in metapackages:
+                mp_id = f"{mp_name}_{to_version}"
+                mp_release = self.release_collection.get_metapackage_release_by_id(mp_id)
+                scripts = mp_release.activation_scripts if mp_release else []
+                metapackages_scripts[mp_name] = scripts
+
+            delete_cmd = ["source", "/etc/platform/openrc;",
+                          "/usr/bin/software-deploy-delete",
+                          from_release, to_release,
+                          "--metapackages", "'%s'" % json.dumps(metapackages_scripts)]
+            if is_major_release:
+                delete_cmd.append("--is_major_release")
+
+            env = os.environ.copy()
+            env["ANSIBLE_LOG_PATH"] = SOFTWARE_LOG_FILE
+            token, endpoint = utils.get_endpoints_token()
+            env["OS_AUTH_TOKEN"] = token
+            env["SYSTEM_URL"] = re.sub('/v[1,9]$', '', endpoint)
+
+            try:
+                LOG.info("starting subprocess %s" % ' '.join(delete_cmd))
+                subprocess.Popen(' '.join(delete_cmd), start_new_session=True,
+                                 shell=True, env=env)
+                LOG.info("subprocess started")
+            except subprocess.SubprocessError as e:
+                LOG.error("Failed to start command: %s. Error %s" % (
+                    ' '.join(delete_cmd), e))
+        else:
+            # Legacy: use DeployPluginRunner for non-metapackage major releases
+            delete_cmd = f"/usr/bin/software-deploy-delete {from_release} {to_release} --is_major_release"
+            runner = DeployPluginRunner(deploy)
+            runner.execute(delete_cmd)
 
     @require_deploy_state([DEPLOY_STATES.HOST_ROLLBACK_DONE, DEPLOY_STATES.COMPLETED, DEPLOY_STATES.START_DONE,
                            DEPLOY_STATES.START_FAILED],
@@ -4771,9 +4807,9 @@ class PatchController(PatchService):
                                 # Run just for the first (lowest) release
                                 break
 
-                # Set deploying releases to deployed state.
-                # Skip transitioning releases to deployed — system-deploy delete
-                # will handle this when the system-deploy entity is cleaned up.
+                # Set deploying releases to deployed state
+                # Skip transitioning releases to deployed, system-deploy delete
+                # will handle this when the system-deploy entity is cleaned up
                 if not is_system_deploy_in_progress():
                     deploying_release_state.deploy_completed()
             else:
@@ -4835,8 +4871,8 @@ class PatchController(PatchService):
         if is_major_release:
             if SW_VERSION == major_release:
                 msg_error = (
-                    f"Deploy {major_release} can't be deleted as it is still the"
-                    "current running software.An error may have occurred during the deploy.")
+                    f"Deploy {major_release} can't be deleted as it is still the "
+                    "current running software. An error may have occurred during the deploy.")
                 LOG.error(msg_error)
                 raise SoftwareServiceError(msg_error)
 
@@ -4857,13 +4893,7 @@ class PatchController(PatchService):
                                        fm_constants.FM_ALARM_STATE_CLEAR,
                                        "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, constants.CONTROLLER_FLOATING_HOSTNAME))
 
-            # execute deploy delete plugins
-            # NOTE(bqian) implement for major release deploy delete only as deleting action
-            # for patching is undefined, i.e, in the case of patch is applied, both from and
-            # to releases are applied.
-            self.execute_delete_actions()
-        else:
-            self.delete_all_patch_activate_scripts()
+        self.execute_delete_actions()
 
         msg_info += "Deploy deleted with success"
         self.db_api_instance.delete_deploy_host_all()

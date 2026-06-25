@@ -27,26 +27,35 @@ def do_activate(from_release, to_release, is_major_release, metapackages=None):
     res = True
     state = DEPLOY_STATES.ACTIVATE_DONE.value
     try:
-        if is_major_release:
-            LOG.info("Running activate scripts for major release")
+        if is_major_release and metapackages:
+            LOG.info("Running activate scripts for major release (per-metapackage)")
+            scripts_release = max(from_release, to_release,
+                                  key=lambda r: tuple(int(x) for x in r.split('.')))
+            for mp_name in metapackages:
+                mp_dir = os.path.join(SOFTWARE_RELEASES_STORAGE_DIR, scripts_release,
+                                      mp_name, UPGRADE_SCRIPTS_DIR)
+                LOG.info(f"Running activate scripts for metapackage: {mp_name}")
+                execute_migration_scripts(from_release, to_release,
+                                          ACTION_ACTIVATE,
+                                          migration_script_dir=mp_dir)
+        elif is_major_release:
+            LOG.info("Running activate scripts for major release (legacy)")
 
             from_major_release = utils.get_major_release_version(from_release)
             to_major_release = utils.get_major_release_version(to_release)
             execute_migration_scripts(from_major_release, to_major_release, ACTION_ACTIVATE)
-        else:
+        elif metapackages:
             LOG.info("Running activate scripts for patch release")
-            if metapackages:
-                # Always use the highest release scripts for activate
-                scripts_release = max(from_release, to_release,
-                                      key=lambda r: tuple(int(x) for x in r.split('.')))
-                for mp_name, scripts in metapackages.items():
-                    mp_dir = os.path.join(SOFTWARE_RELEASES_STORAGE_DIR, scripts_release,
-                                          mp_name, UPGRADE_SCRIPTS_DIR)
-                    LOG.info(f"Running activate scripts for metapackage: {mp_name}")
-                    run_scripts([mp_dir], action=ACTION_ACTIVATE, filter_names=scripts,
-                                from_release=from_release, to_release=to_release)
-            else:
-                LOG.warning("No metapackages were provided for activate")
+            scripts_release = max(from_release, to_release,
+                                  key=lambda r: tuple(int(x) for x in r.split('.')))
+            for mp_name, scripts in metapackages.items():
+                mp_dir = os.path.join(SOFTWARE_RELEASES_STORAGE_DIR, scripts_release,
+                                      mp_name, UPGRADE_SCRIPTS_DIR)
+                LOG.info(f"Running activate scripts for metapackage: {mp_name}")
+                run_scripts([mp_dir], action=ACTION_ACTIVATE, filter_names=scripts,
+                            from_release=from_release, to_release=to_release)
+        else:
+            LOG.warning("No metapackages were provided for activate")
 
     except Exception:
         state = DEPLOY_STATES.ACTIVATE_FAILED.value
