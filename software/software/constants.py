@@ -192,6 +192,9 @@ LICENSE_FILE = "/etc/platform/.license"
 VERIFY_LICENSE_BINARY = "/usr/bin/verify-license"
 VERSIONED_SCRIPTS_DIR = "%s/rel-%%s/bin/" % SOFTWARE_STORAGE_DIR
 SUPPORT_SCRIPTS_DIR = "support-scripts"
+PRECHECK_GENERIC_FAILURE = "Failed to perform deploy precheck. Internal error has occurred."
+PRECHECK_ISSUES_DETECTED_FAILURE = ("The following issues have been detected, "
+                                    "which prevents deploying the release.")
 
 WORKER_SUMMARY_DIR = "%s/summary" % SOFTWARE_STORAGE_DIR
 WORKER_DATETIME_FORMAT = "%Y%m%dT%H%M%S%f"
