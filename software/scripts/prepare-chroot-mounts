@@ -68,7 +68,7 @@ class ChrootMounts:
     # Mount points that may not exist on all upgrade paths
     # TODO: Remove ETCD_PATH when from_release 26.09 since etcd will be
     # provided by kubernetes-unversioned package.
-    OPTIONAL_MOUNTS = ["/var/lib/etcd"]
+    OPTIONAL_MOUNTS = [ETCD_PATH]
 
     def mount(self):
         for src, dst in self._mount_points.items():

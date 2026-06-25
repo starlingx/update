@@ -2103,30 +2103,6 @@ class EtcdUpgradeRollbackHook(BaseHook):
         self._update_hieradata(etcd_version, sw_version=self._to_release)
         LOG.info("EtcdUpgradeRollbackHook upgrade finished.")
 
-    def _get_etcd_version_from_symlink(self, root_dir="/"):
-        """Read etcd version from the stage0 symlink.
-
-        Parses the symlink target to extract the version:
-        /var/lib/etcd/stage0 -> /usr/local/etcd/<version>/stage0
-        """
-        symlink_path = os.path.join(root_dir,
-                                    self.ETCD_STAGE0_LINK.lstrip('/'))
-        try:
-            if not os.path.islink(symlink_path):
-                return None
-            target = os.readlink(symlink_path)
-            pattern = r"/usr/local/etcd/(.*)/stage0"
-            match = re.search(pattern, target)
-            if match is None:
-                LOG.warning("Unable to find etcd version in "
-                            "symlink target %s" % target)
-                return None
-            return match.group(1)
-        except Exception as e:
-            LOG.warning("Failed to read etcd version from symlink "
-                        "%s: %s" % (symlink_path, e))
-        return None
-
     def _get_etcd_version_from_old_hieradata(self):
         """Read etcd version from the rollback target release hieradata."""
         hieradata_path = (f"/opt/platform/puppet/{self._to_release}"
