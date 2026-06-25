@@ -3800,7 +3800,7 @@ class PatchController(PatchService):
             k8s_ver = system_deploy["to_k8s_version"]
             major_to_release = utils.get_major_release_version(system_deploy["to_release"])
             # snapshot is skipped as it was taken and validated during precheck
-            kwargs["options"]["snapshot"] = False
+            kwargs.setdefault("options", {})["snapshot"] = False
             LOG.info("System deploy in progress. Snapshot is skipped in deploy start.")
         else:
             k8s_ver = get_active_k8s_ver()
