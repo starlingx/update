@@ -32,6 +32,26 @@ if [[ "$ACTION" == "activate" ]]; then
             log "ERROR: Failed to add cgroup_v2_enabled parameter."
         fi
     fi
+
+    # Migrate cgroupRoot in kubelet-config ConfigMap (/k8s-infra -> /k8sinfra).
+    # This is the source of truth for kubelet config. If not updated here,
+    # any subsequent kubeadm operation (e.g., k8s upgrade) will regenerate
+    # config.yaml with the old name, causing kubelet to fail.
+    KUBECONFIG=/etc/kubernetes/admin.conf
+    if kubectl --kubeconfig=$KUBECONFIG -n kube-system \
+        get configmap kubelet-config -o yaml 2>/dev/null | grep -q '/k8s-infra'; then
+        kubectl --kubeconfig=$KUBECONFIG -n kube-system \
+            get configmap kubelet-config -o json | \
+            sed 's|/k8s-infra|/k8sinfra|g' | \
+            kubectl --kubeconfig=$KUBECONFIG apply -f -
+        if [ $? -eq 0 ]; then
+            log "Patched kubelet-config ConfigMap: cgroupRoot /k8s-infra -> /k8sinfra"
+        else
+            log "ERROR: Failed to patch kubelet-config ConfigMap."
+        fi
+    else
+        log "kubelet-config ConfigMap already has /k8sinfra or not accessible."
+    fi
 fi
 
 exit 0

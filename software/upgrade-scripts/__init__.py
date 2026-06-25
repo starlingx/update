@@ -117,7 +117,7 @@ PLUGINS = {
             ActivateKeystone(),
             _shell_script_plugin("23-resize-systemcontroller-filesystems.py",
                                  ACTION_ACTIVATE),
-            _shell_script_plugin("12-add-cgroup-v2-service-parameter.sh",
+            _shell_script_plugin("add-cgroup-v2-service-parameter.sh",
                                  ACTION_ACTIVATE),
         ],
         FEATURE_PRE_APPS: [

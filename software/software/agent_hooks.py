@@ -1145,10 +1145,7 @@ class CgroupBootParamsHook(BaseHook):
     2. Updates boot.env kernel params:
        - true:  systemd.unified_cgroup_hierarchy=1, cgroup_no_v1=all
        - false/missing: keeps v1 defaults (no change)
-    3. Fixes /var/lib/kubelet/config.yaml:
-       - Renames cgroupRoot /k8s-infra -> /k8sinfra (all cases)
-       - Sets cgroupDriver to systemd (v2 only)
-    4. Updates puppet hieradata (global.yaml) with cgroup_v2_enabled
+    3. Updates puppet hieradata (global.yaml) with cgroup_v2_enabled
        value so the boot puppet manifest knows whether to create
        v1 cgroup dirs or skip them.
 
@@ -1185,10 +1182,10 @@ class CgroupBootParamsHook(BaseHook):
             value = result.stdout.strip()
             if not value:
                 return None
-            LOG.info("Read cgroup_v2_enabled=%s from DB" % value)
+            LOG.info("CgroupBootParamsHook: Read cgroup_v2_enabled=%s from DB" % value)
             return value
         except Exception as e:
-            LOG.exception("Failed to read cgroup_v2_enabled: %s" % e)
+            LOG.exception("CgroupBootParamsHook: Failed to read cgroup_v2_enabled: %s" % e)
             return None
 
     def _set_v2_boot_params(self):
@@ -1196,24 +1193,23 @@ class CgroupBootParamsHook(BaseHook):
 
         Removes v1 params and adds v2 params so the next boot
         mounts the unified cgroup2 hierarchy.
-        Uses puppet-update-grub-env.py (one param per call).
+        Uses puppet-update-grub-env.py.
         """
         try:
             subprocess.run("python /usr/local/bin/puppet-update-grub-env.py "
-                           "--remove-kernelparams systemd.unified_cgroup_hierarchy",
+                           "--remove-kernelparams "
+                           "\"systemd.unified_cgroup_hierarchy "
+                           "SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE\"",
                            shell=True, capture_output=True, check=False)
             subprocess.run("python /usr/local/bin/puppet-update-grub-env.py "
-                           "--remove-kernelparams SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE",
-                           shell=True, capture_output=True, check=False)
-            subprocess.run("python /usr/local/bin/puppet-update-grub-env.py "
-                           "--add-kernelparams systemd.unified_cgroup_hierarchy=1",
+                           "--add-kernelparams "
+                           "\"systemd.unified_cgroup_hierarchy=1 "
+                           "cgroup_no_v1=all\"",
                            shell=True, capture_output=True, check=True)
-            subprocess.run("python /usr/local/bin/puppet-update-grub-env.py "
-                           "--add-kernelparams cgroup_no_v1=all",
-                           shell=True, capture_output=True, check=True)
-            LOG.info("Boot params set for cgroup v2")
+
+            LOG.info("CgroupBootParamsHook: Boot params set for cgroup v2")
         except Exception as e:
-            LOG.exception("Failed to set v2 boot params: %s" % e)
+            LOG.exception("CgroupBootParamsHook: Failed to set v2 boot params: %s" % e)
             raise
 
     def _set_v1_boot_params(self):
@@ -1224,56 +1220,18 @@ class CgroupBootParamsHook(BaseHook):
         """
         try:
             subprocess.run("python /usr/local/bin/puppet-update-grub-env.py "
-                           "--remove-kernelparams systemd.unified_cgroup_hierarchy",
+                           "--remove-kernelparams "
+                           "\"systemd.unified_cgroup_hierarchy cgroup_no_v1\"",
                            shell=True, capture_output=True, check=False)
             subprocess.run("python /usr/local/bin/puppet-update-grub-env.py "
-                           "--remove-kernelparams cgroup_no_v1",
-                           shell=True, capture_output=True, check=False)
-            subprocess.run("python /usr/local/bin/puppet-update-grub-env.py "
-                           "--add-kernelparams systemd.unified_cgroup_hierarchy=0",
+                           "--add-kernelparams "
+                           "\"systemd.unified_cgroup_hierarchy=0 "
+                           "SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1\"",
                            shell=True, capture_output=True, check=True)
-            subprocess.run("python /usr/local/bin/puppet-update-grub-env.py "
-                           "--add-kernelparams SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1",
-                           shell=True, capture_output=True, check=True)
-            LOG.info("Boot params set for cgroup v1 (rollback)")
+            LOG.info("CgroupBootParamsHook: Boot params set for cgroup v1")
         except Exception as e:
-            LOG.exception("Failed to set v1 boot params: %s" % e)
+            LOG.exception("CgroupBootParamsHook: Failed to set v1 boot params: %s" % e)
             raise
-
-    def _migrate_kubelet_config(self, cgroup_v2=False):
-        """Fix cgroupRoot and cgroupDriver in config.yaml before reboot.
-
-        /var/lib/kubelet/config.yaml is on persistent LVM (not ostree).
-        It survives the ostree switch and is read by kubelet at startup
-        (before puppet or sysinv can fix it). So we must fix it here.
-
-        - cgroupRoot: /k8s-infra -> /k8sinfra (rename, both v1 and v2)
-        - cgroupDriver: cgroupfs -> systemd (v2 only)
-        """
-        config_path = "/var/lib/kubelet/config.yaml"
-        if not os.path.exists(config_path):
-            LOG.info("CgroupBootParamsHook: %s not found, skipping" % config_path)
-            return
-        try:
-            with open(config_path, 'r') as f:
-                content = f.read()
-            changed = False
-            if 'cgroupRoot: /k8s-infra' in content:
-                content = content.replace('cgroupRoot: /k8s-infra',
-                                          'cgroupRoot: /k8sinfra')
-                changed = True
-                LOG.info("CgroupBootParamsHook: migrated cgroupRoot to /k8sinfra")
-            if cgroup_v2 and 'cgroupDriver: cgroupfs' in content:
-                content = content.replace('cgroupDriver: cgroupfs',
-                                          'cgroupDriver: systemd')
-                changed = True
-                LOG.info("CgroupBootParamsHook: set cgroupDriver to systemd")
-            if changed:
-                with open(config_path, 'w') as f:
-                    f.write(content)
-        except Exception as e:
-            LOG.exception("CgroupBootParamsHook: failed to update %s: %s"
-                          % (config_path, e))
 
     def _update_hieradata(self, cgroup_v2=False):
         """Update puppet hieradata so boot manifest knows cgroup version.
@@ -1341,7 +1299,7 @@ class CgroupBootParamsHook(BaseHook):
             LOG.exception("CgroupBootParamsHook: failed to revert %s: %s"
                           % (config_path, e))
 
-    def _rollback_from_2610(self):
+    def _rollback_cgroup_config_from_2610(self):
         """Handle rollback: revert all cgroup changes to old release state.
 
         Restores:
@@ -1359,12 +1317,14 @@ class CgroupBootParamsHook(BaseHook):
         LOG.info("CgroupBootParamsHook: STARTED")
         LOG.info(f"CgroupBootParamsHook: action={self._action}")
 
+        # Note: remove when 26.10 is no longer supported
         if self._action == HookManager.MAJOR_RELEASE_ROLLBACK and \
            self._from_release == "26.10":
 
-            self._rollback_from_2610()
+            self._rollback_cgroup_config_from_2610()
             return
 
+        # Note: remove when 26.10 is no longer supported
         if self._action == HookManager.MAJOR_RELEASE_UPGRADE and \
            self._to_release == "26.10":
 
@@ -1383,7 +1343,6 @@ class CgroupBootParamsHook(BaseHook):
                 LOG.info("CgroupBootParamsHook: setting v1 boot params")
                 self._set_v1_boot_params()
 
-            self._migrate_kubelet_config(cgroup_v2=cgroup_v2)
             self._update_hieradata(cgroup_v2=cgroup_v2)
 
         LOG.info("CgroupBootParamsHook: COMPLETED")
