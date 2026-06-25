@@ -4016,7 +4016,7 @@ class PatchController(PatchService):
                     script = mp.pre_start  # Check for pre_start script in metadata
                     if script:
                         mp_script_dir = Path(mp.metapackage_dir) / constants.HOST_SCRIPTS_TYPE
-                        plugin_runner.run_scripts([mp_script_dir], names=[script],
+                        plugin_runner.run_scripts([mp_script_dir], filter_names=[script],
                                                   extra_args=extra_args)
                 reload_release_data()
 
@@ -4093,7 +4093,7 @@ class PatchController(PatchService):
                     script = mp.post_start  # Check for post_start script in metadata
                     if script:
                         mp_script_dir = Path(mp.metapackage_dir) / constants.HOST_SCRIPTS_TYPE
-                        plugin_runner.run_scripts([mp_script_dir], names=[script],
+                        plugin_runner.run_scripts([mp_script_dir], filter_names=[script],
                                                   extra_args=extra_args)
 
                 # In prepatched add tombstone
@@ -4504,7 +4504,7 @@ class PatchController(PatchService):
             commit_id = None if is_patch else commit_id
 
             # Get highest deployed metapackage version to populate deploy state data
-            metapackage_deploy_state = self._get_highest_deployed(mp_data, apply=apply)
+            metapackage_deploy_state = self._get_highest_deployed(mp_deploy_set.metapackages, apply=apply)
 
             # Set deploy state to start, so that it can transition to start-done or start-failed
             collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
@@ -4524,13 +4524,16 @@ class PatchController(PatchService):
             LOG.info(msg)
             audit_log_info(msg)
 
+            # Running release in remove case might be a deployed-partial release
+            running_release = self.release_collection.highest_release
+
             release_state = ReleaseState(release_ids=mp_deploy_set.metapackage_ids)
             release_state.start_remove()
 
             reboot_required = mp_deploy_set.reboot_required
 
             # Get highest deployed metapackage version to populate deploy state data
-            metapackage_deploy_state = self._get_highest_deployed(mp_data, apply=apply)
+            metapackage_deploy_state = self._get_highest_deployed(mp_deploy_set.metapackages, apply=apply)
             deploy_sw_release = metapackage_deploy_state[0][2]
 
             collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
@@ -4554,7 +4557,7 @@ class PatchController(PatchService):
                     script = mp.pre_start  # Check for pre_start script in metadata
                     if script:
                         mp_script_dir = Path(mp.metapackage_dir) / constants.HOST_SCRIPTS_TYPE
-                        plugin_runner.run_scripts([mp_script_dir], names=[script],
+                        plugin_runner.run_scripts([mp_script_dir], filter_names=[script],
                                                   extra_args=extra_args)
                 reload_release_data()
 
@@ -4605,7 +4608,7 @@ class PatchController(PatchService):
                     script = mp.post_start  # Check for post_start script in metadata
                     if script:
                         mp_script_dir = Path(mp.metapackage_dir) / constants.HOST_SCRIPTS_TYPE
-                        plugin_runner.run_scripts([mp_script_dir], names=[script],
+                        plugin_runner.run_scripts([mp_script_dir], filter_names=[script],
                                                   extra_args=extra_args)
 
                 # In prepatched add tombstone
@@ -4925,6 +4928,16 @@ class PatchController(PatchService):
         if deploying.is_major_release_deployment() \
                 or from_release_maj_min_version != to_release_maj_min_version:
             activate_cmd.append('--is_major_release')
+
+        metapackages = deploy.get("metapackages")
+        if metapackages:
+            metapackages_scripts = {}
+            for mp_name, _, to_version in metapackages:
+                mp_id = f"{mp_name}_{to_version}"
+                mp_release = self.release_collection.get_metapackage_release_by_id(mp_id)
+                scripts = mp_release.activation_scripts if mp_release else []
+                metapackages_scripts[mp_name] = scripts
+            activate_cmd.append("--metapackages '%s'" % json.dumps(metapackages_scripts))
 
         env = os.environ.copy()
         env["ANSIBLE_LOG_PATH"] = SOFTWARE_LOG_FILE
