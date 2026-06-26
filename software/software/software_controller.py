@@ -2200,7 +2200,13 @@ class PatchController(PatchService):
         return to_remove_releases
 
     def reset_feed_commit(self, release):
-        commit_id = release.commit_id
+        if isinstance(release, MetapackageDeploymentSet):
+            # Reset feed using base_commit_id from the metapackage metadata
+            base_commit_id = release.base_commit_id
+            commit_id = next(iter(base_commit_id), None)
+        else:
+            commit_id = release.commit_id
+
         if commit_id is None:
             LOG.warning("Unable to find the commit id in metadata")
             return
@@ -5001,6 +5007,7 @@ class PatchController(PatchService):
         deploy = self.db_api_instance.get_current_deploy()
         from_release = deploy.get("from_release")
         to_release = deploy.get("to_release")
+        metapackages = deploy.get("metapackages")
         from_release_deployment = self.release_collection.get_release_id_by_sw_release(from_release)
         to_release_deployment = self.release_collection.get_release_id_by_sw_release(to_release)
 
@@ -5017,20 +5024,42 @@ class PatchController(PatchService):
             if is_removing:
                 raise SoftwareServiceError("Abort operation is not supported in patch removal")
 
-            from_deployment = self.release_collection.get_release_by_id(from_release_deployment)
-            self.reset_feed_commit(from_deployment)
+            if metapackages:
+                # Component-based path
+                deploying_mps = self.release_collection.get_ordered_metapackages(
+                    filter_by_states=[states.DEPLOYING])
+                mp_deploy_set = MetapackageDeploymentSet(deploying_mps)
 
-            self.send_latest_feed_commit_to_agent(from_deployment.commit_id)
-            self.software_sync()
+                deploy_sw_version = mp_deploy_set.sw_version
 
-        major_from_release = utils.get_major_release_version(from_release)
-        feed_repo = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, major_from_release)
-        deploy_release = self._release_basic_checks(from_release_deployment)
-        commit_id = deploy_release.commit_id
+                self.reset_feed_commit(mp_deploy_set)
+                latest_feed_commit = ostree_utils.get_feed_latest_commit(deploy_sw_version)
+                self.send_latest_feed_commit_to_agent(latest_feed_commit)
+                self.software_sync()
 
-        # TODO(lbonatti): remove this condition when commit-id is built into GA metadata.
-        if is_major_release and commit_id in [constants.COMMIT_DEFAULT_VALUE, None]:
-            commit_id = ostree_utils.get_feed_latest_commit(deploy_release.sw_version)
+                feed_repo = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, deploy_sw_version)
+                commit_id = next(iter(mp_deploy_set.base_commit_id))
+            else:
+                # Legacy path
+                from_deployment = self.release_collection.get_release_by_id(from_release_deployment)
+                self.reset_feed_commit(from_deployment)
+
+                self.send_latest_feed_commit_to_agent(from_deployment.commit_id)
+                self.software_sync()
+
+                # Values for deploy_state.abort()
+                major_from_release = utils.get_major_release_version(from_release)
+                feed_repo = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, major_from_release)
+                commit_id = from_deployment.commit_id
+        else:
+            major_from_release = utils.get_major_release_version(from_release)
+            deploy_release = self._release_basic_checks(from_release_deployment)
+            commit_id = deploy_release.commit_id
+            feed_repo = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, major_from_release)
+
+            # TODO(lbonatti): remove this condition when commit-id is built into GA metadata.
+            if is_major_release and commit_id in [constants.COMMIT_DEFAULT_VALUE, None]:
+                commit_id = ostree_utils.get_feed_latest_commit(deploy_release.sw_version)
 
         # Update the deployment
         deploy_state = DeployState.get_instance()
