@@ -47,3 +47,12 @@ KUBERNETES_CONF_PATH = "/etc/kubernetes"
 KUBERNETES_ADMIN_CONF_FILE = "admin.conf"
 
 VOLATILE_PXEBOOT_PATH = "/var/pxeboot"
+
+# Metapackages
+METAPACKAGE_SWMGMT = "swmgmt"
+
+# Component script variables
+HOST_SCRIPTS_DIR = "host-scripts"
+
+# Script names
+AGENT_HOOKS_SCRIPT = "agent_hooks.py"

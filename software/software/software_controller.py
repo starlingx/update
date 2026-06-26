@@ -585,6 +585,7 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
         self.ip = None
         self.force = False
         self.major_release = None
+        self.metapackages = []
         self.commit_id = None
         self.additional_data = additional_data
 
@@ -593,6 +594,7 @@ class PatchMessageAgentInstallReq(messages.PatchMessage):
         messages.PatchMessage.encode(self)
         self.message['force'] = self.force
         self.message['major_release'] = self.major_release
+        self.message['metapackages'] = self.metapackages
         self.message['commit_id'] = self.commit_id
         if self.additional_data:
             self.message['additional_data'] = self.additional_data.copy()
@@ -5432,6 +5434,11 @@ class PatchController(PatchService):
         if system_deploy:
             additional_data["to_kubelet_version"] = system_deploy["to_k8s_version"]
 
+        metapackages = self.release_collection.get_ordered_metapackages(
+            filter_by_states=[states.DEPLOYING], tuple_format=True)
+        if not metapackages:
+            LOG.warning("No metapackages found in deploying state during deploy host")
+
         self.hosts_lock.acquire()
         self.hosts[ip].install_pending = True
         self.hosts[ip].install_status = False
@@ -5442,6 +5449,7 @@ class PatchController(PatchService):
         installreq.ip = ip
         installreq.force = force
         installreq.major_release = major_release
+        installreq.metapackages = metapackages
         installreq.commit_id = commit_id
         installreq.encode()
         self.socket_lock.acquire()

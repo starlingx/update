@@ -7,13 +7,21 @@ from abc import ABC
 from abc import abstractmethod
 from concurrent.futures import as_completed
 from concurrent.futures import ThreadPoolExecutor
+from packaging import version
+from software.constants import COMPONENT_SOFTWARE_STORAGE_DIR
+from software.utilities import constants
+
+import importlib.util
+import json
 import logging
 import os
 import subprocess
 import sys
 import threading
-import importlib.util
 
+from typing import List
+from typing import Optional
+from typing import Tuple
 
 LOG = logging.getLogger('main_logger')
 
@@ -216,6 +224,85 @@ def execute_migration_scripts(from_release, to_release, action, port=None,
     failed = [s for s in states if s.endswith('-failed')]
     if failed:
         raise Exception(f"Deployment plugins failed: {failed}")
+
+
+def execute_agent_hooks(major_release, metapackages: Optional[List[Tuple]] = None,
+                        additional_data=None):
+    """Run agent hooks for a major release deployment.
+    :param major_release: target major release version
+    :param metapackages: list of metapackages
+    :param additional_data: dict of additional data passed to the hook script
+    """
+    LOG.info("Running agent hooks...")
+
+    extra_args = ["--software-version", major_release]
+    if additional_data:
+        extra_args.extend(["--additional-data", json.dumps(additional_data)])
+
+    if metapackages:
+        LOG.info("Executing componentized method")
+        swmgmt = tuple()
+        for metapackage in metapackages:
+            if metapackage[0] == constants.METAPACKAGE_SWMGMT:
+                swmgmt = metapackage
+                break
+
+        if not swmgmt:
+            raise Exception("Could not retrieve the swmgmt metapackage info")
+
+        script_path = os.path.join(
+            COMPONENT_SOFTWARE_STORAGE_DIR,
+            swmgmt[1],
+            swmgmt[0],
+            constants.HOST_SCRIPTS_DIR)
+
+        if not os.path.isdir(script_path):
+            raise Exception("Could not find host-scripts directory in "
+                            f"metapackage {swmgmt[0]} for release "
+                            f"{swmgmt[1]}. Script path: {script_path}")
+    else:
+        if version.Version(major_release) > version.Version(constants.SW_VERSION):
+            ostree_path = "/ostree/1"
+        else:
+            ostree_path = "/ostree/2"
+
+        LOG.info("No metapackages available, executing legacy method")
+        script_path = os.path.normpath(ostree_path + "/usr/lib/python3/dist-packages/software/")
+        if not os.path.isdir(script_path):
+            raise Exception(f"Could not find software path. Script path: {script_path}")
+
+    run_scripts([script_path], filter_names=constants.AGENT_HOOKS_SCRIPT, extra_args=extra_args)
+
+    LOG.info("Agent hooks executed successfully")
+
+
+def execute_host_scripts(metapackages: List[Tuple], filter_names=None, extra_args=None):
+    """Run host scripts for metapackages in a major release deployment.
+    :param metapackages: list of tuples containing metapackage info in the format
+                         of (metapackage.component, metapackage.sw_release), used
+                         to build the path to the host-scripts.
+    :param filter_names: list of script names to filter execution (optional)
+    :param additional_data: dict of additional data passed to the hook script
+    """
+    if not metapackages:
+        raise Exception("No metapackages found to run host-scripts.")
+
+    host_scripts = []
+    for metapackage in metapackages:
+        # The host-scripts are located at:
+        # /opt/software/releases/<metapackage_release>/<metapackage_name>/host-scripts/
+        mp_dir = os.path.join(
+            COMPONENT_SOFTWARE_STORAGE_DIR, metapackage[1], metapackage[0],
+            constants.HOST_SCRIPTS_DIR)
+        if not os.path.isdir(mp_dir):
+            LOG.info("Metapackage %s does not have host-scripts directory in release %s. "
+                     "Skipping...", metapackage[0], metapackage[1])
+        else:
+            host_scripts.append(mp_dir)
+
+    if host_scripts:
+        run_scripts(host_scripts, filter_names=filter_names, extra_args=extra_args)
+    LOG.info("Host scripts executed successfully.")
 
 
 def discover_scripts(script_dirs, action="run", filter_names=None, extra_args=None):

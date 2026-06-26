@@ -73,6 +73,7 @@ RC_SUCCESS = 0
 RC_UNHEALTHY = 3
 
 # Script names
+AGENT_HOOKS_SCRIPT = "agent_hooks.py"
 DEPLOY_PRECHECK_SCRIPT = "deploy-precheck"
 UPGRADE_UTILS_SCRIPT = "upgrade_utils.py"
 DEPLOY_START_SCRIPT = "deploy-start"
@@ -80,6 +81,8 @@ REMOVE_TEMPORARY_DATA_SCRIPT = "remove-temporary-data"
 MAJOR_RELEASE_UPLOAD_SCRIPT = "major-release-upload"
 USM_LOAD_IMPORT_SCRIPT = "usm_load_import"
 PATCH_SCRIPTS_STAGING_DIR = "/var/www/pages/updates/software-scripts"
+HOST_PRE_INSTALL_SCRIPT = "pre-install.sh"
+HOST_POST_INSTALL_SCRIPT = "post-install.sh"
 
 # Component script variables
 HOST_SCRIPTS_TYPE = "host-scripts"

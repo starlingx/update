@@ -2136,36 +2136,6 @@ def load_module(path, module_name):
     return module
 
 
-def execute_agent_hooks(software_version, additional_data=None):
-    """
-    Executes the agent hooks during deploy host step. The
-    agent hook file used will always be from the most recent
-    release, both for upgrade and rollback
-    :param software_version: to-release major release version
-    :param additional_data: additional data used by the hooks
-    """
-    # determine if it is a rollback and set the source directory
-    # of the agent hook file accordingly
-    if version.Version(software_version) > version.Version(constants.SW_VERSION):
-        ostree_path = "/ostree/1"
-    else:
-        ostree_path = "/ostree/2"
-
-    # load the agent hooks module dynamically
-    agent_hooks_path = os.path.normpath(ostree_path +
-                                        "/usr/lib/python3/dist-packages/software/agent_hooks.py")
-    agent_hooks = load_module(agent_hooks_path, "agent_hooks")
-    hook_manager = agent_hooks.HookManager.create_hook_manager(software_version,
-                                                               additional_data=additional_data)
-    # execute the agent hooks
-    try:
-        hook_manager.run_hooks()
-        LOG.info("Agent hooks executed successfully.")
-    except Exception as e:
-        LOG.exception("Error running agent hooks: %s" % str(e))
-        raise
-
-
 def to_bool(value):
     if isinstance(value, bool):
         return value
