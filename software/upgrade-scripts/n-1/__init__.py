@@ -63,6 +63,7 @@ PLUGINS = {
         ],
         FEATURE_PRE_APPS: [
             _sp("10-add-cluster-host-ip-to-kube-apiserver-cert.py", ACTION_ACTIVATE),
+            _sp("203-netapp-trident-migration.py", ACTION_ACTIVATE),
         ],
         K8S_APP_UPDATE: [
             _sp("18-disable-portieris-webhook.py", ACTION_ACTIVATE),
@@ -87,7 +88,9 @@ PLUGINS = {
             _sp("21-k8s-app-upgrade.py", ACTION_ACTIVATE_ROLLBACK),
             _sp("18-disable-portieris-webhook.py", ACTION_ACTIVATE_ROLLBACK),
         ],
-        FEATURE_POST_APPS: [],
+        FEATURE_POST_APPS: [
+            _sp("203-netapp-trident-migration.py", ACTION_ACTIVATE_ROLLBACK),
+        ],
         FRAMEWORK_FINALIZE: [],
     },
     ACTION_DELETE: {

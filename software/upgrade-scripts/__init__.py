@@ -75,6 +75,9 @@ RemoveLvmSnapshots = getattr(
 AddPlatformTlsParameters = getattr(
     _import_module(".42-add-platform-tls-parameters", __name__),
     "AddPlatformTlsParameters")
+NetappTridentMigration = getattr(
+    _import_module(".203-netapp-trident-migration", __name__),
+    "NetappTridentMigration")
 
 # Shell scripts are wrapped as ScriptPlugin instances
 _SCRIPT_DIR = os.path.dirname(__file__)
@@ -120,6 +123,7 @@ PLUGINS = {
         FEATURE_PRE_APPS: [
             AddPlatformTlsParameters(),
             DisablePortierisWebhook(),
+            NetappTridentMigration(),
         ],
         K8S_APP_UPDATE: [
             _shell_script_plugin("19-assert-docker-health.py", ACTION_ACTIVATE),
@@ -141,7 +145,9 @@ PLUGINS = {
             K8sAppUpgrade(),
             DisablePortierisWebhook(),
         ],
-        FEATURE_POST_APPS: [],
+        FEATURE_POST_APPS: [
+            NetappTridentMigration(),
+        ],
         FRAMEWORK_FINALIZE: [],
     },
     ACTION_DELETE: {
