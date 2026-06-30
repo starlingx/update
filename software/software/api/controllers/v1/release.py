@@ -95,9 +95,20 @@ class ReleaseController(RestController):
                 # Protect against duplications
                 uploaded_files = sorted(set(request_data))
                 # Save all uploaded files to /scratch/upload_files dir
-                for file_item in uploaded_files:
-                    assert isinstance(file_item[1], cgi.FieldStorage)
-                    utils.save_temp_file(file_item[1], temp_dir)
+                for _, file_storage in uploaded_files:
+                    assert isinstance(file_storage, cgi.FieldStorage)
+                    src_path = file_storage.filename
+                    dest_path = os.path.join(temp_dir, os.path.basename(src_path))
+                    # If source is already on /scratch, link instead of copy
+                    try:
+                        if os.path.isfile(src_path) and \
+                                src_path.startswith(constants.SCRATCH_DIR):
+                            os.makedirs(temp_dir, exist_ok=True)
+                            os.link(src_path, dest_path)
+                        else:
+                            utils.save_temp_file(file_storage, temp_dir)
+                    except OSError:
+                        utils.save_temp_file(file_storage, temp_dir)
 
                 # Get all uploaded files from /scratch dir
                 uploaded_files = utils.get_all_files(temp_dir)
