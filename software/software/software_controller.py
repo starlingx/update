@@ -2940,13 +2940,20 @@ class PatchController(PatchService):
             return dict(info=msg_info, warning=msg_warning, error=msg_error, system_healthy=True)
 
         if not os.path.isfile(precheck_script):
-            msg = "Release files for deployment %s are not present on the system, " \
-                  "cannot proceed with the precheck." % release_version
-            LOG.error(msg)
-            msg_error = "Fail to perform deploy precheck. " \
-                        "Uploaded release may have been damaged. " \
-                        "Try delete and re-upload the release.\n"
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+            if metapackage:
+                # For component based releases, the deploy-precheck script is not mandatory
+                system_healthy = True
+            else:
+                # For legacy releases, the deploy-precheck script is mandatory
+                system_healthy = False
+                msg = "Release files for deployment %s are not present on the system, " \
+                      "cannot proceed with the precheck." % release_version
+                LOG.error(msg)
+                msg_error = "Fail to perform deploy precheck. " \
+                            "Uploaded release may have been damaged. " \
+                            "Try delete and re-upload the release.\n"
+            self._save_precheck_result(release_version, healthy=system_healthy)
+            return dict(info=msg_info, warning=msg_warning, error=msg_error, system_healthy=system_healthy)
 
         if self.pre_bootstrap and not patch:
             # Deploy precheck should be avoided in case of major release.
@@ -3051,6 +3058,8 @@ class PatchController(PatchService):
         release_info["reboot_required"] = release.reboot_required
         release_info["prepatched_iso"] = release.prepatched_iso
         release_info["apply_operation"] = release > running_release
+        release_info["from_release"] = running_release.sw_release
+        release_info["to_release"] = release.sw_release
 
         return release_info
 
@@ -3599,8 +3608,7 @@ class PatchController(PatchService):
                 states.COMPONENT_SELECTED_STATES))
             if not selected_releases:
                 raise ReleasePrecheckInvalidRequest(
-                    "No metapackage releases selected for deployment. "
-                    "Specify a product/metapackage release or select for deployment.")
+                    "No metapackage releases found in selected state for deployment.")
             return selected_releases
 
         # Releases are informed
@@ -3618,7 +3626,7 @@ class PatchController(PatchService):
 
         if not product.metapackages:
             raise ReleasePrecheckInvalidRequest(
-                f"No valid metapackage found for deployment in {to_release} release.")
+                f"No valid metapackages found for deployment in {to_release} release.")
 
         return list(product.metapackages.keys())
 
@@ -3731,27 +3739,33 @@ class PatchController(PatchService):
             if not is_patch and socket.gethostname() != constants.CONTROLLER_0_HOSTNAME:
                 msg = ("Deploy precheck for major releases needs to be executed in "
                        f"{constants.CONTROLLER_0_HOSTNAME} host")
+                LOG.error(msg)
                 msg_error += f"{release_id}:\n{msg}\n"
                 unhealthy_releases.append(release_id)
-                break
+
+                msg_additional_data.update({release_id: {"error": msg}})
+                continue
 
             ret = self._deploy_precheck(release_version, release_name,
                                         force, region_name, is_patch,
                                         snapshot=snapshot, **kwargs)
             if ret:
-                if ret.get("system_healthy") is None:
-                    msg = constants.PRECHECK_GENERIC_FAILURE + "\n" + ret.get('error')
+                if ret.get(constants.SYSTEM_HEALTHY) is None:
+                    msg = ("Failed to perform deploy precheck. Internal error "
+                           "has occurred.\n" + ret.get('error'))
                     msg_error += f"{release_id}:\n{msg}\n"
+
+                    ret[constants.SYSTEM_HEALTHY] = False
                     unhealthy_releases.append(release_id)
-                elif not ret.get("system_healthy"):
-                    msg = constants.PRECHECK_ISSUES_DETECTED_FAILURE + "\n" + ret.get('info')
+                elif not ret.get(constants.SYSTEM_HEALTHY):
+                    msg = ("The following issues have been detected, which "
+                           "prevents deploying the release.\n" + ret.get('info'))
                     msg_error += f"{release_id}:\n{msg}\n"
+
+                    ret[constants.SYSTEM_HEALTHY] = False
                     unhealthy_releases.append(release_id)
                 else:
                     healthy_releases.append(release_id)
-
-            release_info = self._get_release_additional_info(release)
-            ret.update(release_info)
 
             msg_info += f"{release_id}:\n{ret.get('info')}\n"
             msg_additional_data.update({release_id: ret})
@@ -3772,7 +3786,11 @@ class PatchController(PatchService):
             LOG.error(msg)
             msg_error += msg
 
-        return dict(info=msg_info, error=msg_error, warning=msg_warning, additional_data=msg_additional_data)
+        product_id = self.release_collection.get_release_id_by_sw_release(release_version)
+        product_release = self.release_collection.get_release_by_id(product_id)
+        release_info = self._get_release_additional_info(product_release)
+
+        return dict(info=msg_info, error=msg_error, warning=msg_warning, **release_info, additional_data=msg_additional_data)
 
     def _deploy_upgrade_start(self, to_release, commit_id, **kwargs):
         LOG.info("start deploy upgrade to %s from %s" % (to_release, SW_VERSION))
