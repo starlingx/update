@@ -6,17 +6,23 @@
 from software_client.common import utils
 
 
-# --all is an optional argument. Default: highest currently deployed release.
+# --all is an optional argument. Default: highest currently deployed release
 @utils.arg('--all',
            default=False,
            required=False,
            action="store_true",
-           help='displays all metapackages')
-# --state is an optional argument.
+           help='Displays all metapackages')
+# --state is an optional argument
 @utils.arg('--state',
            default=None,
            required=False,
-           help='filter against a release state')
+           help='Filter against a provided state')
+# --pre-upgrade-deploy is an optional argument
+@utils.arg('--pre-upgrade-deploy',
+           default=None,
+           required=False,
+           action="store_true",
+           help='Displays the pre-upgrade-deploy metapackages')
 def do_list(cc, args):
     """List the metapackages releases"""
     resp, data = cc.metapackage.list(args)

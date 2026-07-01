@@ -2560,11 +2560,14 @@ class PatchController(PatchService):
 
         query_all = False
         query_metapackages = False
+        query_pre_upgrade_deploy = False
         if "metapackages" in kwargs:
             query_metapackages = True
             # The parameter "all" is supported only for metapackage filters
             if "all" in kwargs:
                 query_all = True
+            if "pre-upgrade-deploy" in kwargs:
+                query_pre_upgrade_deploy = True
 
         results = []
 
@@ -2580,7 +2583,8 @@ class PatchController(PatchService):
 
         # Metapackage filters
         def filter_by_metapackages():
-            for mp in self.release_collection.iterate_metapackages(query_state, query_all):
+            for mp in self.release_collection.iterate_metapackages(state=query_state, query_all=query_all,
+                                                                   query_pre_upgrade_deploy=query_pre_upgrade_deploy):
                 yield mp
 
         if query_metapackages:
@@ -2598,8 +2602,6 @@ class PatchController(PatchService):
         return results
 
     def software_release_query_specific_cached(self, release_ids):
-        LOG.info("software release show")
-
         results = []
 
         for release_id in release_ids:

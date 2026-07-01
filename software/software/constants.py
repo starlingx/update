@@ -267,6 +267,8 @@ NUMBER_OF_COMMITS_TAG = "number_of_commits"
 OSTREE_TAG = "ostree"
 PREPATCHED_ISO_TAG = "prepatched_iso"
 REQUIRES_TAG = "requires"
+METAPACKAGES_TAG = "metapackages"
+PRE_UPGRADE_DEPLOY_TAG = "pre_upgrade_deploy"
 
 # Flags
 INSTALL_LOCAL_FLAG = "/opt/software/.install_local"

@@ -25,6 +25,9 @@ class MetapackageManager(base.Manager):
         if args.all:
             additions.append("all")
 
+        if args.pre_upgrade_deploy:
+            additions.append("pre-upgrade-deploy")
+
         if len(additions) > 0:
             path = path + "?" + "&".join(additions)
 

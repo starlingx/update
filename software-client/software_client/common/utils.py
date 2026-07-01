@@ -248,6 +248,8 @@ def display_detail_result(data):
                 row = ['', r]
                 table.append(row)
         else:
+            if isinstance(v, dict):
+                v = json.dumps(v, indent=2)
             row = [k, v]
             table.append(row)
     print(tabulate(table, header, tablefmt='pretty', colalign=("left", "left")))

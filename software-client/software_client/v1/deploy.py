@@ -39,12 +39,15 @@ class DeployManager(base.Manager):
     def unselect(self, args):
         releases = args.releases
         unselect_all = args.all
+        pre_upgrade_deploy = args.pre_upgrade_deploy
 
         body = {
             "unselect_all": unselect_all,
         }
         if releases:
             body.update({"releases": releases})
+        if pre_upgrade_deploy:
+            body["pre_upgrade_deploy"] = pre_upgrade_deploy
 
         path = "/v1/deploy/unselect"
 
@@ -83,6 +86,8 @@ class DeployManager(base.Manager):
             body["options"] = args.options
         if args.releases:
             body["releases"] = args.releases
+        if args.pre_upgrade_deploy:
+            body["pre_upgrade_deploy"] = args.pre_upgrade_deploy
 
         return self._post(path, body=body)
 
