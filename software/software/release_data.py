@@ -427,18 +427,12 @@ class MetapackageDeploymentSet:
 
     # TODO(heitormatsui): currently it will support only deploying metapackages
     #  belonging to a single product release at once, remove this limitation in the future
-    def __init__(self, metapackages):
+    def __init__(self, metapackages: list):
         """
         :param metapackages: list of SWRelease metapackages
         """
         if not metapackages:
             raise ReleaseInvalidData("Cannot deploy an empty list of metapackages")
-
-        # Filter out no-op metapackages (already in target state) that won't be in selected state
-        metapackages = [mp for mp in metapackages if mp.state in states.COMPONENT_SELECTED_STATES]
-
-        if not metapackages:
-            raise ReleaseInvalidData("All metapackages are already in the target state")
 
         self._metapackages = metapackages
 
@@ -631,6 +625,7 @@ class SWReleaseCollection(object):
         into a tuple with metapackage component and release, or any single metapackage
         property value.
 
+        :param filter_by_ids: list of release ids to be filtered in release collection.
         :param filter_by_states: list of states to be filtered in release collection.
         :param tuple_format: boolean value to format the filtered list in tuple format.
         E.g.: [(metapackage.component, metapackage.sw_release)]
@@ -643,19 +638,30 @@ class SWReleaseCollection(object):
         if not isinstance(filter_by_states, list):
             filter_by_states = []
 
+        filter_by_ids = kwargs.get("filter_by_ids", [])
+        if not isinstance(filter_by_ids, list):
+            filter_by_ids = []
+
         filtered_metapackages = []
+        # Order metapackage list
         sorted_list = sorted(self._sw_metapackages)
+
+        # Apply filters to the ordered list
+        if filter_by_ids:
+            sorted_list = [rel_id for rel_id in sorted_list if rel_id in filter_by_ids]
+
+        # Apply filters to the metapackages in the ordered list
         if not filter_by_states:
-            # Order metapackage list
+            # Fallback to the ordered metapackage list
             filtered_metapackages = [self._sw_metapackages[rel_id] for rel_id in sorted_list]
         else:
-            # Apply filters to the ordered list
+            # Filter by metapackage attributes
             for rel_id in sorted_list:
                 rel_data = self._sw_metapackages[rel_id]
                 if filter_by_states and rel_data.state in filter_by_states:
                     filtered_metapackages.append(rel_data)
 
-        # Define format
+        # Define list format
         formatted_metapackages = []
         if kwargs.get("tuple_format", False):
             formatted_metapackages.extend(
