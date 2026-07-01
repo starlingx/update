@@ -92,7 +92,7 @@ class ScriptPlugin(APlugin):
             MSG_SCRIPT_FAILURE = "Deployment script %s failed with return code %d" \
                                  "\nScript output:\n%s"
             try:
-                cmdline = [script, from_release, to_release, action]
+                cmdline = [script] + [p for p in (from_release, to_release, action) if p]
                 if port is not None:
                     cmdline.append(str(port))
                 cmdline.extend(self._extra_args)
@@ -305,7 +305,7 @@ def execute_host_scripts(metapackages: List[Tuple], filter_names=None, extra_arg
     LOG.info("Host scripts executed successfully.")
 
 
-def discover_scripts(script_dirs, action="run", filter_names=None, extra_args=None):
+def discover_scripts(script_dirs, action="", filter_names=None, extra_args=None):
     """Discover shell/python scripts from one or more directories."""
     plugins = []
     for d in script_dirs:
@@ -325,7 +325,7 @@ def discover_scripts(script_dirs, action="run", filter_names=None, extra_args=No
     return plugins
 
 
-def run_scripts(script_dirs, action="run", from_release=None, to_release=None,
+def run_scripts(script_dirs, action="", from_release="", to_release="",
                 filter_names=None, extra_args=None):
     plugins = discover_scripts(script_dirs, action, filter_names=filter_names, extra_args=extra_args)
     runner = PluginRunner(plugins, max_parallel=1)
