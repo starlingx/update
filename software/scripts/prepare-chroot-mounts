@@ -29,6 +29,7 @@ class ChrootMounts:
     KUBERNETES_PATH="/var/lib/kubernetes"
     ETCD_PATH="/var/lib/etcd"
     PLATFORM_CONF_PATH="/etc/platform"
+    SOFTWARE_RELEASES_PATH="/opt/software/releases"
     TMP_PATH="/tmp"
     USR_PATH="/usr"
     ETC_PATH="/etc"
@@ -55,6 +56,8 @@ class ChrootMounts:
                 os.path.normpath(f"{checkout_dir}/{self.PROC_PATH}"),
             os.path.normpath(self.LOG_PATH):
                 os.path.normpath(f"{checkout_dir}/{self.LOG_PATH}"),
+            os.path.normpath(self.SOFTWARE_RELEASES_PATH):
+                os.path.normpath(f"{checkout_dir}/{self.SOFTWARE_RELEASES_PATH}"),
             os.path.normpath(self.PLATFORM_CONF_PATH):
                 os.path.normpath(f"{self.TMP_PATH}/{self.PLATFORM_CONF_PATH}"),
             os.path.normpath(f"{checkout_dir}/{self.USR_PATH}/{self.ETC_PATH}"):
@@ -67,8 +70,9 @@ class ChrootMounts:
 
     # Mount points that may not exist on all upgrade paths
     # TODO: Remove ETCD_PATH when from_release 26.09 since etcd will be
-    # provided by kubernetes-unversioned package.
-    OPTIONAL_MOUNTS = [ETCD_PATH]
+    #  provided by kubernetes-unversioned package.
+    # TODO(heitormatsui): remove SOFTWARE_RELEASES_PATH after stx-14
+    OPTIONAL_MOUNTS = [ETCD_PATH, SOFTWARE_RELEASES_PATH]
 
     def mount(self):
         for src, dst in self._mount_points.items():
@@ -80,11 +84,11 @@ class ChrootMounts:
                 os.makedirs(dst, exist_ok=True)
                 cmd = ["mount", "--bind", src, dst]
                 subprocess.run(cmd, check=True, text=True, capture_output=True)
+                LOG.info(f"Bind mounted {src} -> {dst}")
             except subprocess.CalledProcessError as e:
                 LOG.error(f"Failed to bind mount {src} to {dst}: {str(e.stderr)}")
                 self.umount()
                 raise
-            LOG.info(f"Bind mounted {src} -> {dst}")
 
     def umount(self):
         for _, dst in self._mount_points.items():

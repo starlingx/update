@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 import os
+from pathlib import Path
 import re
 import shutil
 import socket
@@ -129,12 +130,13 @@ def get_feed_path(sw_release):
     return path
 
 
-def get_software_deploy_script(sw_version, script):
-    if script == constants.DEPLOY_PRECHECK_SCRIPT:
-        return get_precheck_script(sw_version)
+def get_release_path(sw_release):
+    return Path(constants.COMPONENT_SOFTWARE_STORAGE_DIR) / sw_release
 
-    feed_dir = get_feed_path(sw_version)
-    script_path = os.path.join(feed_dir, "upgrades/software-deploy", script)
+
+def get_software_deploy_script(sw_version, script):
+    release_dir = get_release_path(sw_version)
+    script_path = [str(f) for f in release_dir.rglob(script)]
     return script_path
 
 

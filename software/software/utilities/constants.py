@@ -15,6 +15,7 @@ SIMPLEX = 'simplex'
 
 # SW_VERSION should be built-in from build-tools
 SW_VERSION = 'xxxPLATFORM_RELEASExxx'
+MIN_METAPACKAGE_RELEASE = "26.10"
 
 DISTRIBUTED_CLOUD_ROLE_SYSTEMCONTROLLER = 'systemcontroller'
 SERVICE_TYPE_IDENTITY = 'identity'

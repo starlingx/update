@@ -20,13 +20,13 @@ import subprocess
 import sys
 import yaml
 
+from packaging import version
 import psycopg2
 
 from software.utilities.utils import configure_logging
 import software.utilities.utils as utils
 from software.utilities import constants
 from software.utilities.plugin_runner import execute_migration_scripts
-from packaging import version
 
 
 sout = sys.stdout
@@ -952,7 +952,7 @@ def create_mgmt_ip_hieradata(hostname, target_port):
         raise
 
 
-def upgrade_controller(from_release, to_release, target_port):
+def upgrade_controller(from_release, to_release, target_port, release_directory):
     """Executed on controller-0, under chroot N+1 deployment and N runtime. """
 
     LOG.info("Upgrading controller from %s to %s" % (from_release, to_release))
@@ -1022,8 +1022,22 @@ def upgrade_controller(from_release, to_release, target_port):
     print("Applying configuration...")
 
     # Execute migration scripts
-    execute_migration_scripts(
-        from_release, to_release, utils.ACTION_MIGRATE, target_port)
+    # TODO(heitormatsui): remove legacy upgrade support without metapackages
+    if version.parse(to_release) <= version.parse(constants.MIN_METAPACKAGE_RELEASE):
+        LOG.info("Running migration scripts in legacy mode")
+        execute_migration_scripts(
+            from_release, to_release, utils.ACTION_MIGRATE, target_port)
+    else:
+        LOG.info("Running migration scripts in metapackage mode")
+        if not release_directory or not os.path.isdir(release_directory):
+            raise FileNotFoundError(f"Invalid or empty release directory: {release_directory}")
+        metapackage_dirs = [os.path.join(release_directory, d, "upgrade-scripts")
+                            for d in os.listdir(release_directory)
+                            if os.path.isdir(os.path.join(release_directory, d, "upgrade-scripts"))]
+        for metapackage_dir in metapackage_dirs:
+            execute_migration_scripts(
+                from_release, to_release, utils.ACTION_MIGRATE, target_port,
+                migration_script_dir=metapackage_dir)
 
     first_controller = get_first_controller(target_port)
     # Generate config to be used by "regular" manifest
@@ -1036,12 +1050,6 @@ def upgrade_controller(from_release, to_release, target_port):
         LOG.exception(e)
         LOG.info("Failed to update hiera configuration")
         raise
-
-    # Clone the created host hieradata with the name <hostname_mgmt-ip>.yaml
-    # TODO(heitormatsui): remove when upgrade from stx-8 deprecates
-    if from_release == "22.12":
-        LOG.info("Generating mgmt-ip config for %s" % first_controller)
-        create_mgmt_ip_hieradata(first_controller, target_port)
 
     # Stop postgres server
     LOG.info("Shutting down PostgreSQL...")
@@ -1076,14 +1084,18 @@ def migrate():
                         default=False,
                         help="To release")
 
-    parser.add_argument('port',
+    parser.add_argument("port",
                         default=6666,
-                        help="PostgreSQL service port to access target database.")
+                        help="PostgreSQL service port to access target database")
 
-    parser.add_argument('-v', '--verbose',
+    parser.add_argument("release_directory",
+                        default="",
+                        help="Release directory containing metapackage scripts")
+
+    parser.add_argument("-v", "--verbose",
                         default=False, action="store_true",
                         help="Print more verbose output")
 
     args = parser.parse_args()
 
-    upgrade_controller(args.from_release, args.to_release, args.port)
+    upgrade_controller(args.from_release, args.to_release, args.port, args.release_directory)
