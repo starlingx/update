@@ -2261,8 +2261,7 @@ def parse_config(args=None):
                         required=True)
     parser.add_argument("--additional-data",
                         help="Additional data (JSON format)",
-                        required=False,
-                        action='append')
+                        required=False)
 
     # if args was not passed will use sys.argv by default
     parsed_args = parser.parse_args(args)
