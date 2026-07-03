@@ -63,6 +63,9 @@ CleanUpDeploymentData = getattr(
 SetServiceUserOptions = getattr(
     _import_module(".31-set-service-user-options", __name__),
     "SetServiceUserOptions")
+RenameDeprecatedPtpParameters = getattr(
+    _import_module(".77-ptp-parameter-rename", __name__),
+    "RenameDeprecatedPtpParameters")
 ResetConfigTarget = getattr(
     _import_module(".197-reset-config-target", __name__),
     "ResetConfigTarget")
@@ -107,6 +110,7 @@ PLUGINS = {
         ],
         FEATURE_PRE_APPS: [
             UpdateStaticHieradata(),
+            RenameDeprecatedPtpParameters(),
         ],
         K8S_APP_UPDATE: [],
         FEATURE_POST_APPS: [],
