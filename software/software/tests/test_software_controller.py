@@ -457,7 +457,8 @@ class TestSoftwareController(unittest.TestCase):
         expected_result = {
             "from_release": "1.0",
             "to_release": "2.0",
-            "state": "start"
+            "state": "start",
+            "pre_upgrade_deploy": False,
         }
         self.assertEqual(result, expected_result)
 

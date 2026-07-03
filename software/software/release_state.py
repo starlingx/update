@@ -31,8 +31,9 @@ RELEASE_STATE_TRANSITION = {
 class ReleaseState(object):
     _callbacks = []
 
-    def __init__(self, release_ids=None, release_state=None):
+    def __init__(self, release_ids=None, release_state=None, pre_upgrade_deploy=False):
         self._release_ids = []
+        self._pre_upgrade_deploy = pre_upgrade_deploy
 
         # If no parameter is passed return directly
         if not release_ids and not release_state:
@@ -47,7 +48,10 @@ class ReleaseState(object):
         # Check first if release_ids were passed directly
         if release_ids:
             for rel_id in release_ids:
-                rel = release_collection[rel_id]
+                if pre_upgrade_deploy:
+                    rel = release_collection.get_pre_upgrade_deploy_release_by_id(rel_id)
+                else:
+                    rel = release_collection[rel_id]
                 if rel is None:
                     not_found_list.append(rel_id)
                 # If product release, return its metapackages
@@ -58,15 +62,24 @@ class ReleaseState(object):
                     release_list.append(rel_id)
         # Otherwise check for releases in specific state
         else:
-            # Get the list of legacy releases + metapackage releases in the provided state
-            release_list = [
-                rel.id for rel in
-                release_collection.iterate_releases_by_state(release_state)
-                if rel.is_legacy_release
-            ] + [
-                mp.id for mp in
-                release_collection.iterate_metapackages_by_state(release_state)
-            ]
+            if pre_upgrade_deploy:
+                # Get the list of pre-upgrade-deploy metapackage releases in the provided state
+                release_list = [
+                    mp.id for mp in
+                    release_collection.iterate_metapackages_by_state(release_state)
+                    if mp.is_pre_upgrade_deploy_release
+                ]
+            else:
+                # Get the list of legacy releases + metapackage releases in the provided state
+                release_list = [
+                    rel.id for rel in
+                    release_collection.iterate_releases_by_state(release_state)
+                    if rel.is_legacy_release
+                ] + [
+                    mp.id for mp in
+                    release_collection.iterate_metapackages_by_state(release_state)
+                    if not mp.is_pre_upgrade_deploy_release
+                ]
 
         if not_found_list:
             raise ReleaseNotFound(not_found_list)
@@ -96,15 +109,24 @@ class ReleaseState(object):
         """check ALL releases can transform to target state"""
         release_collection = get_SWReleaseCollection()
         for rel_id in self._release_ids:
-            state = release_collection[rel_id].state
-            if target_state not in RELEASE_STATE_TRANSITION[state]:
+            if self._pre_upgrade_deploy:
+                rel = release_collection.get_pre_upgrade_deploy_release_by_id(rel_id)
+            else:
+                rel = release_collection[rel_id]
+            if rel:
+                state = rel.state
+                if target_state not in RELEASE_STATE_TRANSITION[state]:
+                    return False
+            else:
+                LOG.error(f"Release {rel_id} not found")
                 return False
         return True
 
     def transform(self, target_state):
         if self.check_transition(target_state):
             release_collection = get_SWReleaseCollection()
-            release_collection.update_state(self._release_ids, target_state)
+            release_collection.update_state(self._release_ids, target_state,
+                                            pre_upgrade_deploy=self._pre_upgrade_deploy)
         reload_release_data()
 
         for callback in ReleaseState._callbacks:

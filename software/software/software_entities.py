@@ -358,6 +358,7 @@ class DeployHandler(Deploy):
             "commit_id": commit_id,
             "reboot_required": reboot_required,
             "state": state.value,
+            "pre_upgrade_deploy": kwargs.get("pre_upgrade_deploy", False),
             "options": kwargs.get("options", {})
         }
 

@@ -280,26 +280,26 @@ def execute_agent_hooks(major_release, metapackages: Optional[List[Tuple]] = Non
 
 
 def execute_host_scripts(metapackages: List[Tuple], filter_names=None, extra_args=None):
-    """Run host scripts for metapackages in a major release deployment.
+    """Run host scripts for metapackages in a deployment.
     :param metapackages: list of tuples containing metapackage info in the format
-                         of (metapackage.component, metapackage.sw_release), used
+                         of (metapackage.path_component, metapackage.sw_release), used
                          to build the path to the host-scripts.
     :param filter_names: list of script names to filter execution (optional)
-    :param additional_data: dict of additional data passed to the hook script
+    :param extra_args: extra arguments to pass to the scripts
     """
     if not metapackages:
         raise Exception("No metapackages found to run host-scripts.")
 
     host_scripts = []
-    for metapackage in metapackages:
+    for mp_component, mp_release in metapackages:
         # The host-scripts are located at:
-        # /opt/software/releases/<metapackage_release>/<metapackage_name>/host-scripts/
+        # /opt/software/releases/<metapackage_release>/<path_component>/host-scripts/
         mp_dir = os.path.join(
-            COMPONENT_SOFTWARE_STORAGE_DIR, metapackage[1], metapackage[0],
-            constants.HOST_SCRIPTS_DIR)
+            COMPONENT_SOFTWARE_STORAGE_DIR, mp_release,
+            mp_component, constants.HOST_SCRIPTS_DIR)
         if not os.path.isdir(mp_dir):
             LOG.info("Metapackage %s does not have host-scripts directory in release %s. "
-                     "Skipping...", metapackage[0], metapackage[1])
+                     "Skipping...", mp_component, mp_release)
         else:
             host_scripts.append(mp_dir)
 

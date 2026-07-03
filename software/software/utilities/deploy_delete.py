@@ -34,6 +34,7 @@ def do_deploy_delete(from_release, to_release, plugin_path, is_major_release,
     try:
         if is_major_release and metapackages:
             # Major release per-metapackage: run all scripts in each dir
+            LOG.info("Running delete scripts for major release (per-metapackage)")
             scripts_release = max(from_release, to_release,
                                   key=lambda r: tuple(int(x) for x in r.split('.')))
             for mp_name in metapackages:
@@ -45,6 +46,7 @@ def do_deploy_delete(from_release, to_release, plugin_path, is_major_release,
                                           migration_script_dir=mp_dir)
         elif is_major_release:
             # Legacy major release: single directory
+            LOG.info("Running delete scripts for major release (legacy)")
             if plugin_path:
                 execute_migration_scripts(from_release, to_release,
                                           utils.ACTION_DELETE,
@@ -54,6 +56,7 @@ def do_deploy_delete(from_release, to_release, plugin_path, is_major_release,
                                           utils.ACTION_DELETE)
         elif metapackages:
             # Patch per-metapackage: run only specific named scripts
+            LOG.info("Running delete scripts for patch release")
             scripts_release = max(from_release, to_release,
                                   key=lambda r: tuple(int(x) for x in r.split('.')))
             for mp_name, scripts in metapackages.items():
@@ -101,7 +104,7 @@ def deploy_delete():
     parser.add_argument("--metapackages",
                         type=str,
                         default=None,
-                        help="JSON dict of {metapackage: [scripts]}")
+                        help="JSON dict of {path_component: [scripts]}")
 
     args = parser.parse_args()
 

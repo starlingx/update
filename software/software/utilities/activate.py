@@ -28,6 +28,7 @@ def do_activate(from_release, to_release, is_major_release, metapackages=None):
     state = DEPLOY_STATES.ACTIVATE_DONE.value
     try:
         if is_major_release and metapackages:
+            # Major release per-metapackage: run all scripts in each dir
             LOG.info("Running activate scripts for major release (per-metapackage)")
             scripts_release = max(from_release, to_release,
                                   key=lambda r: tuple(int(x) for x in r.split('.')))
@@ -39,12 +40,13 @@ def do_activate(from_release, to_release, is_major_release, metapackages=None):
                                           ACTION_ACTIVATE,
                                           migration_script_dir=mp_dir)
         elif is_major_release:
+            # Legacy major release: single directory
             LOG.info("Running activate scripts for major release (legacy)")
-
             from_major_release = utils.get_major_release_version(from_release)
             to_major_release = utils.get_major_release_version(to_release)
             execute_migration_scripts(from_major_release, to_major_release, ACTION_ACTIVATE)
         elif metapackages:
+            # Patch per-metapackage: run only specific named scripts
             LOG.info("Running activate scripts for patch release")
             scripts_release = max(from_release, to_release,
                                   key=lambda r: tuple(int(x) for x in r.split('.')))
@@ -94,7 +96,7 @@ def activate():
     parser.add_argument("--metapackages",
                         type=str,
                         default=None,
-                        help="JSON dict of {metapackage: [scripts]}")
+                        help="JSON dict of {path_component: [scripts]}")
 
     args = parser.parse_args()
 

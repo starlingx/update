@@ -25,7 +25,6 @@ from typing import List
 from typing import Optional
 from typing import Tuple
 
-from software import states
 from software.base import PatchService
 import software.config as cfg
 import software.constants as constants
@@ -36,7 +35,6 @@ import software.ostree_utils as ostree_utils
 from software.software_functions import configure_logging
 from software.software_functions import LOG
 from software.software_functions import remove_major_release_deployment_flags
-from software.release_data import get_SWReleaseCollection
 from software.utilities.plugin_runner import execute_agent_hooks
 from software.utilities.plugin_runner import execute_host_scripts
 import software.utils as utils
@@ -47,6 +45,7 @@ SOFTWARE_PERSIST_FOLDER = "/var/persist/software-agent"
 pidfile_path = "/var/run/software_agent.pid"
 node_is_patched_file = "/var/run/node_is_patched"
 node_is_software_updated_rr_file = "%s/node_is_software_updated_rr" % SOFTWARE_PERSIST_FOLDER
+deploy_host_info_file = "%s/deploy_host_info.json" % SOFTWARE_PERSIST_FOLDER
 patch_installing_file = "%s/patch_installing" % SOFTWARE_PERSIST_FOLDER
 patch_failed_file = "/var/run/software_install_failed"
 node_is_locked_file = "/var/run/.node_locked"
@@ -87,12 +86,12 @@ def pull_install_scripts_from_controller(metapackages: Optional[List[Tuple]] = N
     """Rsync install scripts from the controller using componentized or legacy
     methods. In componentized method, this function syncs host-scripts directory
     from each metapackage under
-    /opt/software/releases/<metapackage_release>/<metapackage_name>/host-scripts/
+    /opt/software/releases/<metapackage_release>/<path_component>/host-scripts/
     on the controller node directly into the local path. If metapackages parameter
     is not set, then the legacy path is executed to sync the software-scripts from
     the controller repo.
     :param metapackages: list of tuples with items following the format
-                         (metapackage.component, metapackage.release)
+                         (metapackage.path_component, metapackage.release)
     :param install_local: if True, rsync from localhost instead of controller
     """
     host = constants.CONTROLLER
@@ -103,13 +102,15 @@ def pull_install_scripts_from_controller(metapackages: Optional[List[Tuple]] = N
     if metapackages:
         # Componentized path
         for metapackage in metapackages:
+            mp_component, mp_release = metapackage
             LOG.info("Using componentized pre-install method for metapackage %s" % metapackage)
 
             source = "rsync://%s/software/releases/%s/%s/%s/" % (
-                host, metapackage[1], metapackage[0], constants.HOST_SCRIPTS_TYPE)
+                host, mp_release, mp_component,
+                constants.HOST_SCRIPTS_TYPE)
             dest = os.path.join(
                 constants.COMPONENT_SOFTWARE_STORAGE_DIR,
-                metapackage[1], metapackage[0],
+                mp_release, mp_component,
                 constants.HOST_SCRIPTS_TYPE)
 
             os.makedirs(dest, 0o700, exist_ok=True)
@@ -119,14 +120,14 @@ def pull_install_scripts_from_controller(metapackages: Optional[List[Tuple]] = N
                      source, "%s/" % dest],
                     stderr=subprocess.STDOUT)
                 LOG.info("Synced host-scripts for metapackage %s from controller: %s",
-                         metapackage[0], output)
+                         metapackage, output)
             except subprocess.CalledProcessError as e:
                 if "No such file or directory" in e.output.decode("utf-8"):
-                    LOG.info("No host-scripts for metapackage %s", metapackage[0])
+                    LOG.info("No host-scripts for metapackage %s", metapackage)
                 else:
                     LOG.exception("Failed to sync host-scripts for metapackage %s "
                                   "from controller. Output: %s",
-                                  metapackage[0], e.output.decode("utf-8"))
+                                  metapackage, e.output.decode("utf-8"))
                     raise
     else:
         # TODO(mbenedit): Remove legacy path once metapackage host-scripts are fully
@@ -160,7 +161,7 @@ def run_post_install_script(metapackages: Optional[List[Tuple]] = None,
     metapackages parameter is not set, then the legacy method executes the
     the /usr/sbin/run-software-scripts.
     :param metapackages: list of tuples with items following the format
-                         (metapackage.component, metapackage.release)
+                         (metapackage.path_component, metapackage.release)
     :param running_after_reboot: if True, pass AFTER_REBOOT flag
     """
     success = True
@@ -887,6 +888,16 @@ class PatchAgent(PatchService):
 
                 if os.path.exists(node_is_software_updated_rr_file):
                     LOG.info("Reboot is required.")
+                    # Persist deploy host info for after-reboot scripts
+                    _deploy_host_info = {
+                        "metapackages": metapackages if metapackages else [],
+                    }
+                    try:
+                        with open(deploy_host_info_file, "w") as f:
+                            json.dump(_deploy_host_info, f)
+                        LOG.info("Saved deploy host info to %s", deploy_host_info_file)
+                    except Exception as e:
+                        LOG.error("Failed to save deploy host info: %s", e)
                 elif disallow_insvc_patch:
                     LOG.info("Treating as reboot-required")
                     setflag(node_is_software_updated_rr_file)
@@ -1179,17 +1190,27 @@ def main():
     # Run on reboot after the node was updated by a reboot required patch/ISO
     if os.path.exists(node_is_software_updated_rr_file):
         ostree_utils.delete_older_deployments()
-        rc = get_SWReleaseCollection()
-        metapackages = rc.get_ordered_metapackages(
-            filter_by_states=[states.DEPLOYING], tuple_format=True)
 
-        # TODO(mbenedit): When only component-based releases become supported,
-        # raise an exception when no metapackages are found in deploying state.
-        if not metapackages:
-            LOG.info("No metapackages found in deploying state during host deploy.")
+        # Read deploy host info saved during handle_install
+        metapackages = []
+        if os.path.exists(deploy_host_info_file):
+            try:
+                with open(deploy_host_info_file, "r") as f:
+                    deploy_info = json.load(f)
+                metapackages = deploy_info.get("metapackages", [])
+                LOG.info("Loaded deploy host info: metapackages=%s", metapackages)
+            except Exception as e:
+                LOG.error("Failed to read deploy host info: %s", e)
+        else:
+            LOG.info("No deploy host info file found, no post-install scripts to run")
+
+        # Convert metapackages to tuple format if they are lists (from JSON)
+        metapackages = [tuple(mp) for mp in metapackages]
+
         run_post_install_script(
-            metapackages=metapackages,
+            metapackages=metapackages if metapackages else None,
             running_after_reboot=True)
+        clearflag(deploy_host_info_file)  # Clean up the deploy host info file
         clearflag(node_is_software_updated_rr_file)
 
     if len(sys.argv) <= 1:
