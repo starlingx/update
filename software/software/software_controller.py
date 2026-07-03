@@ -4465,9 +4465,10 @@ class PatchController(PatchService):
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         # Get metapackages data
-        mp_data = []
-        for mp in metapackages:
-            mp_data.append(self.release_collection.get_metapackage_release_by_id(mp))
+        mp_data = self.release_collection.get_ordered_metapackages(
+            filter_by_ids=metapackages,
+            filter_by_states=states.COMPONENT_SELECTED_STATES
+        )
         try:
             mp_deploy_set = MetapackageDeploymentSet(mp_data)
         except ReleaseInvalidData as e:
@@ -5086,7 +5087,13 @@ class PatchController(PatchService):
                 # Component-based path
                 deploying_mps = self.release_collection.get_ordered_metapackages(
                     filter_by_states=[states.DEPLOYING])
-                mp_deploy_set = MetapackageDeploymentSet(deploying_mps)
+                try:
+                    mp_deploy_set = MetapackageDeploymentSet(deploying_mps)
+                except ReleaseInvalidData as e:
+                    msg = str(e)
+                    LOG.error(msg)
+                    msg_error += msg
+                    return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
                 deploy_sw_version = mp_deploy_set.sw_version
 
