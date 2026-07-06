@@ -1269,11 +1269,12 @@ class CgroupBootParamsHook(BaseHook):
         """Revert cgroupRoot back to /k8s-infra for rollback.
 
         On rollback, the system goes back to the old release which
-        uses k8s-infra as the cgroup name. The config.yaml was
-        migrated to /k8sinfra during upgrade and must be reverted,
-        otherwise kubelet will look for k8sinfra dirs that don't
-        exist on the old release.
+        uses k8s-infra as the cgroup name. The config.yaml and
+        kubelet-config ConfigMap were migrated to /k8sinfra during
+        upgrade and must be reverted, otherwise kubelet will look
+        for k8sinfra dirs that don't exist on the old release.
         """
+        # Revert config.yaml
         config_path = "/var/lib/kubelet/config.yaml"
         if not os.path.exists(config_path):
             LOG.info("CgroupBootParamsHook: %s not found, skipping" % config_path)
@@ -1298,6 +1299,26 @@ class CgroupBootParamsHook(BaseHook):
         except Exception as e:
             LOG.exception("CgroupBootParamsHook: failed to revert %s: %s"
                           % (config_path, e))
+
+        # Revert kubelet-config ConfigMap (k8s API is available pre-reboot)
+        try:
+            kubeconfig = "/etc/kubernetes/admin.conf"
+            cmd = ("kubectl --kubeconfig=%s -n kube-system "
+                   "get configmap kubelet-config -o json | "
+                   "sed 's|/k8sinfra|/k8s-infra|g' | "
+                   "kubectl --kubeconfig=%s apply -f -"
+                   % (kubeconfig, kubeconfig))
+            result = subprocess.run(cmd, shell=True, capture_output=True,
+                                    text=True, timeout=30, check=False)
+            if result.returncode == 0:
+                LOG.info("CgroupBootParamsHook: reverted ConfigMap "
+                         "cgroupRoot to /k8s-infra")
+            else:
+                LOG.warning("CgroupBootParamsHook: failed to revert "
+                            "ConfigMap: %s" % result.stderr)
+        except Exception as e:
+            LOG.warning("CgroupBootParamsHook: ConfigMap revert failed: "
+                        "%s" % e)
 
     def _rollback_cgroup_config_from_2610(self):
         """Handle rollback: revert all cgroup changes to old release state.
