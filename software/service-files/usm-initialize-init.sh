@@ -118,6 +118,7 @@ refresh_init_links() {
         ln -s /usr/share/starlingx/pmon.d/sm.conf /etc/pmon.d/sm.conf
         ln -s /usr/share/starlingx/pmon.d/sshd.conf /etc/pmon.d/sshd.conf
         ln -s /usr/share/starlingx/pmon.d/sssd.conf /etc/pmon.d/sssd.conf
+        ln -s /usr/share/starlingx/pmon.d/strongswan.conf /etc/pmon.d/strongswan.conf
         ln -s /usr/share/starlingx/pmon.d/sysinv-agent.conf /etc/pmon.d/sysinv-agent.conf
         ln -s /usr/share/starlingx/pmon.d/syslog-ng.conf /etc/pmon.d/syslog-ng.conf
         ln -s /usr/share/starlingx/pmon.d/luks.conf /etc/pmon.d/luks.conf
@@ -140,6 +141,7 @@ refresh_init_links() {
         ln -s /usr/share/starlingx/pmon.d/sm-eru.conf /etc/pmon.d/sm-eru.conf
         ln -s /usr/share/starlingx/pmon.d/sshd.conf /etc/pmon.d/sshd.conf
         ln -s /usr/share/starlingx/pmon.d/sssd.conf /etc/pmon.d/sssd.conf
+        ln -s /usr/share/starlingx/pmon.d/strongswan.conf /etc/pmon.d/strongswan.conf
         ln -s /usr/share/starlingx/pmon.d/sysinv-agent.conf /etc/pmon.d/sysinv-agent.conf
         ln -s /usr/share/starlingx/pmon.d/syslog-ng.conf /etc/pmon.d/syslog-ng.conf
         ln -s /usr/share/starlingx/pmon.d/software-agent.conf /etc/pmon.d/software-agent.conf
@@ -158,6 +160,7 @@ refresh_init_links() {
         ln -s /usr/share/starlingx/pmon.d/sm-eru.conf /etc/pmon.d/sm-eru.conf
         ln -s /usr/share/starlingx/pmon.d/sshd.conf /etc/pmon.d/sshd.conf
         ln -s /usr/share/starlingx/pmon.d/sssd.conf /etc/pmon.d/sssd.conf
+        ln -s /usr/share/starlingx/pmon.d/strongswan.conf /etc/pmon.d/strongswan.conf
         ln -s /usr/share/starlingx/pmon.d/sysinv-agent.conf /etc/pmon.d/sysinv-agent.conf
         ln -s /usr/share/starlingx/pmon.d/syslog-ng.conf /etc/pmon.d/syslog-ng.conf
         ln -s /usr/share/starlingx/pmon.d/software-agent.conf /etc/pmon.d/software-agent.conf
