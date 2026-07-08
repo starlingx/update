@@ -84,6 +84,9 @@ AddMissingServiceParameters = getattr(
 NetappTridentMigration = getattr(
     _import_module(".203-netapp-trident-migration", __name__),
     "NetappTridentMigration")
+MoveReleaseMetadataFile = getattr(
+    _import_module(".99-move-release-metadata-file", __name__),
+    "MoveReleaseMetadataFile")
 
 # Shell scripts are wrapped as ScriptPlugin instances
 _SCRIPT_DIR = os.path.dirname(__file__)
@@ -167,6 +170,7 @@ PLUGINS = {
         FEATURE_POST_APPS: [],
         FRAMEWORK_FINALIZE: [
             RemoveLvmSnapshots(),
+            MoveReleaseMetadataFile(),
         ],
     },
 }

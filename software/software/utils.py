@@ -93,6 +93,23 @@ def get_major_release_version(sw_release_version):
     return match.group(1) if match else None
 
 
+def get_patch_level_version(sw_release_version):
+    """Ensures the version string has the full MM.mm.pp format.
+
+    If the version is in major release format (MM.mm), appends '.0'.
+    Otherwise returns the string unchanged.
+
+    :param sw_release_version: version string (e.g. "MM.mm" or "MM.mm.pp")
+    :returns: version string in MM.mm.pp format
+    """
+    if not sw_release_version:
+        return sw_release_version
+
+    if re.match(r'^\d+\.\d+$', sw_release_version):
+        return sw_release_version + ".0"
+    return sw_release_version
+
+
 def get_controller_feed_latest_commit(patch_sw_version):
     """Gets the latest controller feed commit from any node"""
     nodetype = get_platform_conf('nodetype')
