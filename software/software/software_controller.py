@@ -1953,12 +1953,13 @@ class PatchController(PatchService):
 
             required_patches = []
             for dep_id in self.release_collection.get_release_by_id(values.get("id")).requires_release_ids:
-                required_patches.append(version.parse(dep_id))
+                required_patches.append((utils.parse_release_version(dep_id), dep_id))
 
             # sort the required patches list and get the latest, if available
             req_patch_version = None
             if len(required_patches) > 0:
-                req_patch = str(sorted(required_patches)[-1])
+                required_patches.sort(key=lambda x: x[0])
+                req_patch = required_patches[-1][1]
                 _, req_patch_version, _, _ = utils.get_component_and_versions(req_patch)
                 if self.release_collection.get_release_by_id(req_patch) is None:
                     LOG.warning("Required patch '%s' is not uploaded." % req_patch)

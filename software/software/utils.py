@@ -124,6 +124,25 @@ def get_component_and_versions(release_name):
         return None, None, None, None
 
 
+def parse_release_version(release_id):
+    """Parse a release ID into a packaging.version.Version object.
+
+    Release IDs may contain a component prefix (e.g., 'starlingx-26.10.0')
+    which is not a valid PEP 440 version string. This function strips the
+    prefix before parsing so it works with packaging >= 22.0 (Python 3.12+)
+    where LegacyVersion was removed.
+
+    :param release_id: Full release ID string (e.g., 'starlingx-26.10.0' or '26.10.0')
+    :returns: packaging.version.Version object
+    :raises: packaging.version.InvalidVersion if version cannot be parsed
+    """
+    _, release_ver, _, _ = get_component_and_versions(release_id)
+    if release_ver:
+        return version.Version(release_ver)
+    # Fallback: try parsing as-is (pure version string without prefix)
+    return version.Version(release_id)
+
+
 def get_feed_path(sw_release):
     sw_ver = get_major_release_version(sw_release)
     path = os.path.join(constants.UPGRADE_FEED_DIR, f"rel-{sw_ver}")
