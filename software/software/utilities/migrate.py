@@ -200,54 +200,95 @@ def migrate_keyring_data(from_release, to_release):
     shutil.copy2(keyring_script_file, constants.KEYRING_SCRIPT_FILE)
     change_keyring_ownership(constants.KEYRING_SCRIPT_DIR)
 
+    # Staging area is on the same filesystem as the LUKS vault (required for
+    # atomic os.rename) but OUTSIDE the inotify-watched directory (controller/)
+    # so luks-fs-mgr doesn't trigger a partial rsync mid-write.
+    staging_base = os.path.normpath(
+        os.path.join(constants.LUKS_FS, "..", ".migrate_staging"))
+    staging_keyring_path = os.path.join(staging_base, constants.SW_VERSION)
+    if os.path.exists(staging_base):
+        shutil.rmtree(staging_base)
+
     from_ver = version.Version(from_release)
     to_ver = version.Version(to_release)
     luks_min_version = version.Version("26.10")
-    if from_ver < luks_min_version <= to_ver:
-        # TODO(This block can be removed post 27.03)
-        shutil.rmtree(constants.KEYRING_DIR_PATH, ignore_errors=True)
-        os.makedirs(constants.KEYRING_DIR_PATH, exist_ok=True)
-        change_keyring_ownership(constants.KEYRING_DIR_PATH)
 
+    if from_ver < luks_min_version <= to_ver:
+        # Pre-LUKS → LUKS migration: extract, re-encrypt in staging, move
+        # TODO(This block can be removed post 27.03)
         LOG.info(f"Migrating keyring to LUKS: {from_release} -> {to_release}")
+
         credentials = extract_keyring(from_release)
         if not credentials:
             raise Exception("No credentials extracted from keyring")
 
-        if os.path.exists(constants.KEYRING_PATH):
-            LOG.info(f"Removing existing target path: {constants.KEYRING_PATH}")
-            shutil.rmtree(constants.KEYRING_PATH)
+        # Create staging python_keyring directory
+        staging_python_keyring = os.path.join(staging_keyring_path, "python_keyring")
+        LOG.info(f"Creating staging directory: {staging_python_keyring}")
+        os.makedirs(staging_python_keyring, mode=0o755, exist_ok=True)
 
-        target_path = os.path.join(constants.KEYRING_PATH, "python_keyring")
-        LOG.info(f"Creating LUKS keyring directory: {target_path}")
-        os.makedirs(target_path, mode=0o755, exist_ok=True)
-
+        # Generate new keyring secret
         new_secret = base64.b64encode(secrets.token_bytes(32)).decode('ascii')
-        LOG.info("Generated new random keyring secret (32 bytes, base64-encoded)")
 
-        secret_file = constants.KEYRING_SECRET_PATH
-        LOG.info(f"Writing keyring secret to: {secret_file}")
-        with open(secret_file, 'w') as f:
+        # Write secret to staging only (will be moved to final location later)
+        staging_secret_file = os.path.join(staging_python_keyring, ".keyring_secret")
+        LOG.info(f"Writing keyring secret to staging: {staging_secret_file}")
+        with open(staging_secret_file, 'w') as f:
             f.write(new_secret)
-        os.chmod(secret_file, 0o640)
+        os.chmod(staging_secret_file, 0o640)
 
-        set_keyring_env(keyring_path=constants.KEYRING_PATH)
+        # Pass the secret via KEYRING_PASSWORD so the library uses it directly
+        # for encryption without trying to read from the hardcoded LUKS path.
+        # XDG_DATA_HOME controls where crypted_pass.cfg is written (staging).
+        set_keyring_env(keyring_path=staging_keyring_path,
+                        keyring_password=new_secret)
 
+        # Re-encrypt all credentials with new secret into staging
         LOG.info(f"Re-encrypting {len(credentials)} credentials with new secret")
         for (service, username), pwd in credentials.items():
             keyring.set_password(service, username, pwd)
         LOG.info("All credentials re-encrypted successfully")
 
-        LOG.info(f"Changing ownership of {constants.KEYRING_PATH} to sys_protected")
-        change_keyring_ownership(constants.KEYRING_PATH)
-        LOG.info("Keyring migration to LUKS completed successfully")
-    else:
-        source_path = os.path.join(constants.KEYRING_DIR_PATH, from_release)
-        shutil.rmtree(constants.KEYRING_PATH, ignore_errors=True)
-        shutil.copytree(source_path, constants.KEYRING_PATH)
-        change_keyring_ownership(constants.KEYRING_PATH)
+        # Clear KEYRING_PASSWORD so subsequent operations use .keyring_secret file
+        os.environ.pop('KEYRING_PASSWORD', None)
+
+        # Set ownership and prepare final destination
+        change_keyring_ownership(staging_keyring_path)
+        LOG.info(f"Preparing final LUKS keyring directory: {constants.KEYRING_DIR_PATH}")
+        shutil.rmtree(constants.KEYRING_DIR_PATH, ignore_errors=True)
+        os.makedirs(constants.KEYRING_DIR_PATH, exist_ok=True)
+        change_keyring_ownership(constants.KEYRING_DIR_PATH)
+
+        # Atomic move from staging into the inotify-watched path
+        LOG.info(f"Moving staged keyring to final location: {constants.KEYRING_PATH}")
+        os.rename(staging_keyring_path, constants.KEYRING_PATH)
+        shutil.rmtree(staging_base, ignore_errors=True)
+
+        # Point keyring library at final path for subsequent operations
         set_keyring_env(keyring_path=constants.KEYRING_PATH)
-        LOG.info("Keyring migration from LUKS to LUKS completed successfully")
+        LOG.info("Pre-LUKS to LUKS keyring migration completed successfully")
+
+    else:
+        # LUKS → LUKS migration: copy to staging, then atomic move
+        source_path = os.path.join(constants.KEYRING_DIR_PATH, from_release)
+        LOG.info(f"Migrating keyring LUKS to LUKS: {from_release} -> {to_release}")
+        LOG.info(f"Copying keyring to staging: {source_path} -> {staging_keyring_path}")
+        shutil.copytree(source_path, staging_keyring_path)
+
+        # Set ownership and prepare final destination
+        change_keyring_ownership(staging_keyring_path)
+        # Remove stale target if present (e.g., from a previous failed attempt)
+        # so os.rename() can place the staging directory there.
+        shutil.rmtree(constants.KEYRING_PATH, ignore_errors=True)
+
+        # Atomic move from staging into the inotify-watched path
+        LOG.info(f"Moving staged keyring to final location: {constants.KEYRING_PATH}")
+        os.rename(staging_keyring_path, constants.KEYRING_PATH)
+        shutil.rmtree(staging_base, ignore_errors=True)
+
+        # Point keyring library at final path for subsequent operations
+        set_keyring_env(keyring_path=constants.KEYRING_PATH)
+        LOG.info("LUKS to LUKS keyring migration completed successfully")
 
 
 def migrate_pxeboot_config(from_release, to_release):
