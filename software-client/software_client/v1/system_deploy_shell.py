@@ -13,7 +13,7 @@ KUBE_VERSION_RE = re.compile(r'^v?\d{1,2}\.\d{1,2}\.\d{1,2}$')
 
 @utils.arg('release_id',
            help='Release ID to initialize the system deploy for')
-@utils.arg('--kube-version',
+@utils.arg('--kube-upgrade',
            dest='kube_version',
            default=None,
            required=False,
@@ -21,7 +21,7 @@ KUBE_VERSION_RE = re.compile(r'^v?\d{1,2}\.\d{1,2}\.\d{1,2}$')
 def do_init(cc, args):
     """Initialize a system deploy for the given release"""
     if args.kube_version and not KUBE_VERSION_RE.match(args.kube_version):
-        print("Error:\nInvalid kube_version '%s': must match '[v]n.n.n'" % args.kube_version)
+        print("Error:\nInvalid kube-upgrade version '%s': must match '[v]n.n.n'" % args.kube_version)
         return 1
 
     resp, data = cc.system_deploy.init(args)
