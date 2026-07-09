@@ -211,17 +211,29 @@ def do_upload(cc, args):
                  'sig files for major release (GA or patched) and/or one or '
                  'more files containing a patch release. NOTE: specify at most '
                  'ONE pair of (iso + sig)'))
+@utils.arg('--local',
+           required=False,
+           default=False,
+           action='store_true',
+           help=("Upload the release directory locally from active controller. "
+                 "To use this option, the release files must already exist on "
+                 "the active controller in the specified directory."))
 def do_upload_dir(cc, args):
     """Upload a software release directory."""
     try:
         print("This operation will take a while. Please wait.")
         wait_task = WaitThread()
         wait_task.start()
-        resp, data = cc.release.upload_dir(args)
+        result = cc.release.upload_dir(args)
         wait_task.join()
     except Exception as e:
         wait_task.join()
         raise Exception("Upload directory failed. Reason: %s" % e)
+
+    if isinstance(result, int):
+        return result
+    else:
+        resp, data = result[0], result[1]
     _print_upload_result(resp, data, args.debug)
 
     return utils.check_rc(resp, data)
