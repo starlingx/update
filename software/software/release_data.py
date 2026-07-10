@@ -287,6 +287,10 @@ class SWRelease(object):
         return self._get_by_key('metapackages')
 
     @property
+    def pre_upgrade_deploy(self):
+        return self._get_by_key('pre_upgrade_deploy')
+
+    @property
     def product(self):
         return self._get_by_key('product')
 
@@ -403,17 +407,25 @@ class SWRelease(object):
                 "requires": self.requires_release_ids[:],
                 "activation_scripts": self.activation_scripts[:],
                 "metapackages": {},
+                "pre_upgrade_deploy": {},
                 "packages": []}
         if self.is_product_release:
             # For product releases, the pkg section is present only in
             # the metapackage metadata.
             data["metapackages"] = {mp: {} for mp in self.metapackages}
-            for metapackage in self.metapackages:
+            for metapackage in self.metapackages or []:
                 metapackage_data = self.metapackages[metapackage]
                 if "packages" in metapackage_data:
                     data["packages"].extend(metapackage_data["packages"])
                 if "state" in metapackage_data:
                     data["metapackages"][metapackage]["state"] = metapackage_data["state"]
+            data["pre_upgrade_deploy"] = {mp: {} for mp in self.pre_upgrade_deploy}
+            for metapackage in self.pre_upgrade_deploy or []:
+                metapackage_data = self.pre_upgrade_deploy[metapackage]
+                if "packages" in metapackage_data:
+                    data["packages"].extend(metapackage_data["packages"])
+                if "state" in metapackage_data:
+                    data["pre_upgrade_deploy"][metapackage]["state"] = metapackage_data["state"]
             data["packages"].sort()
         elif self.packages:
             # Legacy releases have a pkg section in their metadata
@@ -536,16 +548,24 @@ class SWReleaseCollection(object):
     def __init__(self, release_data):
         self._sw_releases = {}
         self._sw_metapackages = {}
+        self._sw_pre_upgrade_deploy_metapackages = {}
+
         for rel_id in release_data.metadata:
             rel_data = release_data.metadata[rel_id]
             contents = release_data.contents[rel_id]
             sw_release = SWRelease(rel_id, rel_data, contents)
             if sw_release.is_product_release:
-                for mp in sw_release.metapackages:
+                for mp in sw_release.metapackages or []:
                     mp_data = sw_release.metapackages[mp]
                     mp_contents = sw_release.contents["metapackages"][mp]
                     mp_release = SWRelease(mp, mp_data, mp_contents)
                     self._sw_metapackages[mp] = mp_release
+                for mp in sw_release.pre_upgrade_deploy or []:
+                    mp_data = sw_release.pre_upgrade_deploy[mp]
+                    mp_contents = sw_release.contents["pre_upgrade_deploy"][mp]
+                    mp_release = SWRelease(mp, mp_data, mp_contents)
+                    self._sw_pre_upgrade_deploy_metapackages[mp] = mp_release
+
             self._sw_releases[rel_id] = sw_release
 
     def _running_release(self, partial=False):
@@ -694,7 +714,7 @@ class SWReleaseCollection(object):
         for rel_id in sorted_list:
             yield self._sw_releases[rel_id]
 
-    def iterate_metapackages(self, state=None, query_all=False):
+    def iterate_metapackages(self, state=None, query_all=False, query_pre_upgrade_deploy=False):
         '''
         Return iteration of metapackage data dicts. Can be filtered by state
         or all metapackages. Default output is the latest deployed version of
@@ -702,11 +722,13 @@ class SWReleaseCollection(object):
 
         Conditions:
         1) If state is provided, yield metapackages matching that state
-           (regardless of query_all).
-        2) If query_all is True and state is None, yield all metapackages.
-        3) If state is None and query_all is False, for each metapackage name
+           (regardless of query_all)
+        2) If query_all is True and state is None, yield all metapackages
+        3) If query_pre_upgrade_deploy is True and state is None, yield
+           all pre-upgrade-deploy metapackages
+        4) If state is None and query_all is False, for each metapackage name
            yield only the one from the latest release version that is in
-           DEPLOYED state.
+           DEPLOYED state
         '''
         if state is not None:
             # Case 1: filter by state
@@ -719,8 +741,13 @@ class SWReleaseCollection(object):
             for mp in self._sw_metapackages:
                 mp_data = self._sw_metapackages[mp]
                 yield mp_data
+        elif query_pre_upgrade_deploy:
+            # Case 3: yield all pre-upgrade-deploy metapackages
+            for mp in self._sw_pre_upgrade_deploy_metapackages:
+                mp_data = self._sw_pre_upgrade_deploy_metapackages[mp]
+                yield mp_data
         else:
-            # Case 3: for each metapackage name, yield only the instance
+            # Case 4: for each metapackage name, yield only the instance
             # from the latest release version that is in DEPLOYED state
             latest_deployed = {}
             for mp in self._sw_metapackages:

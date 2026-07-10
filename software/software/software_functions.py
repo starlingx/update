@@ -462,13 +462,40 @@ class ReleaseData(object):
         #        <checksum>17cd4d.....77</checksum>
         #        </commit1>
         #    </ostree>
-        #    <requires/>
+        #    <pre_upgrade_deploy>N</pre_upgrade_deploy>
         #    <packages>
         #        <deb>pkg1.deb</deb>
         #        <deb>pkg2.deb</deb>
         #        <deb>pkg3.deb</deb>
         #        ...
         #    </packages>
+        #
+        #    Pre-upgrade-deploy Metapackage Release (stx.13.0 onwards):
+        #    <id>swmgmt_14.0</id>
+        #    <sw_version>14.0<sw_version>
+        #    <summary/>
+        #    <description/>
+        #    <reboot_required>Y</reboot_required>
+        #    <deployable>Y</deployable>
+        #    <data_migration>Y</data_migration>
+        #    <ostree>
+        #        <base>
+        #        <commit/>
+        #        <checksum/>
+        #        </base>
+        #        <commit1>
+        #        <commit>44.....3d42e</commit>
+        #        <checksum>17cd4d.....77</checksum>
+        #        </commit1>
+        #    </ostree>
+        #    <pre_upgrade_deploy>Y</pre_upgrade_deploy>
+        #    <packages>
+        #        <deb>pkg1.deb</deb>
+        #        <deb>pkg2.deb</deb>
+        #        <deb>pkg3.deb</deb>
+        #        ...
+        #    </packages>
+
         xml_file = ElementTree.fromstring(text)
         release_id = None
         metapackages = xml_file.find("metapackages")
@@ -488,13 +515,14 @@ class ReleaseData(object):
                 sw_version = "unknown"
 
             self.metadata[release_id]["sw_version"] = sw_version
-            self.metadata[release_id]["metapackages"] = {}
-            self.contents[release_id]["metapackages"] = {}
-            metapackages = xml_file.find("metapackages")
-            if metapackages is not None:
-                for pkg in metapackages.findall("pkg"):
-                    if pkg.text is not None and sw_version != "unknown":
-                        self.metadata[release_id]["metapackages"][f"{pkg.text}_{sw_version}"] = {}
+            for metapackage_group in [constants.METAPACKAGES_TAG, constants.PRE_UPGRADE_DEPLOY_TAG]:
+                self.metadata[release_id][metapackage_group] = {}
+                self.contents[release_id][metapackage_group] = {}
+                metapackages = xml_file.find(metapackage_group)
+                if metapackages is not None:
+                    for pkg in metapackages.findall("pkg"):
+                        if pkg.text is not None and sw_version != "unknown":
+                            self.metadata[release_id][metapackage_group][f"{pkg.text}_{sw_version}"] = {}
 
             self.metadata[release_id]["requires"] = []
             self._parse_metadata_array_tag(xml_file, "requires", "req_patch_id",
@@ -513,6 +541,12 @@ class ReleaseData(object):
             metadata_dict = {}
             contents_dict = {}
             if xml_file.tag == "metapackage":
+                # Check if is a common metapackage or pre-upgrade-deploy
+                if xml_file.findtext("pre_upgrade_deploy") == "Y":
+                    metapackage_group = constants.PRE_UPGRADE_DEPLOY_TAG
+                else:
+                    metapackage_group = constants.METAPACKAGES_TAG
+
                 # Metapackage Release
                 metapackage_id = xml_file.findtext("id")
                 if metapackage_id is None:
@@ -528,14 +562,19 @@ class ReleaseData(object):
                     LOG.error(f"No existing release matches {sw_version} version")
                     return None
 
-                self.metadata[release_id]["metapackages"][metapackage_id] = {}
-                self.contents[release_id]["metapackages"][metapackage_id] = {}
-                metadata_dict = self.metadata[release_id]["metapackages"][metapackage_id]
-                contents_dict = self.contents[release_id]["metapackages"][metapackage_id]
+                self.metadata[release_id][metapackage_group][metapackage_id] = {}
+                self.contents[release_id][metapackage_group][metapackage_id] = {}
+                metadata_dict = self.metadata[release_id][metapackage_group][metapackage_id]
+                contents_dict = self.contents[release_id][metapackage_group][metapackage_id]
 
                 metadata_dict["component"] = metapackage_id.split("_")[0]  # metapackage name without version
                 metadata_dict["product"] = release_id  # include product release in metapackage metadata
                 metadata_dict["state"] = state
+                if metapackage_group == constants.PRE_UPGRADE_DEPLOY_TAG:  # include pre-upgrade-deploy information
+                    metadata_dict["pre_upgrade_deploy"] = "Y"
+                else:
+                    metadata_dict["pre_upgrade_deploy"] = "N"
+
                 self._parse_metadata_tag(xml_file, "deployable", metadata_dict)
                 self._parse_metadata_tag(xml_file, "data_migration", metadata_dict)
             else:

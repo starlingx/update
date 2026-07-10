@@ -50,6 +50,11 @@ def do_list(cc, args):
            default=False,
            action='store_true',
            help='list metapackages contained in the release')
+@utils.arg('--pre-upgrade-deploy',
+           required=False,
+           default=False,
+           action='store_true',
+           help='list pre-upgrade-deploy metapackages contained in the release')
 def do_show(cc, args):
     """Show the software release"""
     resp, data = cc.release.show(args)
@@ -62,6 +67,8 @@ def do_show(cc, args):
             del data['packages']
         if not args.metapackages and 'metapackages' in data:
             del data['metapackages']
+        if not args.pre_upgrade_deploy and 'pre_upgrade_deploy' in data:
+            del data['pre_upgrade_deploy']
         utils.display_detail_result(data)
     else:
         utils.display_info(resp)

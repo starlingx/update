@@ -90,6 +90,11 @@ def do_select(cc, args):
            required=False,
            action='store_true',
            help='Unselect all selected metapackages')
+@utils.arg('--pre-upgrade-deploy',
+           default=False,
+           required=False,
+           action='store_true',
+           help='Unselect pre-upgrade-deploy metapackages for the specified product release')
 def do_unselect(cc, args):
     """Unselect metapackages to deploy"""
     resp, data = cc.deploy.unselect(args)
