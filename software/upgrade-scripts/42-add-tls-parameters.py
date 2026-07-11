@@ -18,7 +18,9 @@
 
 import logging
 import os
+import subprocess
 import sys
+import time
 
 from cgtsclient import client as cgts_client
 from software.utilities.plugin_runner import CPlugin
@@ -74,6 +76,60 @@ def get_sysinv_client():
         "1",
         os_auth_token=os.environ.get("OS_AUTH_TOKEN"),
         system_url=os.environ.get("SYSTEM_URL"),
+    )
+
+
+def get_pidof(name):
+    """Return the PID for the given process name.
+
+    :param name: Process name
+    :return: PID as integer, or -1 if not running
+    """
+    try:
+        out = subprocess.check_output(
+            ["pidof", "-s", name], text=True).strip()
+        return int(out) if out else -1
+    except Exception:
+        return -1
+
+
+def wait_kube_apiserver_up(previous_pid, timeout=300, interval=5):
+    """Wait until kube-apiserver is running again with a new PID.
+
+    After service_parameter.apply("kubernetes"), the conductor
+    dispatches a puppet manifest that restarts kube-apiserver.
+    This function polls until the apiserver comes back with a
+    different PID, ensuring downstream scripts do not encounter
+    a restarting apiserver.
+
+    :param previous_pid: PID observed before the apply
+    :param timeout: Maximum wait time in seconds
+    :param interval: Polling interval in seconds
+    :raises TimeoutError: if kube-apiserver does not restart in time
+    """
+    attempts = timeout // interval
+    LOG.info(
+        "Waiting for kube-apiserver restart "
+        "(previous PID: %s, max attempts: %d)",
+        previous_pid,
+        attempts,
+    )
+
+    for attempt in range(0, attempts):
+        pid = get_pidof("kube-apiserver")
+
+        if pid > 0 and pid != previous_pid:
+            LOG.info("kube-apiserver is up (new PID: %d)", pid)
+            return
+
+        LOG.info("Attempt %d/%d: kube-apiserver not ready yet",
+                 attempt + 1, attempts)
+        time.sleep(interval)
+
+    LOG.error("Timed out waiting for kube-apiserver after %d attempts",
+              attempts)
+    raise TimeoutError(
+        "Timed out waiting for kube-apiserver to restart"
     )
 
 
@@ -148,8 +204,12 @@ def update_k8s_tls_cipher_suites(sysinv):
     sysinv.service_parameter.update(param.uuid, patch)
     LOG.info("k8s tls-cipher-suites updated successfully")
 
+    previous_pid = get_pidof("kube-apiserver")
+
     LOG.info("Applying kubernetes service parameters")
     sysinv.service_parameter.apply(K8S_SERVICE)
+
+    wait_kube_apiserver_up(previous_pid)
 
 
 def do_activate(sysinv):
