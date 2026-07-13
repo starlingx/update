@@ -671,11 +671,12 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
 
         success = False
         deploy_host_state = DeployHostState(hostname)
+        pre_upgrade_deploy = deploy.get("pre_upgrade_deploy", False)
 
         try:
             if self.status:
                 deploying = ReleaseState(release_state=states.DEPLOYING)
-                if deploying.is_major_release_deployment():
+                if deploying.is_major_release_deployment() and not pre_upgrade_deploy:
                     # For major release deployment, update sysinv ihost.sw_version
                     # so that right manifest can be generated.
                     sw_version = utils.get_major_release_version(deploy.get("to_release"))
@@ -2241,6 +2242,7 @@ class PatchController(PatchService):
         not_founds = []
         cannot_del = []
         used_by_subcloud = []
+        has_deployed_pre_upgrade_deploy = []
         release_list = []
         for rel_id in full_list:
             rel = self.release_collection.get_release_by_id(rel_id)
@@ -2249,6 +2251,8 @@ class PatchController(PatchService):
             else:
                 if not rel.is_deletable:
                     cannot_del.append(rel_id)
+                elif rel.has_pre_upgrade_deploy_deployed:
+                    has_deployed_pre_upgrade_deploy.append(rel_id)
                 elif rel.is_ga_release and is_system_controller():
                     subcloud_by_sw_version = get_subcloud_groupby_version()
                     if rel.sw_version in subcloud_by_sw_version:
@@ -2271,6 +2275,13 @@ class PatchController(PatchService):
         if used_by_subcloud:
             list_str = ','.join(used_by_subcloud)
             err_msg += f"Release{'' if len(used_by_subcloud) == 1 else 's'} {list_str} still used by subcloud(s)"
+
+        if has_deployed_pre_upgrade_deploy:
+            list_str = ','.join(has_deployed_pre_upgrade_deploy)
+            err_msg += (f"Release{'' if len(has_deployed_pre_upgrade_deploy) == 1 else 's'} "
+                        f"{list_str} {'has' if len(has_deployed_pre_upgrade_deploy) == 1 else 'have'} "
+                        f"deployed pre-upgrade-deploy metapackages. "
+                        f"Undeploy them before deleting the release.\n")
 
         if len(err_msg) > 0:
             raise SoftwareServiceError(error=err_msg)
@@ -2934,7 +2945,9 @@ class PatchController(PatchService):
 
         if region_name is None:
             region_name = utils.get_local_region_name()
-        precheck_script = utils.get_precheck_script(release_version, metapackage)
+        precheck_script = kwargs.pop("precheck_script_override", None)
+        if not precheck_script:
+            precheck_script = utils.get_precheck_script(release_version, metapackage)
 
         if not os.path.isfile(precheck_script) and patch:
             # Precheck script may not be available for some patches
@@ -3475,7 +3488,11 @@ class PatchController(PatchService):
         return metapackage_releases, dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     def software_deploy_select_api(self, **kwargs):
-        _, result = self._deploy_select(**kwargs)
+        pre_upgrade_deploy = kwargs.pop("pre_upgrade_deploy", False)
+        if pre_upgrade_deploy:
+            result = self._pre_upgrade_deploy_select(**kwargs)
+        else:
+            _, result = self._deploy_select(**kwargs)
         return result
 
     def _validate_releases_for_unselect(self, releases):
@@ -3591,8 +3608,482 @@ class PatchController(PatchService):
         return metapackage_releases, dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     def software_deploy_unselect_api(self, **kwargs):
-        _, result = self._deploy_unselect(**kwargs)
+        pre_upgrade_deploy = kwargs.pop("pre_upgrade_deploy", False)
+        if pre_upgrade_deploy:
+            result = self._pre_upgrade_deploy_unselect(**kwargs)
+        else:
+            _, result = self._deploy_unselect(**kwargs)
         return result
+
+    def _pre_upgrade_deploy_select(self, remove=False, **kwargs):
+        """
+        Select pre-upgrade-deploy metapackages from a product release.
+        Pre-upgrade-deploy metapackages are always selected as a full group.
+
+        :param remove: if True, select for removal (deployed -> remove-selected)
+        """
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
+
+        releases = list(set(kwargs.get("releases", [])))
+
+        if not releases:
+            msg = "No releases were passed for pre-upgrade-deploy select"
+            LOG.error(msg)
+            msg_error += msg + "\n"
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Resolve product release to pre-upgrade-deploy metapackages
+        pre_upgrade_deploy_ids = []
+        for release in releases:
+            product = self.release_collection.get_product_release_by_id(release)
+            if product:
+                pud_ids = self.release_collection.get_pre_upgrade_deploy_id_by_product_id(release)
+                if pud_ids:
+                    pre_upgrade_deploy_ids.extend(pud_ids)
+                else:
+                    msg = f"Product release {release} has no pre-upgrade-deploy metapackages"
+                    LOG.error(msg)
+                    msg_error += msg + "\n"
+                    return dict(info=msg_info, warning=msg_warning, error=msg_error)
+            else:
+                msg = (f"Release {release} is not a product release. "
+                       "Pre-upgrade-deploy select requires a product release")
+                LOG.error(msg)
+                msg_error += msg + "\n"
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Select pre-upgrade-deploy metapackages
+        for mp_id in pre_upgrade_deploy_ids:
+            mp_data = self.release_collection.get_pre_upgrade_deploy_release_by_id(mp_id)
+            if mp_data is None:
+                msg = f"Pre-upgrade-deploy metapackage {mp_id} not found"
+                LOG.error(msg)
+                msg_error += msg + "\n"
+                continue
+
+            try:
+                if remove:
+                    if mp_data.state == states.DEPLOYED:
+                        mp_data.update_state(states.REMOVE_SELECTED)
+                    elif mp_data.state == states.REMOVE_SELECTED:
+                        msg = f"Pre-upgrade-deploy metapackage {mp_id} is already selected for removal"
+                        LOG.info(msg)
+                        msg_info += msg + "\n"
+                        continue
+                    else:
+                        msg = (f"Pre-upgrade-deploy metapackage {mp_id} is not in a valid "
+                               f"state for removal (current state: {mp_data.state})")
+                        LOG.error(msg)
+                        msg_error += msg + "\n"
+                        continue
+                else:
+                    if mp_data.state == states.AVAILABLE:
+                        mp_data.update_state(states.DEPLOY_SELECTED)
+                    elif mp_data.state in states.COMPONENT_SELECTED_STATES:
+                        msg = f"Pre-upgrade-deploy metapackage {mp_id} is already selected"
+                        LOG.info(msg)
+                        msg_info += msg + "\n"
+                        continue
+                    else:
+                        msg = (f"Pre-upgrade-deploy metapackage {mp_id} is not in a valid "
+                               f"state for select (current state: {mp_data.state})")
+                        LOG.info(msg)
+                        msg_info += msg + "\n"
+                        continue
+            except FileSystemError as e:
+                msg = f"Failure selecting pre-upgrade-deploy metapackage {mp_id}: {str(e)}"
+                LOG.error(msg)
+                msg_error += msg + "\n"
+                continue
+
+            msg = f"Selected pre-upgrade-deploy metapackage {mp_id} for deployment"
+            LOG.info(msg)
+            msg_info += msg + "\n"
+
+        return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+    def _pre_upgrade_deploy_unselect(self, **kwargs):
+        """
+        Unselect pre-upgrade-deploy metapackages from a product release.
+        Pre-upgrade-deploy metapackages are always unselected as a full group.
+        """
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
+
+        releases = list(set(kwargs.get("releases", [])))
+
+        if not releases:
+            msg = "No releases were passed for pre-upgrade-deploy unselect"
+            LOG.error(msg)
+            msg_error += msg + "\n"
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Resolve product release to pre-upgrade-deploy metapackages
+        pre_upgrade_deploy_ids = []
+        for release in releases:
+            product = self.release_collection.get_product_release_by_id(release)
+            if product:
+                pud_ids = self.release_collection.get_pre_upgrade_deploy_id_by_product_id(release)
+                if pud_ids:
+                    pre_upgrade_deploy_ids.extend(pud_ids)
+                else:
+                    msg = f"Product release {release} has no pre-upgrade-deploy metapackages"
+                    LOG.error(msg)
+                    msg_error += msg + "\n"
+                    return dict(info=msg_info, warning=msg_warning, error=msg_error)
+            else:
+                msg = (f"Release {release} is not a product release. "
+                       "Pre-upgrade-deploy unselect requires a product release")
+                LOG.error(msg)
+                msg_error += msg + "\n"
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Unselect pre-upgrade-deploy metapackages
+        for mp_id in pre_upgrade_deploy_ids:
+            mp_data = self.release_collection.get_pre_upgrade_deploy_release_by_id(mp_id)
+            if mp_data is None:
+                msg = f"Pre-upgrade-deploy metapackage {mp_id} not found"
+                LOG.error(msg)
+                msg_error += msg + "\n"
+                continue
+
+            target_state = {
+                states.DEPLOY_SELECTED: states.AVAILABLE,
+                states.REMOVE_SELECTED: states.DEPLOYED,
+            }
+            try:
+                new_state = target_state[mp_data.state]
+                mp_data.update_state(new_state)
+            except KeyError:
+                msg = (f"Pre-upgrade-deploy metapackage {mp_id} is not selected "
+                       f"(current state: {mp_data.state})")
+                LOG.info(msg)
+                msg_info += msg + "\n"
+            except FileSystemError as e:
+                msg = f"Failure unselecting pre-upgrade-deploy metapackage {mp_id}: {str(e)}"
+                LOG.error(msg)
+                msg_error += msg + "\n"
+            else:
+                msg = f"Unselected pre-upgrade-deploy metapackage {mp_id}"
+                LOG.info(msg)
+                msg_info += msg + "\n"
+
+        return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+    def _software_pre_upgrade_deploy_precheck_api(self, **kwargs):
+        """
+        Run deploy precheck for pre-upgrade-deploy metapackages.
+        The precheck scripts are located at:
+        /opt/software/releases/<sw-release>/pre-upgrade-deploy/<metapackage>/support-scripts/deploy-precheck
+        """
+        msg_info = ""
+        msg_error = ""
+        msg_warning = ""
+        msg_additional_data = {}
+
+        releases = list(set(kwargs.get("releases", [])))
+        force = kwargs.get("force") is not None
+
+        if not releases:
+            msg = "No releases were passed for pre-upgrade-deploy precheck"
+            msg_error += msg
+            LOG.error(msg)
+            return dict(info=msg_info, error=msg_error, warning=msg_warning,
+                        additional_data=msg_additional_data)
+
+        # Resolve product release to pre-upgrade-deploy metapackages
+        pre_upgrade_deploy_releases = []
+        for release in releases:
+            product = self.release_collection.get_product_release_by_id(release)
+            if not product:
+                msg = (f"Release {release} is not a product release. "
+                       "Pre-upgrade-deploy precheck requires a product release")
+                msg_error += msg
+                LOG.error(msg)
+                return dict(info=msg_info, error=msg_error, warning=msg_warning,
+                            additional_data=msg_additional_data)
+
+            pud_ids = self.release_collection.get_pre_upgrade_deploy_id_by_product_id(release)
+            if not pud_ids:
+                msg = f"Product release {release} has no pre-upgrade-deploy metapackages"
+                msg_error += msg
+                LOG.error(msg)
+                return dict(info=msg_info, error=msg_error, warning=msg_warning,
+                            additional_data=msg_additional_data)
+
+            for mp_id in pud_ids:
+                mp_data = self.release_collection.get_pre_upgrade_deploy_release_by_id(mp_id)
+                if mp_data:
+                    pre_upgrade_deploy_releases.append(mp_data)
+
+        # Select the pre-upgrade-deploy metapackages before precheck
+        select_result = self._pre_upgrade_deploy_select(
+            releases=releases)
+        if select_result.get("error"):
+            return dict(info=msg_info, error=select_result["error"],
+                        warning=msg_warning, additional_data=msg_additional_data)
+
+        # Run precheck for each pre-upgrade-deploy metapackage
+        healthy_releases = []
+        unhealthy_releases = []
+
+        for release in pre_upgrade_deploy_releases:
+            release_id = release.id
+            release_name = release.component
+            release_version = release.sw_release
+
+            # Build precheck script path using metapackage_dir which includes
+            # the pre-upgrade-deploy subdirectory
+            precheck_script = os.path.join(release.metapackage_dir,
+                                           constants.SUPPORT_SCRIPTS_DIR,
+                                           constants.DEPLOY_PRECHECK_SCRIPT)
+
+            LOG.info(f"Running precheck for pre-upgrade-deploy metapackage {release_id}")
+            ret = self._deploy_precheck(release_version, release_name,
+                                        force, None, True,
+                                        precheck_script_override=precheck_script,
+                                        **kwargs)
+            if ret:
+                if ret.get(constants.SYSTEM_HEALTHY) is None:
+                    msg = ("Failed to perform deploy precheck. Internal error "
+                           "has occurred.\n" + ret.get('error', ''))
+                    msg_error += f"{release_id}:\n{msg}\n"
+                    ret[constants.SYSTEM_HEALTHY] = False
+                    unhealthy_releases.append(release_id)
+                elif not ret.get(constants.SYSTEM_HEALTHY):
+                    msg = ("The following issues have been detected, which "
+                           "prevents deploying the release.\n" + ret.get('info', ''))
+                    msg_error += f"{release_id}:\n{msg}\n"
+                    ret[constants.SYSTEM_HEALTHY] = False
+                    unhealthy_releases.append(release_id)
+                else:
+                    healthy_releases.append(release_id)
+
+            msg_info += f"{release_id}:\n{ret.get('info', '')}\n"
+            msg_additional_data.update({release_id: ret})
+
+        if not unhealthy_releases:
+            msg = ("The following pre-upgrade-deploy release(s) passed precheck:\n"
+                   + ", ".join(healthy_releases))
+            LOG.info(msg)
+            msg_info += msg
+        else:
+            msg = ("The following pre-upgrade-deploy release(s) are unhealthy:\n"
+                   + ", ".join(unhealthy_releases))
+            LOG.error(msg)
+            msg_error += msg
+
+        # Get additional information before returning
+        release_version = next(iter({rel.sw_release for rel in pre_upgrade_deploy_releases}), None)
+        product_id = self.release_collection.get_release_id_by_sw_release(release_version)
+        product_release = self.release_collection.get_release_by_id(product_id)
+        release_info = self._get_release_additional_info(product_release)
+
+        return dict(info=msg_info, error=msg_error, warning=msg_warning, **release_info,
+                    additional_data=msg_additional_data)
+
+    def _software_pre_upgrade_deploy_start_api(self, releases, force, **kwargs):
+        """
+        Start the deployment or removal of pre-upgrade-deploy metapackages.
+        For apply: installs into the from-release (current running) feed.
+        For remove: resets the from-release feed to the base commit.
+
+        :param releases: list containing the product release ID
+        :param force: ignore non-critical alarms
+        :param kwargs: optional additional parameters (remove=True for removal)
+        """
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
+        remove = kwargs.pop("remove", False)
+
+        if not releases:
+            msg = "No releases were passed for pre-upgrade-deploy start"
+            LOG.error(msg)
+            msg_error += msg
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Resolve product release to pre-upgrade-deploy metapackages
+        pre_upgrade_deploy_ids = []
+        for release in releases:
+            product = self.release_collection.get_product_release_by_id(release)
+            if not product:
+                msg = (f"Release {release} is not a product release. "
+                       "Pre-upgrade-deploy start requires a product release")
+                LOG.error(msg)
+                msg_error += msg
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+            pud_ids = self.release_collection.get_pre_upgrade_deploy_id_by_product_id(release)
+            if not pud_ids:
+                msg = f"Product release {release} has no pre-upgrade-deploy metapackages"
+                LOG.error(msg)
+                msg_error += msg
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+            pre_upgrade_deploy_ids.extend(pud_ids)
+
+        # Select pre-upgrade-deploy metapackages (deploy-selected or remove-selected)
+        select_result = self._pre_upgrade_deploy_select(remove=remove, releases=releases)
+        if select_result.get("error"):
+            msg_error += select_result["error"]
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Run precheck for each pre-upgrade-deploy metapackage before starting
+        for mp_id in pre_upgrade_deploy_ids:
+            mp_release = self.release_collection.get_pre_upgrade_deploy_release_by_id(mp_id)
+            if not mp_release:
+                continue
+            LOG.info(f"Running precheck for pre-upgrade-deploy metapackage {mp_id}")
+            precheck_script = os.path.join(mp_release.metapackage_dir,
+                                           constants.SUPPORT_SCRIPTS_DIR,
+                                           constants.DEPLOY_PRECHECK_SCRIPT)
+            ret = self._deploy_precheck(mp_release.sw_release, mp_release.component,
+                                        force, None, True,
+                                        precheck_script_override=precheck_script)
+            if ret and not ret.get(constants.SYSTEM_HEALTHY, True):
+                msg = (f"Pre-upgrade-deploy precheck failed for {mp_id}:\n"
+                       f"{ret.get('error', ret.get('info', ''))}")
+                LOG.error(msg)
+                msg_error += msg + "\n"
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Build MetapackageDeploymentSet from pre-upgrade-deploy metapackages
+        mp_data = []
+        for mp_id in pre_upgrade_deploy_ids:
+            mp_release = self.release_collection.get_pre_upgrade_deploy_release_by_id(mp_id)
+            if mp_release:
+                mp_data.append(mp_release)
+
+        try:
+            mp_deploy_set = MetapackageDeploymentSet(mp_data)
+        except ReleaseInvalidData as e:
+            msg = str(e)
+            LOG.error(msg)
+            msg_error += msg
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Pre-upgrade-deploy operates on the from-release (current running) feed
+        running_release = self.release_collection.running_release
+        deploy_sw_version = running_release.sw_version
+        feed_repo = f"{constants.FEED_OSTREE_BASE_DIR}/rel-{deploy_sw_version}/ostree_repo"
+        reboot_required = mp_deploy_set.reboot_required
+
+        # Set deploy state and start the deployment
+        hostname = None
+        if self.pre_bootstrap:
+            hostname = constants.PREBOOTSTRAP_HOSTNAME
+        elif self.install_local:
+            hostname = socket.gethostname()
+
+        if remove:
+            # Remove: reset ostree to base commit, transition to removing
+            msg = f"Deploy start remove operation for pre-upgrade-deploy: {mp_deploy_set}"
+            LOG.info(msg)
+            audit_log_info(msg)
+
+            # Transition to removing state
+            for mp in mp_deploy_set.metapackages:
+                mp.update_state(states.REMOVING)
+            self.software_sync()
+
+            # Get base commit from metadata (the commit before pre-upgrade-deploy was applied)
+            base_commit_id = list(mp_deploy_set.base_commit_id)
+
+            # Get metapackage deploy state for deploy entity
+            metapackage_deploy_state = self._get_highest_deployed(
+                mp_deploy_set.metapackages, apply=False)
+
+            collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
+            create_deploy_hosts(hostname=hostname)
+            deploy_state = DeployState.get_instance()
+            deploy_state.start(mp_deploy_set.sw_release, running_release, feed_repo,
+                               base_commit_id, reboot_required, metapackage_deploy_state,
+                               pre_upgrade_deploy=True, **kwargs)
+
+            try:
+                # Reset ostree feed to the base commit
+                base_commit = None
+                all_feed_commits = ostree_utils.get_all_feed_commits(deploy_sw_version)
+                all_feed_commits.reverse()
+                for commit in all_feed_commits:
+                    if commit in mp_deploy_set.base_commit_id:
+                        base_commit = commit
+                        break
+
+                if not base_commit:
+                    raise SoftwareError("Could not find base commit for pre-upgrade-deploy removal")
+
+                ostree_utils.reset_ostree_repo_head(base_commit, feed_repo)
+                LOG.info(f"Reset ostree feed {feed_repo} to base commit {base_commit}")
+
+                # Delete the pre-upgrade-deploy commits from the feed
+                for commit in mp_deploy_set.commit_id:
+                    ostree_utils.delete_ostree_repo_commit(commit, feed_repo)
+                    LOG.info(f"Deleted commit {commit} from the feed")
+
+                # Update feed summary
+                ostree_utils.update_repo_summary_file(feed_repo)
+
+                # Remove contents from metadata
+                for mp in mp_deploy_set.metapackages:
+                    self.remove_tags_from_metadata(mp, constants.CONTENTS_TAG)
+                    LOG.info(f"Removed commit from metapackage {mp.id} metadata")
+
+                # Move deploy state to start-done
+                latest_feed_commit = ostree_utils.get_feed_latest_commit(deploy_sw_version)
+                deploy_state = DeployState.get_instance()
+                deploy_state.start_done(latest_feed_commit)
+
+                self.send_latest_feed_commit_to_agent(latest_feed_commit)
+                self.software_sync()
+
+                msg_info += (f"Pre-upgrade-deploy removal for {mp_deploy_set} completed "
+                             "deploy-start. Await for states: "
+                             "[deploy-start-done | deploy-start-failed] "
+                             "in 'software deploy show'\n")
+            except Exception as e:
+                msg = f"Pre-upgrade-deploy removal failed: {str(e)}"
+                LOG.exception(msg)
+                audit_log_info(msg)
+                msg_error += msg + "\n"
+
+                deploy_state = DeployState.get_instance()
+                deploy_state.start_failed()
+        else:
+            # Apply: install pre-upgrade-deploy into the running release feed
+            msg = f"Deploy start apply operation for pre-upgrade-deploy: {mp_deploy_set}"
+            LOG.info(msg)
+            audit_log_info(msg)
+
+            commit_id = list(mp_deploy_set.commit_id)
+
+            # Transition to deploying state
+            for mp in mp_deploy_set.metapackages:
+                mp.update_state(states.DEPLOYING)
+            self.software_sync()
+
+            # Get metapackage deploy state for deploy entity
+            metapackage_deploy_state = self._get_highest_deployed(
+                mp_deploy_set.metapackages, apply=True)
+
+            collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
+            create_deploy_hosts(hostname=hostname)
+            deploy_state = DeployState.get_instance()
+            deploy_state.start(running_release, mp_deploy_set.sw_release, feed_repo,
+                               commit_id, reboot_required, metapackage_deploy_state,
+                               pre_upgrade_deploy=True, **kwargs)
+
+            # Start applying the releases (patch mode, not upgrade)
+            self.install_releases_thread(mp_deploy_set, feed_repo, False, **kwargs)
+
+            msg_info += (f"Pre-upgrade-deploy metapackages {mp_deploy_set} are now starting, "
+                         "await for the states: [deploy-start-done | deploy-start-failed] "
+                         "in 'software deploy show'\n")
+
+        return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     def _validate_releases_for_precheck(self, releases: list):
         """
@@ -3692,7 +4183,6 @@ class PatchController(PatchService):
 
         return valid_releases
 
-    # TODO(mbenedit): Implement the pre-upgrade-deploy for precheck
     def software_deploy_precheck_api(self, **kwargs) -> dict:
         """
         Verify if system satisfy the requisites to upgrade to a product release or list of
@@ -3702,6 +4192,10 @@ class PatchController(PatchService):
         :param kwargs: dict containing the request body data
         :return: dict of info, warning, error and additional_data
         """
+        pre_upgrade_deploy = kwargs.pop("pre_upgrade_deploy", False)
+        if pre_upgrade_deploy:
+            return self._software_pre_upgrade_deploy_precheck_api(**kwargs)
+
         msg_info = ""
         msg_error = ""
         msg_warning = ""
@@ -3793,7 +4287,8 @@ class PatchController(PatchService):
         product_release = self.release_collection.get_release_by_id(product_id)
         release_info = self._get_release_additional_info(product_release)
 
-        return dict(info=msg_info, error=msg_error, warning=msg_warning, **release_info, additional_data=msg_additional_data)
+        return dict(info=msg_info, error=msg_error, warning=msg_warning, **release_info,
+                    additional_data=msg_additional_data)
 
     def _deploy_upgrade_start(self, to_release, commit_id, **kwargs):
         LOG.info("Start deploy upgrade from %s to %s" % (SW_VERSION, to_release))
@@ -4043,6 +4538,10 @@ class PatchController(PatchService):
             LOG.info(msg)
             audit_log_info(msg)
 
+            # Derive feed version from feed_repo path
+            # feed_repo format: /var/www/pages/feed/rel-<version>/ostree_repo
+            feed_sw_version = Path(feed_repo).parent.name.replace("rel-", "")
+
             try:
                 # Create script runner for the provided metapackages
                 extra_args = ["--operation=apply"]
@@ -4058,7 +4557,7 @@ class PatchController(PatchService):
                 reload_release_data()
 
                 # Check if metapackage commit exist and are in the feed (for upgrade and prestage)
-                all_commits = ostree_utils.get_all_feed_commits(mp_deploy_set.sw_version)
+                all_commits = ostree_utils.get_all_feed_commits(feed_sw_version)
                 # Latest commit is the first in the list
                 latest_commit = all_commits[0]
                 # Target commit is either None or one commit
@@ -4103,7 +4602,7 @@ class PatchController(PatchService):
 
                 # Get the latest commit after performing 'apt-ostree install'
                 reload_release_data()
-                latest_feed_commit = ostree_utils.get_feed_latest_commit(mp_deploy_set.sw_version)
+                latest_feed_commit = ostree_utils.get_feed_latest_commit(feed_sw_version)
 
                 # NOTE(bqian): Below check an exception raise should be revisited,
                 # if applicable should be applied to the begining of all requests
@@ -4116,7 +4615,7 @@ class PatchController(PatchService):
                 if mp_deploy_set.state == states.REMOVE_SELECTED:
                     deploy_state = states.REMOVING
                 metadata_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP[deploy_state]
-                metadata_files = [Path(metadata_dir) / f"{mp.id}-metadata.xml"
+                metadata_files = [Path(metadata_dir) / mp.metadata_filename
                                   for mp in mp_deploy_set]
 
                 # Update metapackage metadata commit-ids
@@ -4450,6 +4949,11 @@ class PatchController(PatchService):
         :param force: ignore non-critical alarms to start the deployment
         :param kwargs: optional additional parameters
         """
+        pre_upgrade_deploy = kwargs.pop("pre_upgrade_deploy", False)
+        if pre_upgrade_deploy:
+            return self._software_pre_upgrade_deploy_start_api(
+                releases, force, **kwargs)
+
         msg_info = ""
         msg_warning = ""
         msg_error = ""
@@ -4683,7 +5187,7 @@ class PatchController(PatchService):
         LOG.info("Removing %s tag from %s metadata" % (tag, release.id))
 
         metadata_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP[release.state]
-        metadata_path = "%s/%s-metadata.xml" % (metadata_dir, release.id)
+        metadata_path = "%s/%s" % (metadata_dir, release.metadata_filename)
         tree = ET.parse(metadata_path)
         root = tree.getroot()
         metadata_tag = root.find(tag)
@@ -4696,24 +5200,31 @@ class PatchController(PatchService):
                 tree = ET.tostring(root)
                 outfile.write(tree)
 
-    def execute_delete_actions(self):
+    def execute_delete_actions(self, release_ids):
+        # TODO(heitormatsui) join activate, activate_rollback
+        # and deploy_delete under the same function/structure
         deploy = self.db_api_instance.get_current_deploy()
         to_release = deploy.get("to_release")
         from_release = deploy.get("from_release")
         metapackages = deploy.get("metapackages")
+        is_pre_upgrade_deploy = deploy.get("pre_upgrade_deploy", False)
 
         is_major_release = utils.is_upgrade_deploy(
-            utils.get_major_release_version(from_release),
-            utils.get_major_release_version(to_release))
+                utils.get_major_release_version(from_release),
+                utils.get_major_release_version(to_release)
+            ) and not is_pre_upgrade_deploy
 
         if metapackages:
             # Per-metapackage delete: build scripts dict and call directly
             metapackages_scripts = {}
-            for mp_name, _, to_version in metapackages:
-                mp_id = f"{mp_name}_{to_version}"
-                mp_release = self.release_collection.get_metapackage_release_by_id(mp_id)
-                scripts = mp_release.activation_scripts if mp_release else []
-                metapackages_scripts[mp_name] = scripts
+            for mp_id in release_ids:
+                if is_pre_upgrade_deploy:
+                    mp_release = self.release_collection.get_pre_upgrade_deploy_release_by_id(mp_id)
+                else:
+                    mp_release = self.release_collection.get_metapackage_release_by_id(mp_id)
+                scripts = mp_release.activation_scripts
+                path_key = mp_release.path_component
+                metapackages_scripts[path_key] = scripts
 
             delete_cmd = ["source", "/etc/platform/openrc;",
                           "/usr/bin/software-deploy-delete",
@@ -4761,6 +5272,7 @@ class PatchController(PatchService):
         deploy = self.db_api_instance.get_current_deploy()
         to_release = deploy.get("to_release")
         from_release = deploy.get("from_release")
+        pre_upgrade_deploy = deploy.get("pre_upgrade_deploy")
 
         deploy_state_instance = DeployState.get_instance()
 
@@ -4778,15 +5290,19 @@ class PatchController(PatchService):
         is_major_release = False
 
         deploy_state = deploy_state_instance.get_deploy_state()
-        deploying_release_state = ReleaseState(release_state=states.DEPLOYING)
+        deploying_release_state = ReleaseState(release_state=states.DEPLOYING,
+                                               pre_upgrade_deploy=pre_upgrade_deploy)
+        removing_release_state = ReleaseState(release_state=states.REMOVING,
+                                              pre_upgrade_deploy=pre_upgrade_deploy)
         is_applying = deploying_release_state.has_release_id()
 
-        if deploy_state in [
+        if pre_upgrade_deploy:
+            is_major_release = False
+        elif deploy_state in [
                 DEPLOY_STATES.START_DONE, DEPLOY_STATES.START_FAILED, DEPLOY_STATES.COMPLETED]:
             is_major_release = deploying_release_state.is_major_release_deployment() if is_applying else False
         elif deploy_state == DEPLOY_STATES.HOST_ROLLBACK_DONE:
-            is_major_release = ReleaseState(
-                release_state=states.DEPLOYING).is_major_release_deployment()
+            is_major_release = deploying_release_state.is_major_release_deployment()
 
         # Only major release is required to be deleted on controller-0
         # Patch deletion can take place on either controller
@@ -4849,15 +5365,23 @@ class PatchController(PatchService):
                 # Skip transitioning releases to deployed, system-deploy delete
                 # will handle this when the system-deploy entity is cleaned up
                 if not is_system_deploy_in_progress():
-                    deploying_release_state.deploy_completed()
+                    if deploy.get("pre_upgrade_deploy", False):
+                        # For pre-upgrade-deploy, transition directly to avoid
+                        # ID collision issues with ReleaseState generic lookup
+                        metapackages_data = deploy.get("metapackages", [])
+                        for mp_name, _, to_version in metapackages_data:
+                            mp_id = f"{mp_name}_{to_version}"
+                            mp_release = self.release_collection.get_pre_upgrade_deploy_release_by_id(mp_id)
+                            if mp_release and mp_release.state == states.DEPLOYING:
+                                mp_release.update_state(states.DEPLOYED)
+                    else:
+                        deploying_release_state.deploy_completed()
             else:
-                removing_release_state = ReleaseState(release_state=states.REMOVING)
                 removing_release_state.available()
 
         elif DEPLOY_STATES.HOST_ROLLBACK_DONE == deploy_state:
             major_release = utils.get_major_release_version(from_release)
-            release_state = ReleaseState(release_state=states.DEPLOYING)
-            release_state.available()
+            deploying_release_state.available()
 
         elif deploy_state in [DEPLOY_STATES.START_DONE, DEPLOY_STATES.START_FAILED]:
             # TODO(bqian), this check is redundant. there should be no host deployed/deploying
@@ -4931,7 +5455,12 @@ class PatchController(PatchService):
                                        fm_constants.FM_ALARM_STATE_CLEAR,
                                        "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, constants.CONTROLLER_FLOATING_HOSTNAME))
 
-        self.execute_delete_actions()
+        release_ids = []
+        if deploying_release_state.has_release_id():
+            release_ids = deploying_release_state.get_release_ids()
+        elif removing_release_state.has_release_id():
+            release_ids = removing_release_state.get_release_ids()
+        self.execute_delete_actions(release_ids=release_ids)
 
         msg_info += "Deploy deleted with success"
         self.db_api_instance.delete_deploy_host_all()
@@ -4975,6 +5504,8 @@ class PatchController(PatchService):
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
     def _activate(self):
+        # TODO(heitormatsui) join activate, activate_rollback
+        # and deploy_delete under the same function/structure
         deploy = self.db_api_instance.get_deploy_all()
         if deploy:
             deploy = deploy[0]
@@ -4985,26 +5516,40 @@ class PatchController(PatchService):
         cmd_path = "/usr/bin/software-deploy-activate"
         from_release = deploy.get("from_release")
         to_release = deploy.get("to_release")
+        pre_upgrade_deploy = deploy.get("pre_upgrade_deploy", False)
+
         if self.pre_bootstrap:
             activate_cmd = [cmd_path, from_release, to_release]
         else:
             activate_cmd = ["source", "/etc/platform/openrc;", cmd_path, from_release, to_release]
 
-        from_release_maj_min_version = utils.get_major_release_version(from_release)
-        to_release_maj_min_version = utils.get_major_release_version(to_release)
-        deploying = ReleaseState(release_state=states.DEPLOYING)
-        if deploying.is_major_release_deployment() \
-                or from_release_maj_min_version != to_release_maj_min_version:
+        is_major_release = utils.is_upgrade_deploy(
+                utils.get_major_release_version(from_release),
+                utils.get_major_release_version(to_release)
+            ) and not pre_upgrade_deploy
+
+        if is_major_release:
             activate_cmd.append('--is_major_release')
+
+        deploying_release_state = ReleaseState(release_state=states.DEPLOYING,
+                                               pre_upgrade_deploy=pre_upgrade_deploy)
+        if not deploying_release_state.has_release_id():
+            deploying_release_state = ReleaseState(release_state=states.REMOVING,
+                                                   pre_upgrade_deploy=pre_upgrade_deploy)
 
         metapackages = deploy.get("metapackages")
         if metapackages:
             metapackages_scripts = {}
-            for mp_name, _, to_version in metapackages:
-                mp_id = f"{mp_name}_{to_version}"
-                mp_release = self.release_collection.get_metapackage_release_by_id(mp_id)
-                scripts = mp_release.activation_scripts if mp_release else []
-                metapackages_scripts[mp_name] = scripts
+            for mp_id in deploying_release_state.get_release_ids():
+                if pre_upgrade_deploy:
+                    mp_release = self.release_collection.get_pre_upgrade_deploy_release_by_id(mp_id)
+                else:
+                    mp_release = self.release_collection.get_metapackage_release_by_id(mp_id)
+                if not mp_release:
+                    raise SoftwareServiceError(f"Metapackage {mp_id} not found.")
+                scripts = mp_release.activation_scripts
+                path_key = mp_release.path_component
+                metapackages_scripts[path_key] = scripts
             activate_cmd.append("--metapackages '%s'" % json.dumps(metapackages_scripts))
 
         env = os.environ.copy()
@@ -5360,6 +5905,11 @@ class PatchController(PatchService):
             product_deploy = self._is_product_deploy(metapackages)
             dd.update({"product_deploy": product_deploy})
 
+        # Ensure pre_upgrade_deploy is in the response
+        # TODO(heitormatsui): remove after stx-14
+        if "pre_upgrade_deploy" not in dd:
+            dd["pre_upgrade_deploy"] = False
+
         # Get release additional data
         release_id = self.release_collection.get_release_id_by_sw_release(release_deployment)
         release = self._release_basic_checks(release_id)
@@ -5501,9 +6051,9 @@ class PatchController(PatchService):
             additional_data["to_kubelet_version"] = system_deploy["to_k8s_version"]
 
         metapackages = self.release_collection.get_ordered_metapackages(
-            filter_by_states=[states.DEPLOYING], tuple_format=True)
+            filter_by_states=[states.DEPLOYING, states.REMOVING], tuple_format=True)
         if not metapackages:
-            LOG.warning("No metapackages found in deploying state during deploy host")
+            LOG.warning("No metapackages found in deploying/removing state during deploy host")
 
         self.hosts_lock.acquire()
         self.hosts[ip].install_pending = True
@@ -5749,6 +6299,7 @@ class PatchController(PatchService):
                 "software_release": deploy.get("from_release"),
                 "target_release": deploy.get("to_release") if state else None,
                 "reboot_required": deploy.get("reboot_required") if state else None,
+                "pre_upgrade_deploy": deploy.get("pre_upgrade_deploy", False),
                 "host_state": state
             }
             deploy_host_list.append(deploy_host)
@@ -5868,11 +6419,13 @@ class PatchController(PatchService):
         from_maj_min_release = utils.get_major_release_version(deploy.get("from_release"))
         to_maj_min_release = utils.get_major_release_version(deploy.get("to_release"))
         state = deploy.get("state")
+        pre_upgrade_deploy = deploy.get("pre_upgrade_deploy", False)
 
         return {
             "from_release": from_maj_min_release,
             "to_release": to_maj_min_release,
-            "state": state
+            "state": state,
+            "pre_upgrade_deploy": pre_upgrade_deploy,
         }
 
     def check_upgrade_in_progress(self):
@@ -5883,6 +6436,11 @@ class PatchController(PatchService):
         upgrade_release = self._get_software_upgrade()
         if not upgrade_release:
             return _upgrade_in_progress
+
+        # Pre-upgrade-deploy is always a patch operation, not an upgrade
+        if upgrade_release.get("pre_upgrade_deploy"):
+            return False
+
         from_release = version.Version(upgrade_release["from_release"])
         to_release = version.Version(upgrade_release["to_release"])
         if (from_release.major != to_release.major) or (from_release.minor != to_release.minor):

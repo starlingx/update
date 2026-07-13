@@ -88,6 +88,8 @@ class DeployManager(base.Manager):
             body["releases"] = args.releases
         if args.pre_upgrade_deploy:
             body["pre_upgrade_deploy"] = args.pre_upgrade_deploy
+        if args.remove:
+            body["remove"] = args.remove
 
         return self._post(path, body=body)
 

@@ -106,14 +106,24 @@ class SWRelease(object):
         to_dir = state_dir_map[state]
         from_dir = state_dir_map[self.state]
         try:
-            shutil.move("%s/%s-metadata.xml" % (from_dir, self.id),
-                        "%s/%s-metadata.xml" % (to_dir, self.id))
+            shutil.move("%s/%s" % (from_dir, self.metadata_filename),
+                        "%s/%s" % (to_dir, self.metadata_filename))
         except shutil.Error:
             msg = "Failed to move the metadata for %s" % self.id
             LOG.exception(msg)
             raise FileSystemError(msg)
 
         self.metadata['state'] = state
+
+    @property
+    def metadata_filename(self):
+        """Returns the metadata filename on disk for this release.
+
+        Pre-upgrade-deploy metapackages have a 'pre-' prefix to avoid
+        filename collision with regular metapackages that share the same ID.
+        """
+        prefix = "pre-" if self.is_pre_upgrade_deploy_release else ""
+        return "%s%s-metadata.xml" % (prefix, self.id)
 
     @property
     def version_obj(self):
@@ -137,6 +147,17 @@ class SWRelease(object):
     @property
     def component(self):
         return self._get_by_key('component')
+
+    @property
+    def path_component(self):
+        """Returns the relative path component for this release.
+
+        For pre-upgrade-deploy metapackages, includes the 'pre-upgrade-deploy'
+        subdirectory prefix. For regular metapackages, returns just the component name.
+        """
+        if self.is_pre_upgrade_deploy_release:
+            return os.path.join(constants.PRE_UPGRADE_DEPLOY, self.component)
+        return self.component
 
     def _get_latest_commit(self):
         if 'number_of_commits' not in self.contents:
@@ -318,6 +339,16 @@ class SWRelease(object):
         return self.product is not None
 
     @property
+    def is_pre_upgrade_deploy_release(self):
+        """Indicates whether this release is a pre-upgrade-deploy metapackage.
+
+        A pre-upgrade-deploy metapackage is shipped as part of a new product
+        release but is meant to be deployed on the current (from) release
+        before an upgrade operation.
+        """
+        return self.is_metapackage_release and self.pre_upgrade_deploy == "Y"
+
+    @property
     def is_legacy_release(self):
         """Indicates whether this release follows the legacy release model.
 
@@ -330,6 +361,11 @@ class SWRelease(object):
 
     @property
     def metapackage_dir(self):
+        if self.is_pre_upgrade_deploy_release:
+            return os.path.join(constants.COMPONENT_SOFTWARE_STORAGE_DIR,
+                                self.sw_release,
+                                constants.PRE_UPGRADE_DEPLOY,
+                                self.component)
         if self.is_metapackage_release:
             return os.path.join(constants.COMPONENT_SOFTWARE_STORAGE_DIR,
                                 self.sw_release, self.component)
@@ -389,6 +425,16 @@ class SWRelease(object):
     @property
     def is_deletable(self):
         return self.state in states.DELETABLE_STATE
+
+    @property
+    def has_pre_upgrade_deploy_deployed(self):
+        """Check if any pre-upgrade-deploy metapackage is in deployed state."""
+        if not self.is_product_release or not self.pre_upgrade_deploy:
+            return False
+        return any(
+            mp_data.get("state") == states.DEPLOYED
+            for mp_data in self.pre_upgrade_deploy.values()
+        )
 
     def to_query_dict(self):
         data = {"release_id": self.id,
@@ -623,12 +669,27 @@ class SWReleaseCollection(object):
             return self._sw_metapackages[metapackage_id]
         return None
 
+    def get_pre_upgrade_deploy_release_by_id(self, metapackage_id):
+        if metapackage_id in self._sw_pre_upgrade_deploy_metapackages:
+            return self._sw_pre_upgrade_deploy_metapackages[metapackage_id]
+        return None
+
     def get_metapackages_id_by_product_id(self, product_id):
         if product_id in self._sw_releases:
             product_data = self._sw_releases[product_id]
             metapackages = []
             for mp in product_data.metapackages:
                 metapackages.append(mp)
+            return metapackages
+        return None
+
+    def get_pre_upgrade_deploy_id_by_product_id(self, product_id):
+        if product_id in self._sw_releases:
+            product_data = self._sw_releases[product_id]
+            metapackages = []
+            if product_data.pre_upgrade_deploy:
+                for mp in product_data.pre_upgrade_deploy:
+                    metapackages.append(mp)
             return metapackages
         return None
 
@@ -663,29 +724,37 @@ class SWReleaseCollection(object):
             filter_by_ids = []
 
         filtered_metapackages = []
-        # Order metapackage list
+        # Order metapackage list (regular + pre-upgrade-deploy)
         sorted_list = sorted(self._sw_metapackages)
+        sorted_pre_upgrade = sorted(self._sw_pre_upgrade_deploy_metapackages)
 
         # Apply filters to the ordered list
         if filter_by_ids:
             sorted_list = [rel_id for rel_id in sorted_list if rel_id in filter_by_ids]
+            sorted_pre_upgrade = [rel_id for rel_id in sorted_pre_upgrade if rel_id in filter_by_ids]
 
         # Apply filters to the metapackages in the ordered list
         if not filter_by_states:
             # Fallback to the ordered metapackage list
             filtered_metapackages = [self._sw_metapackages[rel_id] for rel_id in sorted_list]
+            filtered_metapackages += [self._sw_pre_upgrade_deploy_metapackages[rel_id]
+                                      for rel_id in sorted_pre_upgrade]
         else:
             # Filter by metapackage attributes
             for rel_id in sorted_list:
                 rel_data = self._sw_metapackages[rel_id]
-                if filter_by_states and rel_data.state in filter_by_states:
+                if rel_data.state in filter_by_states:
+                    filtered_metapackages.append(rel_data)
+            for rel_id in sorted_pre_upgrade:
+                rel_data = self._sw_pre_upgrade_deploy_metapackages[rel_id]
+                if rel_data.state in filter_by_states:
                     filtered_metapackages.append(rel_data)
 
         # Define list format
         formatted_metapackages = []
         if kwargs.get("tuple_format", False):
             formatted_metapackages.extend(
-                [(metapackage.component, metapackage.sw_release) for metapackage in filtered_metapackages])
+                [(metapackage.path_component, metapackage.sw_release) for metapackage in filtered_metapackages])
         elif kwargs.get("property_format", None):
             property = kwargs["property_format"]
             formatted_metapackages.extend(
@@ -772,10 +841,18 @@ class SWReleaseCollection(object):
             rel_data = self._sw_metapackages[rel_id]
             if rel_data.state in filter_states:
                 yield rel_data
+        sorted_pre = sorted(self._sw_pre_upgrade_deploy_metapackages)
+        for rel_id in sorted_pre:
+            rel_data = self._sw_pre_upgrade_deploy_metapackages[rel_id]
+            if rel_data.state in filter_states:
+                yield rel_data
 
-    def update_state(self, list_of_releases, state):
+    def update_state(self, list_of_releases, state, pre_upgrade_deploy=False):
         for release_id in list_of_releases:
-            release = self.get_release_by_id(release_id)
+            if pre_upgrade_deploy:
+                release = self.get_pre_upgrade_deploy_release_by_id(release_id)
+            else:
+                release = self.get_release_by_id(release_id)
             if release is not None:
                 release.update_state(state)
 

@@ -189,6 +189,7 @@ RELEASE_GA_NAME = "starlingx-%s"
 RELEASE_PREFIX = "rel"
 STARLINGX_RELEASE = SW_VERSION
 UNKNOWN_SOFTWARE_VERSION = "0.0.0"
+PRE_UPGRADE_DEPLOY = "pre-upgrade-deploy"
 
 # Precheck constants
 LICENSE_FILE = "/etc/platform/.license"

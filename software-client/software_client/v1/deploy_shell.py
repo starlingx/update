@@ -24,6 +24,7 @@ def do_show(cc, args):
                     and deploy["product_deploy"] is False):
                 header_data_list = {"Releases": "metapackages",
                                     "RR": "reboot_required",
+                                    "Pre-Upgrade": "pre_upgrade_deploy",
                                     "State": "state"}
                 nested_tables_headers.update({"metapackages":
                                              ["Metapackage", "From Release", "To Release"]})
@@ -31,6 +32,7 @@ def do_show(cc, args):
                 header_data_list = {"From Release": "from_release",
                                     "To Release": "to_release",
                                     "RR": "reboot_required",
+                                    "Pre-Upgrade": "pre_upgrade_deploy",
                                     "State": "state"}
             utils.format_data(data, header="state", format_func=lambda x: f"deploy-{x}")
             utils.display_result_list(header_data_list, data, nested_tables_headers)
@@ -53,7 +55,7 @@ def do_host_list(cc, args):
         else:
             header_data_list = {"Host": "hostname", "From Release": "software_release",
                                 "To Release": "target_release", "RR": "reboot_required",
-                                "State": "host_state"}
+                                "Pre-Upgrade": "pre_upgrade_deploy", "State": "host_state"}
             utils.format_data(data, header="host_state", format_func=lambda x: f"deploy-host-{x}")
             utils.display_result_list(header_data_list, data)
     else:
@@ -159,6 +161,11 @@ def do_precheck(cc, args):
            required=False,
            help='Run start only in the metapackages required to deploy '
            'before upgrading to the specified product release')
+@utils.arg('--remove',
+           action='store_true',
+           required=False,
+           help='Remove previously deployed pre-upgrade-deploy metapackages '
+           '(requires --pre-upgrade-deploy)')
 @utils.arg('-f',
            '--force',
            action='store_true',
@@ -171,6 +178,10 @@ def do_precheck(cc, args):
            help='Additional parameters in key=value format.')
 def do_start(cc, args):
     """Start the software deployment"""
+    if args.remove and not args.pre_upgrade_deploy:
+        print("Error: --remove requires --pre-upgrade-deploy")
+        return 1
+
     resp, data = cc.deploy.start(args)
     if args.debug:
         utils.print_result_debug(resp, data)
