@@ -114,6 +114,7 @@ PLUGINS = {
         FEATURE_PRE_APPS: [
             UpdateStaticHieradata(),
             RenameDeprecatedPtpParameters(),
+            AddMissingServiceParameters(),
         ],
         K8S_APP_UPDATE: [],
         FEATURE_POST_APPS: [],
@@ -132,7 +133,6 @@ PLUGINS = {
         ],
         FEATURE_PRE_APPS: [
             AddTlsParameters(),
-            AddMissingServiceParameters(),
             DisablePortierisWebhook(),
             NetappTridentMigration(),
         ],

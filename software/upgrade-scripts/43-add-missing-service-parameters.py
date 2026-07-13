@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# Add missing service parameters during upgrade activation.
+# Add missing service parameters during upgrade migration.
 #
 # NOTE: This script is only needed for the 26.03 -> 26.10 upgrade path.
 #       It can be deleted after the 26.10 release.
@@ -16,19 +16,25 @@
 #   identity | ldap-linux | lockout_seconds, lockout_retries,
 #              inactive_session_term_timeout_seconds
 #   identity | security_compliance | inactive_session_term_timeout_seconds
+#
+# This script uses action='migrate' (runs during 'deploy start') and
+# inserts parameters directly into the to-release PostgreSQL database
+# (port 6666). No sysinv API is available at migrate time.
 
 import logging
-import os
+import subprocess
 import sys
+import uuid
 
-from cgtsclient import client as cgts_client
 from software.utilities.plugin_runner import CPlugin
 from software.utilities.utils import configure_logging
 
 LOG = logging.getLogger("main_logger")
 
-# Parameters to add if missing: (service, section, name, default_value)
-MISSING_PARAMS = [
+# All parameters to insert directly into the to-release DB.
+# At migrate time there is no sysinv API — only a temporary
+# PostgreSQL instance on the port passed by the plugin runner.
+DB_PARAMS = [
     ("platform", "config", "amd_pstate", "passive"),
     ("identity", "ldap-linux", "lockout_seconds", "900"),
     ("identity", "ldap-linux", "lockout_retries", "5"),
@@ -39,86 +45,89 @@ MISSING_PARAMS = [
 ]
 
 
-def get_sysinv_client():
-    """Create and return an authenticated sysinv API client.
+def _insert_param_directly(service, section, name, value, port):
+    """Insert a service parameter directly into PostgreSQL.
 
-    Uses OS_AUTH_TOKEN and SYSTEM_URL environment variables which are
-    set by the upgrade plugin runner before invoking upgrade scripts.
+    Bypasses the sysinv API and conductor handlers. At migrate time
+    the to-release DB runs on a temporary port (typically 6666).
+
+    Uses sudo -u postgres psql since the migrate script runs as
+    sysadmin and peer authentication requires the postgres OS user.
     """
-    return cgts_client.get_client(
-        "1",
-        os_auth_token=os.environ.get("OS_AUTH_TOKEN"),
-        system_url=os.environ.get("SYSTEM_URL"),
+    param_uuid = str(uuid.uuid4())
+
+    sql = (
+        "INSERT INTO service_parameter "
+        "(uuid, service, section, name, value, personality, resource, created_at) "
+        "VALUES ('%s', '%s', '%s', '%s', '%s', NULL, NULL, now());"
+        % (param_uuid, service, section, name, value)
     )
 
+    result = subprocess.run(
+        ['sudo', '-u', 'postgres', 'psql', '-d', 'sysinv',
+         '--port=%s' % port, '-c', sql],
+        capture_output=True, text=True, check=True
+    )
+    LOG.info("Inserted %s/%s/%s=%s directly into DB (uuid=%s, port=%s): %s",
+             service, section, name, value, param_uuid, port,
+             result.stdout.strip())
 
-def get_existing_params(sysinv):
-    """Retrieve all current service parameters from the database.
 
-    Returns a set of (service, section, name) tuples representing
-    every parameter that already exists, used for idempotent
-    duplicate checking before inserting new entries.
+def _param_exists_in_db(service, section, name, port):
+    """Check if a service parameter already exists in the DB."""
+    sql = (
+        "SELECT COUNT(*) FROM service_parameter "
+        "WHERE service='%s' AND section='%s' AND name='%s';"
+        % (service, section, name)
+    )
+    result = subprocess.run(
+        ['sudo', '-u', 'postgres', 'psql', '-d', 'sysinv',
+         '--port=%s' % port, '-t', '-c', sql],
+        capture_output=True, text=True, check=True
+    )
+    count = int(result.stdout.strip())
+    return count > 0
+
+
+def do_migrate(port):
+    """Main migration logic: add missing service parameters.
+
+    Inserts all parameters directly into the to-release database
+    running on the specified port. No sysinv API or conductor is
+    involved — this is purely a DB-level operation.
+
+    The parameters will be picked up by puppet when the host first
+    boots into the new release. For amd_pstate specifically, the
+    GRUB change is applied by UpdateKernelParametersHook during
+    deploy-host.
     """
-    return {
-        (p.service, p.section, p.name)
-        for p in sysinv.service_parameter.list()
-    }
+    added = 0
+    skipped = 0
 
-
-def do_activate(sysinv):
-    """Main activation logic: add missing service parameters.
-
-    Iterates over MISSING_PARAMS and for each one:
-    1. Checks if it already exists in the DB (idempotent — safe to re-run).
-    2. If missing, creates it via the sysinv API with its default value.
-    3. After all inserts, calls service-parameter-apply once per affected
-       service so that puppet picks up the new values.
-
-    This handles the gap where _create_default_service_parameter() in
-    conductor/manager.py only runs on first boot (inside
-    _create_default_system) and is never invoked on upgrade.
-    """
-    existing = get_existing_params(sysinv)
-    added = []
-
-    for service, section, name, value in MISSING_PARAMS:
-        if (service, section, name) in existing:
+    for service, section, name, value in DB_PARAMS:
+        if _param_exists_in_db(service, section, name, port):
             LOG.info("Parameter %s/%s/%s already exists, skipping",
                      service, section, name)
+            skipped += 1
             continue
+        _insert_param_directly(service, section, name, value, port)
+        added += 1
 
-        LOG.info("Adding parameter %s/%s/%s=%s",
-                 service, section, name, value)
-        sysinv.service_parameter.create(
-            service,
-            section,
-            None,  # personality
-            None,  # resource
-            {name: value},
-        )
-        added.append((service, section, name))
-
-    if added:
-        # Apply each affected service once
-        services_to_apply = set(s for s, _, _ in added)
-        for svc in services_to_apply:
-            LOG.info("Applying service parameters for %s", svc)
-            sysinv.service_parameter.apply(svc)
-
-    LOG.info("Completed: %d parameters added", len(added))
+    LOG.info("Completed: added %d parameters, skipped %d (already existed)",
+             added, skipped)
 
 
 class AddMissingServiceParameters(CPlugin):
     """USM upgrade plugin to populate service parameters new in Trixie.
 
-    Registered as an 'activate' action plugin.  The USM plugin runner
-    calls _run() during 'software deploy activate' after all hosts
-    have been upgraded and rebooted.
+    Registered as a 'migrate' action plugin. The USM plugin runner
+    calls _run() during 'software deploy start' to populate the
+    to-release database before hosts are upgraded.
     """
 
     def __init__(self):
         super().__init__(
-            matching_action=['activate'],
+            matching_action=['migrate'],
             required_state=None,
             plugin_name='add-missing-service-parameters',
             completed_state='add-missing-service-parameters-completed'
@@ -127,21 +136,19 @@ class AddMissingServiceParameters(CPlugin):
     def _run(self, from_release, to_release, action, port):
         """Entry point called by the USM plugin runner.
 
-        Authenticates to sysinv and delegates to do_activate() which
-        performs the idempotent parameter insertion.
+        Inserts missing service parameters directly into the
+        to-release database on the given port.
         """
-        LOG.info("%s invoked from_release=%s to_release=%s action=%s",
-                 self.name, from_release, to_release, action)
+        LOG.info("%s invoked from_release=%s to_release=%s action=%s port=%s",
+                 self.name, from_release, to_release, action, port)
 
         if from_release != "26.03" or to_release != "26.10":
             LOG.info("Only applicable when upgrading from 26.03 "
                      "to 26.10. Skipping.")
             return
 
-        sysinv = get_sysinv_client()
-
-        if action == "activate":
-            do_activate(sysinv)
+        if action == "migrate":
+            do_migrate(port)
         else:
             LOG.info("Nothing to do for action '%s'", action)
 

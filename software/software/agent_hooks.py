@@ -564,6 +564,44 @@ class UpdateKernelParametersHook(BaseHook):
         else:
             LOG.info(f"Successfully remove kernel parameter '{kthread_prio}'")
 
+    def read_amd_pstate(self, kernel_params: str) -> str:
+        amd_pstate = ''
+        for param in kernel_params.split():
+            if param.startswith('amd_pstate='):
+                amd_pstate = param
+                break
+        return amd_pstate
+
+    # TODO(sbhardwa): Remove when 26.03 is no longer a supported from release.
+    def add_amd_pstate_if_not_set(self, kernel_params: str) -> None:
+        """Add amd_pstate=passive to GRUB if not already set.
+
+        This is a new default in 26.10 (Trixie). On fresh install it's
+        created by _create_default_service_parameter() and applied via
+        puppet. On upgrade the DB record is inserted directly into the
+        to-release database by 43-add-missing-service-parameters.py
+        during migrate (deploy start), and the GRUB change is applied
+        here during deploy-host (before reboot).
+        """
+        amd_pstate = self.read_amd_pstate(kernel_params)
+        if amd_pstate:
+            LOG.info(f"Do nothing. Kernel param '{amd_pstate}' is already set.")
+            return
+
+        amd_pstate_param = 'amd_pstate=passive'
+        try:
+            LOG.info(f"Adding kernel parameter '{amd_pstate_param}'")
+            cmd = ("python /usr/local/bin/puppet-update-grub-env.py "
+                   f"--add-kernelparams {amd_pstate_param}")
+            subprocess.run(cmd, shell=True, check=True, capture_output=True)
+            LOG.info(f"Successfully added kernel parameter '{amd_pstate_param}'")
+        except subprocess.CalledProcessError as e:
+            msg = ("Failed to run puppet-update-grub-env.py: rc=%s, output=%s"
+                   % (e.returncode, e.stderr.decode("utf-8")))
+            LOG.exception(msg)
+        except Exception as e:
+            LOG.exception(f"Failed to add {amd_pstate_param}: {e}")
+
     def read_intel_idle(self, kernel_params: str) -> str:
         intel_idle = ''
         for param in kernel_params.split():
@@ -830,6 +868,15 @@ class UpdateKernelParametersHook(BaseHook):
 
             intel_idle = self.read_intel_idle(kernel_params)
             self.remove_intel_idle_if_set(intel_idle)
+
+            # TODO(sbhardwa): Remove when 26.03 is no longer a supported
+            # from release.
+            # Add amd_pstate=passive (new in 26.10) to GRUB.
+            # The DB record is inserted by
+            # 43-add-missing-service-parameters.py during migrate
+            # (deploy start) via direct SQL insert.
+            if self._to_release == '26.10':
+                self.add_amd_pstate_if_not_set(kernel_params)
         elif self._action == HookManager.MAJOR_RELEASE_ROLLBACK:
             self.restore_kernel_params()
             # TODO(jtognoll): remove when 25.09 is no longer a supported from
