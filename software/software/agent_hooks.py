@@ -1353,8 +1353,10 @@ class CgroupBootParamsHook(BaseHook):
             value = self._get_cgroup_v2_enabled()
             LOG.info(f"CgroupBootParamsHook: DB value={repr(value)}")
 
-            # Determine cgroup version intent
-            cgroup_v2 = (value is not None and value.lower() == 'true')
+            # Determine cgroup version intent during upgrade
+            # Default to v2 if param not set (before upgrade to 26.10)
+            # Only stay on v1 if explicitly set to 'false' (user opt-out)
+            cgroup_v2 = (value is None or value.lower() != 'false')
 
             # Set boot params based on intent
             if cgroup_v2:
