@@ -5227,8 +5227,9 @@ class PatchController(PatchService):
                 metapackages_scripts[path_key] = scripts
 
             delete_cmd = ["source", "/etc/platform/openrc;",
-                          "/usr/bin/software-deploy-delete",
+                          "/usr/bin/software-deploy-action",
                           from_release, to_release,
+                          "--action", "delete",
                           "--metapackages", "'%s'" % json.dumps(metapackages_scripts)]
             if is_major_release:
                 delete_cmd.append("--is_major_release")
@@ -5240,16 +5241,17 @@ class PatchController(PatchService):
             env["SYSTEM_URL"] = re.sub('/v[1,9]$', '', endpoint)
 
             try:
-                LOG.info("starting subprocess %s" % ' '.join(delete_cmd))
+                LOG.info("Starting subprocess %s" % ' '.join(delete_cmd))
                 subprocess.Popen(' '.join(delete_cmd), start_new_session=True,
                                  shell=True, env=env)
-                LOG.info("subprocess started")
+                LOG.info("Subprocess started")
             except subprocess.SubprocessError as e:
                 LOG.error("Failed to start command: %s. Error %s" % (
                     ' '.join(delete_cmd), e))
         else:
             # Legacy: use DeployPluginRunner for non-metapackage major releases
-            delete_cmd = f"/usr/bin/software-deploy-delete {from_release} {to_release} --is_major_release"
+            delete_cmd = (f"/usr/bin/software-deploy-action {from_release} {to_release} "
+                          "--is_major_release --action delete")
             runner = DeployPluginRunner(deploy)
             runner.execute(delete_cmd)
 
@@ -5503,7 +5505,7 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-    def _activate(self):
+    def _activate(self, action="activate"):
         # TODO(heitormatsui) join activate, activate_rollback
         # and deploy_delete under the same function/structure
         deploy = self.db_api_instance.get_deploy_all()
@@ -5513,7 +5515,7 @@ class PatchController(PatchService):
             msg = "Deployment is missing unexpectedly"
             raise InvalidOperation(msg)
 
-        cmd_path = "/usr/bin/software-deploy-activate"
+        cmd_path = "/usr/bin/software-deploy-action"
         from_release = deploy.get("from_release")
         to_release = deploy.get("to_release")
         pre_upgrade_deploy = deploy.get("pre_upgrade_deploy", False)
@@ -5530,6 +5532,8 @@ class PatchController(PatchService):
 
         if is_major_release:
             activate_cmd.append('--is_major_release')
+
+        activate_cmd.append(f"--action {action}")
 
         deploying_release_state = ReleaseState(release_state=states.DEPLOYING,
                                                pre_upgrade_deploy=pre_upgrade_deploy)
@@ -5561,9 +5565,9 @@ class PatchController(PatchService):
 
         env["IGNORE_ERRORS"] = self.ignore_errors
         try:
-            LOG.info("starting subprocess %s" % ' '.join(activate_cmd))
+            LOG.info("Starting subprocess %s" % ' '.join(activate_cmd))
             subprocess.Popen(' '.join(activate_cmd), start_new_session=True, shell=True, env=env)
-            LOG.info("subprocess started")
+            LOG.info("Subprocess started")
         except subprocess.SubprocessError as e:
             LOG.error("Failed to start command: %s. Error %s" % (' '.join(activate_cmd), e))
             return False
@@ -5754,27 +5758,17 @@ class PatchController(PatchService):
                 "LVM snapshot restore failed or tag mismatch for system-deploy ID %s" % system_deploy_id)
         LOG.info("LVM snapshots restored successfully")
 
-    def _activate_rollback_major_release(self, deploy):
-        cmd_path = "/usr/bin/software-deploy-activate-rollback"
-        from_release = utils.get_major_release_version(deploy.get("from_release"))
-        to_release = utils.get_major_release_version(deploy.get("to_release"))
+    def _activate_rollback(self):
+        deploy = self.db_api_instance.get_current_deploy()
+        if not deploy:
+            msg = "Deployment is missing unexpectedly"
+            raise InvalidOperation(msg)
 
-        token, endpoint = utils.get_endpoints_token()
-        env = os.environ.copy()
-        env["ANSIBLE_LOG_PATH"] = SOFTWARE_LOG_FILE
-        env["OS_AUTH_TOKEN"] = token
-        env["SYSTEM_URL"] = re.sub('/v[1,9]$', '', endpoint)  # remove ending /v1
-
-        env["IGNORE_ERRORS"] = self.ignore_errors
-        upgrade_activate_rollback_cmd = [
-            "source", "/etc/platform/openrc;", cmd_path, from_release, to_release]
-
-        # check if LVM snapshots are enabled and try to restore them
+        # Check if LVM snapshots are enabled and try to restore them
         # TODO(heitormatsui): we don't really need to verify the system mode
         #  as LVM snapshots will only be allowed if the system is AIO-SX
         system_mode = utils.get_platform_conf("system_mode")
         if system_mode == constants.SYSTEM_MODE_SIMPLEX:
-            deploy = self.db_api_instance.get_deploy_all()[0]
             options = deploy.get("options", {})
             enabled_lvm_snapshots = to_bool(options.get("snapshot"))
             if enabled_lvm_snapshots:
@@ -5791,36 +5785,7 @@ class PatchController(PatchService):
                     LOG.warning("Failure restoring LVM snapshots, falling back "
                                 "to standard activate-rollback procedure")
 
-        try:
-            LOG.info("starting subprocess %s" % ' '.join(upgrade_activate_rollback_cmd))
-            subprocess.Popen(' '.join(upgrade_activate_rollback_cmd), start_new_session=True, shell=True, env=env)
-            LOG.info("subprocess started")
-        except subprocess.SubprocessError as e:
-            LOG.error("Failed to start command: %s. Error %s" % (' '.join(upgrade_activate_rollback_cmd), e))
-            raise
-
-    def _activate_rollback_patching_release(self):
-        deploy_state = DeployState.get_instance()
-        # patching release activate-rollback operations go here
-        deploy_state.activate_rollback_done()
-
-    def _activate_rollback(self):
-        deploy = self.db_api_instance.get_current_deploy()
-        if not deploy:
-            msg = "Deployment is missing unexpectedly"
-            raise InvalidOperation(msg)
-
-        from_release = deploy.get("from_release")
-        to_release = deploy.get("to_release")
-        from_release_maj_min_version = utils.get_major_release_version(from_release)
-        to_release_maj_min_version = utils.get_major_release_version(to_release)
-
-        deploying = ReleaseState(release_state=states.DEPLOYING)
-        if deploying.is_major_release_deployment() \
-                or from_release_maj_min_version != to_release_maj_min_version:
-            self._activate_rollback_major_release(deploy)
-        else:
-            self._activate_rollback_patching_release()
+        self._activate(action="activate-rollback")
 
     @require_deploy_state([DEPLOY_STATES.ACTIVATE_ROLLBACK_PENDING, DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED],
                           "Activate-rollback deployment only when current deployment state is {require_states}")
