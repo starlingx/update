@@ -52,6 +52,7 @@ node_is_locked_file = "/var/run/.node_locked"
 ostree_pull_completed_deployment_pending_file = \
     "/var/run/ostree_pull_completed_deployment_pending"
 run_hooks_flag = "/var/run/run_hooks"
+run_post_install_flag = "/var/run/software_run_post_install"
 mount_pending_file = "/var/run/mount_pending"
 install_scripts = "%s/software-scripts" % SOFTWARE_PERSIST_FOLDER
 insvc_software_flags = "/run/software/software-flags"
@@ -732,6 +733,18 @@ class PatchAgent(PatchService):
                     except Exception:
                         success = False
 
+                # when post-install scripts failed in a previous deploy host
+                # attempt, a flag is created so that they are reattempted here
+                if success and os.path.exists(run_post_install_flag):
+                    LOG.info("Post-install flag %s found. "
+                             "Re-running post-install scripts." % run_post_install_flag)
+                    pull_install_scripts_from_controller(metapackages,
+                                                         install_local=self.install_local)
+                    if run_post_install_script(metapackages):
+                        clearflag(run_post_install_flag)
+                    else:
+                        success = False
+
                 if success:
                     self.patch_failed = False
                     clearflag(patch_failed_file)
@@ -921,9 +934,11 @@ class PatchAgent(PatchService):
 
                 if success:
                     LOG.info("Running post-install patch scripts")
-                    success = run_post_install_script(
-                        metapackages,
-                        running_after_reboot=False)
+                    setflag(run_post_install_flag)
+                    if run_post_install_script(metapackages, running_after_reboot=False):
+                        clearflag(run_post_install_flag)
+                    else:
+                        success = False
 
         try:
             ostree_utils.copy_updated_efi_files()
