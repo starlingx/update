@@ -118,6 +118,7 @@ class ReleaseManager(base.Manager):
     def upload_dir(self, args):
         # arg.release is a list
         release_dirs = args.release
+        is_local = args.local  # defaults to False
 
         # Ignore interrupts during this function
         signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -155,6 +156,18 @@ class ReleaseManager(base.Manager):
                   temp_sig_files, file=sys.stderr)
             return 1
 
+        path = '/v1/release'
+
+        if is_local:
+            local_valid_files = [f for f in all_raw_files
+                                 if os.path.splitext(f)[1] in
+                                 constants.SUPPORTED_UPLOAD_FILE_EXT]
+            if len(local_valid_files) == 0:
+                print("No file on active controller to be specified.")
+                return 1
+            headers = {'Content-Type': 'text/plain'}
+            return self._create(path, body=local_valid_files, headers=headers)
+
         for software_file in sorted(set(all_raw_files)):
             _, ext = os.path.splitext(software_file)
             if ext in constants.SUPPORTED_UPLOAD_FILE_EXT:
@@ -164,7 +177,6 @@ class ReleaseManager(base.Manager):
 
         encoder = MultipartEncoder(fields=to_upload_files)
         headers = {'Content-Type': encoder.content_type}
-        path = '/v1/release'
         return self._create_multipart(path, body=encoder, headers=headers)
 
     def commit_patch(self, args):
