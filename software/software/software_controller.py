@@ -109,6 +109,7 @@ from software.states import DEPLOY_STATES
 from software.states import INTERRUPTION_RECOVERY_STATES
 from software.sysinv_utils import are_all_hosts_unlocked_and_online
 from software.sysinv_utils import get_active_k8s_ver
+from software.sysinv_utils import get_service_parameter
 from software.sysinv_utils import get_system_info
 from software.sysinv_utils import is_kube_upgrade_in_progress
 from software.sysinv_utils import is_system_controller
@@ -6045,6 +6046,22 @@ class PatchController(PatchService):
         system_deploy = self._get_system_deploy()
         if system_deploy:
             additional_data["to_kubelet_version"] = system_deploy["to_k8s_version"]
+
+        # Pass cgroup_v2_enabled to agent hooks so the standby
+        # controller doesn't need direct DB access.
+        # Default to 'true' if param not set (v2 is default for 26.10).
+        if is_major_release:
+            params = get_service_parameter(
+                service='platform', section='config',
+                name='cgroup_v2_enabled')
+            if params:
+                additional_data["cgroup_v2_enabled"] = params[0]['value']
+                LOG.info("cgroup_v2_enabled=%s from service parameter"
+                         % params[0]['value'])
+            else:
+                additional_data["cgroup_v2_enabled"] = "true"
+                LOG.info("cgroup_v2_enabled not found in service parameters, "
+                         "defaulting to 'true'")
 
         metapackages = self.release_collection.get_ordered_metapackages(
             filter_by_states=[states.DEPLOYING, states.REMOVING], tuple_format=True)
