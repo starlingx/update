@@ -233,7 +233,8 @@ def execute_agent_hooks(major_release, metapackages: Optional[List[Tuple]] = Non
                         additional_data=None):
     """Run agent hooks for a major release deployment.
     :param major_release: target major release version
-    :param metapackages: list of metapackages
+    :param metapackages: list of tuples containing metapackage name and release,
+                         e.g. (swmgmt, 26.10.0)
     :param additional_data: dict of additional data passed to the hook script
     """
     LOG.info("Running agent hooks...")
@@ -244,25 +245,25 @@ def execute_agent_hooks(major_release, metapackages: Optional[List[Tuple]] = Non
 
     if metapackages:
         LOG.info("Executing componentized method")
-        swmgmt = tuple()
-        for metapackage in metapackages:
-            if metapackage[0] == constants.METAPACKAGE_SWMGMT:
-                swmgmt = metapackage
-                break
+        for mp_name, mp_version in metapackages:
+            LOG.info("Running agent hooks for metapackage %s (%s)",
+                     mp_name, mp_version)
+            script_dir = os.path.join(
+                COMPONENT_SOFTWARE_STORAGE_DIR,
+                mp_version,
+                mp_name,
+                constants.HOST_SCRIPTS_DIR)
 
-        if not swmgmt:
-            raise Exception("Could not retrieve the swmgmt metapackage info")
+            if not os.path.isdir(script_dir):
+                LOG.warning("Could not find host-scripts directory in "
+                            f"metapackage {mp_name} for release "
+                            f"{mp_version}. Script directory: {script_dir}")
+                continue
 
-        script_path = os.path.join(
-            COMPONENT_SOFTWARE_STORAGE_DIR,
-            swmgmt[1],
-            swmgmt[0],
-            constants.HOST_SCRIPTS_DIR)
-
-        if not os.path.isdir(script_path):
-            raise Exception("Could not find host-scripts directory in "
-                            f"metapackage {swmgmt[0]} for release "
-                            f"{swmgmt[1]}. Script path: {script_path}")
+            run_scripts(
+                [script_dir],
+                filter_names=constants.AGENT_HOOKS_SCRIPT,
+                extra_args=extra_args)
     else:
         if version.Version(major_release) > version.Version(constants.SW_VERSION):
             ostree_path = "/ostree/1"
@@ -270,11 +271,10 @@ def execute_agent_hooks(major_release, metapackages: Optional[List[Tuple]] = Non
             ostree_path = "/ostree/2"
 
         LOG.info("No metapackages available, executing legacy method")
-        script_path = os.path.normpath(ostree_path + "/usr/lib/python3/dist-packages/software/")
-        if not os.path.isdir(script_path):
-            raise Exception(f"Could not find software path. Script path: {script_path}")
-
-    run_scripts([script_path], filter_names=constants.AGENT_HOOKS_SCRIPT, extra_args=extra_args)
+        script_dir = os.path.normpath(ostree_path + "/usr/lib/python3/dist-packages/software/")
+        if not os.path.isdir(script_dir):
+            raise Exception(f"Could not find software path. Script directory: {script_dir}")
+        run_scripts([script_dir], filter_names=constants.AGENT_HOOKS_SCRIPT, extra_args=extra_args)
 
     LOG.info("Agent hooks executed successfully")
 
