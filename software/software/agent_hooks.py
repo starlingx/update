@@ -88,10 +88,23 @@ class BaseHook(object):
         if not os.path.islink(dst):
             try:
                 os.symlink(src, dst)
+                self._sync_parent_dir(dst)
                 LOG.info("Enabled %s" % service)
             except subprocess.CalledProcessError as e:
                 LOG.exception("Error enabling %s: %s" % (service, str(e)))
                 raise
+
+    @staticmethod
+    def _sync_parent_dir(path):
+        """Flush parent directory to disk to ensure symlink persistence."""
+        parent_dir = os.path.dirname(path)
+        LOG.info("Syncing parent directory %s to disk" % parent_dir)
+        dirfd = os.open(parent_dir, os.O_RDONLY)
+        try:
+            os.fsync(dirfd)
+        finally:
+            os.close(dirfd)
+        LOG.info("Successfully synced %s" % parent_dir)
 
     @staticmethod
     def _get_debian_codename(root_dir='/'):
