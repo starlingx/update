@@ -3511,7 +3511,8 @@ class PatchController(PatchService):
     def software_deploy_select_api(self, **kwargs):
         pre_upgrade_deploy = kwargs.pop("pre_upgrade_deploy", False)
         if pre_upgrade_deploy:
-            result = self._pre_upgrade_deploy_select(**kwargs)
+            remove = kwargs.pop("remove", False)
+            result = self._pre_upgrade_deploy_select(remove=remove, **kwargs)
         else:
             _, result = self._deploy_select(**kwargs)
         return result
@@ -3735,32 +3736,39 @@ class PatchController(PatchService):
         msg_error = ""
 
         releases = list(set(kwargs.get("releases", [])))
+        unselect_all = kwargs.get("unselect_all", False)
 
-        if not releases:
+        # Get pre-upgrade-deploy metapackages to unselect
+        pre_upgrade_deploy_ids = []
+        if unselect_all:
+            for mp in self.release_collection.iterate_metapackages_by_state(
+                    states.COMPONENT_SELECTED_STATES):
+                if mp.is_pre_upgrade_deploy_release:
+                    pre_upgrade_deploy_ids.append(mp.id)
+        elif not releases:
             msg = "No releases were passed for pre-upgrade-deploy unselect"
             LOG.error(msg)
             msg_error += msg + "\n"
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
-        # Resolve product release to pre-upgrade-deploy metapackages
-        pre_upgrade_deploy_ids = []
-        for release in releases:
-            product = self.release_collection.get_product_release_by_id(release)
-            if product:
-                pud_ids = self.release_collection.get_pre_upgrade_deploy_id_by_product_id(release)
-                if pud_ids:
-                    pre_upgrade_deploy_ids.extend(pud_ids)
+        else:
+            # Resolve product release to pre-upgrade-deploy metapackages
+            for release in releases:
+                product = self.release_collection.get_product_release_by_id(release)
+                if product:
+                    pud_ids = self.release_collection.get_pre_upgrade_deploy_id_by_product_id(release)
+                    if pud_ids:
+                        pre_upgrade_deploy_ids.extend(pud_ids)
+                    else:
+                        msg = f"Product release {release} has no pre-upgrade-deploy metapackages"
+                        LOG.error(msg)
+                        msg_error += msg + "\n"
+                        return dict(info=msg_info, warning=msg_warning, error=msg_error)
                 else:
-                    msg = f"Product release {release} has no pre-upgrade-deploy metapackages"
+                    msg = (f"Release {release} is not a product release. "
+                           "Pre-upgrade-deploy unselect requires a product release")
                     LOG.error(msg)
                     msg_error += msg + "\n"
                     return dict(info=msg_info, warning=msg_warning, error=msg_error)
-            else:
-                msg = (f"Release {release} is not a product release. "
-                       "Pre-upgrade-deploy unselect requires a product release")
-                LOG.error(msg)
-                msg_error += msg + "\n"
-                return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         # Unselect pre-upgrade-deploy metapackages
         for mp_id in pre_upgrade_deploy_ids:
@@ -3922,10 +3930,29 @@ class PatchController(PatchService):
         remove = kwargs.pop("remove", False)
 
         if not releases:
-            msg = "No releases were passed for pre-upgrade-deploy start"
-            LOG.error(msg)
-            msg_error += msg
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+            # Check for previously selected pre-upgrade-deploy metapackages
+            selected = [mp for mp in
+                        self.release_collection.iterate_metapackages_by_state(
+                            states.COMPONENT_SELECTED_STATES)
+                        if mp.is_pre_upgrade_deploy_release]
+            if not selected:
+                msg = ("No releases were passed and no pre-upgrade-deploy "
+                       "metapackages are selected")
+                LOG.error(msg)
+                msg_error += msg
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+            # Detect if this is a removal based on the selected state
+            if selected[0].state == states.REMOVE_SELECTED:
+                remove = True
+
+            # Resolve the product release from the selected metapackages
+            product_id = selected[0].product
+            releases = [product_id]
+            msg = (f"Pre-upgrade-deploy metapackages previously selected for "
+                   f"{'removal' if remove else 'deployment'} from {product_id}\n")
+            LOG.info(msg)
+            msg_info += msg
 
         # Resolve product release to pre-upgrade-deploy metapackages
         pre_upgrade_deploy_ids = []
@@ -4909,7 +4936,8 @@ class PatchController(PatchService):
             else:
                 metapackage_list = [mp.id for mp in
                                     self.release_collection.iterate_metapackages_by_state(
-                                        states.COMPONENT_SELECTED_STATES)]
+                                        states.COMPONENT_SELECTED_STATES)
+                                    if not mp.is_pre_upgrade_deploy_release]
                 if metapackage_list:
                     msg = (f"Metapackages previously selected for "
                            f"deployment: {', '.join(metapackage_list)}\n")
