@@ -436,6 +436,32 @@ class SWRelease(object):
             for mp_data in self.pre_upgrade_deploy.values()
         )
 
+    def are_prerequisites_deployed(self, pre_upgrade_deploy=False):
+        """Check if the deployment prerequisites for this release are met.
+
+        :param pre_upgrade_deploy: if True, check that pre-upgrade-deploy
+            metapackages are deployed. Otherwise, check that required
+            releases (from <requires> tag) are deployed.
+        :return: True if all prerequisites are satisfied, False otherwise.
+            Returns True if there are no prerequisites.
+        """
+        if pre_upgrade_deploy:
+            if not self.is_product_release or not self.pre_upgrade_deploy:
+                return True
+            return all(
+                mp_data.get("state") == states.DEPLOYED
+                for mp_data in self.pre_upgrade_deploy.values()
+            )
+        else:
+            if not self.requires_release_ids:
+                return True
+            release_collection = get_SWReleaseCollection()
+            return all(
+                release_collection[req_id] is not None
+                and release_collection[req_id].state == states.DEPLOYED
+                for req_id in self.requires_release_ids
+            )
+
     def to_query_dict(self):
         data = {"release_id": self.id,
                 "state": self.state,
