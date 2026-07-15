@@ -260,6 +260,8 @@ class ReleaseData(object):
         #
         self.state_map = {
             # Legacy States
+            states.UPLOADING: [states.UPLOADING_DIR, states.COMPONENT_UPLOADING_DIR],
+            states.UPLOAD_FAILED: [states.UPLOAD_FAILED_DIR, states.COMPONENT_UPLOAD_FAILED_DIR],
             states.AVAILABLE: [states.AVAILABLE_DIR, states.COMPONENT_AVAILABLE_DIR],
             states.UNAVAILABLE: [states.UNAVAILABLE_DIR, states.COMPONENT_UNAVAILABLE_DIR],
             states.DEPLOYING: [states.DEPLOYING_DIR, states.COMPONENT_DEPLOYING_DIR],
@@ -1478,7 +1480,7 @@ class ComponentPatchFile:
                             # Copy metapackage metadata to correct location
                             metapkg_md_name = f"{mp}_{release_version}-{self.METADATA_XML}"
                             metapkg_md_src = Path(metapkg_dir) / self.METADATA_XML
-                            metapkg_md_dst = Path(states.COMPONENT_AVAILABLE_DIR) / metapkg_md_name
+                            metapkg_md_dst = Path(states.COMPONENT_UPLOADING_DIR) / metapkg_md_name
                             copy_xml_file(metapkg_md_src, metapkg_md_dst,
                                           {"deployable": "Y"})
                             LOG.info(f"Copied metapackage metadata: {metapkg_md_name}")
