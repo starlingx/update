@@ -2203,7 +2203,7 @@ class PatchController(PatchService):
 
         return to_remove_releases
 
-    def reset_feed_commit(self, release):
+    def reset_feed_commit(self, release, feed_repo=None):
         if isinstance(release, MetapackageDeploymentSet):
             # Reset feed using base_commit_id from the metapackage metadata
             base_commit_id = release.base_commit_id
@@ -2218,10 +2218,11 @@ class PatchController(PatchService):
         LOG.info("Reset feed to commit %s" % commit_id)
 
         try:
-            feed_ostree_dir = "%s/rel-%s/ostree_repo" % \
-                (constants.FEED_OSTREE_BASE_DIR, release.sw_version)
+            if not feed_repo:
+                feed_repo = "%s/rel-%s/ostree_repo" % \
+                    (constants.FEED_OSTREE_BASE_DIR, release.sw_version)
 
-            apt_utils.run_rollback(feed_ostree_dir, commit_id)
+            apt_utils.run_rollback(feed_repo, commit_id)
         except APTOSTreeCommandFail:
             msg = "Failure when reseting commit %s" % commit_id
             LOG.exception(msg)
@@ -5640,6 +5641,7 @@ class PatchController(PatchService):
         from_release = deploy.get("from_release")
         to_release = deploy.get("to_release")
         metapackages = deploy.get("metapackages")
+        pre_upgrade_deploy = deploy.get("pre_upgrade_deploy", False)
         from_release_deployment = self.release_collection.get_release_id_by_sw_release(from_release)
         to_release_deployment = self.release_collection.get_release_id_by_sw_release(to_release)
 
@@ -5648,6 +5650,8 @@ class PatchController(PatchService):
         except AttributeError:
             release = self.release_collection.get_release_by_id(to_release_deployment)
             is_major_release = ReleaseState(release_ids=[release.id]).is_major_release_deployment()
+
+        is_major_release = is_major_release and not pre_upgrade_deploy
 
         if not is_major_release:
             removing_release_state = ReleaseState(release_state=states.REMOVING)
@@ -5668,14 +5672,17 @@ class PatchController(PatchService):
                     msg_error += msg
                     return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-                deploy_sw_version = mp_deploy_set.sw_version
+                # Use feed_repo from deploy entity (correct for all scenarios
+                # including pre-upgrade-deploy where metapackage sw_version
+                # differs from the actual feed)
+                feed_repo = deploy.get("feed_repo")
+                feed_sw_version = Path(feed_repo).parent.name.replace("rel-", "")
 
-                self.reset_feed_commit(mp_deploy_set)
-                latest_feed_commit = ostree_utils.get_feed_latest_commit(deploy_sw_version)
+                self.reset_feed_commit(mp_deploy_set, feed_repo=feed_repo)
+                latest_feed_commit = ostree_utils.get_feed_latest_commit(feed_sw_version)
                 self.send_latest_feed_commit_to_agent(latest_feed_commit)
                 self.software_sync()
 
-                feed_repo = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, deploy_sw_version)
                 commit_id = next(iter(mp_deploy_set.base_commit_id))
             else:
                 # Legacy path
