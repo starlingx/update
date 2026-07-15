@@ -3105,6 +3105,7 @@ class PatchController(PatchService):
         """
         Delete system deployment.
         :return: dict of info, warning and error messages
+        :raises SoftwareServiceError: if pre-checks fail
         """
         msg_info = ""
         msg_warning = ""
@@ -3116,8 +3117,26 @@ class PatchController(PatchService):
         try:
             # Check if there is a system_deploy in progress
             if not is_system_deploy_in_progress():
-                msg_error = "There is no system deploy in progress"
-                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+                raise SoftwareServiceError(
+                    error="There is no system deploy in progress")
+
+            # Check if a kubernetes upgrade is still in progress
+            try:
+                if is_kube_upgrade_in_progress():
+                    raise SoftwareServiceError(
+                        error="Cannot delete system-deploy while a Kubernetes "
+                              "upgrade is in progress.")
+            except SoftwareServiceError:
+                raise
+            except Exception as e:
+                raise SoftwareServiceError(
+                    error="Failed to check Kubernetes upgrade state: %s" % str(e))
+
+            # Check if a software deploy is still in progress
+            if is_deployment_in_progress():
+                raise SoftwareServiceError(
+                    error="Cannot delete system-deploy while a software "
+                          "deploy is in progress.")
 
             # Deleting existing LVM snapshot
             manager = lvm_snapshot.LVMSnapshotManager()
@@ -3133,6 +3152,8 @@ class PatchController(PatchService):
             deploying_release_state = ReleaseState(release_state=states.DEPLOYING)
             deploying_release_state.deploy_completed()
 
+        except SoftwareServiceError:
+            raise
         except Exception as e:
             msg = "Failed on deleting system-deploy"
             msg_error += msg + ".\n"
