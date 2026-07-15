@@ -536,7 +536,7 @@ def mount_new_deployment(pending_dir, active_dir):
         create_bind_mount(new_usr_mount_dir, constants.USR)
         create_bind_mount(new_etc_mount_dir, constants.ETC, constants.READ_WRITE_PERMISSION)
         create_bind_mount(new_usr_etc_mount_dir, act_usr_etc_mount_dir)
-        create_bind_mount(new_etc_mount_dir, act_etc_mount_dir)
+        create_bind_mount(new_etc_mount_dir, act_etc_mount_dir, constants.READ_WRITE_PERMISSION)
     finally:
         # Handle the switch from bind mounts to symlinks for K8s versions.
         # Can be removed once the switch is complete.
