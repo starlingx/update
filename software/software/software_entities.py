@@ -165,7 +165,7 @@ class Deploy(abc.ABC):
 
     @abc.abstractmethod
     def update(self, from_release=None, to_release=None, feed_repo=None, commit_id=None, reboot_required: bool = None,
-               new_state: DEPLOY_STATES = None):
+               new_state: DEPLOY_STATES = None, metapackages: list = None):
         """
         Update a deployment entry.
 
@@ -175,6 +175,7 @@ class Deploy(abc.ABC):
         :param commit_id: commit-id to deploy.
         :param reboot_required: If is required to do host reboot.
         :param new_state: The new state.
+        :param metapackages: metapackage list to deploy.
 
         """
         str_params = [from_release, to_release, feed_repo, commit_id]
@@ -403,7 +404,7 @@ class DeployHandler(Deploy):
         return data.get("deploy", [])
 
     def update(self, from_release=None, to_release=None, feed_repo=None, commit_id=None,
-               reboot_required: bool = None, new_state: DEPLOY_STATES = None):
+               reboot_required: bool = None, new_state: DEPLOY_STATES = None, metapackages: list = None):
         """
         Update deployment state and the given params.
 
@@ -413,8 +414,9 @@ class DeployHandler(Deploy):
         :param commit_id: commit-id to deploy.
         :param reboot_required: If is required to do host reboot.
         :param new_state: The new state.
+        :param metapackages: metapackage list to deploy.
         """
-        super().update(from_release, to_release, feed_repo, commit_id, reboot_required, new_state)
+        super().update(from_release, to_release, feed_repo, commit_id, reboot_required, new_state, metapackages)
         deploy = self.query_all()
         if not deploy:
             raise DeployDoNotExist("Error to update deploy state. No deploy in progress.")
@@ -429,7 +431,8 @@ class DeployHandler(Deploy):
                 "to_release": to_release,
                 "feed_repo": feed_repo,
                 "commit_id": commit_id,
-                "reboot_required": reboot_required
+                "reboot_required": reboot_required,
+                "metapackages": metapackages
             }
 
             for key, value in updates.items():

@@ -3074,8 +3074,15 @@ class PatchController(PatchService):
         release_info["reboot_required"] = release.reboot_required
         release_info["prepatched_iso"] = release.prepatched_iso
         release_info["apply_operation"] = release > running_release
-        release_info["from_release"] = running_release.sw_release
-        release_info["to_release"] = release.sw_release
+
+        deploy = self.db_api_instance.get_current_deploy()
+        if not deploy:
+            LOG.info("No running deploy found in database")
+            release_info["from_release"] = running_release.sw_release
+            release_info["to_release"] = release.sw_release
+        else:
+            release_info["from_release"] = deploy.get("from_release")
+            release_info["to_release"] = deploy.get("to_release")
 
         return release_info
 
@@ -5882,6 +5889,9 @@ class PatchController(PatchService):
 
         # Removes RR info as it already exists in software.json.
         release_info.pop('reboot_required')
+        # Removes from_release and to_release as it already exists in software.json.
+        release_info.pop('from_release')
+        release_info.pop('to_release')
 
         if isinstance(deploy_data, list):
             deploy_data[0].update(release_info)
