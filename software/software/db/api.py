@@ -96,8 +96,14 @@ class SoftwareAPI:
             deploy = self.get_current_deploy()
             to_release = deploy["to_release"]
             from_release = deploy["from_release"]
-            self.deploy_handler.update(from_release=to_release, to_release=from_release, feed_repo=feed_repo,
-                                       commit_id=commit_id)
+            metapackages = deploy.get("metapackages", None)
+            if metapackages:
+                metapackages = [[name, to_ver, from_ver]
+                                for name, from_ver, to_ver in metapackages]
+
+            self.deploy_handler.update(from_release=to_release, to_release=from_release,
+                                       feed_repo=feed_repo, commit_id=commit_id,
+                                       metapackages=metapackages)
         finally:
             self.end_update()
 
