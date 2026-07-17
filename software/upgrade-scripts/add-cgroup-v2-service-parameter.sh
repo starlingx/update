@@ -22,16 +22,37 @@ function log {
 log "Invoked from=$FROM_RELEASE to=$TO_RELEASE action=$ACTION"
 
 if [[ "$ACTION" == "activate" ]]; then
+    # Detect cgroup version from mounted filesystem type
+    # cgroup2fs = v2 unified, tmpfs = v1 legacy
+    CGROUP_FSTYPE=$(stat -fc %T /sys/fs/cgroup)
+    if [[ "$CGROUP_FSTYPE" == "cgroup2fs" ]]; then
+        CGROUP_V2=true
+    else
+        CGROUP_V2=false
+    fi
+    log "Detected cgroup v2=$CGROUP_V2 (fstype=$CGROUP_FSTYPE)"
+
     if system service-parameter-list --service platform --section config 2>/dev/null | grep -q cgroup_v2_enabled; then
         log "cgroup_v2_enabled already exists. Skipping."
     else
-        system service-parameter-add platform config cgroup_v2_enabled=false
-        if [ $? -eq 0 ]; then
-            log "Added cgroup_v2_enabled=false service parameter."
-        else
-            log "ERROR: Failed to add cgroup_v2_enabled parameter."
-        fi
+        system service-parameter-add platform config cgroup_v2_enabled=$CGROUP_V2
+        log "Added cgroup_v2_enabled=$CGROUP_V2."
     fi
+
+    # Update kubelet cgroup service parameters to match 26.10 expectations.
+    # cgroupRoot: always /k8sinfra (renamed from /k8s-infra in 25.09)
+    # cgroupDriver: systemd for v2, cgroupfs for v1
+    if [[ "$CGROUP_V2" == "true" ]]; then
+        EXPECTED_DRIVER="systemd"
+    else
+        EXPECTED_DRIVER="cgroupfs"
+    fi
+
+    system service-parameter-modify kubernetes kubelet cgroupDriver="$EXPECTED_DRIVER"
+    log "Set kubernetes/kubelet/cgroupDriver=$EXPECTED_DRIVER"
+
+    system service-parameter-modify kubernetes kubelet cgroupRoot=/k8sinfra
+    log "Set kubernetes/kubelet/cgroupRoot=/k8sinfra"
 
     # Migrate cgroupRoot in kubelet-config ConfigMap (/k8s-infra -> /k8sinfra).
     # This is the source of truth for kubelet config. If not updated here,
