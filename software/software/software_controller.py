@@ -4944,22 +4944,19 @@ class PatchController(PatchService):
         :param apply: indicate whether applying or removing metapackages
         :return: array of tuples containing (metapackage-name, from-release, to-release)
         """
-        # By default, iterate_metapackages bring the highest deployed only
         metapackage_deploy_state = []
         highest_deployed = list(self.release_collection.iterate_metapackages())
+
         for mp in metapackage_data:
-            for hmp in highest_deployed:
-                # Get tuple with (<metapackage-name>, <from-sw-release>, <to-sw-release>)
-                if mp.component == hmp.component:
-                    if apply:
-                        metapackage_deploy_state.append(
-                            (mp.component, hmp.sw_release, mp.sw_release))
-                    # For remove, invert the versions, as the to-release will be the
-                    # highest deployed release after removing the given metapackages
-                    else:
-                        metapackage_deploy_state.append(
-                            (mp.component, mp.sw_release, hmp.sw_release)
-                        )
+            hd_mp = next((m for m in highest_deployed if m.component == mp.component), None)
+            base_release = hd_mp.sw_release if hd_mp else \
+                self.release_collection.running_release.sw_release
+
+            if apply:
+                metapackage_deploy_state.append((mp.component, base_release, mp.sw_release))
+            else:
+                metapackage_deploy_state.append((mp.component, mp.sw_release, base_release))
+
         return metapackage_deploy_state
 
     @require_deploy_state([None],
