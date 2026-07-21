@@ -5,7 +5,9 @@
 #
 # Add missing service parameters during upgrade migration.
 #
-# NOTE: This script is only needed for the 26.03 -> 26.10 upgrade path.
+# NOTE: This script is needed for the following upgrade paths:
+#       25.09 -> 26.10
+#       26.03 -> 26.10
 #       It can be deleted after the 26.10 release.
 #
 # The following parameters are new in Trixie and are created by
@@ -142,9 +144,12 @@ class AddMissingServiceParameters(CPlugin):
         LOG.info("%s invoked from_release=%s to_release=%s action=%s port=%s",
                  self.name, from_release, to_release, action, port)
 
-        if from_release != "26.03" or to_release != "26.10":
-            LOG.info("Only applicable when upgrading from 26.03 "
-                     "to 26.10. Skipping.")
+        supported_from_releases = ["25.09", "26.03"]
+        if from_release not in supported_from_releases or \
+                to_release != "26.10":
+            LOG.info("Only applicable when upgrading from %s "
+                     "to 26.10. Current: %s -> %s. Skipping.",
+                     supported_from_releases, from_release, to_release)
             return
 
         if action == "migrate":
