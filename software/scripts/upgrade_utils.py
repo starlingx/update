@@ -36,7 +36,7 @@ software_conf_mtime = 0
 software_conf = '/etc/software/software.conf'
 
 DEBIAN_ORIGIN = "updates"
-DEBIAN_RELEASE = "bullseye"
+DEBIAN_RELEASE = "trixie"
 
 
 def get_token_endpoint(config, service_type="platform"):

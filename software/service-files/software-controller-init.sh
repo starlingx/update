@@ -27,7 +27,7 @@ REPO_ROOT=/var/www/pages/${REPO_ID}
 REPO_DIR=${REPO_ROOT}/debian/rel-${SW_VERSION}
 GROUPS_FILE=$REPO_DIR/comps.xml
 PATCHING_DIR=/opt/software
-RELEASE=bullseye
+RELEASE=$(grep -oP '(?<=^VERSION_CODENAME=).+' /etc/os-release | tr -d '"')
 SYNCED_SOFTWARE_FILESYSTEM_DIR=${PATCHING_DIR}/synced
 METAPACKAGE_INITIAL_SETUP_FLAG="/etc/platform/.metapackage_initial_setup"
 USM_UPGRADE_IN_PROGRESS_FLAG="/etc/platform/.usm_upgrade_in_progress"
