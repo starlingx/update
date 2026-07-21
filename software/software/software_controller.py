@@ -3218,9 +3218,15 @@ class PatchController(PatchService):
                     msg_error = err
                     return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
+            # 1g. Block P&K upgrade to 26.03 - must use legacy upgrade method
+            if "26.03" in release_id:
+                msg_error = ("Upgrading to release '%s' using the P&K approach is not supported. "
+                             "Please use the legacy upgrade method." % release_id)
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
             release = self._release_basic_checks(release_id)
 
-            # 1g. Only allowed for platform major releases upgrade
+            # 1h. Only allowed for platform major releases upgrade
             # NOTE(lvieira) Remove this in the future to support combined P&K
             # for patches, but need to handle the in-service patch use-case
             if not utils.is_upgrade_deploy(SW_VERSION, release.sw_release):
