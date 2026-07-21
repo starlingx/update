@@ -104,6 +104,7 @@ from software.software_functions import SW_VERSION
 from software.software_functions import to_bool
 from software.software_functions import unmount_iso_load
 from software.software_functions import validate_host_deploy_order
+from software.software_inventory import BranchNotFound
 from software.software_inventory import SoftwareInventoryManager
 from software.thread_utils import no_reentry
 from software.thread_utils import threaded
@@ -1822,9 +1823,11 @@ class PatchController(PatchService):
     @no_reentry()
     def create_sw_releases_it(self, patch_info):
         def get_highest_required_patch(required_patches):
-            if not isinstance(required_patches, list):
-                return required_patches
-            return max(required_patches)
+            if not required_patches:
+                return None
+            if len(required_patches) == 1:
+                return required_patches[0]
+            return max(required_patches, key=utils.parse_release_version)
 
         def update_commit_id_to_all_mp(base_commit_id, commit_id):
             metadata_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP[states.UPLOADING]
@@ -3846,7 +3849,7 @@ class PatchController(PatchService):
                     msg_error += msg + "\n"
                     return dict(info=msg_info, warning=msg_warning, error=msg_error)
             else:
-                msg = (f"Release {release} is not a product release. "
+                msg = (f"Release {release} is not a full product release deployment."
                        "Pre-upgrade-deploy select requires a product release")
                 LOG.error(msg)
                 msg_error += msg + "\n"
@@ -4745,6 +4748,41 @@ class PatchController(PatchService):
         # Delete metadata and all associated release files
         self.software_release_delete_api(to_delete_releases)
 
+    def check_product_release_deployable_branch(self, mp_deploy_set):
+        if not mp_deploy_set.is_product_release_deploy:
+            return False
+        mp_commit_ids = {mp.commit_id for mp in mp_deploy_set.metapackages}
+        if len(mp_commit_ids) != 1:
+            return False
+        mp_commit_id = mp_commit_ids.pop()
+
+        a_mp = mp_deploy_set.metapackages[0]
+        sw_ver = utils.get_major_release_version(a_mp.sw_version)
+        product_rel_id = a_mp.product
+        sim = SoftwareInventoryManager(sw_ver)
+        try:
+            deploy_branch_commit_id = sim.get_branch_commit(product_rel_id)
+        except BranchNotFound:
+            deploy_branch_commit_id = None
+
+        return deploy_branch_commit_id == mp_commit_id
+
+    def apply_deployable_branch(self, mp_deploy_set):
+        # calling this function needs to call check_product_release_deployable_branch
+        # previously
+        a_mp = mp_deploy_set.metapackages[0]
+        product_rel_id = a_mp.product
+        sw_ver = utils.get_major_release_version(a_mp.sw_version)
+        sim = SoftwareInventoryManager(sw_ver)
+        try:
+            sim.deploy(product_rel_id)
+            LOG.info(f"{product_rel_id} has been set to deploy")
+        except BranchNotFound:
+            # somehow branch not found
+            LOG.error(f"Deployable branch {product_rel_id} not found")
+        except RuntimeError:
+            LOG.error(f"Deploy deployable branch {product_rel_id} failed")
+
     def install_releases(self, deployment_list, feed_repo):
         """
         Install the debian packages, create the commit and update the metadata.
@@ -4786,6 +4824,12 @@ class PatchController(PatchService):
                     filter_by_states=[states.DEPLOYING])
                 if deploying_mps:
                     mp_deploy_set = MetapackageDeploymentSet(deploying_mps)
+
+                # check we have the deployable branch and the commit-id matches each metapackage
+                if self.check_product_release_deployable_branch(mp_deploy_set):
+                    self.apply_deployable_branch(mp_deploy_set)
+                else:
+                    LOG.info(f"{mp_deploy_set} is not a product release")
 
                 # Check if metapackage commit exist and are in the feed (for upgrade and prestage)
                 all_commits = ostree_utils.get_all_feed_commits(feed_sw_version)

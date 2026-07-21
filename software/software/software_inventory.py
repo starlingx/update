@@ -94,10 +94,10 @@ def get_release_by_commit(repo, commit):
     return None
 
 
-def get_top_commit(repo, branch):
+def get_top_commit(repo_path, branch):
     try:
         commit = subprocess.check_output(
-            ["ostree", "rev-parse", "--repo", repo, branch],
+            ["ostree", "rev-parse", "--repo", repo_path, branch],
             text=True).strip()
     except subprocess.CalledProcessError:
         raise BranchNotFound(branch)
@@ -252,7 +252,7 @@ class SoftwareInventoryManager():
         """Create an ostree branch and commit new patch
            The new branch is based on base_release (requires release)
         """
-        base_commit = get_top_commit(self.repo_path, base_branch)
+        base_commit = self.get_branch_commit(base_branch)
         self.create_branch(base_commit, new_branch)
         commit_packages_to_branch(self.repo_path, self.sw_ver, new_branch, packages, pre_bootstrap)
 
@@ -289,7 +289,7 @@ class SoftwareInventoryManager():
                 return commits[1]
             return None
 
-        target_tip = get_top_commit(self.repo_path, branch)
+        target_tip = self.get_branch_commit(branch)
         target_tree = get_tree(target_tip)
 
         to_delete = [branch]
@@ -337,7 +337,7 @@ class SoftwareInventoryManager():
         self.validate_deploy(deploy_target)
 
         # Resolve the target branch to its commit
-        target_commit = get_top_commit(self.repo_path, deploy_target)
+        target_commit = self.get_branch_commit(deploy_target)
 
         # Reset the deploy branch to point to the target commit
         try:
