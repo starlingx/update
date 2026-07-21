@@ -210,14 +210,20 @@ def get_distributed_cloud_role():
     return get_platform_conf("distributed_cloud_role")
 
 
-def is_tls_key_rsa(key):
-    cmd = 'openssl rsa -in <(echo \'%s\') -noout -check' % key
-    sub = subprocess.Popen(cmd,
-                           shell=True,
-                           stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE)
-    _, _ = sub.communicate()
-    return sub.returncode == 0
+def is_tls_key_supported(key):
+    """Returns True if the key is a valid ECDSA or RSA private key."""
+    for cmd in (
+        'openssl pkey -in <(echo \'%s\') -noout -ec_param_enc named_curve' % key,
+        'openssl rsa -in <(echo \'%s\') -noout -check' % key,
+    ):
+        sub = subprocess.Popen(cmd, shell=True,
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE)
+        _, _ = sub.communicate()
+        if sub.returncode == 0:
+            return True
+
+    return False
 
 
 def get_secret_data_yaml(name, namespace):
