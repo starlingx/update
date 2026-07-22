@@ -2294,16 +2294,42 @@ class PatchController(PatchService):
         for release_id in release_list:
             release = self.release_collection.get_release_by_id(release_id)
             if release.is_product_release:
+                # Remove patch-related content and metadata
+                # Major product release may have an apt-ostree repo that is removed in this step
                 try:
+                    LOG.info(f"Removing product release {release_id} contents")
                     ComponentPatchFile.delete_patch_product_release(release_id)
                     for metapackage in release.metapackages:
-                        msg = f"Deleted {metapackage} metapackage release\n"
-                        msg_info += msg
+                        msg = f"Deleted {metapackage} metapackage release"
+                        LOG.info(msg)
+                        msg_info += msg + "\n"
+                    for metapackage in release.pre_upgrade_deploy:
+                        msg = f"Deleted {metapackage} pre-upgrade-deploy metapackage release"
+                        LOG.info(msg)
+                        msg_info += msg + "\n"
+                    LOG.info("Removed product release contents and metadata successfully")
                 except Exception as e:
-                    msg = f"Error deleting release {release_id}: {str(e)}\n"
+                    msg = f"Error deleting release {release_id}: {str(e)}"
+                    LOG.error(msg)
+                    msg_error += msg + "\n"
+                    continue
+                # Remove the feed if is a major product release
+                try:
+                    release_state = ReleaseState(release_ids=[release_id])
+                    delete_feed = release_state.is_major_release_deployment()
+                    if delete_feed:
+                        feed_dir = Path(constants.FEED_OSTREE_BASE_DIR) / f"rel-{release.sw_version}"
+                        LOG.info(f"Removing feed directory {feed_dir}")
+                        if feed_dir.is_dir():
+                            shutil.rmtree(feed_dir)
+                            msg = f"Removed {release.sw_version} feed directory"
+                            LOG.info(msg)
+                        else:
+                            LOG.warning(f"Feed directory {feed_dir} does not exist")
+                except Exception as e:
+                    msg = f"Error removing feed: {str(e)}\n"
                     LOG.error(msg)
                     msg_error += msg
-                    continue
             else:
                 release_sw_version = release.sw_version
 
