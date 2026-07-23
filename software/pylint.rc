@@ -473,7 +473,14 @@ disable= C0103,C0114,C0115,C0116,C0201,C0202,C0206,C0209,C2801,
          R1715,R1722,R1724,R1725,R1732,R1735,
          W0107,W0231,W0602,W0603,W0621,W0622,
          W0703,W0707,W0719,W1201,W1514,W3101,
-         E0605,W1203
+         E0605,W1203,
+         # pylint 2.x cannot resolve Optional/mock return types (fixed in 3.x)
+         E1133,E1136,
+         # unittest.mock patterns in test files - pylint cannot resolve:
+         # tests intentionally call _private methods (W0212)
+         # __get__ binding confuses parameter checks (E1111,E1120)
+         # base import used for sys.modules side effect (W0611)
+         W0212,W0611,E1111,E1120
 
 # Enable the message, report, category or checker with the given id(s). You can
 # either give multiple identifier separated by comma (,) or put this option
