@@ -1025,6 +1025,55 @@ def copy_updated_efi_files():
         raise
 
 
+def copy_kickstart_to_feed(sw_version):
+    """
+    Copy kickstart/miniboot files from the pending ostree deployment to
+    the feed directory.
+
+    Runs on controllers during deploy-host for both major release and
+    patch deployments.
+
+    :param sw_version: Major release version MM.mm (e.g. 24.09)
+    """
+    pending_deployment = fetch_pending_deployment()
+    if not pending_deployment:
+        LOG.info("No pending deployment found, skipping kickstart copy to feed")
+        return
+
+    deployment_dir = os.path.join(constants.OSTREE_BASE_DEPLOYMENT_DIR, pending_deployment)
+
+    # The deb installs to /var/www/pages/feed/rel-<version>/kickstart/
+    kickstart_src = os.path.join(
+        deployment_dir,
+        "var/www/pages/feed/rel-%s" % sw_version,
+        constants.KICKSTART_FEED_SUBDIR)
+    feed_kickstart_dst = os.path.join(
+        constants.FEED_OSTREE_BASE_DIR,
+        "rel-%s" % sw_version,
+        constants.KICKSTART_FEED_SUBDIR)
+
+    if not os.path.isdir(kickstart_src):
+        LOG.info("No kickstart directory in deployment at %s, skipping", kickstart_src)
+        return
+
+    try:
+        LOG.info("Copying kickstart/miniboot from %s to %s", kickstart_src, feed_kickstart_dst)
+        shutil.copytree(kickstart_src, feed_kickstart_dst, dirs_exist_ok=True)
+
+        # Also update the flat kickstart.cfg at the feed root (used by pxeboot)
+        inner_cfg = os.path.join(feed_kickstart_dst, "kickstart.cfg")
+        flat_cfg = os.path.join(constants.FEED_OSTREE_BASE_DIR, "rel-%s" %
+                                sw_version, "kickstart.cfg")
+        if os.path.isfile(inner_cfg):
+            shutil.copyfile(inner_cfg, flat_cfg)
+            LOG.info("Updated flat kickstart.cfg at %s", flat_cfg)
+
+        LOG.info("Kickstart/miniboot files copied to feed successfully for release %s", sw_version)
+    except Exception as e:
+        LOG.exception("Failed to copy kickstart/miniboot to feed for %s: %s", sw_version, str(e))
+        raise
+
+
 def ostree_lock(func):
     def wrapper(*args, **kwargs):
         with open(constants.OSTREE_LOCK, "w+") as fd:
