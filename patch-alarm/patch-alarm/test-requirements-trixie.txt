@@ -1,0 +1,13 @@
+# The order of packages is significant, because pip processes them in the order
+# of appearance. Changing the order has an impact on the overall integration
+# process, which may cause wedges in the gate later.
+hacking==8.1.0  # Apache-2.0
+
+astroid==3.3.11
+coverage==7.15.2
+flake8-bugbear==25.11.29
+isort==6.1.0
+pycryptodomex==3.20.0
+pylint==3.3.9
+stestr==4.2.1
+testtools==2.7.2
