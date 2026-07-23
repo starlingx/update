@@ -1212,28 +1212,17 @@ class CgroupBootParamsHook(BaseHook):
     """
 
     def _get_cgroup_v2_enabled(self):
-        """Read cgroup_v2_enabled from the live sysinv DB.
+        """Read cgroup_v2_enabled from additional_data.
 
+        The value is passed by the controller (which has DB access)
+        via additional_data during deploy_host.
         Returns the string value ('true'/'false') or None if not found.
-        The DB is the old release's DB (port 5432) which has the user's
-        setting from before the upgrade was initiated.
         """
-        try:
-            result = subprocess.run(
-                ['sudo', '-u', 'postgres', 'psql', '-d', 'sysinv', '-t', '-c',
-                 "SELECT value FROM service_parameter "
-                 "WHERE service='platform' AND section='config' "
-                 "AND name='cgroup_v2_enabled';"],
-                capture_output=True, text=True, check=False
-            )
-            value = result.stdout.strip()
-            if not value:
-                return None
-            LOG.info("CgroupBootParamsHook: Read cgroup_v2_enabled=%s from DB" % value)
-            return value
-        except Exception as e:
-            LOG.exception("CgroupBootParamsHook: Failed to read cgroup_v2_enabled: %s" % e)
-            return None
+        value = self._additional_data.get("cgroup_v2_enabled", None)
+        if value:
+            LOG.info("CgroupBootParamsHook: Read "
+                     "cgroup_v2_enabled=%s from additional_data" % value)
+        return value
 
     def _set_v2_boot_params(self):
         """Set cgroup v2 kernel boot parameters in boot.env.
