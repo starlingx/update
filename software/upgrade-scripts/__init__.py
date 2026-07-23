@@ -45,6 +45,9 @@ ActivateKeystone = getattr(
 UpdateStaticHieradata = getattr(
     _import_module(".11-update-static-hieradata", __name__),
     "UpdateStaticHieradata")
+SaveEtcdVersion = getattr(
+    _import_module(".12-save-etcd-version", __name__),
+    "SaveEtcdVersion")
 DisablePortierisWebhook = getattr(
     _import_module(".18-disable-portieris-webhook", __name__),
     "DisablePortierisWebhook")
@@ -113,6 +116,7 @@ PLUGINS = {
         ],
         FEATURE_PRE_APPS: [
             UpdateStaticHieradata(),
+            SaveEtcdVersion(),
             RenameDeprecatedPtpParameters(),
             AddMissingServiceParameters(),
         ],
