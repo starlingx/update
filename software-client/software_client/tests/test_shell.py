@@ -88,7 +88,7 @@ class ShellTest(utils.BaseTestCase):
             r'',
             r".*?^List the software releases",
             r'',
-            r".*?^Optional arguments:",
+            r".*?^(Optional arguments|Options):",
             r".*?--release RELEASE  filter against a release ID",
             r".*?--state STATE      filter against a release state",
         ]

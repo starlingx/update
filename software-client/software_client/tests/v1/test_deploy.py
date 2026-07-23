@@ -57,25 +57,18 @@ fixtures = {
             {},
         ),
     },
-    '/v1/deploy/precheck/1':
-    {
-        'GET': (
-            {},
-            {},
-        ),
-    },
-    '/v1/deploy/1/precheck':
+    '/v1/deploy/precheck':
     {
         'POST': (
             {},
             {},
         ),
     },
-    '/v1/deploy/1/start':
+    '/v1/deploy/start':
     {
         'POST': (
             {},
-            {'force': 'true'},
+            {},
         ),
     },
     '/v1/deploy_host/controller-1':
@@ -143,21 +136,24 @@ class DeployManagerTest(testtools.TestCase):
         self.assertEqual(self.api.calls, expect)
 
     def test_precheck(self):
-        input = {'deployment': '1', 'region_name': 'RegionOne', 'force': 1}
+        input = {'deployment': '1', 'region_name': 'RegionOne', 'force': 1,
+                 'releases': ['1'], 'options': None, 'pre_upgrade_deploy': None}
         args = Args(**input)
         check = self.mgr.precheck(args)
         expect = [
-            ('POST', '/v1/deploy/1/precheck', {}, {'force': 'true', 'region_name': 'RegionOne'}),
+            ('POST', '/v1/deploy/precheck', {}, {'force': 'true', 'region_name': 'RegionOne',
+                                                 'releases': ['1']}),
         ]
         self.assertEqual(self.api.calls, expect)
         self.assertEqual(len(check), 2)
 
     def test_start(self):
-        input = {'deployment': '1', 'force': 'True'}
+        input = {'deployment': '1', 'force': 'True', 'options': None,
+                 'releases': None, 'pre_upgrade_deploy': None, 'remove': False}
         args = Args(**input)
         resp = self.mgr.start(args)
         expect = [
-            ('POST', '/v1/deploy/1/start', {}, {'force': 'true'}),
+            ('POST', '/v1/deploy/start', {}, {'force': 'true'}),
         ]
         self.assertEqual(self.api.calls, expect)
         self.assertEqual(len(resp), 2)
