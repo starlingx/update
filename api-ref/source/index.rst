@@ -14,5 +14,4 @@ API reference
 .. toctree::
    :maxdepth: 2
 
-   api-ref-patching-v1-update
    api-ref-usm-v1-update
