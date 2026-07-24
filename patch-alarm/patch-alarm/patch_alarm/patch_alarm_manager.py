@@ -89,7 +89,10 @@ class PatchAlarmDaemon(object):  # pylint: disable=too-many-instance-attributes
 
         while True:
             # start monitoring patch status
-            self.check_patch_alarms()
+            try:
+                self.check_patch_alarms()
+            except Exception:
+                LOG.exception("Error in check_patch_alarms")
 
             # run/poll every 1 min
             time.sleep(60)
