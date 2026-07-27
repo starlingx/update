@@ -39,6 +39,13 @@ SYSTEM_MODE_SIMPLEX = "simplex"
 # defined in lvm_snapshot.LvmSnapshotManager.LOGICAL_VOLUMES
 FREE_SPACE_NEEDED_LVM_SNAPSHOTS_GIB = 24
 DOCKER_FS_MINIMUM_REQUIRED_SIZE_GIB = 40
+# Minimum total size of /sysroot (root host-fs) required for upgrade.
+# The to-release ostree commit requires significant disk space during
+# deploy-start and deploy-host. 40 GiB accommodates the current and
+# to-release ostree deployments plus transient checkout space.
+# This is compared against the sysinv host-fs 'root' size which matches
+# what 'system host-fs-modify' sets.
+SYSROOT_MINIMUM_REQUIRED_SIZE_GIB = 40
 INITIAL_CONFIG_COMPLETE_FLAG = "/etc/platform/.initial_config_complete"
 
 LOG = logging.getLogger('main_logger')
@@ -337,6 +344,49 @@ class UpgradeHealthCheck(HealthCheck):
             return success, msg
         return success, None
 
+    def _get_host_fs_size(self, hostname, fs_name):
+        """Get the size of a named host-fs for a given host.
+
+        Queries the sysinv API, consistent with
+        'system host-fs-show <hostname> <fs_name>'.
+
+        :param hostname: host to query (e.g. 'controller-0')
+        :param fs_name: filesystem name (e.g. 'root', 'docker')
+        :returns: size in GiB (int) or None if not found
+        """
+        hosts = self._sysinv_client.ihost.list()
+        host = next((h for h in hosts if h.hostname == hostname), None)
+        if host is None:
+            return None
+
+        host_filesystems = self._sysinv_client.host_fs.list(host.uuid)
+        for fs in host_filesystems:
+            if fs.name == fs_name:
+                return fs.size
+        return None
+
+    def _check_sysroot_size(self):
+        """Check that the root host-fs on controller-0 meets the minimum size.
+
+        Queries the sysinv API for the 'root' filesystem size on controller-0,
+        consistent with 'system host-fs-show controller-0 root'.
+        """
+        root_fs_size = self._get_host_fs_size("controller-0", "root")
+
+        if root_fs_size is None:
+            return False, "Unable to determine root filesystem size from system inventory."
+
+        if root_fs_size < SYSROOT_MINIMUM_REQUIRED_SIZE_GIB:
+            msg = (("The root filesystem on controller-0 is %d GiB but "
+                    "a minimum of %d GiB is required for upgrade.\n"
+                    "   Use 'system host-fs-modify controller-0 root=%d' "
+                    "to increase the root filesystem size.")
+                   % (root_fs_size,
+                      SYSROOT_MINIMUM_REQUIRED_SIZE_GIB,
+                      SYSROOT_MINIMUM_REQUIRED_SIZE_GIB))
+            return False, msg
+        return True, None
+
     def _check_snapshot_option(self):
         options = json.loads(self._config.get("options", {}))
         snapshot = options.get("snapshot", False)
@@ -425,11 +475,20 @@ class UpgradeHealthCheck(HealthCheck):
 
         # check if docker filesystem satisfies the minimum required size
         success, docker_output = self._check_docker_fs_size()
-        output += 'Docker filesystem in controllers satisfies the required size of %sGB: [%s]\n' \
+        output += 'Docker filesystem in controllers satisfies the required size of %d GiB: [%s]\n' \
                   % (DOCKER_FS_MINIMUM_REQUIRED_SIZE_GIB,
                      HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
         if not success:
-            output += 'Use "system host-fs-modify" to resize accordingly:\n' + docker_output
+            output += docker_output
+        health_ok = health_ok and success
+
+        # check if /sysroot filesystem meets the minimum size requirement
+        success, sysroot_msg = self._check_sysroot_size()
+        output += 'Sysroot filesystem meets minimum size of %d GiB: [%s]\n' \
+                  % (SYSROOT_MINIMUM_REQUIRED_SIZE_GIB,
+                     HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
+        if not success:
+            output += '-> %s\n' % sysroot_msg
         health_ok = health_ok and success
 
         # check for LVM snapshot health checks
@@ -486,23 +545,23 @@ class UpgradeHealthCheck(HealthCheck):
         return upgrade_utils.is_tls_key_rsa(base64.b64decode(key_b64).decode('utf-8'))
 
     def _check_docker_fs_size(self):
-        controllers = {}
-        # get each controller id
+        """Check that docker filesystem on all controllers meets minimum size."""
         hosts = self._sysinv_client.ihost.list()
-        for host in hosts:
-            if "controller" in host.hostname:
-                controllers[host.hostname] = host.uuid
-        # check docker fs size for each controller
+        controllers = [h.hostname for h in hosts if "controller" in h.hostname]
+
         success = True
         output = ""
         for controller in controllers:
-            host_filesystems = self._sysinv_client.host_fs.list(controllers[controller])
-            for fs in host_filesystems:
-                if fs.name == "docker":
-                    if fs.size < DOCKER_FS_MINIMUM_REQUIRED_SIZE_GIB:
-                        success = False
-                        output += f"-> {controller}: docker={fs.size}GB\n"
-                    break
+            docker_size = self._get_host_fs_size(controller, "docker")
+            if docker_size is None:
+                continue
+            if docker_size < DOCKER_FS_MINIMUM_REQUIRED_SIZE_GIB:
+                success = False
+                output += ("-> %s: docker=%d GiB\n"
+                           "   Use 'system host-fs-modify %s docker=%d' "
+                           "to increase.\n"
+                           % (controller, docker_size,
+                              controller, DOCKER_FS_MINIMUM_REQUIRED_SIZE_GIB))
         return success, output
 
 
