@@ -1064,7 +1064,7 @@ def upgrade_controller(from_release, to_release, target_port, release_directory)
 
     # Execute migration scripts
     # TODO(heitormatsui): remove legacy upgrade support without metapackages
-    if version.parse(to_release) <= version.parse(constants.MIN_METAPACKAGE_RELEASE):
+    if version.parse(from_release) < version.parse(constants.MIN_METAPACKAGE_RELEASE):
         LOG.info("Running migration scripts in legacy mode")
         execute_migration_scripts(
             from_release, to_release, utils.ACTION_MIGRATE, target_port)
