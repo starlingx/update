@@ -585,7 +585,8 @@ class UpdateKernelParametersHook(BaseHook):
                 break
         return amd_pstate
 
-    # TODO(sbhardwa): Remove when 26.03 is no longer a supported from release.
+    # TODO(sbhardwa): Remove when 25.09 and 26.03 are no longer
+    # supported from releases.
     def add_amd_pstate_if_not_set(self, kernel_params: str) -> None:
         """Add amd_pstate=passive to GRUB if not already set.
 
@@ -882,8 +883,8 @@ class UpdateKernelParametersHook(BaseHook):
             intel_idle = self.read_intel_idle(kernel_params)
             self.remove_intel_idle_if_set(intel_idle)
 
-            # TODO(sbhardwa): Remove when 26.03 is no longer a supported
-            # from release.
+            # TODO(sbhardwa): Remove when 25.09 and 26.03 are no longer
+            # supported from releases.
             # Add amd_pstate=passive (new in 26.10) to GRUB.
             # The DB record is inserted by
             # 43-add-missing-service-parameters.py during migrate
