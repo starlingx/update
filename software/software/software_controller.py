@@ -5042,6 +5042,26 @@ class PatchController(PatchService):
             msg_error += msg
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
+        # Block deployment if product release pre-upgrade-deploy metapackages aren't deployed
+        product_release = self.release_collection.get_product_release_by_id(mp_deploy_set.product)
+        if product_release and product_release.pre_upgrade_deploy:
+            if not product_release.are_prerequisites_deployed(pre_upgrade_deploy=True):
+                msg = (f"Product release {product_release.id} has pre-upgrade-deploy "
+                       f"metapackages {', '.join(product_release.pre_upgrade_deploy.keys())} that "
+                       f"aren't deployed, deploy them prior to upgrading.")
+                LOG.error(msg)
+                msg_error += msg
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Block deployment if product release required releases aren't deployed
+        if product_release and product_release.requires_release_ids:
+            if not product_release.are_prerequisites_deployed():
+                msg = (f"Product release {product_release.id} requires the following "
+                       f"releases to be deployed: {', '.join(product_release.requires_release_ids)}")
+                LOG.error(msg)
+                msg_error += msg
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
         # Get running release and deployment parameters
         running_release = self.release_collection.running_release
         deploy_sw_version = mp_deploy_set.sw_version
