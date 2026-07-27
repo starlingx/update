@@ -308,6 +308,10 @@ class SWRelease(object):
         return self._get_by_key('deployable') == "Y"
 
     @property
+    def kernel_patch(self):
+        return self._get_by_key('kernel_patch') == "Y"
+
+    @property
     def metapackages(self):
         return self._get_by_key('metapackages')
 
