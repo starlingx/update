@@ -72,8 +72,17 @@ def do_host_list(cc, args):
            required=False,
            action='store_true',
            help='Select metapackages required to deploy before upgrading to the specified release')
+@utils.arg('--remove',
+           default=False,
+           required=False,
+           action='store_true',
+           help='Select pre-upgrade-deploy metapackages for removal '
+           '(requires --pre-upgrade-deploy)')
 def do_select(cc, args):
     """Select metapackages to deploy"""
+    if args.remove and not args.pre_upgrade_deploy:
+        print("Error: --remove requires --pre-upgrade-deploy")
+        return 1
     resp, data = cc.deploy.select(args)
     if args.debug:
         utils.print_result_debug(resp, data)

@@ -32,6 +32,8 @@ class DeployManager(base.Manager):
             "releases": releases,
             "pre_upgrade_deploy": pre_upgrade_deploy,
         }
+        if args.remove:
+            body["remove"] = args.remove
 
         res = self._post(path, body=body)
         return res
