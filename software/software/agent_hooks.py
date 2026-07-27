@@ -411,14 +411,28 @@ class CopyPxeFilesHook(BaseHook):
 
 class RestorePlatformConfPermissionHook(BaseHook):
     """
-    Restore the platform.conf file permission to 644
+    Restore the platform.conf file permission and ownership to the
+    original state (644, root:root) in the to-release ostree
+    deployment so that it takes effect after reboot.
     """
 
     def run(self):
         try:
-            # Restore the platform.conf file permission to 644
-            os.chmod(self.PLATFORM_CONF_FILE, 0o644)
-            LOG.info("Restore platform.conf file permission to 644")
+            # Restore the platform.conf file permission and ownership in the
+            # to-release ostree deployment (/ostree/1). The hook runs
+            # pre-reboot while the current rootfs is still the from-release,
+            # so we must target the deployment that will become root after
+            # reboot, not the live /etc/platform/platform.conf.
+            #
+            # The stx 13 puppet change sets platform.conf to
+            # 0640:root:sys_protected. On rollback, we must
+            # restore to 0644:root:root because older services
+            # are not in the sys_protected group.
+            target = os.path.join(self.TO_RELEASE_OSTREE_DIR,
+                                  self.PLATFORM_CONF_FILE.lstrip('/'))
+            os.chmod(target, 0o644)
+            os.chown(target, 0, 0)  # root:root (uid=0, gid=0)
+            LOG.info("Restore platform.conf to 644 root:root at %s" % target)
         except Exception as e:
             LOG.exception("Failed to restore platform.conf file permission: %s" % e)
             raise
