@@ -151,7 +151,9 @@ class PluginRunner:
             still_pending = []
             for t in pending:
                 with self._lock:
-                    if t.required_state() is None or t.required_state() in self._states:
+                    if len(ready) < self._max_parallel and (t.required_state() is None or t.required_state() in self._states):
+                        # only pick first _max_parallel number of ready task
+                        # this will ensure tasks executing sequentially and stop if previous task failed when max_parallel == 1
                         LOG.info(f"{t.name} is ready")
                         ready.append(t)
                     else:
