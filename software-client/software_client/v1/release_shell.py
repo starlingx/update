@@ -3,9 +3,6 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-import sys
-import threading
-import time
 
 from software_client.common import utils
 
@@ -193,7 +190,7 @@ def do_upload(cc, args):
     """Upload a software release."""
     try:
         print("This operation will take a while. Please wait.")
-        wait_task = WaitThread()
+        wait_task = utils.WaitThread()
         wait_task.start()
         result = cc.release.upload(args)
         wait_task.join()
@@ -229,7 +226,7 @@ def do_upload_dir(cc, args):
     """Upload a software release directory."""
     try:
         print("This operation will take a while. Please wait.")
-        wait_task = WaitThread()
+        wait_task = utils.WaitThread()
         wait_task.start()
         result = cc.release.upload_dir(args)
         wait_task.join()
@@ -263,24 +260,3 @@ def do_delete(cc, args):
 
     utils.display_info(resp)
     return utils.check_rc(resp, data)
-
-
-class WaitThread(threading.Thread):
-    """Thread to show progress indication."""
-    def __init__(self):
-        super(WaitThread, self).__init__()
-        self.stop = threading.Event()
-
-    def run(self):
-        """Run the progress indication."""
-        while not self.stop.is_set():
-            sys.stdout.write(".")
-            sys.stdout.flush()
-            time.sleep(10)
-
-    def join(self, timeout=None):
-        """Stop the progress indication and join the thread."""
-        self.stop.set()
-        super(WaitThread, self).join(timeout)
-        sys.stdout.write("\n")
-        sys.stdout.flush()

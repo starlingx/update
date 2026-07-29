@@ -75,6 +75,21 @@ class DeployManager(base.Manager):
         res = self._post(path, body=body)
         return res
 
+    def prestage(self, args):
+        path = "/v1/deploy/prestage"
+
+        body = {}
+        if args.metapackage_overrides:
+            body["metapackage_overrides"] = args.metapackage_overrides
+        if args.release:
+            body["release"] = args.release
+        if args.pre_upgrade_deploy:
+            body["pre_upgrade_deploy"] = args.pre_upgrade_deploy
+        if args.restore:
+            body["restore"] = args.restore
+
+        return self._post(path, body=body)
+
     def start(self, args):
         # Ignore interrupts during this function
         signal.signal(signal.SIGINT, signal.SIG_IGN)

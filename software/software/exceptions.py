@@ -104,6 +104,11 @@ class OSTreeCommandFail(SoftwareError):
     pass
 
 
+class BranchNotFound(Exception):
+    def __init__(self, branch):
+        super().__init__(f"Software release branch {branch} not found")
+
+
 class SemanticFail(SoftwareError):
     """Semantic check error."""
     pass

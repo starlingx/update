@@ -31,6 +31,41 @@ from software import constants
 LOG = logging.getLogger('main_logger')
 
 
+def get_repo(repo_path):
+    if repo_path:
+        repo = OSTree.Repo.new(Gio.File.new_for_path(repo_path))
+        repo.open(None)
+    else:
+        repo = OSTree.Repo.new_default()
+        repo.open(None)
+    return repo
+
+
+def get_commits(repo, branch_name):
+    """Get all commits in a branch's history.
+
+    :param repo: OSTree.Repo object
+    :param branch_name: branch ref to walk
+    :return: list of commit checksums from newest to oldest
+    """
+    if not branch_name or not branch_name.strip():
+        raise ValueError("branch_name must not be empty")
+
+    _, rev = repo.resolve_rev(branch_name, False)
+    if not rev:
+        raise Exception(f"Branch {branch_name} not found")
+
+    commits = []
+    while rev:
+        try:
+            _, commit = repo.load_variant(OSTree.ObjectType.COMMIT, rev)
+        except Exception as e:
+            raise RuntimeError("Failed to load commit '%s': %s" % (rev, e))
+        commits.append(rev)
+        rev = OSTree.commit_get_parent(commit)
+    return commits
+
+
 def get_ostree_latest_commit(ostree_ref, repo_path):
     """
     Query ostree using ostree log <ref> --repo=<path>

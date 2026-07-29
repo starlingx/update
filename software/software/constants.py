@@ -43,6 +43,7 @@ WORKER = 'worker'
 
 # Region names
 DISTRIBUTED_CLOUD_ROLE_SYSTEMCONTROLLER = 'systemcontroller'
+DISTRIBUTED_CLOUD_ROLE_SUBCLOUD = 'subcloud'
 SYSTEM_CONTROLLER_REGION = 'SystemController'
 
 # DC
@@ -195,6 +196,7 @@ RELEASE_PREFIX = "rel"
 STARLINGX_RELEASE = SW_VERSION
 UNKNOWN_SOFTWARE_VERSION = "0.0.0"
 PRE_UPGRADE_DEPLOY = "pre-upgrade-deploy"
+PRESTAGE_SUFFIX = "prestage"
 
 # Precheck constants
 LICENSE_FILE = "/etc/platform/.license"
@@ -273,6 +275,7 @@ NUMBER_OF_COMMITS_TAG = "number_of_commits"
 OSTREE_TAG = "ostree"
 PREPATCHED_ISO_TAG = "prepatched_iso"
 REQUIRES_TAG = "requires"
+ORIGINAL_COMMIT_TAG = "original_commit"
 METAPACKAGES_TAG = "metapackages"
 PRE_UPGRADE_DEPLOY_TAG = "pre_upgrade_deploy"
 

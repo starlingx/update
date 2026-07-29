@@ -158,6 +158,49 @@ def do_precheck(cc, args):
     return rc
 
 
+@utils.arg('release',
+           help='Product release ID')
+@utils.arg('--metapackage-overrides',
+           nargs='+',
+           default=None,
+           required=False,
+           help='List of metapackage releases to override in the specified '
+           'product release.')
+@utils.arg('--pre-upgrade-deploy',
+           action='store_true',
+           required=False,
+           help='Prestage metapackages required in pre-upgrade-deploy the '
+           'specified product release.')
+@utils.arg('--restore',
+           action='store_true',
+           required=False,
+           help='Remove the prestage commit from a specified product release.')
+def do_prestage(cc, args):
+    """Prestage the software deployment"""
+    prestage_param_set = sum(bool(param) for param in
+                             (args.pre_upgrade_deploy, args.metapackage_overrides, args.restore))
+    if prestage_param_set > 1:
+        print("Error: --pre-upgrade-deploy, --metapackage-overrides and "
+              "--restore cannot be used together")
+        return 1
+    try:
+        print("This operation will take a while. Please wait.")
+        wait_task = utils.WaitThread()
+        wait_task.start()
+        resp, data = cc.deploy.prestage(args)
+        wait_task.join()
+    except Exception as e:
+        wait_task.join()
+        raise Exception("Prestage failed. Reason: %s" % e)
+
+    if args.debug:
+        utils.print_result_debug(resp, data)
+
+    utils.display_info(resp)
+
+    return utils.check_rc(resp, data)
+
+
 @utils.arg('releases',
            nargs='*',
            default=None,

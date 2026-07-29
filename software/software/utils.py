@@ -166,6 +166,12 @@ def get_feed_path(sw_release):
     return path
 
 
+def get_feed_repo_path(sw_release):
+    sw_ver = get_major_release_version(sw_release)
+    path = os.path.join(constants.UPGRADE_FEED_DIR, f"rel-{sw_ver}", constants.OSTREE_REPO)
+    return path
+
+
 def get_release_path(sw_release):
     return Path(constants.COMPONENT_SOFTWARE_STORAGE_DIR) / sw_release
 
