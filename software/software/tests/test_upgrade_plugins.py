@@ -10,10 +10,6 @@ import sys
 import unittest
 from unittest.mock import MagicMock
 
-from software.utilities.plugin_runner import APlugin
-from software.utilities.plugin_runner import CPlugin
-from software.utilities.plugin_runner import ScriptPlugin
-
 # Mock external modules not available in the test environment
 for mod_name in [
     "cgtsclient", "cgtsclient.client",
@@ -35,6 +31,27 @@ UPGRADE_SCRIPTS_DIR = os.path.normpath(os.path.join(
     os.path.dirname(__file__), "..", "..", "upgrade-scripts"
 ))
 
+# In the source tree, plugin_runner.py is not present in upgrade-scripts/
+# (it gets installed there at build time). Create a temporary symlink so
+# _loader.py can find it via importlib.util.spec_from_file_location.
+_plugin_runner_link = os.path.join(UPGRADE_SCRIPTS_DIR, "plugin_runner.py")
+_plugin_runner_src = os.path.normpath(os.path.join(
+    os.path.dirname(__file__), "..", "utilities", "plugin_runner.py"
+))
+if not os.path.exists(_plugin_runner_link):
+    os.symlink(_plugin_runner_src, _plugin_runner_link)
+
+# Ensure upgrade-scripts/ is on sys.path so that `from _loader import ...`
+# works when the scripts are loaded via importlib.
+if UPGRADE_SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, UPGRADE_SCRIPTS_DIR)
+
+# Import plugin base classes from the same dynamic loader the scripts use,
+# so isinstance() checks work correctly.
+from _loader import APlugin  # noqa: E402 pylint: disable=import-error
+from _loader import CPlugin  # noqa: E402 pylint: disable=import-error
+from _loader import ScriptPlugin  # noqa: E402 pylint: disable=import-error
+
 _spec = importlib.util.spec_from_file_location(
     "upgrade_scripts",
     os.path.join(UPGRADE_SCRIPTS_DIR, "__init__.py"),
@@ -51,13 +68,15 @@ class TestPluginsConsistency(unittest.TestCase):
 
     def _get_files_on_disk(self):
         """Return set of .py/.sh filenames in upgrade-scripts,
-           excluding __init__.py and the n-1/ subdirectory.
+           excluding __init__.py, _loader.py, plugin_runner.py and
+           the n-1/ subdirectory.
         """
+        excluded = {"__init__.py", "_loader.py", "plugin_runner.py"}
         return {
             f for f in os.listdir(UPGRADE_SCRIPTS_DIR)
             if os.path.isfile(os.path.join(UPGRADE_SCRIPTS_DIR, f))
             and (f.endswith(".py") or f.endswith(".sh"))
-            and f != "__init__.py"
+            and f not in excluded
         }
 
     def _get_files_in_plugins(self):

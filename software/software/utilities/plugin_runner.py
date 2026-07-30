@@ -8,9 +8,9 @@ from abc import abstractmethod
 from concurrent.futures import as_completed
 from concurrent.futures import ThreadPoolExecutor
 from packaging import version
-from software.constants import COMPONENT_SOFTWARE_STORAGE_DIR
-from software.utilities import constants
 
+
+import configparser
 import importlib.util
 import json
 import logging
@@ -24,6 +24,11 @@ from typing import Optional
 from typing import Tuple
 
 LOG = logging.getLogger('main_logger')
+
+COMPONENT_SOFTWARE_STORAGE_DIR = "/opt/software/releases"
+HOST_SCRIPTS_DIR = "host-scripts"
+AGENT_HOOKS_SCRIPT = "agent_hooks.py"
+BUILD_INFO_FILE = "/etc/build.info"
 
 
 # This file is currently categorized as independent from framework,
@@ -195,6 +200,11 @@ def get_migration_scripts(plugin_dir, from_release, action):
             )
             module = importlib.util.module_from_spec(spec)
             sys.modules[spec.name] = module
+            # Ensure _loader and plugin_runner are importable by the
+            # loaded module. _loader.py lives in plugin_dir alongside
+            # __init__.py, and plugin_runner.py is installed there too.
+            if plugin_dir not in sys.path:
+                sys.path.insert(0, plugin_dir)
             spec.loader.exec_module(module)
             return module
         else:
@@ -252,7 +262,7 @@ def execute_agent_hooks(major_release, metapackages: Optional[List[Tuple]] = Non
                 COMPONENT_SOFTWARE_STORAGE_DIR,
                 mp_version,
                 mp_name,
-                constants.HOST_SCRIPTS_DIR)
+                HOST_SCRIPTS_DIR)
 
             if not os.path.isdir(script_dir):
                 LOG.warning("Could not find host-scripts directory in "
@@ -262,10 +272,10 @@ def execute_agent_hooks(major_release, metapackages: Optional[List[Tuple]] = Non
 
             run_scripts(
                 [script_dir],
-                filter_names=constants.AGENT_HOOKS_SCRIPT,
+                filter_names=AGENT_HOOKS_SCRIPT,
                 extra_args=extra_args)
     else:
-        if version.Version(major_release) > version.Version(constants.SW_VERSION):
+        if version.Version(major_release) > version.Version(get_sw_version()):
             ostree_path = "/ostree/1"
         else:
             ostree_path = "/ostree/2"
@@ -274,7 +284,7 @@ def execute_agent_hooks(major_release, metapackages: Optional[List[Tuple]] = Non
         script_dir = os.path.normpath(ostree_path + "/usr/lib/python3/dist-packages/software/")
         if not os.path.isdir(script_dir):
             raise Exception(f"Could not find software path. Script directory: {script_dir}")
-        run_scripts([script_dir], filter_names=constants.AGENT_HOOKS_SCRIPT, extra_args=extra_args)
+        run_scripts([script_dir], filter_names=AGENT_HOOKS_SCRIPT, extra_args=extra_args)
 
     LOG.info("Agent hooks executed successfully")
 
@@ -296,7 +306,7 @@ def execute_host_scripts(metapackages: List[Tuple], filter_names=None, extra_arg
         # /opt/software/releases/<metapackage_release>/<path_component>/host-scripts/
         mp_dir = os.path.join(
             COMPONENT_SOFTWARE_STORAGE_DIR, mp_release,
-            mp_component, constants.HOST_SCRIPTS_DIR)
+            mp_component, HOST_SCRIPTS_DIR)
         if not os.path.isdir(mp_dir):
             LOG.info("Metapackage %s does not have host-scripts directory in release %s. "
                      "Skipping...", mp_component, mp_release)
@@ -336,3 +346,17 @@ def run_scripts(script_dirs, action="", from_release="", to_release="",
     failed = [s for s in states if s.endswith("-failed")]
     if failed:
         raise Exception(f"Scripts failed: {failed}")
+
+
+def get_sw_version():
+    """Gets the software version"""
+    try:
+        cp = configparser.ConfigParser()
+        default_section = configparser.DEFAULTSECT
+        with open(BUILD_INFO_FILE, "r") as fp:
+            cp.read_string(f"[{default_section}]\n" + fp.read())
+            sw_version = cp.get(default_section, "SW_VERSION").strip('"')
+            return sw_version
+    except Exception as e:
+        LOG.error(f"Error getting SW_VERSION: {str(e)}")
+        raise

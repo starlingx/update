@@ -9,15 +9,17 @@
 #
 
 import logging
+import re
 import sys
 import shutil
 
 from pathlib import Path
 
-from software.utilities.plugin_runner import CPlugin
+from _loader import CPlugin
+
+from software.utilities.constants import SW_VERSION
 from software.utilities.utils import configure_logging
 from software.utils import get_major_release_version
-from software.utils import get_patch_level_version
 
 LOG = logging.getLogger('main_logger')
 OLD_METADATA_DIR = Path("/opt/software/metadata")
@@ -46,6 +48,23 @@ def do_delete(to_release):
                                     % (str(target_path)))
 
 
+def get_patch_level_version(sw_release_version):
+    """Ensures the version string has the full MM.mm.pp format.
+
+    If the version is in major release format (MM.mm), appends '.0'.
+    Otherwise returns the string unchanged.
+
+    :param sw_release_version: version string (e.g. "MM.mm" or "MM.mm.pp")
+    :returns: version string in MM.mm.pp format
+    """
+    if not sw_release_version:
+        return sw_release_version
+
+    if re.match(r'^\d+\.\d+$', sw_release_version):
+        return sw_release_version + ".0"
+    return sw_release_version
+
+
 class MoveReleaseMetadataFile(CPlugin):
     """USM upgrade plugin to move the software release metadata file to
     new directory structure introduced in 26.10.
@@ -71,9 +90,11 @@ class MoveReleaseMetadataFile(CPlugin):
 
         major_from_release = get_major_release_version(from_release)
         major_to_release = get_major_release_version(to_release)
-        if major_from_release not in ["25.09", "26.03"] or major_to_release != "26.10" or action != "delete":
-            LOG.info("Only applicable when upgrading from [25.09, 26.03] "
-                     "to 26.10 upgrades in action delete. Skipping.")
+        if (major_from_release not in ["25.09", "26.03"] or major_to_release != "26.10" or
+                action != "delete" or SW_VERSION == "26.03"):
+            LOG.info("Only applicable when running on 26.10, upgrading "
+                     "from [25.09, 26.03] to 26.10 in action delete. "
+                     "Skipping.")
         else:
             try:
                 LOG.info("Start upgrade script")
@@ -110,6 +131,10 @@ if __name__ == "__main__":
             print("Invalid option %s." % sys.argv[arg])
             sys.exit(1)
         arg += 1
+
+    # TODO(lbonatti) remove this condition once stx13 become N release.
+    if action != "delete":
+        sys.exit(0)
 
     plugin = MoveReleaseMetadataFile()
     result = plugin.run(from_release, to_release, action)

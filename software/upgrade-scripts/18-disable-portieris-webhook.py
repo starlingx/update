@@ -16,7 +16,7 @@ import tempfile
 import time
 import yaml
 
-from software.utilities.plugin_runner import CPlugin
+from _loader import CPlugin
 from software.utilities.utils import configure_logging
 from sysinv.common.kubernetes import test_k8s_health
 
@@ -162,6 +162,10 @@ if __name__ == "__main__":
             print("Invalid option %s." % sys.argv[arg])
             sys.exit(1)
         arg += 1
+
+    # TODO(lbonatti) remove this condition once stx13 become N release.
+    if action not in ("activate", "activate-rollback"):
+        sys.exit(0)
 
     plugin = DisablePortierisWebhook()
     result = plugin.run(from_release, to_release, action, port)

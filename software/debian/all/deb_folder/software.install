@@ -10,3 +10,4 @@ usr/sbin
 usr/share/starlingx/pmon.d/software-controller-daemon.conf
 usr/share/starlingx/pmon.d/software-agent.conf
 upgrade-scripts/* usr/local/share/upgrade.d/
+software/utilities/plugin_runner.py usr/local/share/upgrade.d/

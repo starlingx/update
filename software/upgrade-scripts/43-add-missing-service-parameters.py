@@ -28,7 +28,7 @@ import subprocess
 import sys
 import uuid
 
-from software.utilities.plugin_runner import CPlugin
+from _loader import CPlugin
 from software.utilities.utils import configure_logging
 
 LOG = logging.getLogger("main_logger")
@@ -168,5 +168,9 @@ if __name__ == "__main__":
     action = sys.argv[3]
 
     configure_logging()
+    # TODO(lbonatti) remove this condition once stx13 become N release.
+    if action != "migrate":
+        sys.exit(0)
+
     plugin = AddMissingServiceParameters()
     plugin.run(from_release, to_release, action)

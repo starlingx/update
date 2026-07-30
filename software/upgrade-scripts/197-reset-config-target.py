@@ -15,7 +15,7 @@ from controllerconfig.common import constants
 from controllerconfig import utils
 from psycopg2.extras import RealDictCursor
 
-from software.utilities.plugin_runner import CPlugin
+from _loader import CPlugin
 from software.utilities.utils import configure_logging
 
 LOG = logging.getLogger('main_logger')
@@ -66,6 +66,10 @@ if __name__ == "__main__":
             print("Invalid option %s." % sys.argv[arg])
             sys.exit(1)
         arg += 1
+
+    # TODO(lbonatti) remove this condition once stx13 become N release.
+    if action != "migrate":
+        sys.exit(0)
 
     plugin = ResetConfigTarget()
     result = plugin.run(from_release, to_release, action, port)
