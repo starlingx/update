@@ -364,7 +364,7 @@ class LVMSnapshotManager:
     # the current state of the LV, so how much and how fast it fills up relates to
     # how much and how fast data is changing in each LV during the upgrade
     LOGICAL_VOLUMES = {  # lv_name: snapshot_size
-        "docker-lv": "12G",
+        "docker-lv": "18G",
         "etcd-lv": "2G",
         "kubelet-lv": "2G",
         "platform-lv": "2G",
