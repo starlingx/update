@@ -148,11 +148,17 @@ def run_install(repo_dir, sw_version, sw_release, packages, pre_bootstrap=False)
 
     packages = " ".join(packages)
 
+    # TODO(bqian) below is for backward compatiblility to 26.03 and 25.09.
+    if sw_version > "26.03":
+        branch = sw_release
+    else:
+        branch = constants.OSTREE_REF
+
     try:
         subprocess.run(
             ["apt-ostree", "compose", "install",
              "--repo", repo_dir,
-             "--branch", "starlingx",
+             "--branch", branch,
              "--feed", package_feed,
              "--component", sw_release,
              packages],

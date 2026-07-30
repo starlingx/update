@@ -17,6 +17,7 @@ LOG = logging.getLogger('main_logger')
 # valid release state transition below will still be changed as
 # development continue
 RELEASE_STATE_TRANSITION = {
+    states.UPLOADING: [states.AVAILABLE, states.UPLOAD_FAILED],
     states.AVAILABLE: [states.DEPLOYING, states.UNAVAILABLE, states.DEPLOY_SELECTED],
     states.DEPLOYING: [states.DEPLOYED, states.AVAILABLE],
     states.DEPLOYED: [states.REMOVING, states.UNAVAILABLE, states.COMMITTED, states.REMOVE_SELECTED],
@@ -180,6 +181,12 @@ class ReleaseState(object):
 
     def committed(self):
         self.transform(states.COMMITTED)
+
+    def uploaded(self):
+        self.transform(states.AVAILABLE)
+
+    def upload_failed(self):
+        self.transform(states.UPLOAD_FAILED)
 
     def replaced(self):
         """

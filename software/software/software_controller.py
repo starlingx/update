@@ -104,6 +104,9 @@ from software.software_functions import SW_VERSION
 from software.software_functions import to_bool
 from software.software_functions import unmount_iso_load
 from software.software_functions import validate_host_deploy_order
+from software.software_inventory import SoftwareInventoryManager
+from software.thread_utils import no_reentry
+from software.thread_utils import threaded
 from software.states import DEPLOY_HOST_STATES
 from software.states import DEPLOY_STATES
 from software.states import INTERRUPTION_RECOVERY_STATES
@@ -1344,6 +1347,7 @@ class PatchController(PatchService):
                                                           "pull",
                                                           "--depth=-1",
                                                           "--mirror",
+                                                          "--disable-verify-bindings",
                                                           "starlingx"],
                                                          stderr=subprocess.STDOUT,
                                                          text=True)
@@ -1814,6 +1818,72 @@ class PatchController(PatchService):
                 shutil.rmtree(dc_vault_playbook_dir)
             raise
 
+    @threaded
+    @no_reentry()
+    def create_sw_releases_it(self, patch_info):
+        def get_highest_required_patch(required_patches):
+            if not isinstance(required_patches, list):
+                return required_patches
+            return max(required_patches)
+
+        def update_commit_id_to_all_mp(base_commit_id, commit_id):
+            metadata_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP[states.UPLOADING]
+            metadata_dir_path = Path(metadata_dir)
+            metadata_files = [str(file) for file in metadata_dir_path.rglob("*.xml") if file.is_file()]
+            # Update metapackage metadata commit-ids
+            for md in metadata_files:
+                self.update_ostree_commit_id(md, base_commit_id, commit_id)
+                LOG.info(f"Latest feed commit {commit_id} added to metadata files")
+
+        def _create_sw_release(sw_rel, release_id):
+            sw_ver = utils.get_major_release_version(sw_rel)
+            if sw_ver:
+                new_branch = release_id
+                swrc = get_SWReleaseCollection()
+                release = swrc.get_release_by_id(release_id)
+
+                metapackages = release.metapackages
+                mp_data = self.release_collection.get_ordered_metapackages(
+                    filter_by_ids=metapackages,
+                    filter_by_states=[states.UPLOADING]
+                )
+                mp_deploy_set = MetapackageDeploymentSet(mp_data)
+                packages = [f"meta-{pkg.component}" for pkg in mp_deploy_set.metapackages]
+
+                require_release_ids = release.requires_release_ids
+                require_release_id = get_highest_required_patch(require_release_ids)
+
+                sim = SoftwareInventoryManager(sw_ver)
+                if require_release_id is None:
+                    commit_id = sim.get_deployed_commit()
+                    require_release_id = sim.get_release_by_commit(commit_id)
+
+                rel_state = ReleaseState(release_ids=[release_id])
+                try:
+                    sim.create_sw_release_branch(require_release_id, new_branch, packages, pre_bootstrap)
+                    # Update metapackage metadata commit-id
+                    commit_id = sim.get_branch_commit(new_branch)
+                    base_commit_id = sim.get_branch_commit(require_release_id)
+                    update_commit_id_to_all_mp(base_commit_id, commit_id)
+
+                    self.software_sync()
+                    rel_state.uploaded()
+                except Exception:
+                    LOG.exception(f"Failed to create deployable branch for {release_id}")
+                    rel_state.upload_failed()
+
+        pre_bootstrap = self.pre_bootstrap
+        for patch in patch_info:
+            for info in patch.values():
+                sw_rel = info["sw_release"]
+                rel_id = info["id"]
+                sw_ver = utils.get_major_release_version(sw_rel)
+                if version.Version(sw_ver) < version.Version(SW_VERSION):
+                    LOG.info(f"{rel_id} is for older release, do not attempt to create deployable branch")
+                    continue
+                if sw_rel and rel_id:
+                    _create_sw_release(sw_rel, rel_id)
+
     def _process_upload_patch_files(self, patch_files):
         """
         Process the uploaded patch files
@@ -1989,6 +2059,7 @@ class PatchController(PatchService):
             except SoftwareError as e:
                 local_error += "Error when installing patches from previous release: %s" % e
 
+        self.create_sw_releases_it(upload_patch_info)
         return local_info, local_warning, local_error, upload_patch_info
 
     def software_release_upload_api(self, release_files):
@@ -2013,6 +2084,14 @@ class PatchController(PatchService):
         # We now need to put the files in the category (patch or upgrade)
         patch_files = []
         upgrade_files = {}
+
+        uploadings = []
+        for rel in self.release_collection.iterate_releases_by_state(states.UPLOADING):
+            uploadings.append(rel.id)
+        for mp_rel in self.release_collection.iterate_metapackages_by_state(states.UPLOADING):
+            uploadings.append(mp_rel.id)
+        if uploadings:
+            raise InvalidOperation(f"Uploading in progress {uploadings} ... try again later")
 
         for uploaded_file in release_files:
             (_, ext) = os.path.splitext(uploaded_file)
@@ -2229,24 +2308,18 @@ class PatchController(PatchService):
             LOG.exception(msg)
             raise APTOSTreeCommandFail(msg)
 
-    def software_release_delete_api(self, release_ids):
+    def _verify_releases_to_delete(self, release_ids):
+        """Releases must be deleted with their dependents.
+           Dependents are those releases directly and indirectly require the release
         """
-        Delete release(s)
-        :return: dict of info, warning and error messages
-        """
-        msg_info = ""
-        msg_warning = ""
-        msg_error = ""
-
-        # Protect against duplications
-        full_list = sorted(list(set(release_ids)))
+        to_delete_ids = release_ids[:]
 
         not_founds = []
         cannot_del = []
         used_by_subcloud = []
         has_deployed_pre_upgrade_deploy = []
         release_list = []
-        for rel_id in full_list:
+        for rel_id in to_delete_ids:
             rel = self.release_collection.get_release_by_id(rel_id)
             if rel is None:
                 not_founds.append(rel_id)
@@ -2276,7 +2349,7 @@ class PatchController(PatchService):
 
         if used_by_subcloud:
             list_str = ','.join(used_by_subcloud)
-            err_msg += f"Release{'' if len(used_by_subcloud) == 1 else 's'} {list_str} still used by subcloud(s)"
+            err_msg += f"Release{'' if len(used_by_subcloud) == 1 else 's'} {list_str} still used by subcloud(s)\n"
 
         if has_deployed_pre_upgrade_deploy:
             list_str = ','.join(has_deployed_pre_upgrade_deploy)
@@ -2285,8 +2358,58 @@ class PatchController(PatchService):
                         f"deployed pre-upgrade-deploy metapackages. "
                         f"Undeploy them before deleting the release.\n")
 
-        if len(err_msg) > 0:
+        required = set()
+        for release in self.release_collection.iterate_releases():
+            if release.id in to_delete_ids:
+                continue
+
+            for req_id in release.requires_release_ids:
+                if req_id in to_delete_ids:
+                    required.add(req_id)
+
+        if required:
+            err_msg += f"{list(required)} are required by other releases"
+
+        if err_msg:
             raise SoftwareServiceError(error=err_msg)
+
+    def _get_release_by_dependency(self, release_ids):
+        """Reorder the list of release ids based on dependency order.
+           Return a list of release ids with dependents first.
+           This is a shortcut function that assumes the list of releases does not
+           have external dependents and circular dependency is not possible
+        """
+        ordered_list = []
+        remaining_release_ids = release_ids[:]
+        while remaining_release_ids:
+            for release_id in remaining_release_ids[:]:
+                release = self.release_collection.get_release_by_id(release_id)
+                has_internal_dependency = any(
+                    req_id in remaining_release_ids
+                    for req_id in release.requires_release_ids
+                )
+                if not has_internal_dependency:
+                    ordered_list.append(release_id)
+                    remaining_release_ids.remove(release_id)
+                    break
+
+        ordered_list.reverse()
+        return ordered_list
+
+    def software_release_delete_api(self, release_ids):
+        """
+        Delete release(s)
+        :return: dict of info, warning and error messages
+        """
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
+
+        # Protect against duplications
+        full_list = sorted(list(set(release_ids)))
+        self._verify_releases_to_delete(full_list)
+
+        release_list = self._get_release_by_dependency(full_list)
 
         msg = "Deleting releases: %s" % ",".join(release_list)
         LOG.info(msg)
@@ -2296,6 +2419,13 @@ class PatchController(PatchService):
         for release_id in release_list:
             release = self.release_collection.get_release_by_id(release_id)
             if release.is_product_release:
+                sim = SoftwareInventoryManager(release.sw_version)
+                try:
+                    sim.delete_branch(release_id)
+                except Exception:
+                    LOG.exception(f"Failed to delete deployable branch {release_id}")
+                    raise SoftwareServiceError(f"Failed to delete {release_id}")
+
                 # Remove patch-related content and metadata
                 # Major product release may have an apt-ostree repo that is removed in this step
                 try:

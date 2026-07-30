@@ -281,7 +281,7 @@ def pull_ostree_from_remote(remote=None):
     # Make sure gpg-verify is disabled
     add_gpg_verify_false()
 
-    cmd = "ostree pull %s --depth=-1"
+    cmd = "ostree pull %s --depth=-1 --disable-verify-bindings"
     ref_cmd = ""
     if not remote:
         ref = constants.OSTREE_REMOTE

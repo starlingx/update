@@ -62,6 +62,10 @@ class SWRelease(object):
 
         if all(state in [states.AVAILABLE, states.DEPLOY_SELECTED] for state in mp_states):
             return states.AVAILABLE
+        elif any(state in [states.UPLOADING] for state in mp_states):
+            return states.UPLOADING
+        elif any(state in [states.UPLOAD_FAILED] for state in mp_states):
+            return states.UPLOAD_FAILED
         elif all(state == states.UNAVAILABLE for state in mp_states):
             return states.UNAVAILABLE
         elif all(state in [states.DEPLOYED, states.REMOVE_SELECTED] for state in mp_states):
@@ -306,6 +310,12 @@ class SWRelease(object):
     @property
     def metapackages(self):
         return self._get_by_key('metapackages')
+
+    @property
+    def metapackage_packages(self):
+        metapackages = self.metapackages
+        packages = [f"meta-{pkg}".removesuffix(f"_{self.sw_release}") for pkg in metapackages]
+        return packages
 
     @property
     def pre_upgrade_deploy(self):
