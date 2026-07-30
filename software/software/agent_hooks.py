@@ -1355,14 +1355,16 @@ class CgroupBootParamsHook(BaseHook):
             kubeconfig = "/etc/kubernetes/admin.conf"
             cmd = ("kubectl --kubeconfig=%s -n kube-system "
                    "get configmap kubelet-config -o json | "
-                   "sed 's|/k8sinfra|/k8s-infra|g' | "
+                   "sed 's|/k8sinfra|/k8s-infra|g; "
+                   "s|cgroupDriver: systemd|cgroupDriver: cgroupfs|g' | "
                    "kubectl --kubeconfig=%s apply -f -"
                    % (kubeconfig, kubeconfig))
             result = subprocess.run(cmd, shell=True, capture_output=True,
                                     text=True, timeout=30, check=False)
             if result.returncode == 0:
                 LOG.info("CgroupBootParamsHook: reverted ConfigMap "
-                         "cgroupRoot to /k8s-infra")
+                         "cgroupRoot to /k8s-infra and "
+                         "cgroupDriver to cgroupfs")
             else:
                 LOG.warning("CgroupBootParamsHook: failed to revert "
                             "ConfigMap: %s" % result.stderr)
