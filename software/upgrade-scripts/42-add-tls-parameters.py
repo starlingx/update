@@ -213,14 +213,14 @@ def update_k8s_tls_cipher_suites(sysinv):
 
 
 def do_activate(sysinv):
-    """Add TLS params and apply during upgrade activation."""
+    """Add TLS params during upgrade activation."""
     # Platform TLS parameters
     if tls_params_exist(sysinv):
         LOG.info("Platform TLS parameters already exist, skipping")
     else:
         add_platform_tls_params(sysinv)
-        LOG.info("Applying platform service parameters")
-        sysinv.service_parameter.apply(PARAM_SERVICE)
+        LOG.info("Platform TLS parameters added to database "
+                 "(will be applied on next host config update)")
 
     # Kubernetes TLS cipher suites
     update_k8s_tls_cipher_suites(sysinv)
