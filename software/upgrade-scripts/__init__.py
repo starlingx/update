@@ -84,6 +84,9 @@ AddTlsParameters = getattr(
 AddMissingServiceParameters = getattr(
     _import_module(".43-add-missing-service-parameters", __name__),
     "AddMissingServiceParameters")
+AddCgroupV2ServiceParameters = getattr(
+    _import_module(".44-add-cgroup-v2-service-parameters", __name__),
+    "AddCgroupV2ServiceParameters")
 NetappTridentMigration = getattr(
     _import_module(".203-netapp-trident-migration", __name__),
     "NetappTridentMigration")
@@ -119,6 +122,7 @@ PLUGINS = {
             SaveEtcdVersion(),
             RenameDeprecatedPtpParameters(),
             AddMissingServiceParameters(),
+            AddCgroupV2ServiceParameters(),
         ],
         K8S_APP_UPDATE: [],
         FEATURE_POST_APPS: [],
