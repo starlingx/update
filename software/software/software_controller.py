@@ -3153,7 +3153,7 @@ class PatchController(PatchService):
             # Check if there is a system_deploy in progress
             if not is_system_deploy_in_progress():
                 raise SoftwareServiceError(
-                    error="There is no system deploy in progress")
+                    error="There is no system deploy in progress to be deleted.")
 
             # Check if a kubernetes upgrade is still in progress
             try:
@@ -3333,6 +3333,11 @@ class PatchController(PatchService):
                      "release: %s, k8s: %s" % (
                          system_deploy_id, release.id, kube_version))
 
+        except SoftwareServiceError as e:
+            msg_error += "%s\n" % str(e.error)
+            msg = "Failed to init system-deploy"
+            msg_error += msg + ".\n"
+            LOG.exception("%s: %s", msg, str(e.error))
         except Exception as e:
             msg = "Failed to init system-deploy"
             msg_error += msg + ".\n"
