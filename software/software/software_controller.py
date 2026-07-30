@@ -5796,6 +5796,21 @@ class PatchController(PatchService):
             if is_major_release and commit_id in [constants.COMMIT_DEFAULT_VALUE, None]:
                 commit_id = ostree_utils.get_feed_latest_commit(deploy_release.sw_version)
 
+            # If the to-release has pre-upgrade-deploy metapackages deployed on the
+            # from-release feed, the rollback target must be the pre-upgrade-deploy
+            # commit (not the base from-release commit) since that's what hosts are running
+            to_release_product = self.release_collection.get_release_by_id(to_release_deployment)
+            if (to_release_product and to_release_product.pre_upgrade_deploy
+                    and to_release_product.has_pre_upgrade_deploy_deployed):
+                pud_ids = self.release_collection.get_pre_upgrade_deploy_id_by_product_id(
+                    to_release_deployment)
+                if pud_ids:
+                    pud_release = self.release_collection.get_pre_upgrade_deploy_release_by_id(pud_ids[0])
+                    if pud_release and pud_release.commit_id:
+                        LOG.info(f"Using pre-upgrade-deploy commit {pud_release.commit_id} "
+                                 f"as rollback target (from {to_release_deployment})")
+                        commit_id = pud_release.commit_id
+
         # Update the deployment
         deploy_state = DeployState.get_instance()
         deploy_state.abort(feed_repo, commit_id)
