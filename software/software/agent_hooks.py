@@ -1006,6 +1006,120 @@ class UpdateGrubConfigHook(BaseHook):
             LOG.error("Failed to update system_mode in boot.env: %s", e.stderr)
 
 
+class UpdateEfiBootFilesHook(BaseHook):
+    """
+    Update EFI boot binaries (grubx64.efi, bootx64.efi, etc.) from the
+    to-release ostree deployment using a safe backup + atomic swap pattern.
+
+    This is necessary because the bootloader (GRUB) must be compatible with
+    the new kernel/initramfs.
+
+    Strategy:
+      1. Create a staging directory (BOOT_NEW) with current BOOT contents
+      2. Selectively overwrite EFI files from the to-release deployment
+      3. Copy grub.cfg.stx from pxeboot as grub.cfg
+      4. Atomic swap: BOOT -> BOOT_BKP, BOOT_NEW -> BOOT
+      5. Sync to flush to disk
+
+    On failure before the swap, the original BOOT is untouched.
+    On failure after the swap, BOOT_BKP allows manual recovery.
+    """
+
+    EFI_PATH = "/boot/efi/EFI/BOOT"
+    EFI_BKP_PATH = "/boot/efi/EFI/BOOT_BKP"
+    EFI_NEW_PATH = "/boot/efi/EFI/BOOT_NEW"
+    OSTREE_EFI_PATH = "/usr/lib/ostree-boot/efi/EFI/BOOT"
+    GRUB_CFG_STX_PATH = "/var/pxeboot/pxelinux.cfg.files/grub.cfg.stx"
+
+    # Files to selectively copy from the new deployment
+    EFI_FILES_TO_COPY = [
+        "bootx64.efi",
+        "bootx64-nosig.efi",
+        "grubx64.efi",
+        "LockDown.efi",
+        "LockDown.efi.sig",
+        "mmx64.efi",
+        "grub.cfg",
+    ]
+
+    def _get_source_dir(self):
+        """Return the ostree deployment directory containing new EFI files."""
+        return os.path.join(self.TO_RELEASE_OSTREE_DIR, self.OSTREE_EFI_PATH.lstrip('/'))
+
+    def _get_grub_cfg_source(self):
+        """Return the path to grub.cfg.stx in the to-release deployment."""
+        return os.path.join(self.TO_RELEASE_OSTREE_DIR, self.GRUB_CFG_STX_PATH.lstrip('/'))
+
+    def _cleanup_stale_dirs(self):
+        """Remove leftover staging/backup dirs from a previous failed run."""
+        for path in (self.EFI_NEW_PATH, self.EFI_BKP_PATH):
+            if os.path.exists(path):
+                LOG.info("Removing stale directory %s" % path)
+                shutil.rmtree(path)
+
+    def run(self):
+        # TODO(lbonatti): Remove when stx11 is not supported as from side.
+        if self._from_release != "25.09" and self._to_release != "25.09":
+            LOG.info("UpdateEfiBootFilesHook: nothing to do for this release transition.")
+            return
+
+        LOG.info("Starting UpdateEfiBootFilesHook.")
+
+        source_dir = self._get_source_dir()
+        if not os.path.isdir(source_dir):
+            LOG.warning("Source EFI directory not found: %s, skipping hook" % source_dir)
+            return
+
+        try:
+            # Clean up any leftover dirs from a previous failed attempt
+            self._cleanup_stale_dirs()
+
+            # Step 1: Create staging dir with current BOOT contents
+            LOG.info("Creating staging directory %s" % self.EFI_NEW_PATH)
+            shutil.copytree(self.EFI_PATH, self.EFI_NEW_PATH, symlinks=True)
+
+            # Step 2: Selectively copy new EFI files into staging dir
+            for filename in self.EFI_FILES_TO_COPY:
+                src_file = os.path.join(source_dir, filename)
+                if os.path.exists(src_file):
+                    dst_file = os.path.join(self.EFI_NEW_PATH, filename)
+                    shutil.copy2(src_file, dst_file)
+                    LOG.info("Copied %s from to-release" % filename)
+                else:
+                    LOG.info("File %s not found in source, skipping" % filename)
+
+            # Step 3: Copy grub.cfg.stx from pxeboot as grub.cfg
+            grub_cfg_src = self._get_grub_cfg_source()
+            if os.path.isfile(grub_cfg_src):
+                dst_grub_cfg = os.path.join(self.EFI_NEW_PATH, "grub.cfg")
+                shutil.copy2(grub_cfg_src, dst_grub_cfg)
+                LOG.info("Copied grub.cfg.stx as grub.cfg")
+            else:
+                LOG.warning("grub.cfg.stx not found at %s" % grub_cfg_src)
+
+            # Step 4: Atomic swap (BOOT -> BOOT_BKP, BOOT_NEW -> BOOT)
+            LOG.info("Performing atomic swap of EFI directories")
+            os.rename(self.EFI_PATH, self.EFI_BKP_PATH)
+            os.rename(self.EFI_NEW_PATH, self.EFI_PATH)
+
+            # Step 5: Sync to flush changes to disk
+            subprocess.run(["sync", "-f", self.EFI_PATH], check=True)
+
+            LOG.info("UpdateEfiBootFilesHook completed successfully. "
+                     "Backup at %s" % self.EFI_BKP_PATH)
+
+        except Exception as e:
+            LOG.exception("UpdateEfiBootFilesHook failed: %s" % e)
+            # Attempt recovery if swap was partially done
+            if not os.path.exists(self.EFI_PATH) and os.path.exists(self.EFI_BKP_PATH):
+                LOG.info("Attempting recovery: restoring BOOT from backup")
+                os.rename(self.EFI_BKP_PATH, self.EFI_PATH)
+            # Clean up staging dir if it still exists
+            if os.path.exists(self.EFI_NEW_PATH):
+                shutil.rmtree(self.EFI_NEW_PATH, ignore_errors=True)
+            raise
+
+
 class CreateUSMUpgradeInProgressFlag(BaseHook):
     USM_UPGRADE_IN_PROGRESS_FLAG = os.path.join(BaseHook.PLATFORM_CONF_PATH,
                                                 ".usm_upgrade_in_progress")
@@ -2096,6 +2210,7 @@ class HookManager(object):
             ReconfigureKernelHook,
             OOTDriverHook,
             UpdateGrubConfigHook,
+            UpdateEfiBootFilesHook,
             EnableNewServicesHook,
             DeleteControllerFeedRemoteHook,
             FixedEtcMergeHook,
@@ -2113,6 +2228,7 @@ class HookManager(object):
             ReconfigureKernelHook,
             UpdateKernelParametersHook,
             UpdateGrubConfigHook,
+            UpdateEfiBootFilesHook,
             DeleteControllerFeedRemoteHook,
             FixedEtcMergeRollBackHook,
             CreateKubeApiserverPortUpdatedFlag,
