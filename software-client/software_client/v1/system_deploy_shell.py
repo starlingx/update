@@ -52,14 +52,12 @@ def do_show(cc, args):
             header_data_list = {
                 "System Deploy ID": "id",
                 "To Release": "to_release",
-                "To K8S Release": "to_k8s_version",
-                "State": "state"}
+                "To K8S Release": "to_k8s_version"}
             utils.display_result_list(header_data_list, data)
         else:
             header_data_list = {
                 "To Release": "to_release",
-                "To K8S Release": "to_k8s_version",
-                "State": "state"}
+                "To K8S Release": "to_k8s_version"}
             utils.display_result_list(header_data_list, data)
 
     return rc
