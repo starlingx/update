@@ -23,7 +23,7 @@ import sys
 import time
 
 from cgtsclient import client as cgts_client
-from software.utilities.plugin_runner import CPlugin
+from _loader import CPlugin
 from software.utilities.utils import configure_logging
 
 LOG = logging.getLogger("main_logger")
@@ -257,5 +257,9 @@ if __name__ == "__main__":
     action = sys.argv[3]
 
     configure_logging()
+    # TODO(lbonatti) remove this condition once stx13 become N release.
+    if action != "activate":
+        sys.exit(0)
+
     plugin = AddTlsParameters()
     plugin.run(from_release, to_release, action)

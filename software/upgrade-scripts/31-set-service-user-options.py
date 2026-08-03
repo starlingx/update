@@ -32,7 +32,7 @@ import sys
 from keystoneauth1.identity import v3 as v3_auth
 from keystoneauth1 import session as ks_session
 from keystoneclient.v3 import client as ks_client
-from software.utilities.plugin_runner import CPlugin
+from _loader import CPlugin
 from software.utilities.utils import configure_logging
 
 LOG = logging.getLogger("main_logger")
@@ -189,6 +189,10 @@ if __name__ == "__main__":
             print("Invalid option %s." % sys.argv[arg])
             sys.exit(1)
         arg += 1
+
+    # TODO(lbonatti) remove this condition once stx13 become N release.
+    if action != "activate":
+        sys.exit(0)
 
     plugin = SetServiceUserOptions()
     result = plugin.run(from_release, to_release, action, port)

@@ -17,7 +17,7 @@ import subprocess
 import sys
 import uuid
 
-from software.utilities.plugin_runner import CPlugin
+from _loader import CPlugin
 from software.utilities.utils import configure_logging
 
 LOG = logging.getLogger("main_logger")
@@ -135,10 +135,30 @@ class AddCgroupV2ServiceParameters(CPlugin):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 4:
-        print("Usage: %s from_release to_release action" % sys.argv[0])
-        sys.exit(1)
+    from_release = None
+    to_release = None
+    action = None
+    port = None
+    arg = 1
+
+    while arg < len(sys.argv):
+        if arg == 1:
+            from_release = sys.argv[arg]
+        elif arg == 2:
+            to_release = sys.argv[arg]
+        elif arg == 3:
+            action = sys.argv[arg]
+        elif arg == 4:
+            port = sys.argv[arg]
+        else:
+            print("Invalid option %s." % sys.argv[arg])
+            sys.exit(1)
+        arg += 1
 
     configure_logging()
+    # TODO(lbonatti) remove this condition once stx13 become N release.
+    if action != "migrate":
+        LOG.info("Nothing to do. Skipping cgroup v2 service parameters.")
+        sys.exit(0)
     plugin = AddCgroupV2ServiceParameters()
     plugin.run(sys.argv[1], sys.argv[2], sys.argv[3])

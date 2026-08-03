@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # Copyright (c) 2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
@@ -9,10 +8,11 @@ import logging
 import importlib.util
 import os
 
-from software.utilities.plugin_runner import ScriptPlugin
-
+from _loader import ScriptPlugin
 
 LOG = logging.getLogger('main_logger')
+
+
 SOFTWARE_LOG_FILE = "/var/log/software.log"
 
 DEPLOY_SCRIPTS_FAILURES_LOG = logging.getLogger('deploy_scripts_failures')
@@ -136,7 +136,7 @@ PLUGINS = {
             ActivateKeystone(),
             _shell_script_plugin("23-resize-systemcontroller-filesystems.py",
                                  ACTION_ACTIVATE),
-            _shell_script_plugin("add-cgroup-v2-service-parameter.sh",
+            _shell_script_plugin("13-add-cgroup-v2-service-parameter.sh",
                                  ACTION_ACTIVATE),
         ],
         FEATURE_PRE_APPS: [
