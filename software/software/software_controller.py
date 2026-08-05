@@ -4780,6 +4780,13 @@ class PatchController(PatchService):
                                                   extra_args=extra_args)
                 reload_release_data()
 
+                # Reload the MetapackageDeploymentSet to capture any metadata changes
+                # made by pre-start scripts (e.g., kernel patch commit-id population)
+                deploying_mps = self.release_collection.get_ordered_metapackages(
+                    filter_by_states=[states.DEPLOYING])
+                if deploying_mps:
+                    mp_deploy_set = MetapackageDeploymentSet(deploying_mps)
+
                 # Check if metapackage commit exist and are in the feed (for upgrade and prestage)
                 all_commits = ostree_utils.get_all_feed_commits(feed_sw_version)
                 # Latest commit is the first in the list

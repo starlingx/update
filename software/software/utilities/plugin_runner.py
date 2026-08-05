@@ -106,11 +106,13 @@ class ScriptPlugin(APlugin):
                 cmdline.extend(self._extra_args)
 
                 # Let subprocess.run handle non-zero exit codes via check=True
-                subprocess.run(cmdline,
-                               stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT,
-                               text=True,
-                               check=True)
+                result = subprocess.run(cmdline,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT,
+                                        text=True,
+                                        check=True)
+                if result.stdout:
+                    LOG.info(f"Script {script} output:\n{result.stdout}")
 
             except subprocess.CalledProcessError as e:
                 # Deduplicate output lines using set and create error message

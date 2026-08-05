@@ -183,6 +183,21 @@ def copy_xml_file(src, dst, additional_data=None):
     tree.write(dst)
 
 
+def remove_xml_tag(filepath, tag):
+    """Remove a tag and its children from an XML file.
+
+    :param filepath: path to the XML file
+    :param tag: tag name to remove
+    """
+    tree = ElementTree.parse(str(filepath))
+    root = tree.getroot()
+    element = root.find(tag)
+    if element is not None:
+        root.remove(element)
+        ElementTree.indent(tree, space="  ")
+        tree.write(str(filepath))
+
+
 def get_release_from_patch(patchfile, key="sw_version"):
     rel = ""
     try:
@@ -529,6 +544,8 @@ class ReleaseData(object):
             self.metadata[release_id]["requires"] = []
             self._parse_metadata_array_tag(xml_file, "requires", "req_patch_id",
                                            self.metadata[release_id])
+            # Parse optional product-level flags
+            self._parse_metadata_tag(xml_file, "kernel_patch", self.metadata[release_id])
         else:
             # Legacy or Metapackage Release
             xml_tags = [
@@ -1424,13 +1441,23 @@ class ComponentPatchFile:
 
         try:
             # Extract patch content
-            with (extract_tar(self._patch_file, prefix="patch-") as patch_dir):
+            with extract_tar(self._patch_file, prefix="patch-") as patch_dir:
                 LOG.info(f"Extracted {self._patch_file}")
 
                 # Verify patch signature
                 ComponentPatchFile.verify_signature(patch_dir)
 
+                # Check if it is a kernel patch earlier to set metadata overrides
+                product_metadata_override = {}
+                metapkg_metadata_override = {}
+                extra_tar = Path(patch_dir) / self.EXTRA_TAR
+                kernel_patch = extra_tar.exists()
+                if kernel_patch:
+                    product_metadata_override = {"kernel_patch": "Y"}
+                    metapkg_metadata_override = {"deployable": "N"}
+
                 # Extract product release metadata
+                dst_metadata_file = None
                 metadata_tar = Path(patch_dir) / self.METADATA_TAR
                 with extract_tar(metadata_tar, prefix="metadata-") as metadata_dir:
                     LOG.info(f"Extracted {metadata_tar}")
@@ -1448,7 +1475,7 @@ class ComponentPatchFile:
                     # Copy product release metadata to software directory
                     product_md = f"{product_id}-{self.METADATA_XML}"
                     dst_metadata_file = Path(constants.COMPONENT_SOFTWARE_METADATA_STORAGE_DIR) / product_md
-                    copy_xml_file(metadata_file, dst_metadata_file, additional_data=None)
+                    copy_xml_file(metadata_file, dst_metadata_file, product_metadata_override)
                     LOG.info(f"Copied {product_md} to {constants.COMPONENT_SOFTWARE_METADATA_STORAGE_DIR}")
 
                 # Extract deb packages
@@ -1457,6 +1484,7 @@ class ComponentPatchFile:
                     # Fetch all deb packages and metapackages
                     deb_pkgs = list(Path(software_dir).glob("*.deb"))
                     deb_metapkgs = [d for d in deb_pkgs if d.name.startswith("meta-")]
+
                     # Copy metapackages contents
                     for deb in deb_metapkgs:
                         # Confirm the deb package corresponds to a metapackage
@@ -1473,17 +1501,21 @@ class ComponentPatchFile:
                                 msg = f"Metapackage {deb.name} is empty"
                                 LOG.error(msg)
                                 raise ReleaseInvalidData(msg)
+
                             # Copy full metapackage directory
                             shutil.copytree(mp_content, metapkg_dir, dirs_exist_ok=True)
                             ComponentPatchFile.setup_metapackage_dirs_and_permissions(metapkg_dir, 0o755)
                             LOG.info(f"Created metapackage directory: {metapkg_dir}")
+
                             # Copy metapackage metadata to correct location
                             metapkg_md_name = f"{mp}_{release_version}-{self.METADATA_XML}"
                             metapkg_md_src = Path(metapkg_dir) / self.METADATA_XML
                             metapkg_md_dst = Path(states.COMPONENT_UPLOADING_DIR) / metapkg_md_name
-                            copy_xml_file(metapkg_md_src, metapkg_md_dst,
-                                          {"deployable": "Y"})
-                            LOG.info(f"Copied metapackage metadata: {metapkg_md_name}")
+                            if kernel_patch:  # Kernel patch commit is already pre-built
+                                metapkg_md_dst = Path(states.COMPONENT_AVAILABLE_DIR) / metapkg_md_name
+                            remove_xml_tag(metapkg_md_src, "contents")
+                            copy_xml_file(metapkg_md_src, metapkg_md_dst, metapkg_metadata_override)
+                            LOG.info(f"Copied metapackage metadata to {metapkg_md_dst}")
 
                     # Create apt-ostree repo and load deb packages in it
                     package_repo_dir = Path(constants.PACKAGE_FEED_DIR) / f"rel-{sw_version}"
@@ -1501,6 +1533,12 @@ class ComponentPatchFile:
                     if package_list:
                         apt_utils.package_list_upload(package_repo_dir, release_version,
                                                       package_list)
+
+                    # Extract extra.tar if present (kernel patches with pre-built ostree)
+                    if kernel_patch:
+                        release_dir = Path(constants.COMPONENT_SOFTWARE_STORAGE_DIR) / release_version
+                        with extract_tar(extra_tar, dst_dir=release_dir, prefix="extra-") as _:
+                            LOG.info(f"Extracted extra.tar to {release_dir}")
         except Exception as e:
             error_detail = e.error if hasattr(e, 'error') else str(e)
             msg = f"Error extracting patch: {error_detail}"
@@ -1611,15 +1649,23 @@ class ComponentPatchFile:
 
 
 @contextlib.contextmanager
-def extract_tar(tar_path, prefix="software-"):
-    """Extract a tar file to a temporary directory, yielding the path."""
-    with tempfile.TemporaryDirectory(prefix=prefix) as tmpdir:
+def extract_tar(tar_path, dst_dir=None, prefix="software-"):
+    """Extract a tar file to a temporary or specified directory, yielding the path."""
+    def _extract(target):
         try:
             with tarfile.open(tar_path) as tar:
-                tar.extractall(tmpdir)
+                tar.extractall(target)
         except (tarfile.TarError, OSError) as e:
             raise RuntimeError(f"Failed to extract {tar_path}: {e}") from e
-        yield tmpdir
+
+    if dst_dir:
+        os.makedirs(dst_dir, exist_ok=True)
+        _extract(dst_dir)
+        yield dst_dir
+    else:
+        with tempfile.TemporaryDirectory(prefix=prefix) as tmpdir:
+            _extract(tmpdir)
+            yield tmpdir
 
 
 @contextlib.contextmanager
