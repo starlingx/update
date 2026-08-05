@@ -63,7 +63,7 @@ pecan_opts = [
     ),
     cfg.StrOpt(
         "package_feed",
-        default="http://controller:8080/updates/debian/rel-%s/ bullseye updates"
+        default="http://controller:8080/updates/debian/rel-%s/ trixie updates"
                 % constants.STARLINGX_RELEASE
     ),
 ]
