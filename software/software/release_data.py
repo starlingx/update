@@ -603,6 +603,23 @@ class MetapackageDeploymentSet:
         return self._reboot_required
 
     @property
+    def is_product_release_deploy(self):
+        """Returns True if this deployment set covers all metapackages of its product release."""
+        included = set(self.metapackage_ids)
+        if not included:
+            return False
+        products = {mp.product for mp in self.metapackages}
+        if len(products) != 1:
+            return False
+        product_id = products.pop()
+        swrc = get_SWReleaseCollection()
+        release = swrc.get_release_by_id(product_id)
+        if release is None:
+            return False
+        all_mps = set(release.metapackages)
+        return all_mps == included
+
+    @property
     def version_obj(self):
         """returns packaging.version object"""
         return self._version_obj
