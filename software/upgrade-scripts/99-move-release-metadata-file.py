@@ -91,7 +91,7 @@ class MoveReleaseMetadataFile(CPlugin):
         major_from_release = get_major_release_version(from_release)
         major_to_release = get_major_release_version(to_release)
         if (major_from_release not in ["25.09", "26.03"] or major_to_release != "26.10" or
-                action != "delete" or SW_VERSION == "26.03"):
+                action != "delete" or SW_VERSION in ["25.09", "26.03"]):
             LOG.info("Only applicable when running on 26.10, upgrading "
                      "from [25.09, 26.03] to 26.10 in action delete. "
                      "Skipping.")

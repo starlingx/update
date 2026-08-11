@@ -79,6 +79,27 @@ class RemoveTemporaryData:
         else:
             LOG.warning("No database found in the specified directory")
 
+    def clean_up_stale_postgresql_clusters(self):
+        """Drop PostgreSQL clusters whose binaries no longer exist,
+        preventing pg_wrapper from selecting a non-existent version
+        on a subsequent upgrade attempt.
+        """
+        result = subprocess.run(
+            ["pg_lsclusters", "--no-header"],
+            capture_output=True, text=True)
+        stale = [line.split()[:2] for line in result.stdout.splitlines()
+                 if "binaries_missing" in line]
+        if not stale:
+            LOG.info("No stale PostgreSQL clusters found.")
+            return
+        version, name = stale[0]
+        try:
+            subprocess.run(["pg_dropcluster", "--stop", version, name], check=True)
+            LOG.info("Dropped stale PostgreSQL cluster: version=%s name=%s", version, name)
+        except subprocess.CalledProcessError as e:
+            LOG.error("Failed to drop stale PostgreSQL cluster: version=%s name=%s: %s", version, name, e)
+            raise
+
     def unmount_filesystems(self):
         script_path = (f"/var/www/pages/feed/rel-{self._sw_version}"
                        f"/upgrades/software-deploy/prepare-chroot-mounts")
@@ -122,6 +143,7 @@ class RemoveTemporaryData:
         LOG.info("Starting temporary data cleanup...")
         try:
             self.stop_database()
+            self.clean_up_stale_postgresql_clusters()
             self.unmount_filesystems()
             self.remove_temp_directories()
             LOG.info("Temporary data cleanup finished")

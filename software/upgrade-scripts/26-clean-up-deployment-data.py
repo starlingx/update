@@ -28,6 +28,31 @@ def clean_up_luks_keyring(major_release):
         LOG.info("LUKS keyring removed: %s", luks_keyring_path)
 
 
+def clean_up_stale_postgresql_clusters():
+    """Drop PostgreSQL clusters whose binaries no longer exist,
+    preventing pg_wrapper from selecting a non-existent version
+    on a subsequent upgrade attempt.
+    """
+    # List all registered clusters
+    result = subprocess.run(
+        ["pg_lsclusters", "--no-header"],
+        capture_output=True, text=True)
+    # Filter clusters with missing binaries (version, name)
+    stale = [line.split()[:2] for line in result.stdout.splitlines()
+             if "binaries_missing" in line]
+    if not stale:
+        LOG.info("No stale PostgreSQL clusters found.")
+        return
+    # Drop the stale cluster registration
+    version, name = stale[0]
+    try:
+        subprocess.run(["pg_dropcluster", "--stop", version, name], check=True)
+        LOG.info("Dropped stale PostgreSQL cluster: version=%s name=%s", version, name)
+    except subprocess.CalledProcessError as e:
+        LOG.error("Failed to drop stale PostgreSQL cluster: version=%s name=%s: %s", version, name, e)
+        raise
+
+
 def clean_up_deployment_data(major_release):
     for folder in constants.DEPLOY_CLEANUP_FOLDERS_NAME:
         path = os.path.join(constants.PLATFORM_PATH, folder, major_release, "")
@@ -72,6 +97,7 @@ class CleanUpDeploymentData(CPlugin):
         clean_up_deployment_data(major_release)
         clean_up_luks_keyring(major_release)
         restart_etcd_service()
+        clean_up_stale_postgresql_clusters()
 
 
 if __name__ == "__main__":
