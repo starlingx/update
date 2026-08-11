@@ -1289,7 +1289,7 @@ class PatchController(PatchService):
         # need to think of reattempt to deal w/ the potential failure.
         self.sync_from_nbr(host)
 
-    @ostree_utils.ostree_lock
+    @ostree_utils.with_ostree_lock
     def sync_from_nbr(self, host):
         # Sync the software repo
         host_url = utils.ip_to_url(host)

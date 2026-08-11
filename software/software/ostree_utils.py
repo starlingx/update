@@ -6,6 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 """
 
 import configparser
+import contextlib
 import fcntl
 import filecmp
 import glob
@@ -1074,19 +1075,36 @@ def copy_kickstart_to_feed(sw_version):
         raise
 
 
-def ostree_lock(func):
+@contextlib.contextmanager
+def ostree_lock():
+    """Acquire an exclusive file lock on the ostree feed.
+
+    Used to prevent race conditions between processes accessing the
+    ostree feed concurrently (e.g., software_sync and handle_install).
+
+    Can be used as a context manager:
+        with ostree_lock():
+            ...
+
+    Or as a decorator via with_ostree_lock:
+        @with_ostree_lock
+        def my_function():
+            ...
+    """
+    with open(constants.OSTREE_LOCK, "w+") as fd:
+        try:
+            LOG.info("Acquiring ostree lock...")
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            LOG.info("Ostree lock acquired")
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            LOG.info("Ostree lock released")
+
+
+def with_ostree_lock(func):
+    """Decorator version of ostree_lock for wrapping entire functions."""
     def wrapper(*args, **kwargs):
-        with open(constants.OSTREE_LOCK, "w+") as fd:
-            # try/except block is used to ensure the lock is always released,
-            # even in the case where an unhandled exception is returned by func
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX)
-                LOG.info("Acquired ostree lock")
-                result = func(*args, **kwargs)
-            except Exception:  # pylint: disable=try-except-raise
-                raise
-            finally:
-                fcntl.flock(fd, fcntl.LOCK_UN)
-                LOG.info("Released ostree lock")
-            return result
+        with ostree_lock():
+            return func(*args, **kwargs)
     return wrapper
