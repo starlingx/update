@@ -1293,14 +1293,25 @@ class PatchController(PatchService):
     def sync_from_nbr(self, host):
         # Sync the software repo
         host_url = utils.ip_to_url(host)
+
+        rsync_cmd = ["rsync", "-acv", "--delete",
+                     "--exclude", "tmp",
+                     "--exclude", "software.json"]
+
+        # During a major release upgrade, the peer controller may not be
+        # aware of /opt/software/releases (metapackage content). Exclude it
+        # to prevent rsync --delete from wiping locally populated data
+        # TODO(heitormatsui): remove after stx.14, when supported
+        #  FROM releases will be all metapackage-aware
+        if os.path.exists(constants.USM_UPGRADE_IN_PROGRESS_FLAG):
+            rsync_cmd.extend(["--exclude", "releases"])
+            LOG.info("Upgrade in progress: excluding releases dir from sync")
+
+        rsync_cmd.extend(["rsync://%s/software/" % host_url,
+                          "%s/" % constants.SOFTWARE_STORAGE_DIR])
+
         try:
-            output = subprocess.check_output(["rsync",
-                                              "-acv",
-                                              "--delete",
-                                              "--exclude", "tmp",
-                                              "--exclude", "software.json",
-                                              "rsync://%s/software/" % host_url,
-                                              "%s/" % constants.SOFTWARE_STORAGE_DIR],
+            output = subprocess.check_output(rsync_cmd,
                                              stderr=subprocess.STDOUT,
                                              text=True)
             LOG.info("Synced to mate software via rsync: %s", output)

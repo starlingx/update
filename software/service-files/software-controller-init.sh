@@ -131,10 +131,16 @@ function do_setup {
         return 0
     fi
 
+    # TODO(heitormatsui): remove after stx.14, when supported FROM releases will be all metapackage-aware
+    RSYNC_EXCLUDES=""
+    if [[ -f $USM_UPGRADE_IN_PROGRESS_FLAG ]]; then
+        RSYNC_EXCLUDES="--exclude releases"
+        LOG "Upgrade in progress: excluding releases dir from sync"
+    fi
     # TODO(bqian) review this rsync below, it could break the atomic data sync mechanism
     # Sync the software dir
-    LOG_TO_FILE "rsync -acv --delete rsync://controller/software/ ${PATCHING_DIR}/"
-    rsync -acv --delete rsync://controller/software/ ${PATCHING_DIR}/ >> $logfile 2>&1
+    LOG_TO_FILE "rsync -acv --delete ${RSYNC_EXCLUDES} rsync://controller/software/ ${PATCHING_DIR}/"
+    rsync -acv --delete ${RSYNC_EXCLUDES} rsync://controller/software/ ${PATCHING_DIR}/ >> $logfile 2>&1
 
     # sync the repo from peer controller if both are running the same sw_version
     tmp_dir=$(mktemp -d)
