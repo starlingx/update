@@ -2330,6 +2330,7 @@ class PatchController(PatchService):
 
         not_founds = []
         cannot_del = []
+        uploading = []
         used_by_subcloud = []
         has_deployed_pre_upgrade_deploy = []
         release_list = []
@@ -2338,7 +2339,9 @@ class PatchController(PatchService):
             if rel is None:
                 not_founds.append(rel_id)
             else:
-                if not rel.is_deletable:
+                if rel.state == states.UPLOADING:
+                    uploading.append(rel_id)
+                elif not rel.is_deletable:
                     cannot_del.append(rel_id)
                 elif rel.has_pre_upgrade_deploy_deployed:
                     has_deployed_pre_upgrade_deploy.append(rel_id)
@@ -2355,6 +2358,13 @@ class PatchController(PatchService):
         if not_founds:
             list_str = ','.join(not_founds)
             err_msg = f"Release{'' if len(not_founds) == 1 else 's'} {list_str} can not be found\n"
+
+        if uploading:
+            list_str = ','.join(uploading)
+            err_msg += (f"Release{'' if len(uploading) == 1 else 's'} {list_str} "
+                        f"{'is' if len(uploading) == 1 else 'are'} being uploaded, "
+                        f"please wait for the states: [{states.AVAILABLE} | {states.UPLOAD_FAILED}] "
+                        f"in 'software list'.\n")
 
         if cannot_del:
             list_str = ','.join(cannot_del)
@@ -3556,16 +3566,25 @@ class PatchController(PatchService):
         # Resolve all inputs into metapackage releases
         metapackage_releases = []
         invalid_releases = []
+        uploading_releases = []
 
         for release in releases:
             product_data = self.release_collection.get_product_release_by_id(release)
             if product_data:
+                if product_data.state == states.UPLOADING:
+                    uploading_releases.append(release)
+                    continue
                 product_mps = self.release_collection.get_metapackages_id_by_product_id(release)
                 metapackage_releases.extend(product_mps)
             elif self.release_collection.get_metapackage_release_by_id(release):
                 metapackage_releases.append(release)
             else:
                 invalid_releases.append(release)
+
+        if uploading_releases:
+            raise ReleaseInvalidRequest(
+                f"Software release {', '.join(uploading_releases)} is being uploaded, "
+                f"please wait for it to be available before deploying.")
 
         if invalid_releases:
             raise ReleaseInvalidRequest(
