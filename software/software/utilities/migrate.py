@@ -539,6 +539,26 @@ def import_databases(target_port, from_path=None):
     # schema by default; these grants are only needed for upgrades from
     # Bullseye (PG13) to Trixie (PG17).
     try:
+        LOG.info("Granting permissions on public schema to admin-barbican")
+        subprocess.check_call(
+            ['sudo -u postgres psql --port=%s -d barbican -c '
+             '"GRANT ALL ON SCHEMA public TO \\"admin-barbican\\";"' % target_port],
+            shell=True, stdout=devnull, stderr=sout)
+    except subprocess.CalledProcessError as ex:
+        LOG.exception("Failed to grant barbican schema permissions, return code: %d" % ex.returncode)
+        raise
+
+    try:
+        LOG.info("Granting permissions on public schema to admin-keystone")
+        subprocess.check_call(
+            ['sudo -u postgres psql --port=%s -d keystone -c '
+             '"GRANT ALL ON SCHEMA public TO \\"admin-keystone\\";"' % target_port],
+            shell=True, stdout=devnull, stderr=sout)
+    except subprocess.CalledProcessError as ex:
+        LOG.exception("Failed to grant keystone schema permissions, return code: %d" % ex.returncode)
+        raise
+
+    try:
         LOG.info("Granting permissions on public schema to admin-sysinv")
         subprocess.check_call(
             ['sudo -u postgres psql --port=%s -d sysinv -c '
@@ -855,8 +875,11 @@ def migrate_sysinv_database():
     sysinv_cmd = 'sysinv-dbsync'
     try:
         LOG.info("Executing migrate command: %s" % sysinv_cmd)
-        subprocess.run(sysinv_cmd, shell=True, check=True, text=True,
-                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        result = subprocess.run(sysinv_cmd, shell=True, check=True, text=True,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT)
+        if result.stdout:
+            LOG.debug("Output from %s: %s" % (sysinv_cmd, result.stdout))
 
     except subprocess.CalledProcessError as ex:
         LOG.exception("Failed to execute command: '%s' during upgrade "
@@ -955,13 +978,16 @@ def migrate_databases(shared_services, db_credentials, port,
         try:
             print("Migrating %s" % cmd[0])
             LOG.info("Executing migrate command: %s" % cmd[1])
-            subprocess.check_call([cmd[1]],
-                                  shell=True, stdout=sout, stderr=sout)
+            result = subprocess.run(cmd[1], shell=True, check=True, text=True,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT)
+            if result.stdout:
+                LOG.debug("Output from %s: %s" % (cmd[0], result.stdout))
 
         except subprocess.CalledProcessError as ex:
             LOG.exception("Failed to execute command: '%s' during upgrade "
-                          "processing, return code: %d" %
-                          (cmd[1], ex.returncode))
+                          "processing, return code: %d, output: %s" %
+                          (cmd[1], ex.returncode, ex.stdout))
             raise
 
 
