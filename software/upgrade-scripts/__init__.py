@@ -123,6 +123,7 @@ PLUGINS = {
             RenameDeprecatedPtpParameters(),
             AddMissingServiceParameters(),
             AddCgroupV2ServiceParameters(),
+            AddTlsParameters(),
         ],
         K8S_APP_UPDATE: [],
         FEATURE_POST_APPS: [],
@@ -158,7 +159,9 @@ PLUGINS = {
         FRAMEWORK_INIT: [
             UpdateISystemData(),
         ],
-        FEATURE_PRE_APPS: [],
+        FEATURE_PRE_APPS: [
+            AddTlsParameters(),
+        ],
         K8S_APP_UPDATE: [
             RollbackFluxcdControllers(),
             K8sAppUpgrade(),
