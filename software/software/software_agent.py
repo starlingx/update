@@ -622,7 +622,7 @@ class PatchAgent(PatchService):
         setflag(patch_failed_file)
         self.state = constants.PATCH_AGENT_STATE_INSTALL_FAILED
 
-    @ostree_utils.ostree_lock
+    @ostree_utils.with_ostree_lock
     def query(self, major_release=None):
         """Check current patch state """
         if not self.install_local and not check_install_uuid():
@@ -830,7 +830,9 @@ class PatchAgent(PatchService):
                 # Pull changes from remote to the sysroot ostree
                 # The remote value is configured inside
                 # "/sysroot/ostree/repo/config" file
-                ostree_utils.pull_ostree_from_remote(remote=remote)
+                # Acquire ostree lock to prevent race with software_sync
+                with ostree_utils.ostree_lock():
+                    ostree_utils.pull_ostree_from_remote(remote=remote)
 
                 self.query(major_release=major_release)  # Updates following self variables
 
