@@ -4003,8 +4003,10 @@ class PatchController(PatchService):
         msg_warning = ""
         msg_additional_data = {}
 
-        releases = list(set(kwargs.get("releases", [])))
-        force = kwargs.get("force") is not None
+        releases = list(set(kwargs.pop("releases", [])))
+        force = kwargs.pop("force", None) is not None
+        kwargs.pop("region_name", None)
+        kwargs.pop("options", None)
 
         if not releases:
             msg = "No releases were passed for pre-upgrade-deploy precheck"
@@ -4441,7 +4443,7 @@ class PatchController(PatchService):
 
         healthy_releases = []
         unhealthy_releases = []
-        releases = list(set(kwargs.get("releases", [])))
+        releases = list(set(kwargs.pop("releases", [])))
 
         try:
             selected_releases = self._select_releases_for_precheck(releases)
@@ -4456,12 +4458,11 @@ class PatchController(PatchService):
             LOG.error(msg_error)
             return dict(info=msg_info, error=msg_error, warning=msg_warning, additional_data=msg_additional_data)
 
-        force = kwargs.get("force") is not None
-        region_name = kwargs.get("region_name", None)
-        options = kwargs.get("options", {})
+        force = kwargs.pop("force", None) is not None
+        region_name = kwargs.pop("region_name", None)
+        options = kwargs.pop("options", {})
         if options:
-            kwargs["options"] = self._parse_and_sanitize_extra_options(options)
-            options = kwargs.get("options", {})
+            options = self._parse_and_sanitize_extra_options(options)
         snapshot = to_bool(options.get('snapshot', False))
 
         for release in selected_releases:
