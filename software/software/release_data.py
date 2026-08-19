@@ -189,6 +189,20 @@ class SWRelease(object):
             return None
 
     @property
+    def all_commit_ids(self):
+        """Returns all commit IDs stored in this release's metadata (oldest to newest)."""
+        if 'number_of_commits' not in self.contents:
+            return []
+        num_commits = int(self.contents['number_of_commits'])
+        commits = []
+        for i in range(1, num_commits + 1):
+            commit_tag = "commit%s" % i
+            commit_data = self.contents.get(commit_tag)
+            if commit_data and commit_data.get('commit'):
+                commits.append(commit_data['commit'])
+        return commits
+
+    @property
     def base_commit_id(self):
         commit = None
         base = self.contents.get('base')
@@ -541,9 +555,7 @@ class MetapackageDeploymentSet:
         self._sw_version = self._metapackages[0].sw_version  # yy.mm
         self._version_obj = version.parse(self.sw_release)
 
-        # Commit-ids stored in a set as there may be more than one when removing a product release
-        self._commit_id = {mp.commit_id for mp in self._metapackages
-                           if mp.commit_id is not None}
+        # Commit-ids: base_commit_id is the commit before metapackages were applied
         self._base_commit_id = {mp.base_commit_id for mp in self._metapackages
                                 if mp.base_commit_id is not None}
 
@@ -579,6 +591,10 @@ class MetapackageDeploymentSet:
         return self._metapackages
 
     @property
+    def is_pre_upgrade_deploy(self):
+        return self._metapackages[0].is_pre_upgrade_deploy_release
+
+    @property
     def sw_release(self):
         return self._sw_release
 
@@ -588,7 +604,14 @@ class MetapackageDeploymentSet:
 
     @property
     def commit_id(self):
-        return self._commit_id
+        """Find the commit that contains exactly this set of metapackages.
+
+        Uses the SWReleaseCollection commit_ids map to find a commit
+        whose metapackage list matches this deployment set exactly.
+        Returns the commit_id if found, None otherwise.
+        """
+        swrc = get_SWReleaseCollection()
+        return swrc.find_commit_for_metapackages(self.metapackage_ids)
 
     @property
     def base_commit_id(self):
@@ -671,6 +694,15 @@ class SWReleaseCollection(object):
 
             self._sw_releases[rel_id] = sw_release
 
+        # Build commit_ids map: {commit_id: [metapackage_ids]}
+        self._commit_ids = {}
+        for mp_id, mp_release in self._sw_metapackages.items():
+            for cid in mp_release.all_commit_ids:
+                self._commit_ids.setdefault(cid, []).append(mp_id)
+        for mp_id, mp_release in self._sw_pre_upgrade_deploy_metapackages.items():
+            for cid in mp_release.all_commit_ids:
+                self._commit_ids.setdefault(cid, []).append(mp_id)
+
     def _running_release(self, partial=False):
         latest = None
         state_filter = [states.DEPLOYED, states.UNAVAILABLE]
@@ -681,6 +713,23 @@ class SWReleaseCollection(object):
                 if latest is None or rel.version_obj > latest.version_obj:
                     latest = rel
         return latest
+
+    @property
+    def commit_ids(self):
+        """Returns the commit_ids map: {commit_id: [metapackage_ids]}"""
+        return self._commit_ids
+
+    def find_commit_for_metapackages(self, metapackage_ids):
+        """Find a commit that contains exactly the given set of metapackages.
+
+        :param metapackage_ids: list of metapackage IDs to match
+        :return: commit_id if an exact match exists, None otherwise
+        """
+        target = set(metapackage_ids)
+        for commit_id, mp_ids in self._commit_ids.items():
+            if set(mp_ids) == target:
+                return commit_id
+        return None
 
     @property
     def running_release(self):

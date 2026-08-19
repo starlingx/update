@@ -1834,13 +1834,6 @@ class PatchController(PatchService):
     @threaded
     @no_reentry()
     def create_sw_releases_it(self, patch_info):
-        def get_highest_required_patch(required_patches):
-            if not required_patches:
-                return None
-            if len(required_patches) == 1:
-                return required_patches[0]
-            return max(required_patches, key=utils.parse_release_version)
-
         def update_commit_id_to_all_mp(base_commit_id, commit_id):
             metadata_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP[states.UPLOADING]
             metadata_dir_path = Path(metadata_dir)
@@ -1866,7 +1859,7 @@ class PatchController(PatchService):
                 packages = [f"meta-{pkg.component}" for pkg in mp_deploy_set.metapackages]
 
                 require_release_ids = release.requires_release_ids
-                require_release_id = get_highest_required_patch(require_release_ids)
+                require_release_id = utils.get_highest_required_release(require_release_ids)
 
                 sim = SoftwareInventoryManager(sw_ver)
                 if require_release_id is None:
@@ -4277,25 +4270,22 @@ class PatchController(PatchService):
                                pre_upgrade_deploy=True, **kwargs)
 
             try:
-                # Reset ostree feed to the base commit
-                base_commit = None
-                all_feed_commits = ostree_utils.get_all_feed_commits(deploy_sw_version)
-                all_feed_commits.reverse()
-                for commit in all_feed_commits:
-                    if commit in mp_deploy_set.base_commit_id:
-                        base_commit = commit
-                        break
-
+                # Get base commit from metadata
+                base_commit = next(iter(mp_deploy_set.base_commit_id), None)
                 if not base_commit:
                     raise SoftwareError("Could not find base commit for pre-upgrade-deploy removal")
 
+                # Reset starlingx to base commit
+                sim = SoftwareInventoryManager(deploy_sw_version)
                 ostree_utils.reset_ostree_repo_head(base_commit, feed_repo)
                 LOG.info(f"Reset ostree feed {feed_repo} to base commit {base_commit}")
 
-                # Delete the pre-upgrade-deploy commits from the feed
-                for commit in mp_deploy_set.commit_id:
-                    ostree_utils.delete_ostree_repo_commit(commit, feed_repo)
-                    LOG.info(f"Deleted commit {commit} from the feed")
+                # Delete the pre-upgrade-deploy branch
+                product_id = mp_deploy_set.product
+                branch_name = f"{product_id}-{constants.PRE_UPGRADE_DEPLOY}"
+                if sim.branch_exists(branch_name):
+                    sim.delete_ref(branch_name)
+                    LOG.info(f"Deleted pre-upgrade-deploy branch: {branch_name}")
 
                 # Update feed summary
                 ostree_utils.update_repo_summary_file(feed_repo)
@@ -4331,7 +4321,7 @@ class PatchController(PatchService):
             LOG.info(msg)
             audit_log_info(msg)
 
-            commit_id = list(mp_deploy_set.commit_id)
+            commit_id = mp_deploy_set.commit_id
 
             # Transition to deploying state
             for mp in mp_deploy_set.metapackages:
@@ -4708,6 +4698,53 @@ class PatchController(PatchService):
             tree = ET.tostring(root)
             outfile.write(tree)
 
+    def append_commit_to_metadata(self, metadata_file, new_commit_id, base_commit_id=None):
+        """Append a new commit entry to a metapackage's metadata XML.
+
+        Increments number_of_commits and adds a new <commitN> element.
+        Creates <contents><ostree> structure if not present.
+        Writes <base> only if not already present and base_commit_id is provided.
+        Used when a metapackage is included in a new custom branch commit.
+        """
+        tree = ET.parse(metadata_file)
+        root = tree.getroot()
+
+        contents = root.find(constants.CONTENTS_TAG)
+        if contents is None:
+            contents = ET.SubElement(root, constants.CONTENTS_TAG)
+        ostree = contents.find(constants.OSTREE_TAG)
+        if ostree is None:
+            ostree = ET.SubElement(contents, constants.OSTREE_TAG)
+
+        # Write base only if not already present
+        base_el = ostree.find(constants.BASE_TAG)
+        if base_el is None and base_commit_id:
+            base_el = ET.SubElement(ostree, constants.BASE_TAG)
+            self.add_text_tag_to_xml(base_el, constants.COMMIT_TAG, base_commit_id)
+            self.add_text_tag_to_xml(base_el, constants.CHECKSUM_TAG, "")
+
+        num_commits_el = ostree.find(constants.NUMBER_OF_COMMITS_TAG)
+        if num_commits_el is None:
+            num_commits_el = ET.SubElement(ostree, constants.NUMBER_OF_COMMITS_TAG)
+            num_commits_el.text = "0"
+
+        n = int(num_commits_el.text)
+        n += 1
+        num_commits_el.text = str(n)
+
+        commit_tag_name = "commit%s" % n
+        new_commit_el = ET.SubElement(ostree, commit_tag_name)
+        self.add_text_tag_to_xml(new_commit_el, constants.COMMIT_TAG, new_commit_id)
+        self.add_text_tag_to_xml(new_commit_el, constants.CHECKSUM_TAG, "")
+
+        ET.indent(tree, '  ')
+        with open(metadata_file, "wb") as outfile:
+            tree_str = ET.tostring(root)
+            outfile.write(tree_str)
+
+        LOG.info("Appended commit %s to %s (now %d commits)",
+                 new_commit_id[:10], metadata_file, n)
+
     def is_deployment_list_reboot_required(self, deployment_list):
         """Check if any deploy in deployment list is reboot required"""
         for release_id in deployment_list:
@@ -4866,12 +4903,16 @@ class PatchController(PatchService):
         self.software_release_delete_api(to_delete_releases)
 
     def check_product_release_deployable_branch(self, mp_deploy_set):
+        """Check if the full product release branch matches the deployment set's commit.
+
+        Returns True if mp_deploy_set covers all metapackages of its product release
+        AND the product branch's tip commit matches the set's commit_id.
+        """
         if not mp_deploy_set.is_product_release_deploy:
             return False
-        mp_commit_ids = {mp.commit_id for mp in mp_deploy_set.metapackages}
-        if len(mp_commit_ids) != 1:
+        mp_commit_id = mp_deploy_set.commit_id
+        if not mp_commit_id:
             return False
-        mp_commit_id = mp_commit_ids.pop()
 
         a_mp = mp_deploy_set.metapackages[0]
         sw_ver = utils.get_major_release_version(a_mp.sw_version)
@@ -4942,78 +4983,136 @@ class PatchController(PatchService):
                 if deploying_mps:
                     mp_deploy_set = MetapackageDeploymentSet(deploying_mps)
 
-                # check we have the deployable branch and the commit-id matches each metapackage
-                if self.check_product_release_deployable_branch(mp_deploy_set):
-                    self.apply_deployable_branch(mp_deploy_set)
+                # Determine the target commit for this deployment set
+                a_mp = mp_deploy_set.metapackages[0]
+                sw_ver = utils.get_major_release_version(a_mp.sw_version)
+                product_rel_id = a_mp.product
+
+                # Pre-upgrade-deploy: installs into the from-release feed
+                if mp_deploy_set.is_pre_upgrade_deploy:
+                    sim = SoftwareInventoryManager(feed_sw_version)
+                    base_commit = sim.get_branch_commit(constants.OSTREE_REF)
+                    branch_name = f"{product_rel_id}-{constants.PRE_UPGRADE_DEPLOY}"
+
+                    reuse_commit = False
+                    if sim.branch_exists(branch_name):
+                        branch_commit = sim.get_branch_commit(branch_name)
+                        if branch_commit == mp_deploy_set.commit_id:
+                            reuse_commit = True
+
+                    if reuse_commit:
+                        # Prestaged: branch already exists, just deploy it
+                        LOG.info(f"Pre-upgrade-deploy branch {branch_name} already exists, reusing")
+                        sim.deploy(branch_name)
+                    else:
+                        sim.delete_ref(branch_name)
+                        packages = [f"meta-{pkg.component}" for pkg in mp_deploy_set.metapackages]
+                        LOG.info(f"Building pre-upgrade-deploy branch {branch_name} "
+                                 f"from base {base_commit[:10]}")
+                        sim.create_branch(base_commit, branch_name)
+                        apt_utils.run_install(
+                            feed_repo,
+                            mp_deploy_set.sw_version,
+                            product_rel_id,
+                            packages,
+                            self.pre_bootstrap,
+                            branch=branch_name)
+
+                        # Deploy the branch (resets starlingx in from-release feed)
+                        sim.deploy(branch_name)
+
+                        # Append commit to metadata
+                        new_commit = sim.get_branch_commit(branch_name)
+                        deploy_state = states.DEPLOYING
+                        metadata_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP[deploy_state]
+                        for mp in mp_deploy_set:
+                            md_file = Path(metadata_dir) / mp.metadata_filename
+                            self.append_commit_to_metadata(str(md_file), new_commit, base_commit_id=base_commit)
+                        reload_release_data()
                 else:
-                    LOG.info(f"{mp_deploy_set} is not a product release")
+                    # Regular deploy path
+                    sim = SoftwareInventoryManager(sw_ver)
 
-                # Check if metapackage commit exist and are in the feed (for upgrade and prestage)
-                all_commits = ostree_utils.get_all_feed_commits(feed_sw_version)
-                # Latest commit is the first in the list
-                latest_commit = all_commits[0]
-                # Target commit is either None or one commit
-                try:
-                    target_commit = next(iter(mp_deploy_set.commit_id))
-                except StopIteration:
-                    target_commit = None
-                if target_commit in all_commits:
-                    # This case is for node with prestaged data where ostree
-                    # commits have been pulled from system controller
-                    LOG.info("Commit %s already exists in feed repo for release %s"
-                             % (target_commit, mp_deploy_set.product))
+                    # Check if the full product release branch can be used directly
+                    if self.check_product_release_deployable_branch(mp_deploy_set):
+                        self.apply_deployable_branch(mp_deploy_set)
+                    else:
+                        # Partial or cumulative deploy: compute total set
+                        # Get already deployed metapackages for this product release
+                        product_release = self.release_collection.get_release_by_id(product_rel_id)
+                        all_product_mps = set(product_release.metapackages) if product_release else set()
+                        deployed_mps = self.release_collection.get_ordered_metapackages(
+                            filter_by_ids=list(all_product_mps),
+                            filter_by_states=[states.DEPLOYED]
+                        )
+                        deployed_mp_ids = {mp.id for mp in deployed_mps} if deployed_mps else set()
+                        new_mp_ids = set(mp_deploy_set.metapackage_ids)
+                        total_set_ids = deployed_mp_ids | new_mp_ids
 
-                    # If this is the last deployment, and it is not the latest commit in feed
-                    # delete the commits until reach this, and delete metadatas
-                    if target_commit != latest_commit:
-                        self.cleanup_old_releases(target_commit, all_commits)
+                        # Check if the total set equals the full product release
+                        if total_set_ids == all_product_mps:
+                            # Full product release: use existing product branch
+                            LOG.info(f"Total set equals full product release, using branch {product_rel_id}")
+                            sim.deploy(product_rel_id)
+                        else:
+                            # Partial set: build custom branch from base
+                            total_set_components = sorted([
+                                self.release_collection.get_release_by_id(mp_id).component
+                                for mp_id in total_set_ids
+                                if self.release_collection.get_release_by_id(mp_id)
+                            ])
+                            branch_name = utils.get_partial_branch_name(product_rel_id, total_set_components)
 
-                        # Reset feed to last deployment release
-                        self.reset_feed_commit(target_commit)
-                    return
+                            # Check if this exact combination already has a commit
+                            target_commit = self.release_collection.find_commit_for_metapackages(
+                                list(total_set_ids))
 
-                # Get metapackages .deb packages, which are named 'meta-<metapackage-id>'
-                packages = [f"meta-{pkg.component}" for pkg in mp_deploy_set.metapackages]
-                if packages is None:
-                    msg = "Unable to determine packages to install"
-                    LOG.error(msg)
-                    raise MetadataFail(msg)
+                            if target_commit and sim.branch_exists(branch_name):
+                                LOG.info(f"Branch {branch_name} already exists with matching commit, reusing")
+                                sim.deploy(branch_name)
+                            else:
+                                # Build new custom branch from base commit
+                                # Base is the highest required release's commit (pre-metapackage state)
+                                product_release_obj = self.release_collection.get_release_by_id(product_rel_id)
+                                require_ids = product_release_obj.requires_release_ids if product_release_obj else []
+                                base_branch = utils.get_highest_required_release(require_ids) or constants.OSTREE_REF
+                                base_commit = sim.get_branch_commit(base_branch)
+                                packages = [f"meta-{comp}" for comp in total_set_components]
 
-                # Install debian package through apt-ostree
-                try:
-                    apt_utils.run_install(
-                        feed_repo,
-                        mp_deploy_set.sw_version,
-                        mp_deploy_set.sw_release,
-                        packages,
-                        self.pre_bootstrap)
-                except APTOSTreeCommandFail:
-                    msg = "Failed to install Debian packages."
-                    LOG.exception(msg)
-                    raise APTOSTreeCommandFail(msg)
+                                LOG.info(f"Building custom branch {branch_name} from base {base_commit[:10]}")
+                                sim.create_branch(base_commit, branch_name)
+                                apt_utils.run_install(
+                                    feed_repo,
+                                    mp_deploy_set.sw_version,
+                                    product_rel_id,
+                                    packages,
+                                    self.pre_bootstrap,
+                                    branch=branch_name)
 
-                # Get the latest commit after performing 'apt-ostree install'
-                reload_release_data()
-                latest_feed_commit = ostree_utils.get_feed_latest_commit(feed_sw_version)
+                                # Get the new commit created by run_install
+                                new_commit = sim.get_branch_commit(branch_name)
 
-                # NOTE(bqian): Below check an exception raise should be revisited,
-                # if applicable should be applied to the begining of all requests
-                if len(self.hosts) == 0:
-                    msg = "Service is running in incorrect state, no registered hosts"
-                    raise InternalError(msg)
+                                # Delete old custom branch if it's different from the one just created
+                                for branch in sim.get_branches():
+                                    if (branch.startswith(f"{product_rel_id}-") and
+                                            branch != branch_name and
+                                            branch != product_rel_id):
+                                        LOG.info(f"Deleting old custom branch: {branch}")
+                                        sim.delete_ref(branch)
 
-                # Get the metapackage metadata files location
-                deploy_state = states.DEPLOYING
-                if mp_deploy_set.state == states.REMOVE_SELECTED:
-                    deploy_state = states.REMOVING
-                metadata_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP[deploy_state]
-                metadata_files = [Path(metadata_dir) / mp.metadata_filename
-                                  for mp in mp_deploy_set]
+                                # Deploy the new branch
+                                sim.deploy(branch_name)
 
-                # Update metapackage metadata commit-ids
-                for md in metadata_files:
-                    self.update_ostree_commit_id(md, latest_commit, latest_feed_commit)
-                LOG.info(f"Latest feed commit {latest_feed_commit} added to metadata files")
+                                # Append new commit_id to metadata for each metapackage in total_set
+                                for mp_id in total_set_ids:
+                                    mp_release = self.release_collection.get_release_by_id(mp_id)
+                                    if mp_release:
+                                        metadata_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP.get(
+                                            mp_release.state)
+                                        if metadata_dir:
+                                            md_file = Path(metadata_dir) / mp_release.metadata_filename
+                                            self.append_commit_to_metadata(str(md_file), new_commit)
+                                reload_release_data()
 
                 # Run post-start script contained in each metapackage
                 LOG.info(f"Running post-start scripts for: {mp_deploy_set}")
@@ -5079,7 +5178,7 @@ class PatchController(PatchService):
                         apt_utils.run_install(
                             feed_repo,
                             deploy_release.sw_version,
-                            deploy_release.sw_release,
+                            release_id,
                             packages,
                             self.pre_bootstrap)
                     except APTOSTreeCommandFail:
@@ -5158,9 +5257,8 @@ class PatchController(PatchService):
 
                 # TODO(heitormatsui) adapt upgrade for full metapackage support
                 if upgrade:
-                    try:
-                        upgrade_commit_id = next(iter(metapackage_set.commit_id))
-                    except StopIteration:
+                    upgrade_commit_id = metapackage_set.commit_id
+                    if not upgrade_commit_id:
                         raise ValueError("Couldn't determine commit-id to upgrade")
                     self.db_api_instance.update_deploy(commit_id=upgrade_commit_id)
                     if self._deploy_upgrade_start(metapackage_set.sw_release, upgrade_commit_id, **kwargs):
@@ -5398,7 +5496,7 @@ class PatchController(PatchService):
         running_release = self.release_collection.running_release
         deploy_sw_version = mp_deploy_set.sw_version
         feed_repo = f"{constants.FEED_OSTREE_BASE_DIR}/rel-{deploy_sw_version}/ostree_repo"
-        commit_id = list(mp_deploy_set.commit_id)  # Converts into list so it is serializable
+        commit_id = mp_deploy_set.commit_id
         is_patch = (not utils.is_upgrade_deploy(SW_VERSION, deploy_sw_version))
 
         # Pre-bootstrap patch removal case
@@ -5520,28 +5618,51 @@ class PatchController(PatchService):
                                                   extra_args=extra_args)
                 reload_release_data()
 
-                # Base commit is fetched from the patch metadata
-                all_feed_commits = ostree_utils.get_all_feed_commits(deploy_sw_version)
-                all_feed_commits.reverse()  # Commits come in descending order, we want the oldest first
+                # Compute the requires closure: target release + everything it requires
+                # Releases in this closure stay deployed, everything else gets rolled back
+                target_release = self.release_collection.get_release_by_id(product_id)
+                requires_closure = {product_id}
+                to_process = list(target_release.requires_release_ids) if target_release else []
+                while to_process:
+                    req_id = to_process.pop()
+                    if req_id not in requires_closure:
+                        requires_closure.add(req_id)
+                        req_release = self.release_collection.get_release_by_id(req_id)
+                        if req_release and req_release.requires_release_ids:
+                            to_process.extend(req_release.requires_release_ids)
 
-                # Select the oldest base commit to ensures all metapackages are removed
-                base_commit = None
-                for commit in all_feed_commits:
-                    if commit in mp_deploy_set.base_commit_id:
-                        base_commit = commit
-                        break  # Stop loop when the oldest base commit is found
+                # Get the target commit to reset to (the required release, i.e., what we roll back TO)
+                sw_ver = utils.get_major_release_version(mp_deploy_set.sw_version)
+                sim = SoftwareInventoryManager(sw_ver)
+                target_release_id = utils.get_highest_required_release(
+                    target_release.requires_release_ids if target_release else [])
+                try:
+                    if target_release_id:
+                        target_commit = sim.get_branch_commit(target_release_id)
+                    else:
+                        # No requires: fall back to base commit from metadata
+                        target_commit = next(iter(mp_deploy_set.base_commit_id), None)
+                        if not target_commit:
+                            raise SoftwareError("Cannot determine rollback commit: "
+                                                "no requires and no base_commit_id in metadata")
+                except BranchNotFound:
+                    LOG.error("Couldn't find ostree branch for rollback target")
+                    raise
 
                 feed_repo = f"{constants.FEED_OSTREE_BASE_DIR}/rel-{deploy_sw_version}/ostree_repo"
                 try:
-                    # Reset the ostree HEAD to the base commit
-                    ostree_utils.reset_ostree_repo_head(base_commit, feed_repo)
-                    LOG.info(f"Reset ostree feed {feed_repo} to commit {base_commit}")
+                    # Reset the starlingx deploy branch to the target commit
+                    ostree_utils.reset_ostree_repo_head(target_commit, feed_repo)
+                    LOG.info(f"Reset deploy branch '{constants.OSTREE_REF}' from "
+                             f"ostree feed {feed_repo} to commit {target_commit[:10]}")
 
-                    # Delete all commits that belong to this release
-                    commits_to_delete = mp_deploy_set.commit_id
-                    for commit in commits_to_delete:
-                        ostree_utils.delete_ostree_repo_commit(commit, feed_repo)
-                        LOG.info(f"Deleted commit {commit} from the feed")
+                    # Delete custom branches for all rolled-back releases
+                    for branch in sim.get_branches():
+                        # Delete any custom partial branch (product_id-comp1+comp2)
+                        if (branch.startswith(f"{product_id}-") and
+                                branch != product_id):
+                            LOG.info(f"Deleting custom branch: {branch}")
+                            sim.delete_ref(branch)
 
                     # Update the feed ostree summary
                     ostree_utils.update_repo_summary_file(feed_repo)
@@ -5549,11 +5670,26 @@ class PatchController(PatchService):
                 except OSTreeCommandFail:
                     LOG.exception("Failure while removing release %s.", product_id)
 
-                # Remove contents tag from metapackage metadata xml
+                # Reset metadata to contain only the product release commit
+                product_commit = sim.get_branch_commit(product_id)
+                product_release_obj = self.release_collection.get_release_by_id(product_id)
+                require_ids = product_release_obj.requires_release_ids if product_release_obj else []
+                base_branch = utils.get_highest_required_release(require_ids) or constants.OSTREE_REF
+                try:
+                    base_commit_for_metadata = sim.get_branch_commit(base_branch)
+                except BranchNotFound:
+                    base_commit_for_metadata = target_commit
+
                 for mp in mp_deploy_set.metapackages:
                     release = self.release_collection.get_metapackage_release_by_id(mp.id)
                     self.remove_tags_from_metadata(release, constants.CONTENTS_TAG)
-                    LOG.info(f"Removed commit from metapackage {mp.id} metadata")
+                    deploy_state_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP.get(release.state)
+                    if deploy_state_dir:
+                        md_file = str(Path(deploy_state_dir) / release.metadata_filename)
+                        self.append_commit_to_metadata(md_file, product_commit,
+                                                       base_commit_id=base_commit_for_metadata)
+                    LOG.info(f"Reset metadata for {mp.id} to product commit {product_commit[:10]}")
+                reload_release_data()
 
                 # NOTE(bqian): Below check an exception raise should be revisited,
                 # if applicable should be applied to the begining of all requests
@@ -5881,7 +6017,7 @@ class PatchController(PatchService):
             release_ids = removing_release_state.get_release_ids()
         self.execute_delete_actions(release_ids=release_ids)
 
-        msg_info += "Deploy deleted with success"
+        msg_info += "Deploy deleted with success\n"
         self.db_api_instance.delete_deploy_host_all()
         self.db_api_instance.delete_deploy()
 
@@ -6168,7 +6304,9 @@ class PatchController(PatchService):
 
         try:
             self._activate()
-            msg_info = "Deploy activate has started"
+            msg_info = ("Deploy activate has started, await for the states "
+                        f"[{DEPLOY_STATES.ACTIVATE_DONE.value} | {DEPLOY_STATES.ACTIVATE_FAILED.value}] "
+                        "in 'software deploy show'\n")
         except Exception:
             deploy_state.activate_failed()
             raise
@@ -6281,7 +6419,10 @@ class PatchController(PatchService):
 
         try:
             self._activate_rollback()
-            msg_info = "Deploy activate-rollback has started"
+            msg_info = ("Deploy activate-rollback has started, await for the states "
+                        f"[{DEPLOY_STATES.ACTIVATE_ROLLBACK_DONE.value} | "
+                        f"{DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED.value}] "
+                        "in 'software deploy show'\n")
         except Exception:
             deploy_state.activate_rollback_failed()
             raise

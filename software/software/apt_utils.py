@@ -9,6 +9,7 @@ import subprocess
 
 from software.exceptions import APTOSTreeCommandFail
 from software import constants
+from software import utils
 
 LOG = logging.getLogger('main_logger')
 
@@ -128,16 +129,19 @@ def component_remove(pkg_feed_dir, component):
         raise APTOSTreeCommandFail(msg)
 
 
-def run_install(repo_dir, sw_version, sw_release, packages, pre_bootstrap=False):
+def run_install(repo_dir, sw_version, release_id, packages, pre_bootstrap=False, branch=None):
     """
     Run Debian package upgrade.
 
-    :param repo_dir: the path to the ostree repo
+    :param repo_dir: Path to the ostree repo
     :param sw_version: System version (MM.mm)
-    :param sw_release: Patch release version (MM.mm.pp)
+    :param release_id: Patch release ID (<product>-MM.mm.pp)
     :param packages: List of Debian packages
+    :param pre_bootstrap: Use local file feed instead of http
+    :param branch: Explicit branch name to commit to (overrides release_id-derived branch)
     """
     LOG.info("Running apt-ostree install")
+    _, sw_release, _, _ = utils.get_component_and_versions(release_id)
 
     if pre_bootstrap:
         package_feed = "file:///var/www/pages/updates/debian/rel-%s/ %s %s" \
@@ -148,22 +152,23 @@ def run_install(repo_dir, sw_version, sw_release, packages, pre_bootstrap=False)
 
     packages = " ".join(packages)
 
-    # TODO(bqian) below is for backward compatiblility to 26.03 and 25.09.
-    if sw_version > "26.03":
-        branch = sw_release
-    else:
-        branch = constants.OSTREE_REF
+    # Use explicit branch if provided, otherwise derive from release_id
+    if branch is None:
+        # TODO(bqian) below is for backward compatiblility to 26.03 and 25.09.
+        if sw_version > "26.03":
+            branch = release_id
+        else:
+            branch = constants.OSTREE_REF
+
+    cmd = ["apt-ostree", "compose", "install",
+           "--repo", repo_dir,
+           "--branch", branch,
+           "--feed", package_feed,
+           "--component", sw_release,
+           packages]
 
     try:
-        subprocess.run(
-            ["apt-ostree", "compose", "install",
-             "--repo", repo_dir,
-             "--branch", branch,
-             "--feed", package_feed,
-             "--component", sw_release,
-             packages],
-            check=True,
-            capture_output=True)
+        subprocess.run(cmd, check=True, capture_output=True)
     except subprocess.CalledProcessError as e:
         msg = "Failed to install packages."
         info_msg = "\"apt-ostree compose install\" error: return code %s , Output: %s" \

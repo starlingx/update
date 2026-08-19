@@ -621,3 +621,27 @@ def interval_task(interval_sec=10, no_run_return=False):
             return res
         return exec_op
     return wrap
+
+
+def get_partial_branch_name(product_id, components):
+    """Generate a deterministic branch name for a partial metapackage set.
+
+    :param product_id: product release ID (e.g., 'starlingx-26.10.0')
+    :param components: list of component names (e.g., ['infra', 'swmgmt'])
+    :return: branch name (e.g., 'starlingx-26.10.0-infra_swmgmt')
+    """
+    sorted_components = sorted(components)
+    return "%s-%s" % (product_id, "_".join(sorted_components))
+
+
+def get_highest_required_release(required_releases):
+    """Get the highest version among a list of required release IDs.
+
+    :param required_releases: list of release IDs
+    :return: the release ID with the highest version, or None if empty
+    """
+    if not required_releases:
+        return None
+    if len(required_releases) == 1:
+        return required_releases[0]
+    return max(required_releases, key=parse_release_version)

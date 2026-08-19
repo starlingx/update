@@ -320,6 +320,26 @@ class SoftwareInventoryManager():
         LOG.info("Pruned repo and updated summary after deleting %d branch(es)", len(to_delete))
         return to_delete
 
+    def branch_exists(self, branch_name):
+        """Check if a branch exists in the ostree repo.
+
+        :param branch_name: branch ref to check
+        :return: True if branch exists, False otherwise
+        """
+        return branch_name in self.get_branches()
+
+    def delete_ref(self, branch_name):
+        """Delete a single ostree ref without cascading to dependents.
+
+        :param branch_name: branch ref to delete
+        """
+        try:
+            subprocess.check_call(
+                ["ostree", "refs", "--repo", self.repo_path, "--delete", branch_name])
+            LOG.info("Deleted ref: %s", branch_name)
+        except subprocess.CalledProcessError as e:
+            LOG.error("Failed to delete ref %s: %s", branch_name, str(e))
+
     def validate_deploy(self, deploy_target):
         # validate if deploy_target can be deployed
         branches = self.get_branches()
