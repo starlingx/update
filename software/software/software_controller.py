@@ -1945,9 +1945,12 @@ class PatchController(PatchService):
                 if error_msg:
                     raise ReleaseValidationFailure(error=error_msg)
 
-                local_info += f"Uploaded {release_id} product release\n"
+                local_info += f"Uploading {release_id} product release\n"
                 for metapackage in patch_metadata.metadata[patch_id]["metapackages"]:
-                    local_info += f"Uploaded {metapackage} metapackage release\n"
+                    local_info += f"Uploading {metapackage} metapackage release\n"
+
+                local_info += f"{release_id} is now uploading, await for the states: " \
+                              f"[{states.AVAILABLE} | {states.UPLOAD_FAILED}] in 'software list'\n"
 
                 reload_release_data()
             else:
