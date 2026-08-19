@@ -26,6 +26,27 @@ def get_list_of_keys(from_release, to_release):
     return {"static": [], "secure_static": []}
 
 
+def get_key_renames(from_release, to_release):
+    """Return hieradata keys that need to be renamed between releases.
+
+    During cross-distro migration from Bullseye to Trixie, the upstream
+    puppet-keystone module moved database_connection from the keystone
+    class to the keystone::db subclass. This function provides the
+    old_key -> new_key mapping to migrate persisted hieradata.
+
+    26.03 is the last Bullseye release; 26.10+ is Trixie.
+    """
+    renames = {"static": {}, "secure_static": {}}
+
+    if from_release <= "26.03":
+        renames["secure_static"] = {
+            "keystone::database_connection":
+                "keystone::db::database_connection"
+        }
+
+    return renames
+
+
 def do_update(from_release, to_release):
     with tempfile.TemporaryDirectory() as tempdir:
         _do_update_under_temp(from_release, to_release, tempdir)
@@ -59,6 +80,31 @@ def _do_update_under_temp(from_release, to_release, tempdir):
                         "secure_static": secure_static_file}
     tmp_file_mapping = {"static": tmp_system_static_file,
                         "secure_static": tmp_secure_static_file}
+
+    # Rename hieradata keys that changed between distros.
+    # This preserves the original value and only updates the key name.
+    key_renames = get_key_renames(from_release, to_release)
+    for tag in key_renames:
+        renames = key_renames[tag]
+        if renames:
+            tmp_file = tmp_file_mapping[tag]
+
+            with open(tmp_file, "r") as f:
+                data = yaml.load(f, Loader=yaml.Loader)
+
+            for old_key, new_key in renames.items():
+                if old_key in data:
+                    LOG.info("Renaming hieradata key '%s' to '%s'" %
+                             (old_key, new_key))
+                    data[new_key] = data.pop(old_key)
+                else:
+                    LOG.info("Key '%s' not found in %s, skipping rename" %
+                             (old_key, tmp_file))
+
+            with open(tmp_file, "w") as f:
+                yaml.dump(data, f, default_flow_style=False)
+
+    # Copy new keys from regenerated static config into hieradata.
     list_of_keys = get_list_of_keys(from_release, to_release)
 
     for tag in list_of_keys:

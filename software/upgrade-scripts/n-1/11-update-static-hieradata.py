@@ -26,6 +26,27 @@ def get_list_of_keys(from_release, to_release):
     return keys
 
 
+def get_key_renames(from_release, to_release):
+    """Return hieradata keys that need to be renamed during rollback.
+
+    During rollback from Trixie (26.10+) to Bullseye (26.03 or earlier),
+    the keystone hieradata key must be reverted from the Trixie format
+    (keystone::db::database_connection) back to the Bullseye format
+    (keystone::database_connection).
+
+    26.03 is the last Bullseye release; 26.10+ is Trixie.
+    """
+    renames = {"static": {}, "secure_static": {}}
+
+    if from_release > "26.03" and to_release <= "26.03":
+        renames["secure_static"] = {
+            "keystone::db::database_connection":
+                "keystone::database_connection"
+        }
+
+    return renames
+
+
 def main():
     action = None
     from_release = None
@@ -110,6 +131,39 @@ def _do_update_under_temp(from_release, to_release, tempdir):
 
     tmp_file_mapping = {"static": tmp_system_static_file,
                         "secure_static": tmp_secure_static_file}
+
+    # Rename hieradata keys that changed between distros.
+    # This preserves the original value and only updates the key name.
+    key_renames = get_key_renames(from_release, to_release)
+    for tag in key_renames:
+        renames = key_renames[tag]
+        if renames:
+            tmp_file = tmp_file_mapping[tag]
+
+            with open(tmp_file, "r") as f:
+                try:
+                    data = yaml.load(f, Loader=yaml.Loader)
+                except Exception as e:
+                    LOG.error("Failed to load %s. Error %s" % (tmp_file, e))
+                    raise
+
+            for old_key, new_key in renames.items():
+                if old_key in data:
+                    LOG.info("Renaming hieradata key '%s' to '%s'" %
+                             (old_key, new_key))
+                    data[new_key] = data.pop(old_key)
+                else:
+                    LOG.info("Key '%s' not found in %s, skipping rename" %
+                             (old_key, tmp_file))
+
+            with open(tmp_file, "w") as f:
+                try:
+                    yaml.dump(data, f, default_flow_style=False)
+                except Exception as e:
+                    LOG.error("Failed to update %s. Error %s" %
+                              (tmp_file, e))
+                    raise
+
     list_of_keys = get_list_of_keys(from_release, to_release)
 
     # find the new generated static data and update the static hieradata
