@@ -360,7 +360,8 @@ class DeployHandler(Deploy):
             "reboot_required": reboot_required,
             "state": state.value,
             "pre_upgrade_deploy": kwargs.get("pre_upgrade_deploy", False),
-            "options": kwargs.get("options", {})
+            "options": kwargs.get("options", {}),
+            "initial_kube_version": kwargs.get("initial_kube_version", "")
         }
 
         try:

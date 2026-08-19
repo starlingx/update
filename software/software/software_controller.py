@@ -5346,6 +5346,13 @@ class PatchController(PatchService):
             # Sync release states with neighbor
             self.software_sync()
 
+            # Save current K8s version for rollback compatibility check
+            try:
+                initial_kube_version = get_active_k8s_ver()
+            except Exception:
+                initial_kube_version = ""
+            kwargs["initial_kube_version"] = initial_kube_version
+
             reboot_required = mp_deploy_set.reboot_required
             commit_id = None if is_patch else commit_id
 
@@ -5920,6 +5927,26 @@ class PatchController(PatchService):
         msg_error = ""
 
         deploy = self.db_api_instance.get_current_deploy()
+
+        # Block rollback if K8s was upgraded after platform deploy
+        # Skip if system-deploy is active (LVM snapshot rollback handles K8s)
+        initial_kube = deploy.get("initial_kube_version", "")
+        if initial_kube and not is_system_deploy_in_progress():
+            try:
+                current_kube = get_active_k8s_ver()
+                if current_kube != initial_kube:
+                    raise SoftwareServiceError(
+                        error=(
+                            f"Cannot rollback: Kubernetes was upgraded from "
+                            f"{initial_kube} to {current_kube}. Platform "
+                            f"rollback is not supported after a successful "
+                            f"Kubernetes upgrade."
+                        )
+                    )
+            except SoftwareServiceError:
+                raise
+            except Exception:
+                pass
         from_release = deploy.get("from_release")
         to_release = deploy.get("to_release")
         metapackages = deploy.get("metapackages")
