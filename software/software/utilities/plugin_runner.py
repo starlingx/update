@@ -327,7 +327,7 @@ def discover_scripts(script_dirs, action="", filter_names=None, extra_args=None)
     plugins = []
     for d in script_dirs:
         for f in sorted(os.listdir(d)):
-            if filter_names and f not in filter_names:
+            if filter_names is not None and f not in filter_names:
                 continue
             path = os.path.join(d, f)
             if not os.path.isfile(path) or not os.access(path, os.X_OK):
