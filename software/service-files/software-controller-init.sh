@@ -59,28 +59,35 @@ function do_metapackage_setup {
             LOG "Created ${STATE_DIR}"
         done
 
-        # Copy product release content
+        # Copy product release content ensuring writable directories.
+        # The ostree checkout (from major-release-upload) may create read-only
+        # directories that prevent cp from writing files into them.
+        find "$COMPONENT_SOFTWARE_DIR" -type d -exec chmod u+w {} + 2>/dev/null
         cp -rfv ${COMPONENT_METAPACKAGES_DIR}/* $COMPONENT_SOFTWARE_DIR
         LOG "Copied content from metapackages directory"
 
-        # Copy metadata from metapackage releases
+        # Copy metadata from metapackage releases to the appropriate state directory.
+        # Read directly from the source template directory to avoid issues with
+        # read-only directories in the destination.
+        DST_DIR="${COMPONENT_METADATA_DIR}/deployed"
+        if [[ -f $USM_UPGRADE_IN_PROGRESS_FLAG ]]; then
+            DST_DIR="${COMPONENT_METADATA_DIR}/deploying"
+        fi
         while IFS= read -r -d '' METADATA; do
             METAPACKAGE_ID=$(grep '<id>' "$METADATA" | sed 's/.*<id>//;s/<\/id>.*//')
             METAPACKAGE_METADATA="${METAPACKAGE_ID}-metadata.xml"
-            DST_DIR="${COMPONENT_METADATA_DIR}/deployed"
-            if [[ -f $USM_UPGRADE_IN_PROGRESS_FLAG ]]; then
-                DST_DIR="${COMPONENT_METADATA_DIR}/deploying"
-            fi
-            mv "$METADATA" "${DST_DIR}/${METAPACKAGE_METADATA}"
+            cp "$METADATA" "${DST_DIR}/${METAPACKAGE_METADATA}"
             LOG "Copied ${METAPACKAGE_METADATA}"
-        done < <(find $COMPONENT_SOFTWARE_DIR -name metadata.xml -print0)
+        done < <(find ${COMPONENT_METAPACKAGES_DIR} -name metadata.xml -print0)
 
-        # Replace the ostree commit-id placeholder in metapackages metadata for actual commit-id
-        COMMIT_ID=$(ostree log "starlingx" | grep -i "^commit" | awk '{ print $2; }')
-        CHECKSUM=$(ostree log "starlingx" | grep -i "^contentchecksum" | awk '{ print $2; }')
+        # Replace the ostree commit-id placeholder in metapackages metadata.
+        # Use the feed ostree_repo which is always available and reliable.
+        FEED_OSTREE_REPO="/var/www/pages/feed/rel-${SW_VERSION}/ostree_repo"
+        COMMIT_ID=$(ostree log starlingx --repo="${FEED_OSTREE_REPO}" | grep -i "^commit" | head -1 | awk '{ print $2; }')
+        CHECKSUM=$(ostree log starlingx --repo="${FEED_OSTREE_REPO}" | grep -i "^contentchecksum" | head -1 | awk '{ print $2; }')
         LOG "OSTree commit-id=${COMMIT_ID} checksum=${CHECKSUM}"
 
-        find "$COMPONENT_METADATA_DIR/deployed" -name "*-metadata.xml" -exec \
+        find "$DST_DIR" -name "*-metadata.xml" -exec \
             sed -i -e "s/xxxBASECOMMITxxx/${COMMIT_ID}/g" -e "s/xxxBASECHECKSUMxxx/${CHECKSUM}/g" {} +
 
         # Create initial setup flag
@@ -180,4 +187,3 @@ case "$1" in
 esac
 
 exit 0
-
