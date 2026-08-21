@@ -411,6 +411,13 @@ class SoftwareClientShell(object):
     def main(self, argv):
         # Parse args once to find version
         parser = self.get_base_parser()
+
+        # Rewrite "<subcommand> [<subcommand>] -h/--help" to
+        # "<subcommand> help <subcommand>" so that help is displayed
+        # for the specific command
+        if argv and argv[-1] in ('-h', '--help') and len(argv) > 1:
+            argv = argv[:-2] + ['help'] + [argv[-2]]
+
         (options, args) = parser.parse_known_args(argv)
         self._setup_debugging(options.debug)
 

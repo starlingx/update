@@ -5,79 +5,31 @@
 #
 
 #
-# This file provides bash-completion functionality for
-# the unified software management CLI
+# Bash completion for the unified software management CLI.
+# Commands are hardcoded for instant completion without Python invocation.
 #
 
-_software_opts="" # lazy init
-_software_flags="" # lazy init
-_software_deploy_opts="" # lazy init
-_software_deploy_flags="" # lazy init
-_software_system_deploy_opts="" # lazy init
-_software_system_deploy_flags="" # lazy init
-_software_metapackage_opts="" # lazy init
-_software_metapackage_flags="" # lazy init
-_software_opts_exp="" # lazy init
+_software_opts="list show upload upload-dir delete is-available is-deployed is-committed install-local deploy system-deploy metapackage help"
+_software_deploy_opts="show host-list select unselect precheck start host host-rollback abort activate activate-rollback complete delete help"
+_software_system_deploy_opts="init show delete help"
+_software_metapackage_opts="list help"
 
 _software()
-
 {
-    local cur prev cmd kbc
+    local cur prev cmd
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
     cmd="${COMP_WORDS[1]}"
 
-    if [ "x$_software_opts" == "x" ] ; then
-        kbc="`software bash-completion | sed -e "s/ -h / /"`"
-        _software_opts="`echo "$kbc" | sed -e "s/--[a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
-        _software_flags="`echo " $kbc" | sed -e "s/ [^-][^-][a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
-        _software_opts_exp="`echo $_software_opts | sed -e "s/[ ]/|/g"`"
-    fi
-
-    if [ "x$_software_deploy_opts" == "x" ] && [ "$cmd" == "deploy" ] ; then
-        kbc="`software deploy bash-completion | sed -e "s/ -h / /"`"
-        _software_deploy_opts="`echo "$kbc" | sed -e "s/--[a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
-        _software_deploy_flags="`echo " $kbc" | sed -e "s/ [^-][^-][a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
-        _software_deploy_opts_exp="`echo $_software_deploy_opts | sed -e "s/[ ]\+/|/g"`"
-    fi
-
-    if [ "x$_software_system_deploy_opts" == "x" ] && [ "$cmd" == "system-deploy" ] ; then
-        kbc="`software system-deploy bash-completion | sed -e "s/ -h / /"`"
-        _software_system_deploy_opts="`echo "$kbc" | sed -e "s/--[a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
-        _software_system_deploy_flags="`echo " $kbc" | sed -e "s/ [^-][^-][a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
-    fi
-
-    if [ "x$_software_metapackage_opts" == "x" ] && [ "$cmd" == "metapackage" ] ; then
-        kbc="`software metapackage bash-completion | sed -e "s/ -h / /"`"
-        _software_metapackage_opts="`echo "$kbc" | sed -e "s/--[a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
-        _software_metapackage_opts="`echo " $kbc" | sed -e "s/ [^-][^-][a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
-    fi
-
-    if [ "$cmd" == "system-deploy" ] ; then
-        if [[ " ${_software_system_deploy_opts} " == *" $prev "* && "$prev" != "help" ]] ; then
-            COMPREPLY=($(compgen -W "${_software_system_deploy_flags}" -- ${cur}))
-        else
-            COMPREPLY=($(compgen -W "${_software_system_deploy_opts}" -- ${cur}))
-        fi
-    elif [ "$cmd" == "deploy" ] ; then
-        if [[ " ${_software_deploy_opts} " == *" $prev "* && "$prev" != "help" ]] ; then
-            COMPREPLY=($(compgen -W "${_software_deploy_flags}" -- ${cur}))
-        else
-            COMPREPLY=($(compgen -W "${_software_deploy_opts}" -- ${cur}))
-        fi
+    if [ "$cmd" == "deploy" ] ; then
+        COMPREPLY=($(compgen -W "${_software_deploy_opts}" -- ${cur}))
+    elif [ "$cmd" == "system-deploy" ] ; then
+        COMPREPLY=($(compgen -W "${_software_system_deploy_opts}" -- ${cur}))
     elif [ "$cmd" == "metapackage" ] ; then
-        if [[ " ${_software_metapackage_opts} " == *" $prev "* && "$prev" != "help" ]] ; then
-            COMPREPLY=($(compgen -W "${_software_metapackage_flags}" -- ${cur}))
-        else
-            COMPREPLY=($(compgen -W "${_software_metapackage_opts}" -- ${cur}))
-        fi
+        COMPREPLY=($(compgen -W "${_software_metapackage_opts}" -- ${cur}))
     else
-        if [[ " ${COMP_WORDS[@]} " =~ " "$_software_opts_exp" " && "$prev" != "help" ]] ; then
-            COMPREPLY=($(compgen -W "${_software_flags}" -- ${cur}))
-        else
-            COMPREPLY=($(compgen -W "${_software_opts}" -- ${cur}))
-        fi
+        COMPREPLY=($(compgen -W "${_software_opts}" -- ${cur}))
     fi
 
     return 0
