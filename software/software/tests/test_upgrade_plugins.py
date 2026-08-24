@@ -68,10 +68,12 @@ class TestPluginsConsistency(unittest.TestCase):
 
     def _get_files_on_disk(self):
         """Return set of .py/.sh filenames in upgrade-scripts,
-           excluding __init__.py, _loader.py, plugin_runner.py and
+           excluding __init__.py, _loader.py, _etcd_common.py,
+           plugin_runner.py and
            the n-1/ subdirectory.
         """
-        excluded = {"__init__.py", "_loader.py", "plugin_runner.py"}
+        excluded = {"__init__.py", "_loader.py", "plugin_runner.py",
+                    "_etcd_common.py"}
         return {
             f for f in os.listdir(UPGRADE_SCRIPTS_DIR)
             if os.path.isfile(os.path.join(UPGRADE_SCRIPTS_DIR, f))
