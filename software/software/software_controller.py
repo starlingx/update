@@ -19,6 +19,7 @@ import re
 import select
 import shutil
 import socket
+import stat
 import subprocess
 import tempfile
 import threading
@@ -1921,6 +1922,7 @@ class PatchController(PatchService):
             release = self.release_collection.get_release_by_id(release_id)
             patch_id = None
             thispatch = None
+            extraction_failed = False
 
             # Check if release contains metapackages (26.09 onwards)
             # TODO(heitormatsui): revisit when non-metapackage
@@ -1940,9 +1942,11 @@ class PatchController(PatchService):
                     msg = f"Failed to upload release {release_id}: {str(e)}"
                     local_error += msg + "\n"
                     LOG.error(msg)
+                    extraction_failed = True
                     continue
 
                 if error_msg:
+                    extraction_failed = True
                     raise ReleaseValidationFailure(error=error_msg)
 
                 local_info += f"Uploading {release_id} product release\n"
@@ -1974,6 +1978,7 @@ class PatchController(PatchService):
                                 base_pkgdata=self.base_pkgdata)
 
                             if error_msg:
+                                extraction_failed = True
                                 raise ReleaseValidationFailure(error=error_msg)
 
                             PatchFile.unpack_patch(patch_file)
@@ -1988,6 +1993,7 @@ class PatchController(PatchService):
                             base_pkgdata=self.base_pkgdata)
 
                         if error_msg:
+                            extraction_failed = True
                             raise ReleaseValidationFailure(error=error_msg)
 
                         PatchFile.unpack_patch(patch_file)
@@ -2003,6 +2009,7 @@ class PatchController(PatchService):
                     msg = "Failed to upload release %s" % release_id
                     LOG.exception("%s: %s" % (msg, e))
                     local_error += msg + "\n"
+                    extraction_failed = True
 
                     if patch_id and thispatch:
                         PatchFile.delete_extracted_patch(patch_id, thispatch)
@@ -2014,6 +2021,10 @@ class PatchController(PatchService):
                         except Exception:
                             LOG.info("Could not delete apt-ostree component, does not exist")
                     continue
+
+            # Apply patch script overrides after successful extraction
+            if not extraction_failed:
+                self._apply_upload_script_overrides(release_id, metapackages_enabled)
 
             release = self.release_collection.get_release_by_id(release_id)
             if release:
@@ -4746,6 +4757,78 @@ class PatchController(PatchService):
                 except Exception as e:
                     msg = "Failed to delete patch script %s. Reason: %s" % (script_path, e)
                     LOG.error(msg)
+
+    def _apply_upload_script_overrides(self, release_id, metapackages_enabled):
+        """Apply patch script overrides after a successful upload.
+
+        Checks /usr/local/usm/patch-scripts-overrides/<sw_release>/ for override
+        scripts and replaces the uploaded scripts with the overrides.
+
+        Override folder structure:
+          Legacy:       <sw_release>/<script_name>
+          Metapackage:  <sw_release>/<component>/<script_name>
+
+        Target locations:
+          Legacy scripts:      /opt/software/software-scripts/<release_id>_<script_name>
+          Metapackage scripts: /opt/software/releases/<sw_release>/<component>/host-scripts/<script>
+
+        :param release_id: the release id (e.g. "WRCP-25.09.200")
+        :param metapackages_enabled: whether this is a metapackage-enabled release
+        """
+        release = self.release_collection.get_release_by_id(release_id)
+        if not release:
+            return
+
+        sw_release = release.sw_release
+        override_dir = os.path.join(constants.PATCH_SCRIPTS_OVERRIDES_DIR, sw_release)
+
+        if not os.path.isdir(override_dir):
+            return
+
+        LOG.info("Checking patch script overrides for %s in %s", release_id, override_dir)
+
+        if metapackages_enabled:
+            # Metapackage release: overrides are in subfolders <component>/<script>
+            # Target: /opt/software/releases/<sw_release>/<component>/host-scripts/<script>
+            for component in os.listdir(override_dir):
+                component_override_dir = os.path.join(override_dir, component)
+                if not os.path.isdir(component_override_dir):
+                    continue
+                for script_name in os.listdir(component_override_dir):
+                    override_file = os.path.join(component_override_dir, script_name)
+                    if not os.path.isfile(override_file):
+                        continue
+                    target_path = os.path.join(
+                        constants.COMPONENT_SOFTWARE_STORAGE_DIR,
+                        sw_release, component,
+                        constants.HOST_SCRIPTS_TYPE, script_name)
+                    if os.path.isfile(target_path):
+                        LOG.info("Overriding metapackage script: %s -> %s",
+                                 override_file, target_path)
+                        shutil.copy2(override_file, target_path)
+                        os.chmod(target_path,
+                                 os.stat(target_path).st_mode | stat.S_IXUSR)
+                    else:
+                        LOG.warning("Override target does not exist, skipping: %s",
+                                    target_path)
+        else:
+            # Legacy release: overrides are files directly in the override dir
+            # Target: /opt/software/software-scripts/<release_id>_<script_name>
+            for script_name in os.listdir(override_dir):
+                override_file = os.path.join(override_dir, script_name)
+                if not os.path.isfile(override_file):
+                    continue
+                target_path = os.path.join(
+                    root_scripts_dir, f"{release_id}_{script_name}")
+                if os.path.isfile(target_path):
+                    LOG.info("Overriding legacy script: %s -> %s",
+                             override_file, target_path)
+                    shutil.copy2(override_file, target_path)
+                    os.chmod(target_path,
+                             os.stat(target_path).st_mode | stat.S_IXUSR)
+                else:
+                    LOG.warning("Override target does not exist, skipping: %s",
+                                target_path)
 
     def _run_start_script(self, script_name, release_id, operation):
         """Run pre_start or post_start scripts"""

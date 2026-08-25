@@ -7,6 +7,7 @@ run/software-tmpdirs.conf
 usr/bin
 usr/lib/python*/dist-packages/*
 usr/sbin
+usr/local/usm/patch-scripts-overrides
 usr/share/starlingx/pmon.d/software-controller-daemon.conf
 usr/share/starlingx/pmon.d/software-agent.conf
 upgrade-scripts/* usr/local/share/upgrade.d/

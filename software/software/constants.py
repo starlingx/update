@@ -61,6 +61,7 @@ SOFTWARE_DEPLOY_FOLDER = "software-deploy"
 SOFTWARE_JSON_FILE = "%s/software.json" % SOFTWARE_STORAGE_DIR
 SYNCED_SOFTWARE_JSON_FILE = "%s/synced/software.json" % SOFTWARE_STORAGE_DIR
 SYSTEM_DEPLOY_JSON_FILE = "%s/system_deploy.json" % SOFTWARE_STORAGE_DIR
+SOFTWARE_SCRIPTS_DIR = "/opt/software/software-scripts"
 
 # Component software paths
 COMPONENT_SOFTWARE_STORAGE_DIR = "/opt/software/releases"
@@ -81,6 +82,7 @@ REMOVE_TEMPORARY_DATA_SCRIPT = "remove-temporary-data"
 MAJOR_RELEASE_UPLOAD_SCRIPT = "major-release-upload"
 USM_LOAD_IMPORT_SCRIPT = "usm_load_import"
 PATCH_SCRIPTS_STAGING_DIR = "/var/www/pages/updates/software-scripts"
+PATCH_SCRIPTS_OVERRIDES_DIR = "/usr/local/usm/patch-scripts-overrides"
 HOST_PRE_INSTALL_SCRIPT = "pre-install.sh"
 HOST_POST_INSTALL_SCRIPT = "post-install.sh"
 

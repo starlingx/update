@@ -99,6 +99,12 @@ override_dh_install:
 	cd ${SCRIPTDIR} ; ln -sf major-release-upload usm_load_import
 	cd ${SCRIPTDIR} ; ln -sf deploy-start software-deploy-start
 
+	# Install patch script overrides to /usr/local/usm/patch-scripts-overrides/
+	install -d -m 755 $(ROOT)/usr/local/usm/patch-scripts-overrides
+	if [ -d scripts/patch-override ] && [ "$$(ls -A scripts/patch-override)" ]; then \
+		cd scripts/patch-override && find . -type f ! -name 'README.md' -exec install -D -m 755 {} $(ROOT)/usr/local/usm/patch-scripts-overrides/{} \; ; \
+	fi
+
 	dh_install
 
 override_dh_usrlocal:
