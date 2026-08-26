@@ -5472,11 +5472,17 @@ class PatchController(PatchService):
                             ])
                             branch_name = utils.get_partial_branch_name(product_rel_id, total_set_components)
 
+                            # Get branch commit
+                            try:
+                                branch_commit = sim.get_branch_commit(branch_name)
+                            except BranchNotFound:
+                                branch_commit = None
+
                             # Check if this exact combination already has a commit
                             target_commit = self.release_collection.find_commit_for_metapackages(
                                 list(total_set_ids))
 
-                            if target_commit and sim.branch_exists(branch_name):
+                            if target_commit and target_commit == branch_commit:
                                 LOG.info(f"Branch {branch_name} already exists with matching commit, reusing")
                                 sim.deploy(branch_name)
                             else:
@@ -5489,6 +5495,7 @@ class PatchController(PatchService):
                                 packages = [f"meta-{comp}" for comp in total_set_components]
 
                                 LOG.info(f"Building custom branch {branch_name} from base {base_commit[:10]}")
+                                sim.delete_ref(branch_name)  # Clean old branch, if existing
                                 sim.create_branch(base_commit, branch_name)
                                 apt_utils.run_install(
                                     feed_repo,
@@ -6370,13 +6377,26 @@ class PatchController(PatchService):
                         LOG.error("%s: %s" % (msg_error, e))
                         raise SoftwareServiceError(msg_error)
                 else:
-                    deployment_list = deploying_release_state.get_release_ids()
-                    for release in self.release_collection.iterate_releases():
-                        if release.sw_release == from_release:
-                            self.reset_feed_commit(release)
+                    metapackages = deploy.get("metapackages")
+                    if metapackages:
+                        # Metapackage path: reset feed only.
+                        # The custom branch and appended commit are preserved
+                        # for reuse on a subsequent deploy of the same set.
+                        deploying_mps = self.release_collection.get_ordered_metapackages(
+                            filter_by_states=[states.DEPLOYING])
+                        if deploying_mps:
+                            mp_deploy_set = MetapackageDeploymentSet(deploying_mps)
+                            feed_repo = deploy.get("feed_repo")
+                            self.reset_feed_commit(mp_deploy_set, feed_repo=feed_repo)
+                    else:
+                        # Legacy path
+                        deployment_list = deploying_release_state.get_release_ids()
+                        for release in self.release_collection.iterate_releases():
+                            if release.sw_release == from_release:
+                                self.reset_feed_commit(release)
 
-                        if release.id in deployment_list:
-                            self.remove_tags_from_metadata(release, constants.CONTENTS_TAG)
+                            if release.id in deployment_list:
+                                self.remove_tags_from_metadata(release, constants.CONTENTS_TAG)
 
                 deploying_release_state.available()
             else:

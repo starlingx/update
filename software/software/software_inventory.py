@@ -255,7 +255,7 @@ class SoftwareInventoryManager():
         while changed:
             changed = False
             for b in branches:
-                if b in to_delete:
+                if b in to_delete or b == self.DEPLOY_BRANCH:
                     continue
                 tip = subprocess.check_output(
                     ["ostree", "rev-parse", "--repo", self.repo_path, b], text=True).strip()
