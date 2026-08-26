@@ -397,108 +397,63 @@ def do_activate():
     _wait_kube_apiserver_up(previous_pid)
 
 
-def _remove_platform_tls_params(sysinv):
-    """Remove platform TLS parameters added during migrate.
-
-    Deletes platform/config/tls-min-version and
-    platform/config/tls-cipher-suite from the DB via the sysinv API.
-    These parameters did not exist in 25.09/26.03 and must be removed
-    on rollback.
-    """
-    params_to_delete = [
-        ("platform", "config", "tls-min-version"),
-        ("platform", "config", "tls-cipher-suite"),
-    ]
-
-    all_params = sysinv.service_parameter.list()
-
-    for service, section, name in params_to_delete:
-        param = None
-        for p in all_params:
-            if (p.service == service
-                    and p.section == section
-                    and p.name == name):
-                param = p
-                break
-
-        if param is None:
-            LOG.info("Parameter %s/%s/%s not found, already removed",
-                     service, section, name)
-            continue
-
-        sysinv.service_parameter.delete(param.uuid)
-        LOG.info("Deleted %s/%s/%s (uuid=%s)",
-                 service, section, name, param.uuid)
-
-
-def _revert_k8s_ciphers(sysinv):
-    """Revert k8s tls-cipher-suites to original 6 ciphers.
-
-    Removes the 3 CHACHA20 ciphers that were added during migrate,
-    restoring the value to the pre-upgrade state.
-
-    Returns True if the DB value was changed, False if already correct
-    or parameter not found.
-    """
-    param = None
-    for p in sysinv.service_parameter.list():
-        if (p.service == K8S_SERVICE
-                and p.section == K8S_SECTION
-                and p.name == K8S_TLS_CIPHER_SUITES):
-            param = p
-            break
-
-    if param is None:
-        LOG.info("k8s %s/%s/%s not found, nothing to revert",
-                 K8S_SERVICE, K8S_SECTION, K8S_TLS_CIPHER_SUITES)
-        return False
-
-    cipher_list = [c.strip() for c in param.value.split(",")]
-
-    # Remove the CHACHA20 ciphers that were added during migrate
-    original_ciphers = [c for c in cipher_list
-                        if c not in K8S_MISSING_CIPHERS]
-
-    if len(original_ciphers) == len(cipher_list):
-        LOG.info("k8s tls-cipher-suites already at original value "
-                 "(no CHACHA20 ciphers present)")
-        return False
-
-    new_value = ",".join(original_ciphers)
-    patch = [{'op': 'replace', 'path': '/value', 'value': new_value}]
-    sysinv.service_parameter.update(param.uuid, patch)
-    LOG.info("Reverted k8s tls-cipher-suites to: %s", new_value)
-    return True
-
-
 def do_activate_rollback():
     """Activate-rollback phase: undo TLS changes from migrate/activate.
 
-    The USM framework does not restore the database to its
-    pre-migration state during activate-rollback. This function
-    explicitly reverts the DB changes made by do_migrate():
-
+    Reverts the DB changes made by do_migrate() via direct SQL:
     1. Delete platform/config/tls-min-version from the DB
     2. Delete platform/config/tls-cipher-suite from the DB
     3. Revert kubernetes/kube_apiserver/tls-cipher-suites back to
        the original 6 ciphers (remove the 3 CHACHA20 entries)
-    4. Re-apply kubernetes service parameters to re-render the
-       kube-apiserver static pod manifest with the reverted ciphers
-    5. Wait for kube-apiserver to restart
+
     """
-    sysinv = _get_sysinv_client()
+    port = 5432
 
-    # Step 1 & 2: Remove platform TLS params that were added by migrate
-    LOG.info("Removing platform TLS parameters added during migration")
-    _remove_platform_tls_params(sysinv)
+    # Step 1-2: Delete platform TLS params from DB.
+    for service, section, name in [("platform", "config", "tls-min-version"),
+                                   ("platform", "config", "tls-cipher-suite")]:
+        sql = (
+            "DELETE FROM service_parameter "
+            "WHERE service='%s' AND section='%s' AND name='%s';"
+            % (service, section, name)
+        )
+        try:
+            _run_psql(sql, port)
+            LOG.info("Deleted %s/%s/%s from DB", service, section, name)
+        except Exception as e:
+            LOG.warning("Failed to delete %s/%s/%s: %s",
+                        service, section, name, e)
 
-    # Step 3: Revert k8s cipher suites back to original 6 ciphers
-    LOG.info("Reverting k8s tls-cipher-suites to pre-upgrade value")
-    _revert_k8s_ciphers(sysinv)
+    # Step 3: Revert k8s cipher suites back to original 6 ciphers.
+    current = _get_param_value(K8S_SERVICE, K8S_SECTION,
+                               K8S_TLS_CIPHER_SUITES, port)
+    if current:
+        cipher_list = [c.strip() for c in current.split(",")]
+        original = [c for c in cipher_list if c not in K8S_MISSING_CIPHERS]
+        if len(original) != len(cipher_list):
+            new_value = ",".join(original)
+            _update_param_value(K8S_SERVICE, K8S_SECTION,
+                                K8S_TLS_CIPHER_SUITES, new_value, port)
+            LOG.info("Reverted k8s tls-cipher-suites to: %s", new_value)
+        else:
+            LOG.info("k8s tls-cipher-suites already at original value")
+    else:
+        LOG.info("k8s tls-cipher-suites not found in DB, nothing to revert")
 
-    # Step 4 & 5: Re-apply kubernetes service parameters to update
+    LOG.info("DB cleanup complete.")
+
+    # Step 4: Re-apply kubernetes service parameters to re-render
     # the kube-apiserver manifest with the reverted cipher list.
-    # Check if manifest already matches (idempotent on reattempt).
+    # Since we deleted platform TLS params via SQL (not API), no
+    # HAProxy reload was triggered — port 6443 is stable.
+    try:
+        sysinv = _get_sysinv_client()
+    except Exception as e:
+        LOG.warning("Cannot obtain sysinv client (%s). "
+                    "Manifest will retain stale ciphers until "
+                    "next service-parameter-apply.", e)
+        return
+
     try:
         out = subprocess.check_output(
             ['cat', '/etc/kubernetes/manifests/kube-apiserver.yaml'],
