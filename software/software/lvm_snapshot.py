@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import xml.etree.ElementTree as ElementTree
 
 from packaging import version
 
@@ -239,12 +240,83 @@ class VarSnapshot(LVMSnapshot):
                     if version.Version(to_release) > version.Version(from_release):
                         d["from_release"] = to_release
                         d["to_release"] = from_release
+                    # The snapshot left metadata in available, move it back to deploying
+                    # to match the active host-rollback-done deploy state.
+                    if self._is_major_release_rollback(from_release, to_release):
+                        target_release = max(from_release, to_release, key=version.Version)
+                        self._move_release_metadata_to_deploying(mount_dir, target_release)
                 with open(software_json, "w") as fp:
                     fp.write(json.dumps(content))
                 LOG.info("Deployment data updated")
         except Exception as e:
             LOG.error("Failure updating %s: %s", software_json, str(e))
             raise
+
+    @staticmethod
+    def _is_major_release_rollback(from_release, to_release):
+        """
+        Return True when from_release and to_release belong to different
+        major releases.
+
+        Same-major patch deploys return False.
+        """
+        from_ver = version.Version(from_release).release
+        to_ver = version.Version(to_release).release
+        return from_ver[:2] != to_ver[:2]
+
+    def _move_release_metadata_to_deploying(self, mount_dir, sw_release):
+        """
+        Move the metadata of the release identified by sw_release from the
+        available to the deploying directory inside the mounted snapshot.
+
+        The legacy metadata root (/opt/software/metadata) is searched first;
+        if the release is not found there, the componentized root
+        (/opt/software/releases/metadata) is searched as a fallback.
+
+        The release is matched by the <sw_version> tag inside the metadata XML
+
+        :param mount_dir: path where the snapshot is mounted
+        :param sw_release: release version to look for
+        """
+        metadata_roots = [
+            pathlib.Path(mount_dir) / "rootdirs/opt/software/metadata",
+            pathlib.Path(mount_dir) / "rootdirs/opt/software/releases/metadata",
+        ]
+
+        searched_dirs = []
+        for metadata_root in metadata_roots:
+            available_dir = metadata_root / "available"
+            deploying_dir = metadata_root / "deploying"
+
+            if not available_dir.is_dir():
+                LOG.info("Metadata available dir %s not found in snapshot, skipping",
+                         available_dir)
+                continue
+
+            searched_dirs.append(str(available_dir))
+            moved = False
+            for xml_file in available_dir.glob("*-metadata.xml"):
+                try:
+                    root = ElementTree.parse(str(xml_file)).getroot()
+                except ElementTree.ParseError as e:
+                    LOG.warning("Failed to parse metadata %s: %s.", xml_file, str(e))
+                    continue
+
+                if root.findtext("sw_version") != sw_release:
+                    continue
+
+                deploying_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(xml_file), str(deploying_dir / xml_file.name))
+                LOG.info("Moved release metadata %s from available to deploying.",
+                         xml_file.name)
+                moved = True
+
+            # Release found in this metadata root; skip the fallback root.
+            if moved:
+                return
+
+        LOG.warning("No release metadata with sw_version %s found in %s.",
+                    sw_release, searched_dirs or [str(r) for r in metadata_roots])
 
     def restore(self):
         """
