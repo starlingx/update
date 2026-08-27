@@ -25,6 +25,7 @@ class DeployController(RestController):
         'activate': ['POST'],
         'activate_rollback': ['POST'],
         'precheck': ['POST'],
+        'prestage': ['POST'],
         'start': ['POST'],
         'complete': ['POST'],
         'delete': ['DELETE'],
@@ -122,6 +123,14 @@ class DeployController(RestController):
         reload_release_data()
         result = sc.software_deploy_select_api(**kwargs)
         sc.software_sync()
+        return result
+
+    @expose(method='POST', template='json')
+    def prestage(self, **kwargs):
+        reload_release_data()
+        result = sc.software_deploy_prestage_api(**kwargs)
+        if result.get("error"):
+            response.status = 406
         return result
 
     @expose(method='POST', template='json')

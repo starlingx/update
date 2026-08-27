@@ -16,6 +16,7 @@ from software.exceptions import ReleaseNotFound
 from software.software_functions import LOG
 from software.software_functions import ReleaseData
 from software import constants
+from software import ostree_utils
 from software import states
 from software import utils
 
@@ -278,6 +279,18 @@ class SWRelease(object):
     @property
     def requires_release_ids(self):
         return self._get_by_key('requires') or []
+
+    @property
+    def original_commit_id(self):
+        if self.is_ga_release:
+            # If GA release, return the first commit from the
+            # ostree branch related to this SWRelease. The
+            # branch name is equal to the SWRelease id.
+            sw_rel = self.sw_release
+            repo_path = utils.get_feed_repo_path(sw_rel)
+            repo = ostree_utils.get_repo(repo_path)
+            return ostree_utils.get_commits(repo, self.id)[-1]
+        return self._get_by_key('original_commit') or ''
 
     @property
     def packages(self):

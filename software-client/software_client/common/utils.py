@@ -1,4 +1,4 @@
-# Copyright 2013-2025 Wind River, Inc
+# Copyright 2013-2026 Wind River, Inc
 # Copyright 2012 OpenStack LLC.
 # All Rights Reserved.
 #
@@ -22,6 +22,8 @@ import os
 import re
 import signal
 import sys
+import threading
+import time
 from tabulate import tabulate
 from oslo_utils import importutils
 
@@ -429,3 +431,24 @@ def _is_service_impacting_command(command, cmd_area):
 
 def _is_cli_confirmation_param_enabled():
     return env("CLI_CONFIRMATIONS", default="disabled") == "enabled"
+
+
+class WaitThread(threading.Thread):
+    """Thread to show progress indication."""
+    def __init__(self):
+        super(WaitThread, self).__init__()
+        self.stop = threading.Event()
+
+    def run(self):
+        """Run the progress indication."""
+        while not self.stop.is_set():
+            sys.stdout.write(".")
+            sys.stdout.flush()
+            time.sleep(10)
+
+    def join(self, timeout=None):
+        """Stop the progress indication and join the thread."""
+        self.stop.set()
+        super(WaitThread, self).join(timeout)
+        sys.stdout.write("\n")
+        sys.stdout.flush()

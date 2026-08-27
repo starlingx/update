@@ -140,6 +140,10 @@ def is_system_controller():
     return get_dc_role() == constants.DISTRIBUTED_CLOUD_ROLE_SYSTEMCONTROLLER
 
 
+def is_subcloud():
+    return get_dc_role() == constants.DISTRIBUTED_CLOUD_ROLE_SUBCLOUD
+
+
 def get_sw_version_from_host(hostname):
     for host in get_ihost_list():
         if host.hostname == hostname:

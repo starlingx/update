@@ -22,6 +22,7 @@ DEPLOY_COMMAND_MODULES = [
 #     - activate-rollback
 #     - complete
 #     - delete
+#     - prestage
 # non root/sudo users can run:
 #     - host-list
 #     - show

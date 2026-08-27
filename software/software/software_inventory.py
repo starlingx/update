@@ -5,7 +5,6 @@ SPDX-License-Identifier: Apache-2.0
 
 """
 
-import os
 import subprocess
 import xml.etree.ElementTree as ET
 import gi
@@ -13,18 +12,17 @@ gi.require_version('OSTree', '1.0')
 from gi.repository import OSTree
 from gi.repository import Gio
 
-import software.apt_utils as apt_utils
-from software.exceptions import MetadataFail
 from software.exceptions import APTOSTreeCommandFail
+from software.exceptions import BranchNotFound
+from software.exceptions import MetadataFail
+from software.release_data import get_SWReleaseCollection
 from software.software_functions import LOG
-from software import utils
+
+from software import apt_utils
 from software import constants
+from software import ostree_utils
 from software import states
-
-
-class BranchNotFound(Exception):
-    def __init__(self, branch):
-        super().__init__(f"Software release branch {branch} not found")
+from software import utils
 
 
 def get_sw_version(path="/etc/build.info"):
@@ -33,48 +31,6 @@ def get_sw_version(path="/etc/build.info"):
             if line.startswith("SW_VERSION="):
                 return line.split("=", 1)[1].strip().strip('"')
     return None
-
-
-def get_feed_repo_path(sw_release):
-    sw_ver = utils.get_major_release_version(sw_release)
-    rel_folder_path = utils.get_feed_path(sw_ver)
-    feed_repo = os.path.join(rel_folder_path, constants.OSTREE_REPO)
-    return feed_repo
-
-
-def get_repo(repo_path):
-    if repo_path:
-        repo = OSTree.Repo.new(Gio.File.new_for_path(repo_path))
-        repo.open(None)
-    else:
-        repo = OSTree.Repo.new_default()
-        repo.open(None)
-    return repo
-
-
-def get_commits(repo, branch_name):
-    """Get all commits in a branch's history.
-
-    :param repo: OSTree.Repo object
-    :param branch_name: branch ref to walk
-    :return: list of commit checksums from newest to oldest
-    """
-    if not branch_name or not branch_name.strip():
-        raise ValueError("branch_name must not be empty")
-
-    _, rev = repo.resolve_rev(branch_name, False)
-    if not rev:
-        raise BranchNotFound(branch_name)
-
-    commits = []
-    while rev:
-        try:
-            _, commit = repo.load_variant(OSTree.ObjectType.COMMIT, rev)
-        except Exception as e:
-            raise RuntimeError("Failed to load commit '%s': %s" % (rev, e))
-        commits.append(rev)
-        rev = OSTree.commit_get_parent(commit)
-    return commits
 
 
 def get_release_by_commit(repo, commit):
@@ -186,8 +142,8 @@ class SoftwareInventoryManager():
             sw_ver = get_sw_version()
 
         self.sw_ver = sw_ver
-        self.repo_path = get_feed_repo_path(self.sw_ver)
-        self.repo = get_repo(self.repo_path)
+        self.repo_path = utils.get_feed_repo_path(self.sw_ver)
+        self.repo = ostree_utils.get_repo(self.repo_path)
 
     def get_branch_commit(self, branch):
         return get_top_commit(self.repo_path, branch)
@@ -216,7 +172,7 @@ class SoftwareInventoryManager():
             branch_name = self.DEPLOY_BRANCH
 
         releases = []
-        commits = get_commits(self.repo, branch_name)
+        commits = ostree_utils.get_commits(self.repo, branch_name)
         for commit in commits:
             sw_release = get_release_by_commit(self.repo, commit)
             if sw_release and sw_release != self.DEPLOY_BRANCH:
@@ -256,7 +212,7 @@ class SoftwareInventoryManager():
         self.create_branch(base_commit, new_branch)
         commit_packages_to_branch(self.repo_path, self.sw_ver, new_branch, packages, pre_bootstrap)
 
-    def delete_branch(self, branch):
+    def delete_branch(self, branch, prestage=False):
         """Delete an ostree software release branch and any branches built on top of it,
            then prune.
            When a software release branch is deleted, its dependents become orphan, that's
@@ -307,6 +263,8 @@ class SoftwareInventoryManager():
                 if parent:
                     parent_tree = get_tree(parent)
                     if parent_tree in target_trees:
+                        if prestage and not b.endswith(constants.PRESTAGE_SUFFIX):
+                            continue
                         to_delete.append(b)
                         target_trees.add(get_tree(tip))
                         changed = True
@@ -377,3 +335,41 @@ class SoftwareInventoryManager():
         LOG.info("Deploy branch '%s' reset to commit %s (from branch '%s')",
                  self.DEPLOY_BRANCH, target_commit, deploy_target)
         return target_commit
+
+    def get_branch_original_commit(self, branch):
+        """Get the original commit for a release branch.
+
+        The original commit is the commit that was produced at upload time,
+        stored as the `original_commit` attribute in the product release
+        metadata. This value is immutable and does not change after prestage
+        operations modify the branch tip.
+
+        :param branch: the release branch name (which is also the release_id)
+        :return: the original commit checksum
+        :raises Exception: if the original commit cannot be determined
+        """
+        release_collection = get_SWReleaseCollection()
+        release = release_collection.get_release_by_id(branch)
+
+        if release and release.original_commit_id:
+            return release.original_commit_id
+
+        raise BranchNotFound(
+            f"Original commit not found for release '{branch}'. "
+            f"Ensure the release was uploaded successfully.")
+
+    def get_branch_prestage_commit(self, branch):
+        """Resolve the prestage commit if one exists.
+
+        The prestage commit is the current tip of the target branch
+        when it differs from the original commit (meaning prestaged
+        packages were installed on top of it).
+
+        :param branch: the release branch name (which is also the release_id)
+        :return: the prestage commit checksum, or None if no prestage occurred
+        """
+        original_commit = self.get_branch_original_commit(branch)
+        tip = self.get_branch_commit(branch)
+        if tip == original_commit:
+            return None
+        return tip

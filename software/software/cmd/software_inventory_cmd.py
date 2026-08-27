@@ -9,10 +9,10 @@ import logging
 import os
 import sys
 
+from software.exceptions import BranchNotFound
+from software.ostree_utils import get_repo
 from software.software_functions import LOG
-from software.software_inventory import BranchNotFound
 from software.software_inventory import SoftwareInventoryManager
-from software.software_inventory import get_repo
 from software.software_inventory import get_release_by_commit
 from software.software_inventory import get_top_commit
 

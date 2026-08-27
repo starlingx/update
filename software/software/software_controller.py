@@ -49,6 +49,7 @@ from software.deploy_host_state import DeployHostState
 from software.deploy_state import DeployState
 from software.deploy_state import require_deploy_state
 from software.exceptions import APTOSTreeCommandFail
+from software.exceptions import BranchNotFound
 from software.exceptions import FileSystemError
 from software.exceptions import HostAgentUnreachable
 from software.exceptions import HostNotFound
@@ -105,7 +106,6 @@ from software.software_functions import SW_VERSION
 from software.software_functions import to_bool
 from software.software_functions import unmount_iso_load
 from software.software_functions import validate_host_deploy_order
-from software.software_inventory import BranchNotFound
 from software.software_inventory import SoftwareInventoryManager
 from software.thread_utils import no_reentry
 from software.thread_utils import threaded
@@ -117,6 +117,7 @@ from software.sysinv_utils import get_active_k8s_ver
 from software.sysinv_utils import get_service_parameter
 from software.sysinv_utils import get_system_info
 from software.sysinv_utils import is_kube_upgrade_in_progress
+from software.sysinv_utils import is_subcloud
 from software.sysinv_utils import is_system_controller
 from software.sysinv_utils import trigger_evaluate_apps_reapply
 from software.sysinv_utils import trigger_vim_host_audit
@@ -1873,6 +1874,9 @@ class PatchController(PatchService):
                     commit_id = sim.get_branch_commit(new_branch)
                     base_commit_id = sim.get_branch_commit(require_release_id)
                     update_commit_id_to_all_mp(base_commit_id, commit_id)
+
+                    # Persist the original commit in product release metadata
+                    self._set_original_commit(release_id, commit_id)
 
                     self.software_sync()
                     rel_state.uploaded()
@@ -4348,6 +4352,367 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
+    def _validate_parameters_for_prestage(self, release, metapackage_overrides: list,
+                                          pre_upgrade_deploy: bool, restore: bool):
+        """
+        Validate parameters passed for deploy prestage.
+        """
+        LOG.info(f"Validating deploy prestage parameters (release: {release}, "
+                 f"metapackage_overrides:{metapackage_overrides}, "
+                 f"pre_upgrade_deploy:{pre_upgrade_deploy}, "
+                 f"restore:{restore})")
+
+        # Must be running on a subcloud
+        if not is_subcloud():
+            raise Exception("Deploy prestage is only allowed on subclouds")
+
+        # Mutually exclusive parameters
+        prestage_param_set = sum(bool(param) for param in
+                                 (pre_upgrade_deploy, metapackage_overrides, restore))
+        if prestage_param_set > 1:
+            raise Exception("--pre-upgrade-deploy, --metapackage-overrides and --restore "
+                            "parameters cannot be used together")
+
+        # At least one of pre-upgrade-deploy, restore or metapackage-overrides must be specified
+        if not pre_upgrade_deploy and not metapackage_overrides and not restore:
+            raise Exception("At least one of --pre-upgrade-deploy, --metapackage-overrides "
+                            "or --restore must be specified for deploy prestage")
+
+        # Release parameter is mandatory
+        if not release:
+            raise Exception("A product release ID is required for deploy prestage")
+
+        # Release must be a valid product release
+        product_release = self.release_collection.get_product_release_by_id(release)
+        if not product_release:
+            raise Exception(f"Release {release} is not a valid product release. "
+                            "Deploy prestage requires a product release")
+
+        # Release must be in available state
+        if product_release.state not in [states.AVAILABLE, states.DEPLOYED]:
+            raise Exception(f"Release {release} is not in a valid state (available or deployed)")
+
+        running_release = self.release_collection.running_release
+        metapackage_data = []
+        # If restore is true, pass the following validation and return the running_release to
+        # continue the restore operation.
+        if restore:
+            pass
+        else:
+            # Pre-upgrade-deploy and metapackage-overrides
+            # Prestage release version must be greater than current running version
+            # Compare at full patch level (MM.mm.pp) to cover both patch and major upgrades
+            running_sw_release = running_release.sw_release
+            product_release_sw_release = product_release.sw_release
+            running_ver = version.parse(running_sw_release)
+            product_ver = version.parse(product_release_sw_release)
+
+            if product_ver < running_ver:
+                raise Exception(f"Product release {release} (version {product_release_sw_release}) "
+                                f"must be greater than or equal to the running version "
+                                f"({running_sw_release})")
+
+            if pre_upgrade_deploy:
+                LOG.info("Validating deploy prestage parameters for --pre-upgrade-deploy")
+                # Release skip is allowed when pre_upgrade_deploy parameter is specified
+                # Use pre-upgrade-deploy metapackages from the product release
+                pud_ids = self.release_collection.get_pre_upgrade_deploy_id_by_product_id(release)
+                if not pud_ids:
+                    msg = f"Product release {release} has no pre-upgrade-deploy metapackages"
+                    raise Exception(msg)
+
+                for mp_id in pud_ids:
+                    mp_release = self.release_collection.get_pre_upgrade_deploy_release_by_id(mp_id)
+                    if mp_release:
+                        metapackage_data.append(mp_release)
+                    else:
+                        msg = f"Pre-upgrade-deploy metapackage {mp_id} not found"
+                        raise Exception(msg)
+            else:
+                # Validate that the overrides do not match the entire product release's
+                # metapackage list. If so, deploy start should be used instead.
+                product_mp_ids = set(product_release.metapackages)
+                override_mp_ids = set(metapackage_overrides)
+                if override_mp_ids == product_mp_ids:
+                    raise Exception(
+                        "The metapackage overrides match the entire metapackage list of "
+                        "the product release. Use 'software deploy start' instead "
+                        "of prestage with --metapackage-overrides")
+
+                # Resolve each override and validate all belong to the same product release
+                # and are in available state
+                mp_sw_releases = set()
+                for mp_id in metapackage_overrides:
+                    mp_release = self.release_collection.get_metapackage_release_by_id(mp_id)
+                    if not mp_release:
+                        raise Exception(f"Metapackage {mp_id} not found")
+                    if mp_release.state != states.AVAILABLE:
+                        raise Exception(f"Metapackage {mp_id} is not in available state")
+                    metapackage_data.append(mp_release)
+                    mp_sw_releases.add(mp_release.sw_release)
+
+                # All metapackages must belong to the same product release
+                if len(mp_sw_releases) > 1:
+                    msg = ("All metapackage overrides must belong to the same product release, "
+                           f"but found versions: {', '.join(sorted(mp_sw_releases))}")
+                    raise Exception(msg)
+
+                # Metapackage overrides are only valid for patches.
+                # 1. Same major.minor (MM.mm) as the product_release
+                # 2. Patch level (.pp) must be greater than product_release's patch level
+                mp_product_sw_release = next(iter(mp_sw_releases))
+                mp_product_id = self.release_collection.get_release_id_by_sw_release(mp_product_sw_release)
+                mp_product = self.release_collection.get_product_release_by_id(mp_product_id)
+                if not mp_product:
+                    raise Exception(f"Product release for version {mp_product_sw_release} not found")
+
+                mp_ver = version.parse(mp_product.sw_release)
+                if (mp_ver.major != product_ver.major
+                        or mp_ver.minor != product_ver.minor):
+                    raise Exception(
+                        f"Metapackage overrides (version {mp_product_sw_release}) must have the "
+                        f"same major.minor as the product release {release} "
+                        f"(version {product_release_sw_release})")
+                if mp_ver.micro <= product_ver.micro:
+                    raise Exception(
+                        f"Metapackage overrides (version {mp_product_sw_release}) must have a "
+                        f"patch level greater than the product release {release} "
+                        f"(version {product_release_sw_release})")
+
+                # Validate if the product release requirements are met
+                if mp_product.requires_release_ids:
+                    missing_prereqs = []
+                    for req_id in mp_product.requires_release_ids:
+                        # If the requirement is the product_release parameter, it's satisfied
+                        # regardless of state
+                        if req_id == release:
+                            continue
+                        # Otherwise it must be deployed in the current running release
+                        req_release = self.release_collection.get_release_by_id(req_id)
+                        if not req_release or req_release.state != states.DEPLOYED:
+                            missing_prereqs.append(req_id)
+                    if missing_prereqs:
+                        raise Exception(
+                            f"Product release {mp_product_id} has unmet prerequisites: "
+                            f"{', '.join(missing_prereqs)}. Required releases must be "
+                            f"deployed or be the product release being prestaged")
+                    LOG.info("All product release requirements are met")
+
+            if not metapackage_data:
+                raise Exception("No metapackages resolved for prestage operation")
+
+        LOG.info("Validation complete for deploy prestage parameters")
+        return running_release, metapackage_data
+
+    def _prune_prestage_branch(self, sw_version, feed_repo, target_branch):
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
+
+        sw_inventory = SoftwareInventoryManager(sw_ver=sw_version)
+        base_release = target_branch.split(f"-{constants.PRESTAGE_SUFFIX}")[0]
+        if sw_inventory.branch_exists(target_branch):
+            LOG.info("Prestage branch exists")
+            try:
+                LOG.info(f"Deleting prestage branch {target_branch}")
+                deleted_branches = sw_inventory.delete_branch(target_branch, prestage=True)
+                ostree_utils.update_repo_summary_file(feed_repo)
+            except Exception as e:
+                msg = str(e)
+                LOG.error(msg)
+                msg_error += msg
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+            msg = f"The following branches were removed during restore of {base_release}:\n"
+            msg += ", ".join(deleted_branches) + "\n\n"
+        else:
+            msg = f"No prestage branch created based on the release {base_release} yet.\n\n"
+
+        msg += "Restore completed successfully."
+        msg_info += msg
+        LOG.info(msg)
+        self.software_sync()
+        return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+    def software_deploy_prestage_api(self, **kwargs):
+        """
+        Prestage the software deployment on a subcloud.
+
+        Builds a new ostree commit on top of the parent commit from the product
+        release, using the metapackages specified via --metapackage-overrides or
+        --pre-upgrade-deploy for metapackages from the product release.
+
+        This command is only allowed on subclouds and must target a product
+        release with a software version greater than the currently running
+        version. The metapackages must be from a patch level greater then
+        the target product release (no release skip allowed), unless
+        pre-upgrade-deploy is specified.
+
+        This command can be executed with --restore parameter to reset a specific
+        branch release and remove its prestage commit.
+
+        :param kwargs: release, metapackage_overrides, pre_upgrade_deploy,
+                       restore
+        """
+        msg_info = ""
+        msg_warning = ""
+        msg_error = ""
+
+        release = kwargs.get("release", None)
+        metapackage_overrides = kwargs.get("metapackage_overrides", [])
+        pre_upgrade_deploy = kwargs.get("pre_upgrade_deploy", False)
+        restore = kwargs.get("restore", False)
+
+        try:
+            running_release, metapackage_data = \
+                self._validate_parameters_for_prestage(
+                    release, metapackage_overrides, pre_upgrade_deploy, restore)
+        except Exception as e:
+            msg = "Failed to execute prestage command.\nError: %s" % (str(e))
+            LOG.error(msg)
+            msg_error += msg
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Derive feed repo from the running release sw_version (same as deploy start)
+        deploy_sw_version = running_release.sw_version
+        feed_repo = f"{constants.FEED_OSTREE_BASE_DIR}/rel-{deploy_sw_version}/{constants.OSTREE_REPO}"
+
+        # Determine the base release from the appropriate ostree branch
+        if pre_upgrade_deploy:
+            # For pre-upgrade-deploy, the target branch is named after the highest available
+            # release's id.
+            # Find the highest available patch in the same major version (available or deployed)
+            highest_available = None
+            for rel in self.release_collection.iterate_releases():
+                if rel.sw_version != deploy_sw_version:
+                    continue
+                if rel.state not in [states.AVAILABLE, states.DEPLOYED]:
+                    continue
+                if highest_available is None or rel.version_obj > highest_available.version_obj:
+                    highest_available = rel
+            # If nothing found, use the running release
+            if not highest_available:
+                highest_available = running_release
+            highest_available_id = highest_available.id
+            LOG.info(f"Highest available release: {highest_available_id}")
+
+            base_release = highest_available_id
+        else:
+            # For metapackage overrides or restore: parent commit is the top commit of the
+            # target product release branch in the feed repo
+            base_release = release
+        target_branch = f"{base_release}-{constants.PRESTAGE_SUFFIX}"
+
+        if restore:
+            return self._prune_prestage_branch(deploy_sw_version, feed_repo, target_branch)
+
+        # Build MetapackageDeploymentSet for the install step
+        deploy_set = None
+        try:
+            deploy_set = MetapackageDeploymentSet(metapackage_data)
+        except ReleaseInvalidData as e:
+            msg = str(e)
+            LOG.error(msg)
+            msg_error += msg
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        target_metapackages = [mp.id for mp in deploy_set.metapackages]
+        # Build a new ostree commit on the target branch with all prestage metapackages
+        LOG.info(f"Starting prestage for product release {base_release} with "
+                 f"metapackages: {target_metapackages}")
+
+        # Get the original commit from the base release.
+        # The original commit is the commit in the base release who will
+        # parent the commit in the target branch.
+        sw_inventory = SoftwareInventoryManager(sw_ver=deploy_sw_version)
+        try:
+            original_commit = sw_inventory.get_branch_original_commit(base_release)
+        except BranchNotFound:
+            msg = (f"Ostree branch '{target_branch}' not found in feed repo "
+                   f"{feed_repo}. Ensure the release is properly uploaded")
+            LOG.error(msg)
+            msg_error += msg
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+        except Exception as e:
+            msg = (f"Failed to determine original commit from {base_release} "
+                   f"to prestage: {str(e)}")
+            LOG.error(msg)
+            msg_error += msg
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        msg = (f"Original commit to prestage: {original_commit} (target_branch: "
+               f"{target_branch})")
+        LOG.info(msg)
+        audit_log_info(msg)
+
+        if sw_inventory.branch_exists(target_branch):
+            LOG.info("Prestage branch already exists")
+            try:
+                LOG.info(f"Deleting old prestage branch {target_branch}")
+                sw_inventory.delete_branch(target_branch, prestage=True)
+                ostree_utils.update_repo_summary_file(feed_repo)
+            except Exception as e:
+                msg = str(e)
+                LOG.error(msg)
+                msg_error += msg
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Create target branch
+        LOG.info(f"Creating prestage branch {target_branch}")
+        sw_inventory.create_branch(original_commit, target_branch)
+
+        # New commit is created on top of the target branch
+        packages = [f"meta-{pkg.component}" for pkg in deploy_set.metapackages]
+        LOG.info(f"Installing prestage metapackages: {packages}")
+        try:
+            apt_utils.run_install(
+                feed_repo,
+                deploy_set.sw_version,
+                deploy_set.sw_release,
+                packages,
+                self.pre_bootstrap,
+                branch=target_branch)
+        except APTOSTreeCommandFail as e:
+            msg = str(e)
+            # Delete prestage branch on failure
+            sw_inventory.delete_ref(target_branch)
+            LOG.error(msg)
+            msg_error += msg
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Update metadata and update summary
+        try:
+            latest_feed_commit = sw_inventory.get_branch_commit(target_branch)
+
+            # Update metapackage metadata with the new commit-id and base commit
+            metadata_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP[states.AVAILABLE]
+            for mp in deploy_set.metapackages:
+                metadata_file = "%s/%s" % (metadata_dir, mp.metadata_filename)
+                self.update_ostree_commit_id(
+                    metadata_file, original_commit, latest_feed_commit)
+            LOG.info(f"Updated metapackage metadata with commit {latest_feed_commit} "
+                     f"(base: {original_commit})")
+
+            reload_release_data()
+
+            # Update the feed ostree summary
+            ostree_utils.update_repo_summary_file(feed_repo)
+        except Exception as e:
+            msg = f"Deploy prestage failed during post-install: {str(e)}"
+            # Delete prestage branch on failure
+            sw_inventory.delete_ref(target_branch)
+            LOG.error(msg)
+            msg_error += msg
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        msg_info += f"Prestage completed successfully for product release {release}"
+        LOG.info("Prestage completed for %s. commit: %s, parent: %s, branch: %s",
+                 release, latest_feed_commit, original_commit, target_branch)
+
+        self.software_sync()
+
+        return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
     def _validate_releases_for_precheck(self, releases: list):
         """
         Validate and resolve the releases list for deploy precheck.
@@ -4670,6 +5035,50 @@ class PatchController(PatchService):
         if text is not None:
             element.text = text
         return element
+
+    def _set_original_commit(self, release_id, commit_id):
+        """Persist the original commit in the product release metadata XML.
+
+        This is called once during upload after the release branch is created.
+        The original_commit value is immutable and identifies the commit that
+        was produced at upload time, before any prestage operations.
+
+        :param release_id: The product release ID (also the branch name)
+        :param commit_id: The original commit checksum to persist
+        """
+        release = self.release_collection.get_release_by_id(release_id)
+        if release is None:
+            LOG.warning("Cannot set original_commit: release %s not found", release_id)
+            return
+
+        # Search for metadata file in component uploading dir first, then
+        # the final metadata storage dir
+        search_dirs = [
+            states.COMPONENT_RELEASE_STATE_TO_DIR_MAP[states.UPLOADING],
+            constants.COMPONENT_SOFTWARE_METADATA_STORAGE_DIR,
+        ]
+
+        metadata_file = None
+        for dir_path in search_dirs:
+            candidate = os.path.join(str(dir_path), release.metadata_filename)
+            if os.path.exists(candidate):
+                metadata_file = candidate
+                break
+
+        if metadata_file is None:
+            LOG.warning("Cannot set original_commit: metadata file not found for %s", release_id)
+            return
+
+        tree = ET.parse(metadata_file)
+        root = tree.getroot()
+        self.add_text_tag_to_xml(root, constants.ORIGINAL_COMMIT_TAG, commit_id)
+
+        ET.indent(tree, '  ')
+        with open(metadata_file, "wb") as outfile:
+            outfile.write(ET.tostring(root))
+
+        LOG.info("Original commit %s persisted in metadata for release %s",
+                 commit_id, release_id)
 
     def update_ostree_commit_id(self, metadata_file, latest_commit, latest_feed_commit):
         tree = ET.parse(metadata_file)

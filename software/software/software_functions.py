@@ -546,6 +546,11 @@ class ReleaseData(object):
                                            self.metadata[release_id])
             # Parse optional product-level flags
             self._parse_metadata_tag(xml_file, "kernel_patch", self.metadata[release_id])
+
+            # Parse original_commit if present (set during upload)
+            original_commit = xml_file.findtext(constants.ORIGINAL_COMMIT_TAG)
+            if original_commit:
+                self.metadata[release_id][constants.ORIGINAL_COMMIT_TAG] = original_commit
         else:
             # Legacy or Metapackage Release
             xml_tags = [
