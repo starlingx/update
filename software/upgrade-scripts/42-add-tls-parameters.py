@@ -355,7 +355,7 @@ def _k8s_ciphers_already_applied(sysinv):
     return True
 
 
-def do_activate():
+def do_activate(from_release=None):
     """Activate phase: apply kubernetes service parameters.
 
     Triggers puppet class change_apiserver_parameters which updates
@@ -368,6 +368,11 @@ def do_activate():
 
     If the DB value is still incomplete (missing CHACHA20 ciphers),
     corrects it via the sysinv API before calling apply.
+
+    When upgrading from 25.09 (N-2 path), the apply is deferred to
+    script 45-apply-kubernetes-service-parameters.py which runs later
+    in FEATURE_POST_APPS. This consolidates both OIDC and TLS cipher
+    changes into a single kube-apiserver restart.
     """
     sysinv = _get_sysinv_client()
 
@@ -375,19 +380,29 @@ def do_activate():
         LOG.warning("k8s cipher suites missing CHACHA20 ciphers in DB, "
                     "correcting before apply")
         _fix_k8s_ciphers_via_api(sysinv)
-    else:
-        # DB value is correct. Check if the manifest already has the
-        # ciphers (reattempt after successful apply).
-        try:
-            out = subprocess.check_output(
-                ['cat', '/etc/kubernetes/manifests/kube-apiserver.yaml'],
-                text=True)
-            if all(c in out for c in K8S_MISSING_CIPHERS):
-                LOG.info("kube-apiserver manifest already has CHACHA20 "
-                         "ciphers, skipping apply")
-                return
-        except Exception:
-            pass
+
+    # When upgrading from 25.09, defer the apply to
+    # script 45-apply-kubernetes-service-parameters.py which runs
+    # after script 41, covering both OIDC and TLS cipher changes
+    # in a single kube-apiserver restart.
+    if from_release == "25.09":
+        LOG.info("Skipping kubernetes apply — will be performed by "
+                 "script 45-apply-kubernetes-service-parameters.py "
+                 "after OIDC parameters are handled")
+        return
+
+    # DB value is correct. Check if the manifest already has the
+    # ciphers (reattempt after successful apply).
+    try:
+        out = subprocess.check_output(
+            ['cat', '/etc/kubernetes/manifests/kube-apiserver.yaml'],
+            text=True)
+        if all(c in out for c in K8S_MISSING_CIPHERS):
+            LOG.info("kube-apiserver manifest already has CHACHA20 "
+                     "ciphers, skipping apply")
+            return
+    except Exception:
+        pass
 
     previous_pid = _get_pidof("kube-apiserver")
 
@@ -562,7 +577,7 @@ class AddTlsParameters(CPlugin):
         if action == "migrate":
             do_migrate(port)
         elif action == "activate":
-            do_activate()
+            do_activate(from_release)
         elif action == "activate-rollback":
             do_activate_rollback()
         else:

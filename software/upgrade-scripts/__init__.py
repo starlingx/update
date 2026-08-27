@@ -87,6 +87,9 @@ AddMissingServiceParameters = getattr(
 AddCgroupV2ServiceParameters = getattr(
     _import_module(".44-add-cgroup-v2-service-parameters", __name__),
     "AddCgroupV2ServiceParameters")
+ApplyKubernetesServiceParameters = getattr(
+    _import_module(".45-apply-kubernetes-service-parameters", __name__),
+    "ApplyKubernetesServiceParameters")
 NetappTridentMigration = getattr(
     _import_module(".203-netapp-trident-migration", __name__),
     "NetappTridentMigration")
@@ -150,7 +153,9 @@ PLUGINS = {
             EnableFluxcdControllers(),
             K8sAppUpgrade(),
         ],
-        FEATURE_POST_APPS: [],
+        FEATURE_POST_APPS: [
+            ApplyKubernetesServiceParameters(),
+        ],
         FRAMEWORK_FINALIZE: [
             UpdateISystemData(),
         ],
