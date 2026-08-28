@@ -35,6 +35,21 @@ class SWRelease(object):
         # sw_version: The release software version MM.mm.pp
         self._sw_version = None
         self._release = None
+        self._missing_metapackages = []
+
+    def add_missing_metapackage(self, mp_id):
+        """Track a metapackage that is listed in product release but has no metadata."""
+        self._missing_metapackages.append(mp_id)
+
+    @property
+    def has_missing_metapackages(self):
+        """Returns True if any metapackage metadata is missing for this product release."""
+        return len(self._missing_metapackages) > 0
+
+    @property
+    def missing_metapackages(self):
+        """Returns list of metapackage IDs with missing metadata."""
+        return self._missing_metapackages
 
     @property
     def metadata(self):
@@ -58,7 +73,15 @@ class SWRelease(object):
 
     def metapackage_based_state(self):
         mp_states = []
+
+        if self.has_missing_metapackages:
+            return states.UPLOAD_FAILED
+
         for _, metadata in self.metapackages.items():
+            # If metapackage is missing metadata it cannot
+            # be taken into account to calculate the attribute
+            if "state" not in metadata:
+                continue
             mp_states.append(metadata["state"])
 
         if all(state in [states.AVAILABLE, states.DEPLOY_SELECTED] for state in mp_states):
@@ -253,6 +276,10 @@ class SWRelease(object):
         reboot_required = True
         for mp in self.metapackages:
             mp_data = self.metapackages[mp]
+            # If metapackage is missing metadata it cannot
+            # be taken into account to calculate the attribute
+            if "reboot_required" not in mp_data:
+                continue
             if mp_data["reboot_required"] == "Y":
                 # If at least one metapackages is Reboot Required,
                 # the release is Reboot Required.
@@ -696,12 +723,22 @@ class SWReleaseCollection(object):
             if sw_release.is_product_release:
                 for mp in sw_release.metapackages or []:
                     mp_data = sw_release.metapackages[mp]
-                    mp_contents = sw_release.contents["metapackages"][mp]
+                    mp_contents = sw_release.contents["metapackages"].get(mp)
+                    if mp_contents is None:
+                        LOG.warning("Metapackage %s listed in product release %s "
+                                    "but metadata not found, skipping", mp, rel_id)
+                        sw_release.add_missing_metapackage(mp)
+                        continue
                     mp_release = SWRelease(mp, mp_data, mp_contents)
                     self._sw_metapackages[mp] = mp_release
                 for mp in sw_release.pre_upgrade_deploy or []:
                     mp_data = sw_release.pre_upgrade_deploy[mp]
-                    mp_contents = sw_release.contents["pre_upgrade_deploy"][mp]
+                    mp_contents = sw_release.contents["pre_upgrade_deploy"].get(mp)
+                    if mp_contents is None:
+                        LOG.warning("Pre-upgrade-deploy metapackage %s listed in product "
+                                    "release %s but metadata not found, skipping", mp, rel_id)
+                        sw_release.add_missing_metapackage(mp)
+                        continue
                     mp_release = SWRelease(mp, mp_data, mp_contents)
                     self._sw_pre_upgrade_deploy_metapackages[mp] = mp_release
 
