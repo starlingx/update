@@ -448,6 +448,33 @@ class PatchMessageAgentInstallResp(messages.PatchMessage):
         resp.send(sock)
 
 
+# TODO(mdecastr): Remove after upgrading from versions with legacy LUKS
+# passphrases is not possible.
+def signal_luks_legacy_keyslot_removal():
+    """Signal luks-fs-mgr to remove the legacy LUKS keyslot.
+
+    After deploy delete, rollback is no longer possible, so the legacy
+    keyslot (retained for rollback safety) can be removed. Sends SIGUSR1
+    to the running luks-fs-mgr process which handles removal internally.
+    """
+    try:
+        result = subprocess.run(["pkill", "-USR1", "luks-fs-mgr"],
+                                capture_output=True, text=True, check=False)
+        if result.returncode == 0:
+            LOG.info("Sent SIGUSR1 to luks-fs-mgr for legacy "
+                     "keyslot removal.")
+        elif result.returncode == 1:
+            # pkill returns 1 when no matching process is found. luks-fs-mgr
+            # only runs on controllers, so this is expected on
+            # workers/storage nodes where the cleanup request is also sent.
+            LOG.debug("No luks-fs-mgr process running (nothing to signal).")
+        else:
+            LOG.warning("pkill -USR1 luks-fs-mgr failed (rc=%s): %s",
+                        result.returncode, result.stderr.strip())
+    except Exception as e:
+        LOG.warning("Could not signal luks-fs-mgr: %s" % e)
+
+
 class SoftwareMessageDeployDeleteCleanupReq(messages.PatchMessage):
     def __init__(self):
         messages.PatchMessage.__init__(self, messages.PATCHMSG_DEPLOY_DELETE_CLEANUP_REQ)
@@ -471,6 +498,10 @@ class SoftwareMessageDeployDeleteCleanupReq(messages.PatchMessage):
 
         # remove the local upgrade flags created for the upgrade process
         success_remove_upgrade_flags = remove_major_release_deployment_flags()
+
+        # Signal luks-fs-mgr to remove the legacy keyslot now that
+        # rollback is no longer possible.
+        signal_luks_legacy_keyslot_removal()
 
         # undeploy the from-release ostree deployment to free sysroot disk space
         success_ostree_undeploy_from_release = ostree_utils.delete_older_deployments()
