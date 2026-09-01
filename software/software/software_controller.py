@@ -3352,6 +3352,14 @@ class PatchController(PatchService):
             deploying_release_state = ReleaseState(release_state=states.DEPLOYING)
             deploying_release_state.deploy_completed()
 
+            # Clear the 900.023 alarm immediately instead of waiting for
+            # the next patch-alarm daemon polling cycle (60s)
+            entity_instance_id = "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST,
+                                            constants.CONTROLLER_FLOATING_HOSTNAME)
+            self.fm_api.clear_fault(
+                fm_constants.FM_ALARM_ID_USM_RELEASE_DEPLOY_IN_PROGRESS,
+                entity_instance_id)
+
         except SoftwareServiceError:
             raise
         except Exception as e:
