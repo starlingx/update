@@ -2461,6 +2461,13 @@ class PatchController(PatchService):
                     LOG.exception(f"Failed to delete deployable branch {release_id}")
                     raise SoftwareServiceError(f"Failed to delete {release_id}")
 
+                # Determine if feed should be removed before deleting metadata
+                try:
+                    release_state = ReleaseState(release_ids=[release_id])
+                    delete_feed = release_state.is_major_release_deployment()
+                except Exception:
+                    delete_feed = False
+
                 # Remove patch-related content and metadata
                 # Major product release may have an apt-ostree repo that is removed in this step
                 try:
@@ -2482,8 +2489,6 @@ class PatchController(PatchService):
                     continue
                 # Remove the feed if is a major product release
                 try:
-                    release_state = ReleaseState(release_ids=[release_id])
-                    delete_feed = release_state.is_major_release_deployment()
                     if delete_feed:
                         feed_dir = Path(constants.FEED_OSTREE_BASE_DIR) / f"rel-{release.sw_version}"
                         LOG.info(f"Removing feed directory {feed_dir}")
@@ -3616,6 +3621,9 @@ class PatchController(PatchService):
         metapackage_versions = set()
         for mp in metapackage_releases:
             mp_data = self.release_collection.get_metapackage_release_by_id(mp)
+            if not mp_data:
+                raise ReleaseInvalidRequest(f"Metapackage {mp} metadata is missing. "
+                                            f"Re-upload the product release to fix.")
             metapackage_versions.add(mp_data.sw_release)
 
         if len(metapackage_versions) > 1:
@@ -4191,6 +4199,14 @@ class PatchController(PatchService):
             if not product:
                 msg = (f"Release {release} is not a product release. "
                        "Pre-upgrade-deploy start requires a product release")
+                LOG.error(msg)
+                msg_error += msg
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+            if product.has_missing_metapackages:
+                msg = (f"Product release {release} has missing metapackage metadata: "
+                       f"{', '.join(product.missing_metapackages)}. "
+                       f"Re-upload the product release to fix.")
                 LOG.error(msg)
                 msg_error += msg
                 return dict(info=msg_info, warning=msg_warning, error=msg_error)
@@ -4860,6 +4876,19 @@ class PatchController(PatchService):
         if options:
             options = self._parse_and_sanitize_extra_options(options)
         snapshot = to_bool(options.get('snapshot', False))
+
+        # Block precheck if product release has missing metapackage metadata
+        if selected_releases:
+            product_id = selected_releases[0].product
+            product_release = self.release_collection.get_product_release_by_id(product_id)
+            if product_release and product_release.has_missing_metapackages:
+                msg = (f"Product release {product_release.id} has missing metapackage metadata: "
+                       f"{', '.join(product_release.missing_metapackages)}. "
+                       f"Re-upload the release to fix.")
+                LOG.error(msg)
+                msg_error += msg
+                return dict(info=msg_info, error=msg_error, warning=msg_warning,
+                            additional_data=msg_additional_data)
 
         for release in selected_releases:
             release_id = release.id
