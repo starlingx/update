@@ -86,6 +86,13 @@ fixtures = {
             {},
         ),
     },
+    '/v1/deploy_host/install_local':
+    {
+        'POST': (
+            {},
+            {},
+        ),
+    },
 }
 
 
@@ -126,7 +133,7 @@ class ReleaseManagerTest(testtools.TestCase):
         self.assertEqual(len(release), 2)
 
     def test_release_delete(self):
-        response = self.mgr.release_delete("1")
+        response = self.mgr.release_delete(["1"], delete_all=False)
         expect = [
             ('DELETE', '/v1/release/1', {}, None),
         ]
@@ -158,17 +165,17 @@ class ReleaseManagerTest(testtools.TestCase):
         self.assertFalse(response[1], True)
 
     def test_upload(self):
-        input = {'release': '1', 'local': ''}
+        input = {'release': '1', 'local': False}
         args = Args(**input)
         response = self.mgr.upload(args)
         expect = [
             ('POST', '/v1/release', {}, {}),
         ]
         self.assertNotEqual(self.api.calls, expect)
-        self.assertEqual(response, 0)
+        self.assertEqual(response, 1)
 
     def test_upload_dir(self):
-        input = {'release': '1'}
+        input = {'release': '1', 'local': False}
         args = Args(**input)
         response = self.mgr.upload_dir(args)
         expect = [
@@ -178,9 +185,9 @@ class ReleaseManagerTest(testtools.TestCase):
         self.assertEqual(response, 0)
 
     def test_install_local(self):
-        self.mgr.install_local()
+        self.mgr.install_local(delete=False)
         expect = [
-            ('POST', '/v1/deploy/install_local', {}, None),
+            ('POST', '/v1/deploy_host/install_local', {}, {'delete': False}),
         ]
         self.assertEqual(self.api.calls, expect)
 
