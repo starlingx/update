@@ -3353,9 +3353,8 @@ class PatchController(PatchService):
 
             self.db_api_instance.delete_system_deploy()
 
-            # Set deployment state to completed so the 900.023 alarm can be cleared
-            deploying_release_state = ReleaseState(release_state=states.DEPLOYING)
-            deploying_release_state.deploy_completed()
+            # Set deployment state to completed so the 900.023 alarm can be cleared.
+            self._move_releases_from_deploying_to_deployed()
 
             # Clear the 900.023 alarm immediately instead of waiting for
             # the next patch-alarm daemon polling cycle (60s)
@@ -6373,17 +6372,8 @@ class PatchController(PatchService):
                 # Skip transitioning releases to deployed, system-deploy delete
                 # will handle this when the system-deploy entity is cleaned up
                 if not is_system_deploy_in_progress():
-                    if deploy.get("pre_upgrade_deploy", False):
-                        # For pre-upgrade-deploy, transition directly to avoid
-                        # ID collision issues with ReleaseState generic lookup
-                        metapackages_data = deploy.get("metapackages", [])
-                        for mp_name, _, to_version in metapackages_data:
-                            mp_id = f"{mp_name}_{to_version}"
-                            mp_release = self.release_collection.get_pre_upgrade_deploy_release_by_id(mp_id)
-                            if mp_release and mp_release.state == states.DEPLOYING:
-                                mp_release.update_state(states.DEPLOYED)
-                    else:
-                        deploying_release_state.deploy_completed()
+                    self._move_releases_from_deploying_to_deployed()
+
             else:
                 removing_release_state.available()
 
@@ -6489,6 +6479,36 @@ class PatchController(PatchService):
 
         LOG.info("Deploy is deleted")
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+    def _move_releases_from_deploying_to_deployed(self):
+        """
+        Transition the releases/metapackages of the current deploy from the
+        DEPLOYING state to DEPLOYED.
+
+        A deploy is either a regular deploy or a pre-upgrade-deploy, never both
+        at once, so exactly one of the two DEPLOYING sets below is populated.
+        The two sets are queried separately only because pre-upgrade-deploy
+        metapackages are keyed in a dedicated collection to avoid ID collisions
+        with regular releases; they still go through the same DEPLOYING ->
+        DEPLOYED transition.
+        """
+        # Regular deploy: ReleaseState(DEPLOYING) collects both legacy releases
+        # and regular metapackages in the DEPLOYING state.
+        deploying_release_state = ReleaseState(release_state=states.DEPLOYING)
+
+        # Pre-upgrade-deploy: dedicated collection lookup to avoid ID collision
+        # with the generic lookup.
+        pre_upgrade_deploying = ReleaseState(release_state=states.DEPLOYING,
+                                             pre_upgrade_deploy=True)
+
+        if deploying_release_state.has_release_id():
+            deploying_release_state.deploy_completed()
+        elif pre_upgrade_deploying.has_release_id():
+            pre_upgrade_deploying.deploy_completed()
+        else:
+            raise SoftwareServiceError(
+                error="No releases in the deploying state to transition to "
+                      "deployed.")
 
     def _deploy_complete(self):
         is_all_hosts_in_deployed_state = all(host_state.get("state") == DEPLOY_HOST_STATES.DEPLOYED.value
