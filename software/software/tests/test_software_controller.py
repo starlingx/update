@@ -995,3 +995,153 @@ class TestBuildMetapackageScripts(unittest.TestCase):
         result = PatchController._build_metapackage_scripts(  # pylint: disable=protected-access
             mp_releases, descending=True)
         self.assertEqual(list(result), ["13.0.3", "13.0.2", "13.0.1"])
+
+
+class TestEnsureReleaseBranch(unittest.TestCase):
+    """Tests for PatchController._ensure_release_branch, which recreates a
+    release's ostree branch (and its <requires> chain) when it is missing.
+    """
+
+    def _make_controller(self):
+        # release_collection is a read-only property returning
+        # get_SWReleaseCollection(); patch that so it returns our fake
+        with unittest.mock.patch.object(PatchController, "__init__", return_value=None):
+            controller = PatchController()
+        controller.pre_bootstrap = False
+        controller.software_sync = unittest.mock.MagicMock()
+        controller.remove_tags_from_metadata = unittest.mock.MagicMock()
+        controller.update_ostree_commit_id = unittest.mock.MagicMock()
+        controller._set_original_commit = unittest.mock.MagicMock()  # pylint: disable=protected-access
+        return controller
+
+    @staticmethod
+    def _make_release(rel_id, sw_release, requires=None, kernel_patch=False, metapackages=None):
+        release = unittest.mock.MagicMock()
+        release.id = rel_id
+        release.sw_release = sw_release
+        release.requires_release_ids = requires or []
+        release.kernel_patch = kernel_patch
+        release.metapackages = metapackages or {}
+        return release
+
+    @unittest.mock.patch("software.software_controller.get_SWReleaseCollection")
+    def test_noop_when_branch_exists(self, _mock_swrc):
+        # If the branch is already present, nothing is rebuilt
+        controller = self._make_controller()
+        sim = unittest.mock.MagicMock()
+        sim.branch_exists.return_value = True
+
+        controller._ensure_release_branch("starlingx-13.0.1", sim)  # pylint: disable=protected-access
+
+        sim.create_sw_release_branch.assert_not_called()
+        sim.create_kernel_release_branch.assert_not_called()
+
+    @unittest.mock.patch("software.software_controller.get_SWReleaseCollection")
+    def test_missing_release_record_is_hard_error(self, mock_swrc):
+        # A missing branch whose release record is also gone cannot be rebuilt
+        controller = self._make_controller()
+        mock_swrc.return_value.get_release_by_id.return_value = None
+        sim = unittest.mock.MagicMock()
+        sim.branch_exists.return_value = False
+
+        with self.assertRaises(SoftwareServiceError):
+            controller._ensure_release_branch("starlingx-13.0.1", sim)  # pylint: disable=protected-access
+
+    @unittest.mock.patch("software.software_controller.get_SWReleaseCollection")
+    @unittest.mock.patch("software.software_controller.reload_release_data")
+    @unittest.mock.patch("software.software_controller.utils.get_highest_required_release")
+    def test_recursive_chain_rebuild(self, mock_highest_req, _mock_reload, mock_swrc):
+        # .2 branch is missing and requires .1, whose branch is ALSO missing:
+        # the required .1 must be rebuilt first (bottom-up), then .2
+        controller = self._make_controller()
+
+        rel1 = self._make_release("starlingx-13.0.1", "13.0.1", requires=[])
+        rel2 = self._make_release("starlingx-13.0.2", "13.0.2",
+                                  requires=["starlingx-13.0.1"])
+        releases = {"starlingx-13.0.1": rel1, "starlingx-13.0.2": rel2}
+
+        swrc = mock_swrc.return_value
+        swrc.get_release_by_id.side_effect = releases.get
+        swrc.get_ordered_metapackages.return_value = []
+
+        # .1 requires nothing -> base resolved from deployed commit
+        mock_highest_req.side_effect = lambda reqs: (
+            "starlingx-13.0.1" if reqs else None)
+
+        sim = unittest.mock.MagicMock()
+        # Both target branches are missing; the deployed base and the rebuilt
+        # branches resolve after creation. branch_exists: False for the two
+        # release branches so both get rebuilt.
+        sim.branch_exists.return_value = False
+        sim.get_deployed_commit.return_value = "deployed-commit"
+        sim.get_release_by_commit.return_value = "starlingx-13.0.0"
+        sim.get_branch_commit.return_value = "rebuilt-commit"
+
+        controller._ensure_release_branch("starlingx-13.0.2", sim)  # pylint: disable=protected-access
+
+        # Both branches rebuilt, required (.1) before target (.2)
+        built = [c.args[1] for c in sim.create_sw_release_branch.call_args_list]
+        self.assertEqual(built, ["starlingx-13.0.1", "starlingx-13.0.2"])
+
+    @unittest.mock.patch("software.software_controller.get_SWReleaseCollection")
+    @unittest.mock.patch("software.software_controller.os.path.isdir", return_value=False)
+    @unittest.mock.patch("software.software_controller.utils.get_highest_required_release",
+                         return_value=None)
+    def test_kernel_patch_missing_extra_repo_is_hard_error(self, _mock_req, _mock_isdir, mock_swrc):
+        # A kernel patch rebuild needs the shipped extra ostree repo; if it is
+        # gone the rebuild is a hard error asking to re-upload
+        controller = self._make_controller()
+        release = self._make_release("starlingx-13.0.1", "13.0.1",
+                                     kernel_patch=True)
+        swrc = mock_swrc.return_value
+        swrc.get_release_by_id.return_value = release
+        swrc.get_ordered_metapackages.return_value = []
+
+        sim = unittest.mock.MagicMock()
+        sim.branch_exists.return_value = False
+        sim.get_deployed_commit.return_value = "deployed-commit"
+        sim.get_release_by_commit.return_value = "starlingx-13.0.0"
+
+        with self.assertRaises(SoftwareServiceError):
+            controller._ensure_release_branch("starlingx-13.0.1", sim)  # pylint: disable=protected-access
+        sim.create_kernel_release_branch.assert_not_called()
+
+    @unittest.mock.patch("software.software_controller.get_SWReleaseCollection")
+    @unittest.mock.patch("software.software_controller.os.path.exists", return_value=True)
+    @unittest.mock.patch("software.software_controller.reload_release_data")
+    @unittest.mock.patch("software.software_controller.utils.get_highest_required_release",
+                         return_value=None)
+    def test_rebuild_wipes_contents_before_writing_commit1(self, _mock_req, _mock_reload,
+                                                           _mock_exists, mock_swrc):
+        # A regular rebuild must clear stale metadata contents (e.g. leftover
+        # commitN) before writing a fresh commit1, and refresh original_commit
+        controller = self._make_controller()
+
+        mp = unittest.mock.MagicMock()
+        mp.component = "base"
+        mp.state = states.DEPLOYED
+        mp.metadata_filename = "base_13.0.1-metadata.xml"
+
+        release = self._make_release("starlingx-13.0.1", "13.0.1",
+                                     metapackages={"base_13.0.1": {}})
+        swrc = mock_swrc.return_value
+        swrc.get_release_by_id.return_value = release
+        swrc.get_ordered_metapackages.return_value = [mp]
+
+        sim = unittest.mock.MagicMock()
+        sim.branch_exists.return_value = False
+        sim.get_deployed_commit.return_value = "deployed-commit"
+        sim.get_release_by_commit.return_value = "starlingx-13.0.0"
+        sim.get_branch_commit.return_value = "new-commit"
+
+        controller._ensure_release_branch("starlingx-13.0.1", sim)  # pylint: disable=protected-access
+
+        # Regular (non-kernel) build path used
+        sim.create_sw_release_branch.assert_called_once()
+        sim.create_kernel_release_branch.assert_not_called()
+        # Stale contents wiped before a fresh commit1 is written
+        controller.remove_tags_from_metadata.assert_called_once_with(mp, constants.CONTENTS_TAG)
+        controller.update_ostree_commit_id.assert_called_once()
+        # Product original_commit refreshed with the rebuilt commit
+        controller._set_original_commit.assert_called_once_with(  # pylint: disable=protected-access
+            "starlingx-13.0.1", "new-commit")
