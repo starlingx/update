@@ -15,6 +15,27 @@
         - software-tox-py39
         - software-client-tox-flake8
         - software-client-tox-pylint
+        - software-tox-coverage:
+            voting: false
+        - software-client-tox-coverage:
+            voting: false
+        - patch-alarm-tox-coverage:
+            voting: false
+        - py3-bandit-trixie
+        - py3-flake8-trixie
+        - patch-alarm-tox-pylint-trixie
+        - patch-alarm-tox-py313-trixie
+        - software-tox-flake8-trixie
+        - software-tox-pylint-trixie
+        - software-tox-py313-trixie
+        - software-client-tox-flake8-trixie
+        - software-client-tox-pylint-trixie
+        - software-tox-coverage-trixie:
+            voting: false
+        - software-client-tox-coverage-trixie:
+            voting: false
+        - patch-alarm-tox-coverage-trixie:
+            voting: false
     gate:
       jobs:
         - openstack-tox-linters
@@ -112,6 +133,7 @@
     nodeset: debian-bullseye
     required-projects:
       - starlingx/config
+      - starlingx/utilities
     files:
       - software-client/*
     vars:
@@ -250,3 +272,212 @@
           XmhOj9kjRFw5fanrVsh0oZwXSi013CzW3GT0EuIcb1z4LuAXnZLGVN1THnPEdzfD/pr2Q
           Z6kmXoZDiQe6Fq7PilRP3DVPeg5CsZiurzLgVgYx28fHSRx5Z6LkQ/zbrLWjetVxS7Esq
           2nrupHgCUSZ4Go/AX4kYzlZqBRlpnc8X1MoqcCoF/ZUCc5H8rnG4iBWqyBc4/4=
+- job:
+    name: software-tox-coverage
+    parent: tox
+    description: Run all tests with coverage analysis
+    nodeset: debian-bullseye
+    required-projects:
+      - starlingx/config
+      - starlingx/fault
+      - starlingx/utilities
+    vars:
+      tox_envlist: coverage
+      tox_extra_args: -c software/tox.ini
+    post-run: playbooks/upload-coverage-reports.yaml
+
+- job:
+    name: software-client-tox-coverage
+    parent: tox
+    description: Run software-client tests with coverage
+    nodeset: debian-bullseye
+    required-projects:
+      - starlingx/config
+      - starlingx/utilities
+    files:
+      - software-client/*
+    vars:
+      tox_envlist: coverage
+      tox_extra_args: -c software-client/tox.ini
+
+- job:
+    name: patch-alarm-tox-coverage
+    parent: tox
+    description: Run patch-alarm tests with coverage
+    nodeset: debian-bullseye
+    required-projects:
+      - starlingx/config
+      - starlingx/fault
+    files:
+      - patch-alarm/patch-alarm/*
+    vars:
+      tox_envlist: coverage
+      tox_extra_args: -c patch-alarm/patch-alarm/tox.ini
+
+- job:
+    name: py3-bandit-trixie
+    parent: tox
+    nodeset: debian-trixie-8GB
+    voting: false
+    vars:
+      tox_envlist: bandit-trixie
+
+- job:
+    name: py3-flake8-trixie
+    parent: tox
+    nodeset: debian-trixie-8GB
+    required-projects:
+      - starlingx/config
+      - starlingx/fault
+    voting: false
+    vars:
+      tox_envlist: flake8-trixie
+
+- job:
+    name: software-tox-py313-trixie
+    parent: tox
+    nodeset: debian-trixie-8GB
+    required-projects:
+      - starlingx/config
+      - starlingx/fault
+      - starlingx/utilities
+    files:
+      - software/*
+    voting: false
+    vars:
+      tox_envlist: py313-trixie
+      tox_extra_args: -c software/tox.ini
+
+- job:
+    name: software-tox-flake8-trixie
+    parent: tox
+    nodeset: debian-trixie-8GB
+    required-projects:
+      - starlingx/config
+      - starlingx/fault
+      - starlingx/utilities
+    files:
+      - software/*
+    voting: false
+    vars:
+      tox_envlist: flake8-trixie
+      tox_extra_args: -c software/tox.ini
+
+- job:
+    name: software-tox-pylint-trixie
+    parent: tox
+    nodeset: debian-trixie-8GB
+    required-projects:
+      - starlingx/config
+      - starlingx/fault
+      - starlingx/utilities
+    files:
+      - software/*
+    voting: false
+    vars:
+      tox_envlist: pylint-trixie
+      tox_extra_args: -c software/tox.ini
+
+- job:
+    name: software-client-tox-flake8-trixie
+    parent: tox
+    nodeset: debian-trixie-8GB
+    required-projects:
+      - starlingx/config
+      - starlingx/utilities
+    files:
+      - software-client/*
+    voting: false
+    vars:
+      tox_envlist: flake8-trixie
+      tox_extra_args: -c software-client/tox.ini
+
+- job:
+    name: software-client-tox-pylint-trixie
+    parent: tox
+    nodeset: debian-trixie-8GB
+    required-projects:
+      - starlingx/config
+      - starlingx/utilities
+    files:
+      - software-client/*
+    voting: false
+    vars:
+      tox_envlist: pylint-trixie
+      tox_extra_args: -c software-client/tox.ini
+
+- job:
+    name: patch-alarm-tox-pylint-trixie
+    parent: tox
+    nodeset: debian-trixie-8GB
+    required-projects:
+      - starlingx/config
+      - starlingx/fault
+    files:
+      - patch-alarm/patch-alarm/*
+    voting: false
+    vars:
+      bindep_profile: pylint
+      tox_envlist: pylint-trixie
+      tox_extra_args: -c patch-alarm/patch-alarm/tox.ini
+
+- job:
+    name: patch-alarm-tox-py313-trixie
+    parent: tox
+    nodeset: debian-trixie-8GB
+    required-projects:
+      - starlingx/config
+      - starlingx/fault
+    files:
+      - patch-alarm/patch-alarm/*
+    voting: false
+    vars:
+      bindep_profile: python3
+      tox_envlist: py313-trixie
+      tox_extra_args: -c patch-alarm/patch-alarm/tox.ini
+
+- job:
+    name: software-tox-coverage-trixie
+    parent: tox
+    description: Run all tests with coverage analysis on trixie
+    nodeset: debian-trixie-8GB
+    required-projects:
+      - starlingx/config
+      - starlingx/fault
+      - starlingx/utilities
+    voting: false
+    vars:
+      tox_envlist: coverage-trixie
+      tox_extra_args: -c software/tox.ini
+    post-run: playbooks/upload-coverage-reports.yaml
+
+- job:
+    name: software-client-tox-coverage-trixie
+    parent: tox
+    description: Run software-client tests with coverage on trixie
+    nodeset: debian-trixie-8GB
+    required-projects:
+      - starlingx/config
+      - starlingx/utilities
+    files:
+      - software-client/*
+    voting: false
+    vars:
+      tox_envlist: coverage-trixie
+      tox_extra_args: -c software-client/tox.ini
+
+- job:
+    name: patch-alarm-tox-coverage-trixie
+    parent: tox
+    description: Run patch-alarm tests with coverage on trixie
+    nodeset: debian-trixie-8GB
+    required-projects:
+      - starlingx/config
+      - starlingx/fault
+    files:
+      - patch-alarm/patch-alarm/*
+    voting: false
+    vars:
+      bindep_profile: python3
+      tox_envlist: coverage-trixie
+      tox_extra_args: -c patch-alarm/patch-alarm/tox.ini
