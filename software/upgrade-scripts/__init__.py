@@ -60,6 +60,9 @@ K8sAppUpgrade = getattr(
 RollbackFluxcdControllers = getattr(
     _import_module(".22-rollback-fluxcd-controllers", __name__),
     "RollbackFluxcdControllers")
+RollbackKeystoneFederation = getattr(
+    _import_module(".25-rollback-keystone-federation", __name__),
+    "RollbackKeystoneFederation")
 CleanUpDeploymentData = getattr(
     _import_module(".26-clean-up-deployment-data", __name__),
     "CleanUpDeploymentData")
@@ -174,6 +177,7 @@ PLUGINS = {
         ],
         FEATURE_POST_APPS: [
             NetappTridentMigration(),
+            RollbackKeystoneFederation(),
         ],
         FRAMEWORK_FINALIZE: [],
     },
