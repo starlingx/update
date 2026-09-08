@@ -36,7 +36,10 @@ software_conf_mtime = 0
 software_conf = '/etc/software/software.conf'
 
 DEBIAN_ORIGIN = "updates"
-DEBIAN_RELEASE = "trixie"
+DEBIAN_RELEASE_BULLSEYE = "bullseye"
+DEBIAN_RELEASE_TRIXIE = "trixie"
+LAST_BULLSEYE_RELEASE = "26.03"
+FIRST_METAPACKAGE_AWARE_RELEASE = "26.03"
 
 
 def get_token_endpoint(config, service_type="platform"):
@@ -425,17 +428,30 @@ def is_metapackage_deb(deb_path):
     return False
 
 
-def initialize_apt_ostree(feed_dir):
+def normalize_none(var):
+    return None if var in [None, "None"] else var
+
+
+# TODO(heitormatsui): Remove when 'bullseye' is not a valid from-release
+def get_apt_ostree_release(from_release=None):
+    # stx.13 or older uses 'bullseye' for apt-ostree repo
+    if from_release and version.parse(from_release) <= version.parse(LAST_BULLSEYE_RELEASE):
+        return DEBIAN_RELEASE_BULLSEYE
+    return DEBIAN_RELEASE_TRIXIE
+
+
+def initialize_apt_ostree(feed_dir, from_release=None):
     """
     Initialize an apt Debian package archive.
 
     :param feed_dir: apt package feed directory
+    :param from_release: from-release version
     """
     try:
         subprocess.run(
             ["apt-ostree", "repo", "init",
              "--feed", str(feed_dir),
-             "--release", DEBIAN_RELEASE,
+             "--release", get_apt_ostree_release(from_release),
              "--origin", DEBIAN_ORIGIN],
             check=True,
             capture_output=True)
@@ -447,19 +463,20 @@ def initialize_apt_ostree(feed_dir):
         raise OSError(msg)
 
 
-def package_list_upload(feed_dir, sw_release, package_list):
+def package_list_upload(feed_dir, sw_release, package_list, from_release=None):
     """
     Upload a Debian package to an apt repository.
 
     :param feed_dir: apt package feed directory
     :param sw_release: Uploading patch release version (MM.mm.pp)
     :param package_list: Debian package list
+    :param from_release: from-release version
     """
     try:
         subprocess.run(
             ["apt-ostree", "repo", "add",
              "--feed", str(feed_dir),
-             "--release", DEBIAN_RELEASE,
+             "--release", get_apt_ostree_release(from_release),
              "--component", sw_release,
              *package_list],
             check=True,
@@ -475,23 +492,23 @@ def package_list_upload(feed_dir, sw_release, package_list):
         raise OSError(msg)
 
 
-def component_remove(pkg_feed_dir, component):
+def component_remove(feed_dir, component, from_release=None):
     """
     Remove the component with all packages from the
     apt repository.
 
-    :param pkg_feed_dir: apt package feed directory
+    :param feed_dir: apt package feed directory
     :param component: Component name in format MM.mm.pp
+    :param from_release: from-release version
     """
-
     try:
         msg = "Removing component: %s" % component
         LOG.info(msg)
 
         subprocess.run(
             ["apt-ostree", "repo", "remove",
-                "--feed", str(pkg_feed_dir),
-                "--release", DEBIAN_RELEASE,
+                "--feed", str(feed_dir),
+                "--release", get_apt_ostree_release(from_release),
                 "--component", component],
             check=True,
             capture_output=True)

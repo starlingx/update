@@ -46,7 +46,6 @@ FEED_REMOTE = "starlingx"
 FEED_BRANCH = "starlingx"
 METAPACKAGES_DIR = "/usr/local/share/metapackages"
 PACKAGE_FEED_DIR = Path("/var/www/pages/updates/debian")
-MIN_METAPACKAGE_RELEASE = "26.10.0"
 
 # Ensure the metapackage base directories exist
 # This will create the parents and metapackage state directories
@@ -61,7 +60,7 @@ def setup_from_release_load(from_release, to_feed_dir):
     :param to_feed_dir: to release feed directory
     """
     # 'None' is passed from this script argument
-    if from_release == 'None':
+    if from_release is None:
         LOG.info("From release is not specified. Skipping from release load")
         return
 
@@ -242,13 +241,17 @@ def load_import(from_release, to_release, iso_mount_dir, metapackages):
                     pkg_repo_dir = PACKAGE_FEED_DIR / f"rel-{to_major_rel}"
                     try:
                         if not pkg_repo_dir.exists():
-                            upgrade_utils.initialize_apt_ostree(str(pkg_repo_dir))
+                            upgrade_utils.initialize_apt_ostree(str(pkg_repo_dir),
+                                                                from_release=from_release)
                             LOG.info(f"Initialized package repository: {pkg_repo_dir}")
-                        upgrade_utils.package_list_upload(str(pkg_repo_dir), to_release, pre_upgrade_deploy_pkg_list)
+                        upgrade_utils.package_list_upload(str(pkg_repo_dir), to_release,
+                                                          pre_upgrade_deploy_pkg_list,
+                                                          from_release=from_release)
                         LOG.info(f"Uploaded packages to repository")
                     except Exception as e:
                         LOG.error(f"Failed setting up package repository: {str(e)}")
-                        upgrade_utils.component_remove(str(pkg_repo_dir), to_release)
+                        upgrade_utils.component_remove(str(pkg_repo_dir), to_release,
+                                                       from_release=from_release)
                         raise
                     # Process metapackages
                     pre_upgrade_deploy_to_release_dir = to_release_dir / "pre-upgrade-deploy"
@@ -332,9 +335,11 @@ def sync_inactive_load_standby_controller(to_release):
 
 # TODO(heitormatsui): remove when non-metapackage releases are deprecated
 def should_upload_metapackages(from_release, metapackages=False):
-    if from_release in [None, 'None']:
+    # When this script is uploading an older release
+    if from_release is None:
         return True
-    return version.parse(from_release) >= version.parse(MIN_METAPACKAGE_RELEASE) or metapackages
+    return (version.parse(from_release) >=
+            version.parse(upgrade_utils.FIRST_METAPACKAGE_AWARE_RELEASE) or metapackages)
 
 
 def main():
@@ -346,6 +351,7 @@ def main():
         "--from-release",
         required=True,
         help="The from-release version.",
+        type=upgrade_utils.normalize_none,
     )
     parser.add_argument(
         "--to-release",
@@ -369,16 +375,19 @@ def main():
         LOG.info("Load import from %s to %s started", args.from_release, args.to_release)
         load_import(args.from_release, args.to_release, args.iso_dir, args.metapackages)
 
-        legacy_release = args.from_release in ['None', None]
+        older_release_import = args.from_release is None
         if should_upload_metapackages(args.from_release, args.metapackages):
-            target_dir = SOFTWARE_RELEASES_METADATA_STORAGE_DIR
-        elif legacy_release:
-            target_dir = LEGACY_UNAVAILABLE_DIR
+            # For stx.12 the metadata goes into legacy directory for backward compatibility
+            if (args.from_release and version.parse(args.from_release) ==
+                    version.parse(upgrade_utils.FIRST_METAPACKAGE_AWARE_RELEASE)):
+                target_dir = LEGACY_AVAILABLE_DIR
+            else:
+                target_dir = SOFTWARE_RELEASES_METADATA_STORAGE_DIR
         else:
             target_dir = LEGACY_AVAILABLE_DIR
         move_metadata_file_to_target_dir(args.to_release, args.iso_dir, target_dir)
 
-        if legacy_release:  # This is N-1 load
+        if older_release_import:  # This is N-1 load
             sync_inactive_load_standby_controller(args.to_release)
 
     except Exception as e:
