@@ -42,6 +42,7 @@ from sysinv.common.kubernetes import k8s_wait_for_endpoints_health
 LOG = logging.getLogger("main_logger")
 
 K8S_SERVICE = "kubernetes"
+K8S_SECTION = "kube_apiserver"
 
 # CHACHA20 cipher suites that must be present in the kube-apiserver
 # manifest after a successful apply.
@@ -159,7 +160,7 @@ def do_activate(from_release):
     previous_pid = _get_pidof("kube-apiserver")
 
     LOG.info("Applying kubernetes service parameters")
-    sysinv.service_parameter.apply(K8S_SERVICE)
+    sysinv.service_parameter.apply(K8S_SERVICE, K8S_SECTION)
 
     _wait_kube_apiserver_up(previous_pid)
 

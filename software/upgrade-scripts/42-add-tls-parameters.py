@@ -407,7 +407,7 @@ def do_activate(from_release=None):
     previous_pid = _get_pidof("kube-apiserver")
 
     LOG.info("Applying kubernetes service parameters")
-    sysinv.service_parameter.apply(K8S_SERVICE)
+    sysinv.service_parameter.apply(K8S_SERVICE, K8S_SECTION)
 
     _wait_kube_apiserver_up(previous_pid)
 
@@ -483,7 +483,7 @@ def do_activate_rollback():
     previous_pid = _get_pidof("kube-apiserver")
 
     LOG.info("Applying kubernetes service parameters (rollback)")
-    sysinv.service_parameter.apply(K8S_SERVICE)
+    sysinv.service_parameter.apply(K8S_SERVICE, K8S_SECTION)
 
     _wait_kube_apiserver_up(previous_pid)
 

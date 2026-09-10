@@ -197,7 +197,8 @@ def main():
     previous_pid = get_pidof("kube-apiserver")
 
     LOG.info("Applying Kubernetes service parameters")
-    sysinv.service_parameter.apply(c.SERVICE_TYPE_KUBERNETES)
+    sysinv.service_parameter.apply(c.SERVICE_TYPE_KUBERNETES,
+                                   c.SERVICE_PARAM_SECTION_KUBERNETES_APISERVER)
 
     wait_kube_apiserver_up(previous_pid)
 
