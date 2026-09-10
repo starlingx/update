@@ -678,9 +678,11 @@ class ReleaseData(object):
         # Reset the data
         self._reset()
 
-        # This function firstly parses the Product metadata and secondly Metapackage
-        # and Legacy metadatas.
-        # metadata_state_map = [(path, state)]
+        # A metapackage resolves its product by sw_version and can only be
+        # parsed after that product is in self.metadata. Since a product and its
+        # metapackages may live in different state directories (e.g. during a
+        # rollback), parse in two passes: products/legacy releases first, then
+        # metapackages. This keeps loading independent of discovery order
         metadata_state_map = [
             (constants.COMPONENT_SOFTWARE_METADATA_STORAGE_DIR, None)
         ]
@@ -689,14 +691,31 @@ class ReleaseData(object):
             for path in paths:
                 metadata_state_map.append((path, state))
 
+        # Collect and classify all metadata files up front so parse ordering is
+        # driven by release type rather than by discovery order
+        non_metapackage_files = []
+        metapackage_files = []
         for path, state in metadata_state_map:
-            # Parse product metadata.xml
             for filename, text in self._read_all_metafile(path):
                 try:
-                    self.parse_metadata_string(text, state=state)
+                    root_tag = ElementTree.fromstring(text).tag
                 except Exception as e:
-                    err_msg = f"Failed parsing {filename}, {e}"
-                    LOG.exception(err_msg)
+                    LOG.exception(f"Failed parsing {filename}, {e}")
+                    continue
+
+                if root_tag == "metapackage":
+                    metapackage_files.append((filename, text, state))
+                else:
+                    non_metapackage_files.append((filename, text, state))
+
+        # Pass 1: product and legacy patch releases
+        # Pass 2: metapackage releases (depend on their product being parsed previously)
+        for filename, text, state in non_metapackage_files + metapackage_files:
+            try:
+                self.parse_metadata_string(text, state=state)
+            except Exception as e:
+                err_msg = f"Failed parsing {filename}, {e}"
+                LOG.exception(err_msg)
 
     def query_line(self,
                    release_id,
