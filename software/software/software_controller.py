@@ -2015,6 +2015,10 @@ class PatchController(PatchService):
                             release_sw_version = thispatch.metadata[patch_id]["sw_version"]
                             pkg_feed_dir = "%s/rel-%s" % (constants.PACKAGE_FEED_DIR, release_sw_version)
                             apt_utils.component_remove(pkg_feed_dir, release_sw_version)
+
+                            software_dir = "%s/rel-%s" % (constants.SOFTWARE_STORAGE_DIR, release_sw_version)
+                            if os.path.exists(software_dir):
+                                shutil.rmtree(software_dir)
                         except Exception:
                             LOG.info("Could not delete apt-ostree component, does not exist")
                     continue

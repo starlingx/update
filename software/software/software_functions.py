@@ -1191,8 +1191,11 @@ class PatchFile(object):
             extra_origin = os.path.join(tmpdir, "extra.tar")
             if os.path.exists(extra_origin):
                 patch_dir = "%s/rel-%s" % (constants.SOFTWARE_STORAGE_DIR, patch_sw_release)
+                extra_dest = os.path.join(patch_dir, "extra")
                 if not os.path.exists(patch_dir):
                     os.makedirs(patch_dir)
+                elif os.path.exists(extra_dest):
+                    shutil.rmtree(extra_dest)
                 shutil.move(extra_origin, patch_dir)
                 LOG.info("extra.tar copied to %s" % patch_dir)
 
