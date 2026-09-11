@@ -1880,6 +1880,12 @@ class PatchController(PatchService):
 
                     self.software_sync()
                     rel_state.uploaded()
+                except BranchNotFound:
+                    LOG.error(
+                        f"Branch {require_release_id} not found, please verify if "
+                        f"the required release {require_release_id} is uploaded and in "
+                        f"available state before retrying the upload of {release_id}")
+                    rel_state.upload_failed()
                 except Exception:
                     LOG.exception(f"Failed to create deployable branch for {release_id}")
                     rel_state.upload_failed()
