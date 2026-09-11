@@ -1846,12 +1846,20 @@ class PatchController(PatchService):
 
         def _create_sw_release(sw_rel, release_id):
             sw_ver = utils.get_major_release_version(sw_rel)
-            if sw_ver:
-                new_branch = release_id
+            if not sw_ver:
+                return
+
+            new_branch = release_id
+            rel_state = ReleaseState(release_ids=[release_id])
+            # Guard the whole per-release work so one failure marks only that
+            # release upload-failed instead of aborting the batch
+            try:
                 swrc = get_SWReleaseCollection()
                 release = swrc.get_release_by_id(release_id)
 
-                metapackages = release.metapackages
+                # Pass metapackage ids as a list; get_ordered_metapackages
+                # silently ignores a non-list filter_by_ids
+                metapackages = list(release.metapackages)
                 mp_data = self.release_collection.get_ordered_metapackages(
                     filter_by_ids=metapackages,
                     filter_by_states=[states.UPLOADING]
@@ -1867,31 +1875,35 @@ class PatchController(PatchService):
                     commit_id = sim.get_deployed_commit()
                     require_release_id = sim.get_release_by_commit(commit_id)
 
-                rel_state = ReleaseState(release_ids=[release_id])
-                try:
-                    sim.create_sw_release_branch(require_release_id, new_branch, packages, pre_bootstrap)
-                    # Update metapackage metadata commit-id
-                    commit_id = sim.get_branch_commit(new_branch)
-                    base_commit_id = sim.get_branch_commit(require_release_id)
-                    update_commit_id_to_all_mp(base_commit_id, commit_id)
+                sim.create_sw_release_branch(require_release_id, new_branch, packages, pre_bootstrap)
+                # Update metapackage metadata commit-id
+                commit_id = sim.get_branch_commit(new_branch)
+                base_commit_id = sim.get_branch_commit(require_release_id)
+                update_commit_id_to_all_mp(base_commit_id, commit_id)
 
-                    # Persist the original commit in product release metadata
-                    self._set_original_commit(release_id, commit_id)
+                # Persist the original commit in product release metadata
+                self._set_original_commit(release_id, commit_id)
 
-                    self.software_sync()
-                    rel_state.uploaded()
-                except BranchNotFound:
-                    LOG.error(
-                        f"Branch {require_release_id} not found, please verify if "
-                        f"the required release {require_release_id} is uploaded and in "
-                        f"available state before retrying the upload of {release_id}")
-                    rel_state.upload_failed()
-                except Exception:
-                    LOG.exception(f"Failed to create deployable branch for {release_id}")
-                    rel_state.upload_failed()
+                self.software_sync()
+                rel_state.uploaded()
+            except BranchNotFound:
+                LOG.error(
+                    f"Branch {require_release_id} not found, please verify if "
+                    f"the required release {require_release_id} is uploaded and in "
+                    f"available state before retrying the upload of {release_id}")
+                rel_state.upload_failed()
+            except Exception:
+                LOG.exception(f"Failed to create deployable branch for {release_id}")
+                rel_state.upload_failed()
+
+        def _sort_key(patch):
+            info = next(iter(patch.values()))
+            return utils.parse_release_version(info["id"])
 
         pre_bootstrap = self.pre_bootstrap
-        for patch in patch_info:
+        # Process releases in ascending order so that when a release
+        # requires another, the required release's branch is created first
+        for patch in sorted(patch_info, key=_sort_key):
             for info in patch.values():
                 sw_rel = info["sw_release"]
                 rel_id = info["id"]

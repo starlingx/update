@@ -809,3 +809,136 @@ class TestSoftwareController(unittest.TestCase):
         # Should NOT raise - fails open
         result = controller.software_deploy_abort_api()
         self.assertIn("info", result)
+
+
+class TestCreateSwReleasesIt(unittest.TestCase):
+    """Tests for PatchController.create_sw_releases_it, which creates the
+    ostree branch/commit for each uploaded product release.
+    """
+
+    @staticmethod
+    def _patch_info(*release_ids):
+        """Build a patch_info list mirroring what _process_upload_patch_files
+        accumulates: a list of single-key dicts {filename: {id, sw_release,
+        is_product_release}}.
+        """
+        patch_info = []
+        for rel_id in release_ids:
+            sw_release = rel_id.split("-", 1)[1]  # 'starlingx-13.0.1' -> '13.0.1'
+            patch_info.append({
+                f"{sw_release}.patch": {
+                    "id": rel_id,
+                    "sw_release": sw_release,
+                    "is_product_release": True,
+                }
+            })
+        return patch_info
+
+    def _make_release(self, rel_id):
+        """A release whose .metapackages is a dict keyed by metapackage id,
+        matching the real ReleaseData shape.
+        """
+        sw_release = rel_id.split("-", 1)[1]
+        release = unittest.mock.MagicMock()
+        release.metapackages = {
+            f"distcloud_{sw_release}": {},
+            f"infra_{sw_release}": {},
+            f"k8s-common_{sw_release}": {},
+        }
+        release.requires_release_ids = []
+        return release
+
+    def _run(self, controller, patch_info):
+        # create_sw_releases_it is @threaded and returns the Thread; join it so
+        # the body completes before we assert.
+        thread = controller.create_sw_releases_it(patch_info)
+        if thread is not None:
+            thread.join()
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
+    @unittest.mock.patch('software.software_controller.SW_VERSION', '13.0')
+    @unittest.mock.patch('software.software_controller.ReleaseState')
+    @unittest.mock.patch('software.software_controller.MetapackageDeploymentSet')
+    @unittest.mock.patch('software.software_controller.SoftwareInventoryManager')
+    @unittest.mock.patch('software.software_controller.get_SWReleaseCollection')
+    def test_metapackage_filter_is_scoped_list(self,
+                                               mock_get_swrc,
+                                               mock_sim_cls,
+                                               mock_mp_set,   # pylint: disable=unused-argument
+                                               mock_rel_state,   # pylint: disable=unused-argument
+                                               mock_init):   # pylint: disable=unused-argument
+        # get_ordered_metapackages must be called with filter_by_ids as a LIST
+        # of this release's metapackage ids (a dict is silently ignored by the
+        # filter, which previously pulled in metapackages of all releases).
+        controller = PatchController()
+        controller.pre_bootstrap = False
+        controller.software_sync = unittest.mock.MagicMock()
+        controller._set_original_commit = unittest.mock.MagicMock()  # pylint: disable=protected-access
+        controller.update_ostree_commit_id = unittest.mock.MagicMock()
+
+        # release_collection is a property returning get_SWReleaseCollection(),
+        # so this single mock backs both get_release_by_id and
+        # get_ordered_metapackages.
+        release = self._make_release("starlingx-13.0.1")
+        swrc = mock_get_swrc.return_value
+        swrc.get_release_by_id.return_value = release
+
+        # SoftwareInventoryManager instance with a resolvable base
+        sim = mock_sim_cls.return_value
+        sim.get_deployed_commit.return_value = "deployed-commit"
+        sim.get_release_by_commit.return_value = "starlingx-13.0.0"
+
+        patch_info = self._patch_info("starlingx-13.0.1")
+        self._run(controller, patch_info)
+
+        swrc.get_ordered_metapackages.assert_called_once()
+        _, kwargs = swrc.get_ordered_metapackages.call_args
+        filter_by_ids = kwargs.get("filter_by_ids")
+        self.assertIsInstance(filter_by_ids, list)
+        self.assertEqual(
+            sorted(filter_by_ids),
+            ["distcloud_13.0.1", "infra_13.0.1", "k8s-common_13.0.1"])
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
+    @unittest.mock.patch('software.software_controller.SW_VERSION', '13.0')
+    @unittest.mock.patch('software.software_controller.ReleaseState')
+    @unittest.mock.patch('software.software_controller.MetapackageDeploymentSet')
+    @unittest.mock.patch('software.software_controller.SoftwareInventoryManager')
+    @unittest.mock.patch('software.software_controller.get_SWReleaseCollection')
+    def test_releases_processed_in_ascending_version_order(self,
+                                                           mock_get_swrc,
+                                                           mock_sim_cls,
+                                                           mock_mp_set,   # pylint: disable=unused-argument
+                                                           mock_rel_state,   # pylint: disable=unused-argument
+                                                           mock_init):   # pylint: disable=unused-argument
+        # Given a batch in arbitrary order (3, 1, 2), branches must be created
+        # in ascending version order so an in-batch dependency (e.g. .2
+        # requires .1) finds its base branch already created.
+        controller = PatchController()
+        controller.pre_bootstrap = False
+        controller.software_sync = unittest.mock.MagicMock()
+        controller._set_original_commit = unittest.mock.MagicMock()  # pylint: disable=protected-access
+        controller.update_ostree_commit_id = unittest.mock.MagicMock()
+
+        releases = {
+            rid: self._make_release(rid)
+            for rid in ("starlingx-13.0.1", "starlingx-13.0.2", "starlingx-13.0.3")
+        }
+        swrc = mock_get_swrc.return_value
+        swrc.get_release_by_id.side_effect = lambda rid: releases[rid]
+
+        sim = mock_sim_cls.return_value
+        sim.get_deployed_commit.return_value = "deployed-commit"
+        sim.get_release_by_commit.return_value = "starlingx-13.0.0"
+
+        patch_info = self._patch_info(
+            "starlingx-13.0.3", "starlingx-13.0.1", "starlingx-13.0.2")
+        self._run(controller, patch_info)
+
+        # Capture the order of new_branch (2nd positional arg) passed to
+        # create_sw_release_branch(base_branch, new_branch, packages, pre_bootstrap)
+        created_order = [
+            call.args[1] for call in sim.create_sw_release_branch.call_args_list]
+        self.assertEqual(
+            created_order,
+            ["starlingx-13.0.1", "starlingx-13.0.2", "starlingx-13.0.3"])
