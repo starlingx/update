@@ -6768,6 +6768,11 @@ class PatchController(PatchService):
                                  f"as rollback target (from {to_release_deployment})")
                         commit_id = pud_release.commit_id
 
+        # Clear 900.022 alarm if raised
+        self.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_CLEANUP_DEPLOYMENT_DATA,
+                                   fm_constants.FM_ALARM_STATE_CLEAR,
+                                   "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, constants.CONTROLLER_FLOATING_HOSTNAME))
+
         # Update the deployment
         deploy_state = DeployState.get_instance()
         deploy_state.abort(feed_repo, commit_id)
