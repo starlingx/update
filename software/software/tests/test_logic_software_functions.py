@@ -396,4 +396,4 @@ class TestModifyMetadataText(unittest.TestCase):
 
         with self.assertRaises(ReleaseValidationFailure) as ctx:
             ReleaseData.modify_metadata_text(filepath, "nonexistent", "value")
-        self.assertIn("failed to find tag", str(ctx.exception))
+        self.assertIn("failed to find tag", str(ctx.exception.error))

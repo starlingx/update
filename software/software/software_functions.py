@@ -342,7 +342,7 @@ class ReleaseData(object):
         if e is None:
             msg = "modify_metadata_text: failed to find tag '%s'" % key
             LOG.error(msg)
-            raise ReleaseValidationFailure(msg)
+            raise ReleaseValidationFailure(error=msg)
         e.text = value
 
         # write the modified file
@@ -1496,9 +1496,11 @@ class ComponentPatchFile:
                     _, release_version, sw_version, _ = utils.get_component_and_versions(product_id)
                     # Check if feed exists
                     if not base_pkgdata.check_release(sw_version):
-                        msg = f"Software feed {sw_version} for release {product_id} doesn't exist"
+                        msg = (f"Cannot upload release {product_id}: the {sw_version} major "
+                               f"release feed is not present, upload a {sw_version} release "
+                               f"ISO before uploading patches for it.")
                         LOG.error(msg)
-                        raise ReleaseValidationFailure(msg)
+                        raise ReleaseValidationFailure(error=msg)
                     # Copy product release metadata to software directory
                     product_md = f"{product_id}-{self.METADATA_XML}"
                     dst_metadata_file = Path(constants.COMPONENT_SOFTWARE_METADATA_STORAGE_DIR) / product_md
@@ -1567,9 +1569,8 @@ class ComponentPatchFile:
                         with extract_tar(extra_tar, dst_dir=release_dir, prefix="extra-") as _:
                             LOG.info(f"Extracted extra.tar to {release_dir}")
         except Exception as e:
-            error_detail = e.error if hasattr(e, 'error') else str(e)
-            msg = f"Error extracting patch: {error_detail}"
-            LOG.error(msg)
+            msg = getattr(e, "error", "") or str(e)
+            LOG.error(f"Error extracting patch: {msg}")
             error_msg += msg
             # If product_id was assigned, delete already extracted files
             if product_id:
@@ -1872,7 +1873,7 @@ def get_sw_version(metadata_files):
 
     if rel_ver == unset_ver:
         err_msg = "sw_version value not found or invalid in the metadata file"
-        raise SoftwareServiceError(err_msg)
+        raise SoftwareServiceError(error=err_msg)
 
     return rel_ver
 
@@ -1888,7 +1889,7 @@ def read_attributes_from_metadata_file(mounted_dir):
         root = ElementTree.parse(metadata_file)
     except IOError:
         raise SoftwareServiceError(
-            f"The ISO does not contain required upgrade information in {metadata_file}")
+            error=f"The ISO does not contain required upgrade information in {metadata_file}")
 
     to_release = root.findtext("version")
 
