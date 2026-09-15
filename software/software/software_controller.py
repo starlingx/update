@@ -2060,9 +2060,7 @@ class PatchController(PatchService):
         # create versioned precheck for uploaded patches
         for patch in upload_patch_info:
             filename, values = list(patch.items())[0]
-            # product releases directory is created when extracting the patch
-            if values.get("is_product_release"):
-                continue
+            # TODO(heitormatsui): Remove when legacy versioned directory is no longer supported
             LOG.info("Creating precheck for release %s..." % values.get("id"))
             for pf in patch_files:
                 if filename in pf:
