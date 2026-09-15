@@ -254,7 +254,13 @@ def do_upload_dir(cc, args):
            help='Release ID to delete')
 def do_delete(cc, args):
     """Delete the software release"""
-    resp, data = cc.release.release_delete(args.release, args.all)
+    result = cc.release.release_delete(args.release, args.all)
+
+    # release_delete returns the return code on early-exit/error
+    if isinstance(result, int):
+        return result
+
+    resp, data = result[0], result[1]
     if args.debug:
         utils.print_result_debug(resp, data)
 
