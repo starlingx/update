@@ -180,7 +180,58 @@ def copy_xml_file(src, dst, additional_data=None):
     for tag in additional_data:
         add_text_tag_to_xml(root, tag, additional_data[tag])
     ElementTree.indent(tree, space="  ")
-    tree.write(dst)
+
+    # Write atomically: the destination may live in a metadata directory read
+    # concurrently by release-data reloads; a direct write would truncate the
+    # live file and let a reader parse an empty document. Serialize to a temp
+    # file in the same directory and os.replace() it into place instead.
+    atomic_write_xml(tree, str(dst))
+
+
+def atomic_write_xml(tree, dst):
+    """Write an ElementTree to dst atomically, preserving the destination mode.
+
+    The metadata files under /opt/software/releases/metadata are read
+    concurrently by multiple threads (e.g. load_all() during a release-data
+    reload) while they are being written by the upload/deploy workers. A
+    direct write (open(path, "wb") or tree.write(path)) truncates the live
+    file to zero bytes before the new content is written, leaving a window in
+    which a concurrent reader parses an empty document ("Document is empty")
+    and silently drops the release.
+
+    To eliminate that window, serialize to a temporary file in the same
+    directory and os.replace() it into place. os.replace() is atomic on the
+    same filesystem, so a concurrent reader always sees either the old
+    complete file or the new complete file, never a truncated one.
+
+    tempfile.mkstemp() creates the temp file with mode 0600, so the mode of
+    the file being replaced is restored (or 0644 for a brand-new file) to
+    avoid silently dropping read access for non-root readers.
+
+    :param tree: ElementTree to write (xml.etree or lxml)
+    :param dst: destination path for the XML file
+    """
+    dst = str(dst)
+    dest_dir = os.path.dirname(os.path.abspath(dst))
+    fd, tmp_path = tempfile.mkstemp(dir=dest_dir, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as outfile:
+            tree.write(outfile)
+            outfile.flush()
+            os.fsync(outfile.fileno())
+        # Preserve the permissions of the file being replaced.
+        try:
+            mode = stat.S_IMODE(os.stat(dst).st_mode)
+        except FileNotFoundError:
+            mode = 0o644
+        os.chmod(tmp_path, mode)
+        os.replace(tmp_path, dst)
+    except Exception:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            LOG.warning("Failed to remove temporary file: %s", tmp_path)
+        raise
 
 
 def remove_xml_tag(filepath, tag):
@@ -195,7 +246,9 @@ def remove_xml_tag(filepath, tag):
     if element is not None:
         root.remove(element)
         ElementTree.indent(tree, space="  ")
-        tree.write(str(filepath))
+        # Write atomically: filepath may be in a metadata directory read
+        # concurrently by release-data reloads.
+        atomic_write_xml(tree, str(filepath))
 
 
 def get_release_from_patch(patchfile, key="sw_version"):

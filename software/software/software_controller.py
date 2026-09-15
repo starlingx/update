@@ -79,6 +79,7 @@ from software.release_data import reload_release_data
 from software.release_data import SWReleaseCollection
 from software.release_state import ReleaseState
 from software.release_verify import verify_files
+from software.software_functions import atomic_write_xml
 from software.software_functions import audit_log_info
 from software.software_functions import BasePackageData
 from software.software_functions import collect_current_load_for_hosts
@@ -5130,8 +5131,7 @@ class PatchController(PatchService):
         self.add_text_tag_to_xml(root, constants.ORIGINAL_COMMIT_TAG, commit_id)
 
         ET.indent(tree, '  ')
-        with open(metadata_file, "wb") as outfile:
-            outfile.write(ET.tostring(root))
+        atomic_write_xml(tree, metadata_file)
 
         LOG.info("Original commit %s persisted in metadata for release %s",
                  commit_id, release_id)
@@ -5159,9 +5159,7 @@ class PatchController(PatchService):
 
         # Save file content
         ET.indent(tree, '  ')
-        with open(metadata_file, "wb") as outfile:
-            tree = ET.tostring(root)
-            outfile.write(tree)
+        atomic_write_xml(tree, metadata_file)
 
     def append_commit_to_metadata(self, metadata_file, new_commit_id, base_commit_id=None):
         """Append a new commit entry to a metapackage's metadata XML.
@@ -5203,9 +5201,7 @@ class PatchController(PatchService):
         self.add_text_tag_to_xml(new_commit_el, constants.CHECKSUM_TAG, "")
 
         ET.indent(tree, '  ')
-        with open(metadata_file, "wb") as outfile:
-            tree_str = ET.tostring(root)
-            outfile.write(tree_str)
+        atomic_write_xml(tree, metadata_file)
 
         LOG.info("Appended commit %s to %s (now %d commits)",
                  new_commit_id[:10], metadata_file, n)
@@ -5691,9 +5687,7 @@ class PatchController(PatchService):
                     self.add_text_tag_to_xml(commit1, constants.CHECKSUM_TAG, "")
 
                     ET.indent(tree, '  ')
-                    with open(metadata_file, "wb") as outfile:
-                        tree = ET.tostring(root)
-                        outfile.write(tree)
+                    atomic_write_xml(tree, metadata_file)
 
                     LOG.info("Latest feed commit: %s added to metadata file" % latest_feed_commit)
 
@@ -6219,11 +6213,8 @@ class PatchController(PatchService):
 
         if metadata_tag is not None:
             root.remove(metadata_tag)
-
             ET.indent(tree, '  ')
-            with open(metadata_path, "wb") as outfile:
-                tree = ET.tostring(root)
-                outfile.write(tree)
+            atomic_write_xml(tree, metadata_path)
 
     def execute_delete_actions(self, release_ids):
         # TODO(heitormatsui) join activate, activate_rollback
@@ -6381,9 +6372,7 @@ class PatchController(PatchService):
                                     root.remove(requires_tag)
 
                                 ET.indent(tree, '  ')
-                                with open(metadata_file, "wb") as outfile:
-                                    tree = ET.tostring(root)
-                                    outfile.write(tree)
+                                atomic_write_xml(tree, metadata_file)
 
                                 # Run just for the first (lowest) release
                                 break
