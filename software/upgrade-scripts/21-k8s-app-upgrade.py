@@ -14,7 +14,10 @@ from _loader import CPlugin
 from software.utilities.utils import configure_logging
 
 LOG = logging.getLogger('main_logger')
-TIMEOUT_LIMIT_IN_MINUTES = 30
+# Timeout that waits for the apps to be updated or downgraded, set to
+# 35 minutes to avoid a race condition with the 30 minute install
+# timeout most of the apps' helm-releases define.
+TIMEOUT_LIMIT_IN_MINUTES = 35
 PROGRESS_CHECK_INTERVAL_IN_SECONDS = 20
 IN_PROGRESS_STATUS = 'in_progress'
 FAILED_STATUS = 'failed'
