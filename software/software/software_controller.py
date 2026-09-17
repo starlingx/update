@@ -1836,10 +1836,10 @@ class PatchController(PatchService):
     @threaded
     @no_reentry()
     def create_sw_releases_it(self, patch_info):
-        def update_commit_id_to_all_mp(base_commit_id, commit_id):
+        def update_commit_id_to_all_mp(base_commit_id, commit_id, sw_release):
             metadata_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP[states.UPLOADING]
             metadata_dir_path = Path(metadata_dir)
-            metadata_files = [str(file) for file in metadata_dir_path.rglob("*.xml") if file.is_file()]
+            metadata_files = [str(file) for file in metadata_dir_path.rglob(f"*{sw_release}*.xml") if file.is_file()]
             # Update metapackage metadata commit-ids
             for md in metadata_files:
                 self.update_ostree_commit_id(md, base_commit_id, commit_id)
@@ -1880,7 +1880,7 @@ class PatchController(PatchService):
                 # Update metapackage metadata commit-id
                 commit_id = sim.get_branch_commit(new_branch)
                 base_commit_id = sim.get_branch_commit(require_release_id)
-                update_commit_id_to_all_mp(base_commit_id, commit_id)
+                update_commit_id_to_all_mp(base_commit_id, commit_id, sw_rel)
 
                 # Persist the original commit in product release metadata
                 self._set_original_commit(release_id, commit_id)
