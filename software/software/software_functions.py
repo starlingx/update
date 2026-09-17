@@ -1667,11 +1667,17 @@ class ComponentPatchFile:
         """
         _, release_version, sw_version, _ = utils.get_component_and_versions(product_id)
 
-        # delete the metadata
-        metadata_path = Path(constants.COMPONENT_SOFTWARE_METADATA_STORAGE_DIR)
-        for metadata in metadata_path.rglob(f"*{release_version}*.xml"):
-            metadata.unlink()
-            LOG.info(f"Removed metadata: {metadata.name}")
+        # Delete the metadata
+        # TODO(mbenedit): Remove the legacy metadata path once it is deprecated
+        # and component-based metadata dir becomes the only one supported by USM.
+        metadata_path = [
+            Path(constants.SOFTWARE_METADATA_STORAGE_DIR),
+            Path(constants.COMPONENT_SOFTWARE_METADATA_STORAGE_DIR),
+        ]
+        for path in metadata_path:
+            for file in path.rglob(f"*{release_version}*.xml"):
+                file.unlink()
+                LOG.info(f"Removed metadata: {file}")
 
         # delete the release directory
         release_path = Path(constants.COMPONENT_SOFTWARE_STORAGE_DIR) / release_version
