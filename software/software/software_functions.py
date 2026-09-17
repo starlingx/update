@@ -1297,10 +1297,16 @@ class PatchFile(object):
         """
 
         try:
-            abs_metadata_dir = os.path.abspath(states.AVAILABLE_DIR)
-            os.remove("%s/%s-metadata.xml" % (abs_metadata_dir, patch_id))
-        except Exception:
-            msg = "Could not delete %s metadata, does not exist" % patch_id
+            abs_metadata_dirs = [os.path.abspath(states.AVAILABLE_DIR),
+                                 os.path.abspath(states.UNAVAILABLE_DIR)]
+            for metadata_dir in abs_metadata_dirs:
+                metadata_file = os.path.join(metadata_dir, f"{patch_id}-metadata.xml")
+                if os.path.exists(metadata_file):
+                    os.remove(metadata_file)
+                else:
+                    LOG.info(f"{metadata_file} doesn't exist")
+        except Exception as e:
+            msg = "Could not delete %s metadata: %s" % (patch_id, str(e))
             LOG.info(msg)
 
         try:
