@@ -361,7 +361,9 @@ class DeployHandler(Deploy):
             "state": state.value,
             "pre_upgrade_deploy": kwargs.get("pre_upgrade_deploy", False),
             "options": kwargs.get("options", {}),
-            "initial_kube_version": kwargs.get("initial_kube_version", "")
+            "initial_kube_version": kwargs.get("initial_kube_version", ""),
+            # Rollback feed commit, to restore on abort/delete-after-start
+            "rollback_commit_id": kwargs.get("rollback_commit_id", None)
         }
 
         try:

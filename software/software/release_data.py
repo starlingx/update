@@ -530,6 +530,26 @@ class SWRelease(object):
                 for req_id in self.requires_release_ids
             )
 
+    def requires_chain_deployable(self, deployable_states):
+        """Whether the <requires> chain below this release can be deployed in a
+        single span: each release must be DEPLOYED (chain stops) or in
+        deployable_states (deployed as part of the span). Any other state, or a
+        missing release, breaks the chain.
+        """
+        release_collection = get_SWReleaseCollection()
+
+        def _walk(release_id):
+            release = release_collection[release_id]
+            if release is None:
+                return False
+            if release.state == states.DEPLOYED:
+                return True
+            if release.state not in deployable_states:
+                return False
+            return all(_walk(req_id) for req_id in release.requires_release_ids)
+
+        return all(_walk(req_id) for req_id in self.requires_release_ids)
+
     def to_query_dict(self):
         data = {"release_id": self.id,
                 "state": self.state,
@@ -617,6 +637,19 @@ class MetapackageDeploymentSet:
 
     def __iter__(self):
         return iter(self.metapackages)
+
+    def reload(self):
+        """Rebuild this set from the release collection so metadata changes
+        made after construction (e.g. commit-id from a pre-start script) are
+        picked up. Callers should reload_release_data() first.
+        """
+        swrc = get_SWReleaseCollection()
+        if self.is_pre_upgrade_deploy:
+            refreshed = [swrc.get_pre_upgrade_deploy_release_by_id(mp.id) for mp in self._metapackages]
+        else:
+            refreshed = [swrc.get_release_by_id(mp.id) for mp in self._metapackages]
+        refreshed = [mp for mp in refreshed if mp is not None]
+        self.__init__(refreshed or self._metapackages)
 
     @property
     def product(self):

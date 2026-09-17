@@ -2330,12 +2330,7 @@ class PatchController(PatchService):
         return to_remove_releases
 
     def reset_feed_commit(self, release, feed_repo=None):
-        if isinstance(release, MetapackageDeploymentSet):
-            # Reset feed using base_commit_id from the metapackage metadata
-            base_commit_id = release.base_commit_id
-            commit_id = next(iter(base_commit_id), None)
-        else:
-            commit_id = release.commit_id
+        commit_id = release.commit_id
 
         if commit_id is None:
             LOG.warning("Unable to find the commit id in metadata")
@@ -3559,37 +3554,61 @@ class PatchController(PatchService):
         system_deploy = self._get_system_deploy()
         return system_deploy
 
-    def _get_metapackages_to_remove(self, release):
+    def _get_target_component_versions(self, target_product_id):
+        """Map each component to the version it runs at after rolling back to
+        the target release (target + its requires closure; highest at/below
+        the target wins).
         """
-        Determine which metapackages should be removed from the system.
+        component_versions = {}
+        target_release = self.release_collection.get_product_release_by_id(target_product_id)
+        if target_release is None:
+            return component_versions
 
-        Collects metapackages from all deployed dependencies of the running release,
-        excluding the target release. This identifies the releases that must be removed
-        to get the system back to the target release.
+        kept_releases = target_release.get_all_dependencies()
+        kept_releases.append(target_release)
+        for rel in sorted(kept_releases):  # ascending version; higher overwrites
+            for mp_id in rel.metapackages.keys():
+                mp = self.release_collection.get_metapackage_release_by_id(mp_id)
+                if mp is not None:
+                    component_versions[mp.component] = mp.sw_release
+        return component_versions
 
-        :param release: The ID of the target release to be deployed.
-        :returns: List of metapackage names from the to-be-removed releases (dependencies + running - target).
+    def _get_metapackages_to_remove(self, release):
+        """Metapackages to remove to roll the system back to the target release:
+        the deployed metapackages of every release above the target (running +
+        its requires closure - target closure).
+
+        :param release: target release id to roll back to.
         """
         metapackage_releases = []
 
-        # Get all dependencies from the running release that are deployed
+        # Running release plus its full requires closure. Not filtered by
+        # DEPLOYED: the highest release may be deployed-partial, and filtering
+        # would cut the traversal there and miss the releases below
         highest_release = self.release_collection.highest_release
-        deps = highest_release.get_all_dependencies(filter_states=[states.DEPLOYED])
+        deployed_releases = highest_release.get_all_dependencies()
+        deployed_releases.append(highest_release)
         # TODO(heitormatsui): what should happen if the dependency chain is broken?
         #  i.e. a release in the middle of the chain doesn't require any releases
 
-        # Include running release in the list
-        deps.append(highest_release)
+        # The target and its requires closure stay deployed; only releases
+        # strictly above the target are removed
+        target_release = self.release_collection.get_product_release_by_id(release)
+        keep = set()
+        if target_release is not None:
+            keep = {dep.id for dep in target_release.get_all_dependencies()}
+            keep.add(target_release.id)
 
-        # Verify if the target release is in the list and pop it
-        release = self.release_collection.get_product_release_by_id(release)
-        if release in deps:
-            deps.remove(release)
-
-        # Iterate over the remaining releases and get its metapackages
-        # Remaining releases = dependencies + running release - target release
-        for dep in deps:
-            metapackage_releases += dep.metapackages.keys()
+        # Only deployed metapackages are removed: a removed release may be
+        # deployed-partial, and its available metapackages must not enter the
+        # removal set
+        for dep in deployed_releases:
+            if dep.id in keep:
+                continue
+            for mp_id in dep.metapackages.keys():
+                mp = self.release_collection.get_metapackage_release_by_id(mp_id)
+                if mp is not None and mp.state == states.DEPLOYED:
+                    metapackage_releases.append(mp_id)
 
         return metapackage_releases
 
@@ -3646,10 +3665,17 @@ class PatchController(PatchService):
                                             f"Re-upload the product release to fix.")
             metapackage_versions.add(mp_data.sw_release)
 
+        # A selection may only target a single product release. Releases below
+        # the target in the <requires> chain are deployed automatically as part
+        # of the same deploy (the target ostree commit is built on top of them),
+        # so they must not be selected explicitly. Only the target release may
+        # be selected as a partial subset of its metapackages.
         if len(metapackage_versions) > 1:
             raise ReleaseInvalidRequest(
-                f"Selected metapackages must belong to the same product release, "
-                f"but found versions: {', '.join(sorted(metapackage_versions))}")
+                f"A subset of metapackages can only be selected for a single "
+                f"product release; required releases are deployed automatically. "
+                f"Found metapackages from versions: "
+                f"{', '.join(sorted(metapackage_versions))}")
 
         # Full product release or partial (individual metapackages)
         target_sw_release = metapackage_versions.pop()
@@ -3687,7 +3713,11 @@ class PatchController(PatchService):
 
         LOG.info(
             f"Metapackage release list validated successfully: {', '.join(metapackage_releases)}")
-        return metapackage_releases, apply
+        # target_product_id identifies the target release for both apply and
+        # remove. For remove, metapackage_releases is the removed span (target
+        # excluded), so the caller needs target_product_id to key the operation
+        # (ostree reset / deploy record) on the target release.
+        return metapackage_releases, apply, target_product_id
 
     # TODO(heitormatsui): add support for the pre-upgrade-deploy parameter for
     #  the upgrade scenario using product releases containing metapackages
@@ -3706,21 +3736,22 @@ class PatchController(PatchService):
             msg = "Select is blocked when a deployment is in progress"
             LOG.error(msg)
             msg_error += msg + "\n"
-            return None, dict(info=msg_info, warning=msg_warning, error=msg_error)
+            return None, dict(info=msg_info, warning=msg_warning, error=msg_error), None
 
         if not releases:
             msg = "No releases were passed for select, unable to proceed"
             LOG.error(msg)
             msg_error += msg + "\n"
-            return None, dict(info=msg_info, warning=msg_warning, error=msg_error)
+            return None, dict(info=msg_info, warning=msg_warning, error=msg_error), None
         else:
             # Validate provided releases
             try:
-                metapackage_releases, apply = self._validate_releases_for_select(releases)
+                metapackage_releases, apply, target_product_id = \
+                    self._validate_releases_for_select(releases)
             except ReleaseInvalidRequest as e:
                 LOG.error(f"Error validating releases for select: {str(e)}")
                 msg_error += f"{str(e)}\n"
-                return None, dict(info=msg_info, warning=msg_warning, error=msg_error)
+                return None, dict(info=msg_info, warning=msg_warning, error=msg_error), None
 
         # Get selected metapackages and determine which ones need unselect
         selected_metapackages = self.release_collection.iterate_metapackages_by_state(
@@ -3762,7 +3793,9 @@ class PatchController(PatchService):
                 LOG.info(msg)
                 msg_info += msg + "\n"
 
-        return metapackage_releases, dict(info=msg_info, warning=msg_warning, error=msg_error)
+        return (metapackage_releases,
+                dict(info=msg_info, warning=msg_warning, error=msg_error),
+                target_product_id)
 
     def software_deploy_select_api(self, **kwargs):
         pre_upgrade_deploy = kwargs.pop("pre_upgrade_deploy", False)
@@ -3770,7 +3803,7 @@ class PatchController(PatchService):
             remove = kwargs.pop("remove", False)
             result = self._pre_upgrade_deploy_select(remove=remove, **kwargs)
         else:
-            _, result = self._deploy_select(**kwargs)
+            _, result, _ = self._deploy_select(**kwargs)
         return result
 
     def _validate_releases_for_unselect(self, releases):
@@ -4849,7 +4882,7 @@ class PatchController(PatchService):
         valid_releases = self._validate_releases_for_precheck(releases)
         releases_to_select = [release.id for release in valid_releases]
 
-        _, ret = self._deploy_select(releases=releases_to_select)
+        _, ret, _ = self._deploy_select(releases=releases_to_select)
         if ret['error']:
             raise ReleaseSelectFailure(ret["error"])
 
@@ -5439,10 +5472,7 @@ class PatchController(PatchService):
 
                 # Reload the MetapackageDeploymentSet to capture any metadata changes
                 # made by pre-start scripts (e.g., kernel patch commit-id population)
-                deploying_mps = self.release_collection.get_ordered_metapackages(
-                    filter_by_states=[states.DEPLOYING])
-                if deploying_mps:
-                    mp_deploy_set = MetapackageDeploymentSet(deploying_mps)
+                mp_deploy_set.reload()
 
                 # Determine the target commit for this deployment set
                 a_mp = mp_deploy_set.metapackages[0]
@@ -5560,13 +5590,10 @@ class PatchController(PatchService):
                                 # Get the new commit created by run_install
                                 new_commit = sim.get_branch_commit(branch_name)
 
-                                # Delete old custom branch if it's different from the one just created
-                                for branch in sim.get_branches():
-                                    if (branch.startswith(f"{product_rel_id}-") and
-                                            branch != branch_name and
-                                            branch != product_rel_id):
-                                        LOG.info(f"Deleting old custom branch: {branch}")
-                                        sim.delete_ref(branch)
+                                # Do not delete other custom branches here: a
+                                # previous custom branch may be the rollback
+                                # target if this deploy is aborted/deleted.
+                                # Branch cleanup is owned by 'software delete'.
 
                                 # Deploy the new branch
                                 sim.deploy(branch_name)
@@ -5765,10 +5792,17 @@ class PatchController(PatchService):
         msg_warning = ""
         msg_error = ""
 
-        # Run precheck for each metapackage under /opt/software/releases/<release_version>
+        # Run precheck for each metapackage under its OWN release version
+        # directory (/opt/software/releases/<mp_release_version>). In a span
+        # deploy the metapackages may belong to different release versions
+        # (the target plus the lower releases being deployed with it), and each
+        # release ships its own precheck script, so resolve the release version
+        # per metapackage rather than assuming a single one.
         for metapackage in metapackages:
             mp_name, _ = metapackage.split("_")
-            precheck_result = self._deploy_precheck(release_version, metapackage=mp_name,
+            mp_data = self.release_collection.get_metapackage_release_by_id(metapackage)
+            mp_release_version = mp_data.sw_release if mp_data else release_version
+            precheck_result = self._deploy_precheck(mp_release_version, metapackage=mp_name,
                                                     force=force, snapshot=snapshot, patch=is_patch,
                                                     **kwargs)
             if precheck_result.get("system_healthy") is None:
@@ -5832,6 +5866,21 @@ class PatchController(PatchService):
 
         return not last_result["healthy"]
 
+    def _resolve_target_product_id(self, metapackage_ids):
+        """Resolve the target product release id from a list of metapackage ids.
+
+        The target is the product release of the highest-versioned metapackage
+        in the list.
+        """
+        product_ids = set()
+        for mp_id in metapackage_ids:
+            mp = self.release_collection.get_metapackage_release_by_id(mp_id)
+            if mp and mp.product:
+                product_ids.add(mp.product)
+        if not product_ids:
+            return None
+        return max(product_ids, key=utils.parse_release_version)
+
     def _get_metapackages_to_deploy(self, releases):
         # When no releases are provided, check system deploy first, and then selected metapackages
         if not releases:
@@ -5849,13 +5898,16 @@ class PatchController(PatchService):
                 if metapackage_list:
                     msg = (f"Metapackages previously selected for "
                            f"deployment: {', '.join(metapackage_list)}\n")
-                    return metapackage_list, dict(info=msg, warning="", error="")
+                    # Resolve target product id from the already-selected set
+                    target_product_id = self._resolve_target_product_id(metapackage_list)
+                    return metapackage_list, dict(info=msg, warning="", error=""), target_product_id
         # When releases are provided, attempt to select them for deployment
         else:
             metapackage_list = releases[:]
 
         # Attempt to select the metapackages for deployment
-        selected_metapackages, select_output = self._deploy_select(**{"releases": metapackage_list})
+        selected_metapackages, select_output, target_product_id = \
+            self._deploy_select(**{"releases": metapackage_list})
         select_error = select_output.get("error")
 
         # Raise ReleaseInvalidRequest in error case
@@ -5863,7 +5915,30 @@ class PatchController(PatchService):
             raise ReleaseInvalidRequest(select_error)
 
         # Return the list of metapackages to be deployed
-        return selected_metapackages, select_output
+        return selected_metapackages, select_output, target_product_id
+
+    def _collect_span_metapackage_ids(self, target_product_id):
+        """Not-yet-deployed metapackages of the releases below the target in the
+        <requires> chain. Deploying the target commit implicitly includes them,
+        so this is used only for state bookkeeping, never the ostree operation.
+        The target's own metapackages are excluded (handled by its deploy set).
+        """
+        target_release = self.release_collection.get_release_by_id(target_product_id)
+        if target_release is None:
+            return []
+
+        # Filter at the metapackage level: a deployed-partial release has some
+        # metapackages already DEPLOYED; re-selecting those would attempt an
+        # invalid DEPLOYED -> DEPLOYING transition
+        span_metapackage_ids = []
+        for dep in target_release.get_all_dependencies():
+            if dep.state == states.DEPLOYED:
+                continue
+            for mp_id in self.release_collection.get_metapackages_id_by_product_id(dep.id) or []:
+                mp = self.release_collection.get_metapackage_release_by_id(mp_id)
+                if mp is not None and mp.state != states.DEPLOYED:
+                    span_metapackage_ids.append(mp_id)
+        return span_metapackage_ids
 
     def _get_highest_deployed(self, metapackage_data, apply=True):
         """
@@ -5915,7 +5990,8 @@ class PatchController(PatchService):
         # Get metapackage list to deploy based on provided releases
         try:
             # TODO(heitormatsui) integrate precheck and start to use the same function
-            metapackages, select_output = self._get_metapackages_to_deploy(releases)
+            metapackages, select_output, target_product_id = \
+                self._get_metapackages_to_deploy(releases)
             msg_info += select_output["info"]
             msg_warning += select_output["warning"]
             msg_info += select_output["warning"]
@@ -5925,10 +6001,30 @@ class PatchController(PatchService):
             msg_error += msg
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-        # Get metapackages data
+        # Determine whether this is an apply or a remove operation up front,
+        # so MetapackageDeploymentSet can always be built from the TARGET
+        # release (a single release) rather than the span. For remove, the
+        # selected metapackages are the removed span (multiple releases); the
+        # set must not be built from them. Both apply and remove key the set
+        # (sw_version, commit_id, reboot_required, product) on the target.
+        target_release = self.release_collection.get_product_release_by_id(target_product_id)
+        highest_release = self.release_collection.highest_release
+        is_remove = (target_release is not None and highest_release is not None
+                     and target_release < highest_release)
+
+        if is_remove:
+            # Build the set from the target release's own metapackages
+            # (deployed), regardless of selected state.
+            set_metapackage_ids = list(target_release.metapackages)
+            set_filter_states = None
+        else:
+            # Apply: the set is the selected target metapackages
+            set_metapackage_ids = metapackages
+            set_filter_states = states.COMPONENT_SELECTED_STATES
+
         mp_data = self.release_collection.get_ordered_metapackages(
-            filter_by_ids=metapackages,
-            filter_by_states=states.COMPONENT_SELECTED_STATES
+            filter_by_ids=set_metapackage_ids,
+            filter_by_states=set_filter_states
         )
         try:
             mp_deploy_set = MetapackageDeploymentSet(mp_data)
@@ -5951,9 +6047,18 @@ class PatchController(PatchService):
 
         # Block deployment if product release required releases aren't deployed
         if product_release and product_release.requires_release_ids:
-            if not product_release.are_prerequisites_deployed():
+            # A required release is acceptable if it is already deployed, or if
+            # it will be deployed/completed together as part of this span: it is
+            # available (deployed in full by the span) or deployed-partial (its
+            # remaining metapackages completed by the span). The target commit
+            # is built on top of the required ones.
+            span_deployable_states = [states.AVAILABLE, states.DEPLOY_SELECTED,
+                                      states.DEPLOYED_PARTIAL]
+            if not (product_release.are_prerequisites_deployed()
+                    or product_release.requires_chain_deployable(span_deployable_states)):
                 msg = (f"Product release {product_release.id} requires the following "
-                       f"releases to be deployed: {', '.join(product_release.requires_release_ids)}")
+                       f"releases to be deployed or available: "
+                       f"{', '.join(product_release.requires_release_ids)}")
                 LOG.error(msg)
                 msg_error += msg
                 return dict(info=msg_info, warning=msg_warning, error=msg_error)
@@ -5982,13 +6087,23 @@ class PatchController(PatchService):
                 LOG.warning("Using unknown hostname for local install: %s", hostname)
 
         to_release = mp_deploy_set.sw_release
+
+        # For an apply span, collect the lower releases' metapackages up front so
+        # the precheck below covers the whole span (each release's own precheck
+        # script runs against its own version). For a remove, the metapackages
+        # list is already the removal span.
+        span_metapackage_ids = []
+        if not is_remove:
+            span_metapackage_ids = self._collect_span_metapackage_ids(mp_deploy_set.product)
+        precheck_metapackages = metapackages + span_metapackage_ids
+
         if kwargs.get("options"):
             kwargs["options"] = self._parse_and_sanitize_extra_options(kwargs.get("options"))
         if self._should_run_precheck_prior_deploy_start(to_release, force, is_patch,
-                                                        metapackages, **kwargs):
+                                                        precheck_metapackages, **kwargs):
             LOG.info("Executing software deploy precheck prior to software deploy start")
             if precheck_result := self._precheck_before_start(
-                metapackages,
+                precheck_metapackages,
                 to_release,
                 is_patch=is_patch,
                 force=force,
@@ -6009,8 +6124,17 @@ class PatchController(PatchService):
             LOG.info(msg)
             audit_log_info(msg)
 
-            # Update metapackage release states
-            release_state = ReleaseState(release_ids=mp_deploy_set.metapackage_ids)
+            # Lower span releases' metapackages: bookkeeping only (state
+            # transition + deploy record); the ostree commit is the target's
+            span_metapackages = [
+                self.release_collection.get_metapackage_release_by_id(mp_id)
+                for mp_id in span_metapackage_ids
+            ]
+            span_metapackages = [mp for mp in span_metapackages if mp is not None]
+
+            # Update metapackage release states (target set + lower span releases)
+            release_state = ReleaseState(
+                release_ids=mp_deploy_set.metapackage_ids + span_metapackage_ids)
             release_state.start_deploy()
 
             # Sync release states with neighbor
@@ -6023,11 +6147,22 @@ class PatchController(PatchService):
                 initial_kube_version = ""
             kwargs["initial_kube_version"] = initial_kube_version
 
-            reboot_required = mp_deploy_set.reboot_required
+            reboot_required = mp_deploy_set.reboot_required or any(
+                mp.reboot_required for mp in span_metapackages)
             commit_id = None if is_patch else commit_id
 
-            # Get highest deployed metapackage version to populate deploy state data
-            metapackage_deploy_state = self._get_highest_deployed(mp_deploy_set.metapackages, apply=apply)
+            metapackage_deploy_state = self._get_highest_deployed(
+                mp_deploy_set.metapackages + span_metapackages, apply=apply)
+
+            # Capture the commit the feed is on now, before the deploy resets
+            # it, to restore on abort/delete-after-start (covers a custom
+            # partial-branch state, which can't be re-derived from a release id)
+            try:
+                rollback_commit_id = SoftwareInventoryManager(
+                    deploy_sw_version).get_deployed_commit()
+            except Exception:
+                rollback_commit_id = None
+            kwargs["rollback_commit_id"] = rollback_commit_id
 
             # Set deploy state to start, so that it can transition to start-done or start-failed
             collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
@@ -6050,14 +6185,31 @@ class PatchController(PatchService):
             # Running release in remove case might be a deployed-partial release
             running_release = self.release_collection.highest_release
 
-            release_state = ReleaseState(release_ids=mp_deploy_set.metapackage_ids)
+            # The removed span (metapackages var) are the metapackages of the
+            # releases above the target that get removed. These drive the
+            # bookkeeping (state transition + deploy record); the target release
+            # drives the ostree reset and the deploy record's to-release.
+            removed_span = [self.release_collection.get_metapackage_release_by_id(mp_id)
+                            for mp_id in metapackages]
+            removed_span = [mp for mp in removed_span if mp is not None]
+
+            release_state = ReleaseState(release_ids=metapackages)
             release_state.start_remove()
 
-            reboot_required = mp_deploy_set.reboot_required
+            reboot_required = mp_deploy_set.reboot_required or any(
+                mp.reboot_required for mp in removed_span)
 
-            # Get highest deployed metapackage version to populate deploy state data
-            metapackage_deploy_state = self._get_highest_deployed(mp_deploy_set.metapackages, apply=apply)
-            deploy_sw_release = metapackage_deploy_state[0][2]
+            # Deploy record: "from" = current deployed version, "to" = the
+            # rollback target version for the component. A component only
+            # present above the target has none, so use the target release
+            # version as a placeholder
+            target_component_versions = self._get_target_component_versions(target_product_id)
+            metapackage_deploy_state = []
+            for mp in removed_span:
+                to_release = target_component_versions.get(mp.component,
+                                                           target_release.sw_release)
+                metapackage_deploy_state.append((mp.component, mp.sw_release, to_release))
+            deploy_sw_release = target_release.sw_release
 
             collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
             create_deploy_hosts(hostname=hostname)
@@ -6066,17 +6218,18 @@ class PatchController(PatchService):
                                reboot_required, metapackage_deploy_state)
 
             try:
-                product_id = mp_deploy_set.product
-                msg = f"Removing product release: {product_id}"
+                # product_id is the target release we want to go back to
+                product_id = target_product_id
+                msg = f"Deploying product release: {product_id}"
                 LOG.info(msg)
                 audit_log_info(msg)
 
                 # Create script runner for the provided metapackages
                 extra_args = ["--operation=remove"]
 
-                # Run pre-start script contained in each metapackage
-                LOG.info(f"Running pre-start scripts for: {mp_deploy_set}")
-                for mp in mp_deploy_set:
+                # Run pre-start script contained in each removed metapackage
+                LOG.info(f"Running pre-start scripts for: {', '.join(metapackages)}")
+                for mp in removed_span:
                     script = mp.pre_start  # Check for pre_start script in metadata
                     if script:
                         mp_script_dir = Path(mp.metapackage_dir) / constants.HOST_SCRIPTS_TYPE
@@ -6084,78 +6237,30 @@ class PatchController(PatchService):
                                                   extra_args=extra_args)
                 reload_release_data()
 
-                # Compute the requires closure: target release + everything it requires
-                # Releases in this closure stay deployed, everything else gets rolled back
-                target_release = self.release_collection.get_release_by_id(product_id)
-                requires_closure = {product_id}
-                to_process = list(target_release.requires_release_ids) if target_release else []
-                while to_process:
-                    req_id = to_process.pop()
-                    if req_id not in requires_closure:
-                        requires_closure.add(req_id)
-                        req_release = self.release_collection.get_release_by_id(req_id)
-                        if req_release and req_release.requires_release_ids:
-                            to_process.extend(req_release.requires_release_ids)
-
-                # Get the target commit to reset to (the required release, i.e., what we roll back TO)
-                sw_ver = utils.get_major_release_version(mp_deploy_set.sw_version)
+                # Reset directly to the target release branch commit; being
+                # chained, it already contains everything at/below the target
+                sw_ver = utils.get_major_release_version(target_release.sw_version)
                 sim = SoftwareInventoryManager(sw_ver)
-                target_release_id = utils.get_highest_required_release(
-                    target_release.requires_release_ids if target_release else [])
                 try:
-                    if target_release_id:
-                        target_commit = sim.get_branch_commit(target_release_id)
-                    else:
-                        # No requires: fall back to base commit from metadata
-                        target_commit = next(iter(mp_deploy_set.base_commit_id), None)
-                        if not target_commit:
-                            raise SoftwareError("Cannot determine rollback commit: "
-                                                "no requires and no base_commit_id in metadata")
+                    target_commit = sim.get_branch_commit(target_product_id)
                 except BranchNotFound:
-                    LOG.error("Couldn't find ostree branch for rollback target")
+                    LOG.error(f"Couldn't find ostree branch for rollback target "
+                              f"{target_product_id}")
                     raise
 
                 feed_repo = f"{constants.FEED_OSTREE_BASE_DIR}/rel-{deploy_sw_version}/ostree_repo"
                 try:
-                    # Reset the starlingx deploy branch to the target commit
+                    # Branches are preserved on rollback (rolled-back releases
+                    # stay re-deployable); cleanup is owned by 'software delete'.
                     ostree_utils.reset_ostree_repo_head(target_commit, feed_repo)
                     LOG.info(f"Reset deploy branch '{constants.OSTREE_REF}' from "
                              f"ostree feed {feed_repo} to commit {target_commit[:10]}")
-
-                    # Delete custom branches for all rolled-back releases
-                    for branch in sim.get_branches():
-                        # Delete any custom partial branch (product_id-comp1+comp2)
-                        if (branch.startswith(f"{product_id}-") and
-                                branch != product_id):
-                            LOG.info(f"Deleting custom branch: {branch}")
-                            sim.delete_ref(branch)
 
                     # Update the feed ostree summary
                     ostree_utils.update_repo_summary_file(feed_repo)
                     LOG.info("Updated feed summary")
                 except OSTreeCommandFail:
-                    LOG.exception("Failure while removing release %s.", product_id)
-
-                # Reset metadata to contain only the product release commit
-                product_commit = sim.get_branch_commit(product_id)
-                product_release_obj = self.release_collection.get_release_by_id(product_id)
-                require_ids = product_release_obj.requires_release_ids if product_release_obj else []
-                base_branch = utils.get_highest_required_release(require_ids) or constants.OSTREE_REF
-                try:
-                    base_commit_for_metadata = sim.get_branch_commit(base_branch)
-                except BranchNotFound:
-                    base_commit_for_metadata = target_commit
-
-                for mp in mp_deploy_set.metapackages:
-                    release = self.release_collection.get_metapackage_release_by_id(mp.id)
-                    self.remove_tags_from_metadata(release, constants.CONTENTS_TAG)
-                    deploy_state_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP.get(release.state)
-                    if deploy_state_dir:
-                        md_file = str(Path(deploy_state_dir) / release.metadata_filename)
-                        self.append_commit_to_metadata(md_file, product_commit,
-                                                       base_commit_id=base_commit_for_metadata)
-                    LOG.info(f"Reset metadata for {mp.id} to product commit {product_commit[:10]}")
-                reload_release_data()
+                    LOG.exception("Failure while deploying %s.", target_product_id)
 
                 # NOTE(bqian): Below check an exception raise should be revisited,
                 # if applicable should be applied to the begining of all requests
@@ -6163,9 +6268,9 @@ class PatchController(PatchService):
                     msg = "Service is running in incorrect state, no registered hosts"
                     raise InternalError(msg)
 
-                # Run post-start script contained in each metapackage
-                LOG.info(f"Running post-start scripts for: {mp_deploy_set}")
-                for mp in mp_deploy_set:
+                # Run post-start script contained in each removed metapackage
+                LOG.info(f"Running post-start scripts for: {', '.join(metapackages)}")
+                for mp in removed_span:
                     script = mp.post_start  # Check for post_start script in metadata
                     if script:
                         mp_script_dir = Path(mp.metapackage_dir) / constants.HOST_SCRIPTS_TYPE
@@ -6187,7 +6292,7 @@ class PatchController(PatchService):
                 self.send_latest_feed_commit_to_agent(latest_feed_commit)
                 self.software_sync()
 
-                msg = f"Deploy start to remove {product_id} completed successfully"
+                msg = f"Deploy start to {product_id} completed successfully"
                 LOG.info(msg)
                 msg_info += msg + "\n"
             except Exception as e:
@@ -6415,15 +6520,29 @@ class PatchController(PatchService):
                 else:
                     metapackages = deploy.get("metapackages")
                     if metapackages:
-                        # Metapackage path: reset feed only.
-                        # The custom branch and appended commit are preserved
-                        # for reuse on a subsequent deploy of the same set.
+                        # Reset the feed to the pre-deploy commit
+                        # (rollback_commit_id), falling back to the from-release
+                        # branch for older records
                         deploying_mps = self.release_collection.get_ordered_metapackages(
                             filter_by_states=[states.DEPLOYING])
                         if deploying_mps:
-                            mp_deploy_set = MetapackageDeploymentSet(deploying_mps)
                             feed_repo = deploy.get("feed_repo")
-                            self.reset_feed_commit(mp_deploy_set, feed_repo=feed_repo)
+                            feed_sw_version = Path(feed_repo).parent.name.replace("rel-", "")
+                            from_release_deployment = \
+                                self.release_collection.get_release_id_by_sw_release(from_release)
+                            sim = SoftwareInventoryManager(feed_sw_version)
+                            reset_commit = deploy.get("rollback_commit_id")
+                            try:
+                                if not reset_commit:
+                                    reset_commit = sim.get_branch_commit(from_release_deployment)
+                                ostree_utils.reset_ostree_repo_head(reset_commit, feed_repo)
+                                ostree_utils.update_repo_summary_file(feed_repo)
+                                LOG.info(f"Reset deploy branch '{constants.OSTREE_REF}' to "
+                                         f"commit {reset_commit[:10]}")
+                            except BranchNotFound:
+                                LOG.error(f"Couldn't find ostree branch for reset target "
+                                          f"{from_release_deployment}")
+                                raise
                     else:
                         # Legacy path
                         deployment_list = deploying_release_state.get_release_ids()
@@ -6707,29 +6826,29 @@ class PatchController(PatchService):
                 raise SoftwareServiceError("Abort operation is not supported in patch removal")
 
             if metapackages:
-                # Component-based path
-                deploying_mps = self.release_collection.get_ordered_metapackages(
-                    filter_by_states=[states.DEPLOYING])
-                try:
-                    mp_deploy_set = MetapackageDeploymentSet(deploying_mps)
-                except ReleaseInvalidData as e:
-                    msg = str(e)
-                    LOG.error(msg)
-                    msg_error += msg
-                    return dict(info=msg_info, warning=msg_warning, error=msg_error)
-
-                # Use feed_repo from deploy entity (correct for all scenarios
-                # including pre-upgrade-deploy where metapackage sw_version
-                # differs from the actual feed)
+                # Reset the feed to the pre-deploy commit (rollback_commit_id),
+                # falling back to the from-release branch for older records
                 feed_repo = deploy.get("feed_repo")
                 feed_sw_version = Path(feed_repo).parent.name.replace("rel-", "")
 
-                self.reset_feed_commit(mp_deploy_set, feed_repo=feed_repo)
+                sim = SoftwareInventoryManager(feed_sw_version)
+                commit_id = deploy.get("rollback_commit_id")
+                if not commit_id:
+                    try:
+                        commit_id = sim.get_branch_commit(from_release_deployment)
+                    except BranchNotFound:
+                        LOG.error(f"Couldn't find ostree branch for rollback target "
+                                  f"{from_release_deployment}")
+                        raise
+
+                ostree_utils.reset_ostree_repo_head(commit_id, feed_repo)
+                LOG.info(f"Reset deploy branch '{constants.OSTREE_REF}' from "
+                         f"ostree feed {feed_repo} to commit {commit_id[:10]}")
+                ostree_utils.update_repo_summary_file(feed_repo)
+
                 latest_feed_commit = ostree_utils.get_feed_latest_commit(feed_sw_version)
                 self.send_latest_feed_commit_to_agent(latest_feed_commit)
                 self.software_sync()
-
-                commit_id = next(iter(mp_deploy_set.base_commit_id))
             else:
                 # Legacy path
                 from_deployment = self.release_collection.get_release_by_id(from_release_deployment)
