@@ -24,7 +24,7 @@ def initialize_apt_ostree(feed_dir):
         subprocess.run(
             ["apt-ostree", "repo", "init",
              "--feed", str(feed_dir),
-             "--release", constants.DEBIAN_RELEASE,
+             "--release", utils.get_system_debian_codename(),
              "--origin", constants.DEBIAN_ORIGIN],
             check=True,
             capture_output=True)
@@ -48,7 +48,7 @@ def package_list_upload(feed_dir, sw_release, package_list):
         subprocess.run(
             ["apt-ostree", "repo", "add",
              "--feed", str(feed_dir),
-             "--release", constants.DEBIAN_RELEASE,
+             "--release", utils.get_repo_codename(feed_dir),
              "--component", sw_release,
              *package_list],
             check=True,
@@ -81,7 +81,7 @@ def package_remove(feed_dir, sw_release, packages):
             subprocess.run(
                 ["apt-ostree", "repo", "remove",
                  "--feed", str(feed_dir),
-                 "--release", constants.DEBIAN_RELEASE,
+                 "--release", utils.get_repo_codename(feed_dir),
                  "--component", sw_release,
                  package],
                 check=True,
@@ -117,7 +117,7 @@ def component_remove(pkg_feed_dir, component):
         subprocess.run(
             ["apt-ostree", "repo", "remove",
                 "--feed", str(pkg_feed_dir),
-                "--release", constants.DEBIAN_RELEASE,
+                "--release", utils.get_repo_codename(pkg_feed_dir),
                 "--component", component],
             check=True,
             capture_output=True)

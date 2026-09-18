@@ -13,52 +13,65 @@ from software import apt_utils
 
 
 class TestInitializeAptOstree(unittest.TestCase):
+    @patch('software.apt_utils.utils.get_system_debian_codename',
+           return_value='trixie')
     @patch('software.apt_utils.subprocess.run')
-    def test_success(self, mock_run):
+    def test_success(self, mock_run, _mock_codename):
         apt_utils.initialize_apt_ostree("/feed/dir")
         mock_run.assert_called_once()
         args = mock_run.call_args[0][0]
         self.assertIn("apt-ostree", args)
         self.assertIn("init", args)
+        self.assertIn("trixie", args)
 
+    @patch('software.apt_utils.utils.get_system_debian_codename',
+           return_value='trixie')
     @patch('software.apt_utils.subprocess.run',
            side_effect=subprocess.CalledProcessError(
                1, 'cmd', stderr=b"error"))
-    def test_failure(self, _mock_run):
+    def test_failure(self, _mock_run, _mock_codename):
         with self.assertRaises(APTOSTreeCommandFail):
             apt_utils.initialize_apt_ostree("/feed/dir")
 
 
 class TestPackageListUpload(unittest.TestCase):
 
+    @patch('software.apt_utils.utils.get_repo_codename',
+           return_value='trixie')
     @patch('software.apt_utils.subprocess.run',
            side_effect=subprocess.CalledProcessError(
                1, 'cmd', stderr=b"upload error"))
-    def test_failure(self, _mock_run):
+    def test_failure(self, _mock_run, _mock_codename):
         with self.assertRaises(APTOSTreeCommandFail):
             apt_utils.package_list_upload("/feed", "24.09.1", ["pkg1.deb"])
 
 
 class TestPackageRemove(unittest.TestCase):
+    @patch('software.apt_utils.utils.get_repo_codename',
+           return_value='trixie')
     @patch('software.apt_utils.subprocess.run')
-    def test_success(self, mock_run):
+    def test_success(self, mock_run, _mock_codename):
         apt_utils.package_remove("/feed", "24.09.1", ["pkg1", "pkg2"])
         self.assertEqual(mock_run.call_count, 2)
 
+    @patch('software.apt_utils.utils.get_repo_codename',
+           return_value='trixie')
     @patch('software.apt_utils.subprocess.run',
            side_effect=subprocess.CalledProcessError(
                1, 'cmd', stderr=b"other error"))
-    def test_other_error(self, _mock_run):
+    def test_other_error(self, _mock_run, _mock_codename):
         with self.assertRaises(APTOSTreeCommandFail):
             apt_utils.package_remove("/feed", "24.09.1", ["pkg1"])
 
 
 class TestComponentRemove(unittest.TestCase):
 
+    @patch('software.apt_utils.utils.get_repo_codename',
+           return_value='trixie')
     @patch('software.apt_utils.subprocess.run',
            side_effect=subprocess.CalledProcessError(
                1, 'cmd', stderr=b"error"))
-    def test_failure(self, _mock_run):
+    def test_failure(self, _mock_run, _mock_codename):
         with self.assertRaises(APTOSTreeCommandFail):
             apt_utils.component_remove("/feed", "24.09.1")
 

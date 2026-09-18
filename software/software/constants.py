@@ -111,6 +111,8 @@ REMOVE = "remove"
 # Feed
 DEBIAN_RELEASE = "trixie"
 DEBIAN_ORIGIN = "updates"
+# os-release file used to detect the running system's Debian codename
+OS_RELEASE_FILE = "/usr/lib/os-release"
 FEED_DIR = "/var/www/pages/feed/"
 FEED_OSTREE_BASE_DIR = "/var/www/pages/feed"
 FEED_OSTREE_URL = "http://controller:8080/feed"

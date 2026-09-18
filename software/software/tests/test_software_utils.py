@@ -3,6 +3,9 @@
 #
 # Copyright (c) 2025-2026 Wind River Systems, Inc.
 #
+import os
+import shutil
+import tempfile
 import unittest
 from unittest import mock
 
@@ -12,6 +15,8 @@ from packaging.version import Version
 from software.utils import find_file_by_regex
 from software.utils import get_component_and_versions
 from software.utils import get_major_release_version
+from software.utils import get_repo_codename
+from software.utils import get_system_debian_codename
 from software.utils import parse_release_version
 
 
@@ -164,3 +169,92 @@ class TestParseReleaseVersion(unittest.TestCase):
         self.assertEqual(str(ver), "26.10.0")
         # But the original dep_id is unchanged
         self.assertEqual(dep_id, "starlingx-26.10.0")
+
+
+class TestGetSystemDebianCodename(unittest.TestCase):
+    """Tests for utils.get_system_debian_codename."""
+
+    def _write_os_release(self, content):
+        tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmpdir, ignore_errors=True)
+        os_release = os.path.join(tmpdir, "os-release")
+        with open(os_release, "w") as f:
+            f.write(content)
+        return os_release
+
+    def test_reads_codename(self):
+        os_release = self._write_os_release(
+            'PRETTY_NAME="Debian GNU/Linux 13 (trixie)"\n'
+            'VERSION_CODENAME=trixie\n'
+            'ID=debian\n')
+        with mock.patch('software.utils.constants.OS_RELEASE_FILE',
+                        os_release):
+            self.assertEqual(get_system_debian_codename(), "trixie")
+
+    def test_reads_bullseye_codename(self):
+        os_release = self._write_os_release(
+            'VERSION_CODENAME=bullseye\n')
+        with mock.patch('software.utils.constants.OS_RELEASE_FILE',
+                        os_release):
+            self.assertEqual(get_system_debian_codename(), "bullseye")
+
+    def test_strips_quotes(self):
+        os_release = self._write_os_release(
+            'VERSION_CODENAME="trixie"\n')
+        with mock.patch('software.utils.constants.OS_RELEASE_FILE',
+                        os_release):
+            self.assertEqual(get_system_debian_codename(), "trixie")
+
+    def test_missing_codename_raises(self):
+        os_release = self._write_os_release(
+            'PRETTY_NAME="Debian GNU/Linux"\nID=debian\n')
+        with mock.patch('software.utils.constants.OS_RELEASE_FILE',
+                        os_release):
+            with self.assertRaises(ValueError):
+                get_system_debian_codename()
+
+
+class TestGetRepoCodename(unittest.TestCase):
+    """Tests for utils.get_repo_codename."""
+
+    def _make_repo(self, codename):
+        """Create a repo dir with a reprepro conf/distributions file."""
+        repo_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, repo_dir, ignore_errors=True)
+        conf_dir = os.path.join(repo_dir, "conf")
+        os.makedirs(conf_dir)
+        with open(os.path.join(conf_dir, "distributions"), "w") as f:
+            f.write(
+                "Origin: updates\n"
+                "Label: StarlingX project updates.\n"
+                "Codename: %s\n"
+                "Architectures: amd64\n"
+                "Components: updates\n" % codename)
+        return repo_dir
+
+    def test_reads_bullseye_repo(self):
+        repo_dir = self._make_repo("bullseye")
+        self.assertEqual(get_repo_codename(repo_dir), "bullseye")
+
+    def test_reads_trixie_repo(self):
+        repo_dir = self._make_repo("trixie")
+        self.assertEqual(get_repo_codename(repo_dir), "trixie")
+
+    @mock.patch('software.utils.get_system_debian_codename',
+                return_value='trixie')
+    def test_missing_repo_falls_back_to_system(self, _mock_system):
+        # Repo dir has no conf/distributions yet.
+        missing_repo = os.path.join(tempfile.mkdtemp(), "rel-99.99")
+        self.addCleanup(shutil.rmtree,
+                        os.path.dirname(missing_repo), ignore_errors=True)
+        self.assertEqual(get_repo_codename(missing_repo), "trixie")
+
+    def test_codename_missing_in_config_raises(self):
+        repo_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, repo_dir, ignore_errors=True)
+        conf_dir = os.path.join(repo_dir, "conf")
+        os.makedirs(conf_dir)
+        with open(os.path.join(conf_dir, "distributions"), "w") as f:
+            f.write("Origin: updates\nComponents: updates\n")
+        with self.assertRaises(ValueError):
+            get_repo_codename(repo_dir)

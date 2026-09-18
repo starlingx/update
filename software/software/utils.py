@@ -208,6 +208,43 @@ def compare_release_version(sw_release_version_1, sw_release_version_2):
             return None
 
 
+def get_system_debian_codename():
+    """Return the Debian codename of the running system.
+
+    Parsed from VERSION_CODENAME in /usr/lib/os-release.
+
+    :returns: Debian codename (e.g. 'bullseye', 'trixie')
+    """
+    with open(constants.OS_RELEASE_FILE, "r") as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith("VERSION_CODENAME="):
+                return line.split("=", 1)[1].strip("'\"")
+    raise ValueError(
+        "VERSION_CODENAME not found in %s" % constants.OS_RELEASE_FILE)
+
+
+def get_repo_codename(repo_dir):
+    """Return the Debian codename an apt-ostree repo is configured with.
+
+    :param repo_dir: apt-ostree/reprepro repo directory
+    :returns: Debian codename (e.g. 'bullseye', 'trixie')
+    """
+    distributions_file = os.path.join(
+        str(repo_dir), "conf", "distributions")
+    if not os.path.exists(distributions_file):
+        # No repo yet: a new one will be created for the running release.
+        return get_system_debian_codename()
+
+    with open(distributions_file, "r") as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith("Codename:"):
+                return line.split(":", 1)[1].strip()
+    raise ValueError(
+        "Codename not found in %s" % distributions_file)
+
+
 def gethostbyname(hostname):
     """gethostbyname with IPv6 support """
     try:
