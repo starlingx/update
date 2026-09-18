@@ -29,11 +29,13 @@ from software.base import PatchService
 class TestAptUtilsInitialize(unittest.TestCase):
     """Tests for apt_utils.initialize_apt_ostree."""
 
+    @mock.patch('software.apt_utils.utils.get_system_debian_codename',
+                return_value='trixie')
     @mock.patch('subprocess.run',
                 side_effect=subprocess.CalledProcessError(1,
                                                           'cmd',
                                                           stderr=b'err'))
-    def test_failure(self, _mock_run):
+    def test_failure(self, _mock_run, _mock_codename):
         with self.assertRaises(APTOSTreeCommandFail):
             initialize_apt_ostree("/feed/dir")
 
@@ -41,11 +43,13 @@ class TestAptUtilsInitialize(unittest.TestCase):
 class TestAptUtilsPackageListUpload(unittest.TestCase):
     """Tests for apt_utils.package_list_upload."""
 
+    @mock.patch('software.apt_utils.utils.get_repo_codename',
+                return_value='trixie')
     @mock.patch('subprocess.run',
                 side_effect=subprocess.CalledProcessError(1,
                                                           'cmd',
                                                           stderr=b'err'))
-    def test_failure(self, _mock_run):
+    def test_failure(self, _mock_run, _mock_codename):
         with self.assertRaises(APTOSTreeCommandFail):
             package_list_upload("/feed", "24.09.1", ["pkg1.deb"])
 
@@ -53,15 +57,19 @@ class TestAptUtilsPackageListUpload(unittest.TestCase):
 class TestAptUtilsPackageRemove(unittest.TestCase):
     """Tests for apt_utils.package_remove."""
 
+    @mock.patch('software.apt_utils.utils.get_repo_codename',
+                return_value='trixie')
     @mock.patch('subprocess.run')
-    def test_success(self, mock_run):
+    def test_success(self, mock_run, _mock_codename):
         package_remove("/feed", "24.09.1", ["pkg1", "pkg2"])
         self.assertEqual(mock_run.call_count, 2)
 
+    @mock.patch('software.apt_utils.utils.get_repo_codename',
+                return_value='trixie')
     @mock.patch('subprocess.run',
                 side_effect=subprocess.CalledProcessError(
                     1, 'cmd', stderr=b'other error'))
-    def test_other_error(self, _mock_run):
+    def test_other_error(self, _mock_run, _mock_codename):
         with self.assertRaises(APTOSTreeCommandFail):
             package_remove("/feed", "24.09.1", ["pkg1"])
 
@@ -69,11 +77,13 @@ class TestAptUtilsPackageRemove(unittest.TestCase):
 class TestAptUtilsComponentRemove(unittest.TestCase):
     """Tests for apt_utils.component_remove."""
 
+    @mock.patch('software.apt_utils.utils.get_repo_codename',
+                return_value='trixie')
     @mock.patch('subprocess.run',
                 side_effect=subprocess.CalledProcessError(1,
                                                           'cmd',
                                                           stderr=b'err'))
-    def test_failure(self, _mock_run):
+    def test_failure(self, _mock_run, _mock_codename):
         with self.assertRaises(APTOSTreeCommandFail):
             component_remove("/feed", "24.09.1")
 
