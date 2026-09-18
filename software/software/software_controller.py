@@ -2452,6 +2452,16 @@ class PatchController(PatchService):
         ordered_list.reverse()
         return ordered_list
 
+    def _get_mp_branches(self, release):
+        """
+        Get all metapackage release deployable branches that are created
+        """
+        release_id = release.id
+        sim = SoftwareInventoryManager(release.sw_version)
+        branches = sim.get_branches()
+        mp_branches = [branch for branch in branches if branch.startswith(f"{release_id}-")]
+        return mp_branches
+
     def software_release_delete_api(self, release_ids):
         """
         Delete release(s)
@@ -2476,11 +2486,20 @@ class PatchController(PatchService):
             release = self.release_collection.get_release_by_id(release_id)
             if release.is_product_release:
                 sim = SoftwareInventoryManager(release.sw_version)
+                # TODO(bqian) below multiple steps ostree branch deletection is not atomic and enhancement is required.
+                mp_branches = self._get_mp_branches(release)
                 try:
                     sim.delete_branch(release_id)
-                except Exception:
-                    LOG.exception(f"Failed to delete deployable branch {release_id}")
+                except Exception as e:
+                    LOG.exception(f"Failed to delete deployable branch {release_id}. {str(e)}")
                     raise SoftwareServiceError(f"Failed to delete {release_id}")
+
+                for mpb in mp_branches:
+                    try:
+                        sim.delete_branch(mpb)
+                    except Exception as e:
+                        LOG.exception(f"Failed to delete metapackage release branch {mpb}. {str(e)}")
+                        # product release has been deleted, so continue even mp branch deletion has failed.
 
                 # Determine if feed should be removed before deleting metadata
                 try:
