@@ -212,6 +212,35 @@ class SoftwareInventoryManager():
         self.create_branch(base_commit, new_branch)
         commit_packages_to_branch(self.repo_path, self.sw_ver, new_branch, packages, pre_bootstrap)
 
+    def create_kernel_release_branch(self, base_branch, new_branch, extra_repo_path):
+        """Build a release branch from the pre-built ostree commit shipped in extra.tar
+
+        Used only by the legacy kernel-patch model, which ships a full ostree_repo
+        instead of debian packages and will be dropped in the future. The shipped
+        commit is pulled into the feed repo and committed under new_branch, parented
+        on base_branch (the highest required release, or the deploy branch).
+        """
+        extra_commit = get_top_commit(extra_repo_path, self.DEPLOY_BRANCH)
+        parent_commit = self.get_branch_commit(base_branch)
+        commit_msg = "Kernel patch %s" % new_branch
+        try:
+            LOG.info(f"Pulling commit {extra_commit} from {extra_repo_path}")
+            subprocess.run(
+                ["ostree", f"--repo={self.repo_path}", "pull-local", extra_repo_path, extra_commit],
+                check=True, capture_output=True, text=True)
+            LOG.info(f"Committing to {new_branch} with parent {parent_commit}")
+            subprocess.run(
+                ["ostree", f"--repo={self.repo_path}", "commit", "-b", new_branch,
+                 "--parent", parent_commit, "--tree=ref=%s" % extra_commit, "-s", commit_msg],
+                check=True, capture_output=True, text=True)
+            LOG.info(f"Updating feed {self.repo_path} summary")
+            subprocess.run(
+                ["ostree", f"--repo={self.repo_path}", "summary", "-u"],
+                check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError("Failed to build kernel release branch '%s': %s"
+                               % (new_branch, e.stderr)) from None
+
     def delete_branch(self, branch, prestage=False):
         """Delete an ostree software release branch and any branches built on top of it,
            then prune.

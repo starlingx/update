@@ -846,6 +846,7 @@ class TestCreateSwReleasesIt(unittest.TestCase):
             f"k8s-common_{sw_release}": {},
         }
         release.requires_release_ids = []
+        release.kernel_patch = False
         return release
 
     def _run(self, controller, patch_info):

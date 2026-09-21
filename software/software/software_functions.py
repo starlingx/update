@@ -1599,8 +1599,6 @@ class ComponentPatchFile:
                             metapkg_md_name = f"{mp}_{release_version}-{self.METADATA_XML}"
                             metapkg_md_src = Path(metapkg_dir) / self.METADATA_XML
                             metapkg_md_dst = Path(states.COMPONENT_UPLOADING_DIR) / metapkg_md_name
-                            if kernel_patch:  # Kernel patch commit is already pre-built
-                                metapkg_md_dst = Path(states.COMPONENT_AVAILABLE_DIR) / metapkg_md_name
                             remove_xml_tag(metapkg_md_src, "contents")
                             copy_xml_file(metapkg_md_src, metapkg_md_dst, metapkg_metadata_override)
                             LOG.info(f"Copied metapackage metadata to {metapkg_md_dst}")
