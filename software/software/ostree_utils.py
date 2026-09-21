@@ -17,11 +17,11 @@ import shutil
 import subprocess
 import time
 
+import gi
+gi.require_version('OSTree', '1.0')
 from gi.repository import Gio
 from gi.repository import GLib
 from gi.repository import OSTree  # pylint: disable=E0611
-import gi
-gi.require_version('OSTree', '1.0')
 import sh
 from tsconfig.tsconfig import subfunctions
 

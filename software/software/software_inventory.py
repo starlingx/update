@@ -215,7 +215,7 @@ class SoftwareInventoryManager():
     def delete_branch(self, branch, prestage=False):
         """Delete an ostree software release branch and any branches built on top of it,
            then prune.
-           When a software release branch is deleted, its dependents become orphan, that's
+           When a software release branch is deleted, its dependent branches become orphan, that's
            why they are deleted in one operation.
         """
         branches = self.get_branches()
@@ -223,51 +223,31 @@ class SoftwareInventoryManager():
             LOG.info(f"Branch {branch} does not exist to delete")
             return []
 
-        def get_tree(commit):
-            r = subprocess.run(
-                ["ostree", "ls", "--repo", self.repo_path, commit, "-d"],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
-            if r.returncode == 0:
-                return r.stdout.strip()
-            return None
-
-        def get_parent_commit(commit):
-            r = subprocess.run(
-                ["ostree", "log", "--repo", self.repo_path, commit],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
-            if r.returncode != 0:
-                return None
-            commits = []
-            for line in r.stdout.splitlines():
-                if line.startswith("commit "):
-                    commits.append(line.split()[1])
-            if len(commits) >= 2:
-                return commits[1]
-            return None
-
         target_tip = self.get_branch_commit(branch)
-        target_tree = get_tree(target_tip)
 
         to_delete = [branch]
-        target_trees = {target_tree}
+        tip_to_delete = [target_tip]
 
+        # A branch is built on top of a deletion target if the target's tip
+        # commit appears anywhere in the branch's full commit history.
+        # Iterate to a fixed point so transitive dependents are also caught.
         changed = True
         while changed:
             changed = False
             for b in branches:
-                if b in to_delete or b == self.DEPLOY_BRANCH:
+                if b == self.DEPLOY_BRANCH:
                     continue
-                tip = subprocess.check_output(
-                    ["ostree", "rev-parse", "--repo", self.repo_path, b], text=True).strip()
-                parent = get_parent_commit(tip)
-                if parent:
-                    parent_tree = get_tree(parent)
-                    if parent_tree in target_trees:
-                        if prestage and not b.endswith(constants.PRESTAGE_SUFFIX):
-                            continue
-                        to_delete.append(b)
-                        target_trees.add(get_tree(tip))
-                        changed = True
+                if b in to_delete:
+                    continue
+
+                # history excludes the tip.
+                history = ostree_utils.get_commits(self.repo, b)[1:]
+                if any(tip in history for tip in tip_to_delete):
+                    if prestage and not b.endswith(constants.PRESTAGE_SUFFIX):
+                        continue
+                    tip_to_delete.append(self.get_branch_commit(b))
+                    to_delete.append(b)
+                    changed = True
 
         for b in to_delete:
             LOG.info("Deleting branch: %s", b)
