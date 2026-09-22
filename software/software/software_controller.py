@@ -6340,7 +6340,7 @@ class PatchController(PatchService):
             ET.indent(tree, '  ')
             atomic_write_xml(tree, metadata_path)
 
-    def execute_delete_actions(self, release_ids):
+    def execute_delete_actions(self, release_ids, descending=False):
         # TODO(heitormatsui) join activate, activate_rollback
         # and deploy_delete under the same function/structure
         deploy = self.db_api_instance.get_current_deploy()
@@ -6356,15 +6356,16 @@ class PatchController(PatchService):
 
         if metapackages:
             # Per-metapackage delete: build scripts dict and call directly
-            metapackages_scripts = {}
+            mp_releases = []
             for mp_id in release_ids:
                 if is_pre_upgrade_deploy:
                     mp_release = self.release_collection.get_pre_upgrade_deploy_release_by_id(mp_id)
                 else:
                     mp_release = self.release_collection.get_metapackage_release_by_id(mp_id)
-                scripts = mp_release.activation_scripts
-                path_key = mp_release.path_component
-                metapackages_scripts[path_key] = scripts
+                mp_releases.append(mp_release)
+            # Order releases by version: ascending when applying forward,
+            # descending when unwinding (removing/rollback)
+            metapackages_scripts = self._build_metapackage_scripts(mp_releases, descending)
 
             delete_cmd = ["source", "/etc/platform/openrc;",
                           "/usr/bin/software-deploy-action",
@@ -6614,11 +6615,14 @@ class PatchController(PatchService):
                                        "%s=%s" % (fm_constants.FM_ENTITY_TYPE_HOST, constants.CONTROLLER_FLOATING_HOSTNAME))
 
         release_ids = []
+        descending = False
         if deploying_release_state.has_release_id():
             release_ids = deploying_release_state.get_release_ids()
         elif removing_release_state.has_release_id():
             release_ids = removing_release_state.get_release_ids()
-        self.execute_delete_actions(release_ids=release_ids)
+            # Removing unwinds the span, so run higher releases first
+            descending = True
+        self.execute_delete_actions(release_ids=release_ids, descending=descending)
 
         msg_info += "Deploy deleted with success\n"
         self.db_api_instance.delete_deploy_host_all()
@@ -6691,6 +6695,25 @@ class PatchController(PatchService):
 
         return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
+    @staticmethod
+    def _build_metapackage_scripts(mp_releases, descending=False):
+        """Build the metapackage scripts payload for software-deploy-action.
+
+        Keyed by release version, then component, so that different releases
+        sharing the same component do not overwrite each other:
+            {sw_release: {component: [scripts], ...}, ...}
+        Releases are ordered by version (ascending, or descending when
+        unwinding a span); dict/json iteration preserves that order.
+        """
+        ordered = sorted(mp_releases,
+                         key=lambda r: utils.parse_release_version(r.sw_release),
+                         reverse=descending)
+        scripts = {}
+        for mp_release in ordered:
+            scripts.setdefault(mp_release.sw_release, {})[mp_release.path_component] = \
+                mp_release.activation_scripts
+        return scripts
+
     def _activate(self, action="activate"):
         # TODO(heitormatsui) join activate, activate_rollback
         # and deploy_delete under the same function/structure
@@ -6729,17 +6752,19 @@ class PatchController(PatchService):
 
         metapackages = deploy.get("metapackages")
         if metapackages:
-            metapackages_scripts = {}
+            mp_releases = []
             for mp_id in deploying_release_state.get_release_ids():
                 if pre_upgrade_deploy:
                     mp_release = self.release_collection.get_pre_upgrade_deploy_release_by_id(mp_id)
                 else:
                     mp_release = self.release_collection.get_metapackage_release_by_id(mp_id)
                 if not mp_release:
-                    raise SoftwareServiceError(f"Metapackage {mp_id} not found.")
-                scripts = mp_release.activation_scripts
-                path_key = mp_release.path_component
-                metapackages_scripts[path_key] = scripts
+                    raise SoftwareServiceError(error=f"Metapackage {mp_id} not found")
+                mp_releases.append(mp_release)
+            # Order releases by version: ascending when applying forward
+            # (activate), descending when rolling back (activate-rollback)
+            descending = action == "activate-rollback"
+            metapackages_scripts = self._build_metapackage_scripts(mp_releases, descending)
             activate_cmd.append("--metapackages '%s'" % json.dumps(metapackages_scripts))
 
         env = os.environ.copy()

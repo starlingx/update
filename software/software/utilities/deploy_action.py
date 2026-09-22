@@ -69,17 +69,16 @@ def do_action(from_release, to_release, is_major_release, metapackages=None,
 
     try:
         if is_major_release and metapackages:
-            # Major release per-metapackage: run all scripts in each dir
+            # Major release per-metapackage: run all scripts in each dir,
+            # metapackages is keyed {sw_release: {component: [scripts]}}
             LOG.info(f"Running {action} scripts for major release (per-metapackage)")
-            scripts_release = max(from_release, to_release,
-                                  key=lambda r: tuple(int(x) for x in r.split('.')))
-            for mp_name in metapackages:
-                mp_dir = os.path.join(SOFTWARE_RELEASES_STORAGE_DIR, scripts_release,
-                                      mp_name, UPGRADE_SCRIPTS_DIR)
-                LOG.info(f"Running {action} scripts for metapackage: {mp_name}")
-                execute_migration_scripts(from_release, to_release,
-                                          action,
-                                          migration_script_dir=mp_dir)
+            for mp_release, components in metapackages.items():
+                for mp_name in components:
+                    mp_dir = os.path.join(SOFTWARE_RELEASES_STORAGE_DIR, mp_release,
+                                          mp_name, UPGRADE_SCRIPTS_DIR)
+                    LOG.info(f"Running {action} scripts for metapackage: {mp_name} ({mp_release})")
+                    execute_migration_scripts(from_release, to_release, action,
+                                              migration_script_dir=mp_dir)
         elif is_major_release:
             # Legacy major release: single directory
             LOG.info(f"Running {action} scripts for major release (legacy)")
@@ -87,16 +86,20 @@ def do_action(from_release, to_release, is_major_release, metapackages=None,
             to_major_release = utils.get_major_release_version(to_release)
             execute_migration_scripts(from_major_release, to_major_release, action)
         elif metapackages:
-            # Patch per-metapackage: run only specific named scripts
+            # Patch per-metapackage: run only specific named scripts. Each
+            # metapackage's scripts live under its own release directory, since
+            # a single deploy can span metapackages from multiple releases,
+            # metapackages is keyed {sw_release: {component: [scripts]}}; the
+            # controller orders it (ascending forward, descending unwinding)
+            # and dict/json iteration preserves that order
             LOG.info(f"Running {action} scripts for patch release")
-            scripts_release = max(from_release, to_release,
-                                  key=lambda r: tuple(int(x) for x in r.split('.')))
-            for mp_name, scripts in metapackages.items():
-                mp_dir = os.path.join(SOFTWARE_RELEASES_STORAGE_DIR, scripts_release,
-                                      mp_name, UPGRADE_SCRIPTS_DIR)
-                LOG.info(f"Running {action} scripts for metapackage: {mp_name}")
-                run_scripts([mp_dir], action=action, filter_names=scripts,
-                            from_release=from_release, to_release=to_release)
+            for mp_release, components in metapackages.items():
+                for mp_name, scripts in components.items():
+                    mp_dir = os.path.join(SOFTWARE_RELEASES_STORAGE_DIR, mp_release,
+                                          mp_name, UPGRADE_SCRIPTS_DIR)
+                    LOG.info(f"Running {action} scripts for metapackage: {mp_name} ({mp_release})")
+                    run_scripts([mp_dir], action=action, filter_names=scripts,
+                                from_release=from_release, to_release=to_release)
         else:
             LOG.warning(f"No metapackages were provided for {action}")
 
