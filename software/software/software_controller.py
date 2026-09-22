@@ -1876,7 +1876,14 @@ class PatchController(PatchService):
                     commit_id = sim.get_deployed_commit()
                     require_release_id = sim.get_release_by_commit(commit_id)
 
-                sim.create_sw_release_branch(require_release_id, new_branch, packages, pre_bootstrap)
+                if release.kernel_patch:
+                    # Legacy kernel-patch model: the ostree commit is shipped
+                    # pre-built inside extra.tar rather than assembled from debs
+                    extra_repo_path = os.path.join(
+                        constants.COMPONENT_SOFTWARE_STORAGE_DIR, sw_rel, "extra", "ostree_repo")
+                    sim.create_kernel_release_branch(require_release_id, new_branch, extra_repo_path)
+                else:
+                    sim.create_sw_release_branch(require_release_id, new_branch, packages, pre_bootstrap)
                 # Update metapackage metadata commit-id
                 commit_id = sim.get_branch_commit(new_branch)
                 base_commit_id = sim.get_branch_commit(require_release_id)
