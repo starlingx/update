@@ -101,6 +101,7 @@ def do_action(from_release, to_release, is_major_release, metapackages=None,
             LOG.warning(f"No metapackages were provided for {action}")
 
     except Exception:
+        LOG.exception(f"Error running {action} scripts")
         if state_info["failed"]:
             state = state_info["failed"]
         res = False
@@ -114,7 +115,7 @@ def do_action(from_release, to_release, is_major_release, metapackages=None,
                 else:
                     LOG.error(f"Deploy {action} failed")
             except Exception:
-                LOG.error(f"Update deploy state failed for {action}")
+                LOG.exception(f"Update deploy state failed for {action}")
                 res = False
         else:
             if res:
