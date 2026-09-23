@@ -176,10 +176,35 @@ def get_release_path(sw_release):
     return Path(constants.COMPONENT_SOFTWARE_STORAGE_DIR) / sw_release
 
 
-def get_software_deploy_script(sw_version, script):
-    release_dir = get_release_path(sw_version)
-    script_path = [str(f) for f in release_dir.rglob(script)]
-    return script_path
+def get_software_deploy_script(sw_versions, script):
+    """
+    Find a deploy script across one or more release directories.
+
+    A single deploy can span multiple product releases, and the script may
+    live under any release in the span rather than the target. Each release
+    dir tree is searched and the match under the highest release is returned.
+
+    This function is used to find deploy scripts used by upgrade, so, for
+    consistency, only a single metapackage from a given release should contain
+    these scripts.
+
+    :param sw_versions: a single release version, or a list of them (span)
+    :param script: script filename to search for
+    :return: path to the highest-release match, or None if not found
+    """
+    if isinstance(sw_versions, str):
+        sw_versions = [sw_versions]
+
+    # Highest release first so the first release with a match wins
+    for sw_version in sorted(sw_versions, key=parse_release_version, reverse=True):
+        matches = [str(f) for f in get_release_path(sw_version).rglob(script)]
+        if len(matches) > 1:
+            raise SoftwareServiceError(
+                f"Found multiple {script} scripts under release {sw_version}: "
+                f"{', '.join(matches)}")
+        if matches:
+            return matches[0]
+    return None
 
 
 def get_precheck_script(sw_version, metapackage: typing.Optional[str] = None):

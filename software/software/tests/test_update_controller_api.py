@@ -335,7 +335,7 @@ class TestSoftwareDeployDeleteApi(unittest.TestCase):
     @mock.patch('software.software_controller.get_SWReleaseCollection')
     @mock.patch('os.path.isfile', return_value=False)
     @mock.patch('software.software_controller.utils.get_software_deploy_script',
-                return_value=[])
+                return_value=None)
     def test_delete_start_done_patch(self, _get_state, _isfile, mock_swrc,
                                      mock_rs, _mock_plugin, _script, _init):
         c = _make_controller()
