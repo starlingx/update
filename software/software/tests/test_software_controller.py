@@ -943,3 +943,55 @@ class TestCreateSwReleasesIt(unittest.TestCase):
         self.assertEqual(
             created_order,
             ["starlingx-13.0.1", "starlingx-13.0.2", "starlingx-13.0.3"])
+
+
+class _FakeScriptRelease:
+    """Minimal metapackage release stand-in for _build_metapackage_scripts:
+    only sw_release, path_component and activation_scripts are used.
+    """
+
+    def __init__(self, sw_release, component, scripts):
+        self.sw_release = sw_release
+        self.path_component = component
+        self.activation_scripts = scripts
+
+
+class TestBuildMetapackageScripts(unittest.TestCase):
+    """Tests for PatchController._build_metapackage_scripts, which builds the
+    --metapackages payload passed to software-deploy-action.
+    """
+
+    def test_same_component_across_releases_not_overwritten(self):
+        # A span where two releases both ship a 'base' metapackage: keying by
+        # release then component must preserve both, not collide on 'base'.
+        mp_releases = [
+            _FakeScriptRelease("13.0.1", "base", ["b1.py"]),
+            _FakeScriptRelease("13.0.2", "base", ["b2.py"]),
+            _FakeScriptRelease("13.0.2", "infra", ["i2.py"]),
+        ]
+        result = PatchController._build_metapackage_scripts(mp_releases)  # pylint: disable=protected-access
+        self.assertEqual(result, {
+            "13.0.1": {"base": ["b1.py"]},
+            "13.0.2": {"base": ["b2.py"], "infra": ["i2.py"]},
+        })
+
+    def test_ascending_order_when_forward(self):
+        # Forward (activate/apply): releases ordered low to high
+        mp_releases = [
+            _FakeScriptRelease("13.0.3", "k8s-common", []),
+            _FakeScriptRelease("13.0.1", "base", []),
+            _FakeScriptRelease("13.0.2", "infra", []),
+        ]
+        result = PatchController._build_metapackage_scripts(mp_releases)  # pylint: disable=protected-access
+        self.assertEqual(list(result), ["13.0.1", "13.0.2", "13.0.3"])
+
+    def test_descending_order_when_unwinding(self):
+        # Reverse (activate-rollback/remove): releases ordered high to low
+        mp_releases = [
+            _FakeScriptRelease("13.0.1", "base", []),
+            _FakeScriptRelease("13.0.3", "k8s-common", []),
+            _FakeScriptRelease("13.0.2", "infra", []),
+        ]
+        result = PatchController._build_metapackage_scripts(  # pylint: disable=protected-access
+            mp_releases, descending=True)
+        self.assertEqual(list(result), ["13.0.3", "13.0.2", "13.0.1"])

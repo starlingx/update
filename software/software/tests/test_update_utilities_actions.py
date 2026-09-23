@@ -103,7 +103,7 @@ class TestDoDeployDelete(unittest.TestCase):
     def test_major_release_custom_plugin_path(self, mock_exec):
         """Test major release with metapackages runs per-metapackage."""
         do_action('10.0', '11.0', True,
-                  metapackages=['my-meta'],
+                  metapackages={'11.0': {'my-meta': []}},
                   action=ACTION_DELETE)
         mock_exec.assert_called_once_with(
             '10.0', '11.0', 'delete',
