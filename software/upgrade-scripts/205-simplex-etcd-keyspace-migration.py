@@ -354,6 +354,8 @@ def restore_to_fixed_0(snapshot_file, etcd_version):
 
 def stop_etcd_fixed():
     """Stop etcd-fixed if it is running; its data directory is replaced."""
+    # Prevent etcd-fixed service from restarting.
+    _execute(["/usr/local/sbin/pmon-stop", ETCD_FIXED_SERVICE], SERVICE_TIMEOUT)
     result = subprocess.run(["systemctl", "is-active", ETCD_FIXED_SERVICE],
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True)
@@ -666,6 +668,8 @@ def start_etcd_fixed():
     """
     _execute(["systemctl", "enable", "--now", ETCD_FIXED_SERVICE],
              SERVICE_TIMEOUT)
+    # Resume pmon monitoring.
+    _execute(["/usr/local/sbin/pmon-start", ETCD_FIXED_SERVICE], SERVICE_TIMEOUT)
     wait_for_fixed_0_healthy()
 
 
@@ -736,6 +740,12 @@ def migrate_keyspace():
         shutil.rmtree(temp_dir, ignore_errors=True)
         if mounted_here:
             unmount_floating_volume()
+        # Start etcd-fixed if a failure above left it stopped. Ignore any
+        # error here so it does not hide the original failure.
+        try:
+            start_etcd_fixed()
+        except Exception:
+            LOG.exception("Could not start %s", ETCD_FIXED_SERVICE)
 
     # Reached only when the keyspace actually moved: the early returns above
     # leave etcd untouched and need no wait. Wait for kube-apiserver to
