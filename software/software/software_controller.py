@@ -6491,7 +6491,7 @@ class PatchController(PatchService):
                             if release.sw_version == major_release and release.state in applied_releases_states:
                                 LOG.info("Changing %s metadata to prepatched" % release.id)
 
-                                metadata_dir = states.RELEASE_STATE_TO_DIR_MAP[release.state]
+                                metadata_dir = constants.COMPONENT_SOFTWARE_METADATA_STORAGE_DIR
                                 metadata_file = "%s/%s-metadata.xml" % (metadata_dir, release.id)
 
                                 tree = ET.parse(metadata_file)
