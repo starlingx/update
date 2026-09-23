@@ -28,6 +28,12 @@ def do_show(cc, args):
                                     "State": "state"}
                 nested_tables_headers.update({"metapackages":
                                              ["Metapackage", "From Release", "To Release"]})
+                # Each entry is (metapackage, from_release, to_release); order
+                # by to-release then metapackage name for readability, treating
+                # separators as the same character
+                sep = dict.fromkeys(map(ord, "-_."), "-")
+                deploy["metapackages"].sort(
+                    key=lambda mp: (mp[2], mp[0].translate(sep)))
             else:
                 header_data_list = {"From Release": "from_release",
                                     "To Release": "to_release",
