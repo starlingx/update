@@ -69,7 +69,12 @@ class TestPreviousReleaseApplyOrder(unittest.TestCase):
     """Tests for previous_release_apply_order."""
 
     @patch('software.software_controller.SW_VERSION', '25.03')
-    def test_basic(self):
+    @patch('software.software_controller.SoftwareInventoryManager')
+    @patch('software.software_controller.ostree_utils.get_commits',
+           return_value=["abc"])
+    def test_basic(self, _mock_get_commits, _mock_sim_cls):
+        # The release's commit_id is present in its deployable branch history,
+        # so it is already applied and excluded; only the target remains.
         sc = create_software_controller()
         sc.previous_release_apply_order = (
             PatchController.previous_release_apply_order.__get__(
@@ -82,7 +87,13 @@ class TestPreviousReleaseApplyOrder(unittest.TestCase):
         self.assertIn("stx-24.09.2", result)
 
     @patch('software.software_controller.SW_VERSION', '25.03')
-    def test_excludes_already_deployed(self):
+    @patch('software.software_controller.SoftwareInventoryManager')
+    @patch('software.software_controller.ostree_utils.get_commits',
+           return_value=["abc"])
+    def test_excludes_already_deployed(self, _mock_get_commits, _mock_sim_cls):
+        # The release's deployable branch exists and its commit_id is present
+        # in the branch history, so the release is correctly treated as
+        # already applied and excluded from the apply order.
         sc = create_software_controller()
         sc.previous_release_apply_order = (
             PatchController.previous_release_apply_order.__get__(
@@ -93,6 +104,68 @@ class TestPreviousReleaseApplyOrder(unittest.TestCase):
         sc.get_release_dependency_list.return_value = ["stx-24.09.1"]
         result = sc.previous_release_apply_order("stx-24.09.2")
         self.assertNotIn("stx-24.09.1", result)
+
+    @patch('software.software_controller.SW_VERSION', '25.03')
+    @patch('software.software_controller.SoftwareInventoryManager')
+    @patch('software.software_controller.ostree_utils.get_commits',
+           return_value=["top", "middle", "abc", "base"])
+    def test_excludes_when_commit_is_ancestor(self, _mock_get_commits,
+                                              _mock_sim_cls):
+        # The commit_id need not be the branch tip: later releases may be
+        # committed on top. As long as the commit_id is somewhere in the
+        # branch history it is valid and the release is excluded.
+        sc = create_software_controller()
+        sc.previous_release_apply_order = (
+            PatchController.previous_release_apply_order.__get__(
+                sc))
+        r = MagicMock(id="stx-24.09.1", sw_version="24.09.1",
+                      commit_id="abc", prepatched_iso=False)
+        sc.release_collection.iterate_releases.return_value = [r]
+        sc.get_release_dependency_list.return_value = ["stx-24.09.1"]
+        result = sc.previous_release_apply_order("stx-24.09.2")
+        self.assertNotIn("stx-24.09.1", result)
+
+    @patch('software.software_controller.SW_VERSION', '25.03')
+    @patch('software.software_controller.SoftwareInventoryManager')
+    @patch('software.software_controller.ostree_utils.get_commits',
+           side_effect=Exception("Branch stx-24.09.1 not found"))
+    def test_keeps_release_when_branch_missing(self, _mock_get_commits,
+                                               _mock_sim_cls):
+        # When a release has a commit_id in its metadata but its deployable
+        # branch no longer exists (e.g. after re-uploading an N-1 base ISO
+        # rebuilds the feed), it must NOT be treated as already applied and
+        # must be kept in the apply order so it can be re-applied. Regression
+        # test for the patch re-upload failure after base ISO re-upload.
+        sc = create_software_controller()
+        sc.previous_release_apply_order = (
+            PatchController.previous_release_apply_order.__get__(
+                sc))
+        r = MagicMock(id="stx-24.09.1", sw_version="24.09.1",
+                      commit_id="abc", prepatched_iso=False)
+        sc.release_collection.iterate_releases.return_value = [r]
+        sc.get_release_dependency_list.return_value = ["stx-24.09.1"]
+        result = sc.previous_release_apply_order("stx-24.09.2")
+        self.assertIn("stx-24.09.1", result)
+
+    @patch('software.software_controller.SW_VERSION', '25.03')
+    @patch('software.software_controller.SoftwareInventoryManager')
+    @patch('software.software_controller.ostree_utils.get_commits',
+           return_value=["top", "other"])
+    def test_keeps_release_when_commit_not_in_branch(self, _mock_get_commits,
+                                                     _mock_sim_cls):
+        # When the release's deployable branch exists but its commit_id is not
+        # present in the branch history, the commit_id is stale and the
+        # release must be kept in the apply order to be re-applied.
+        sc = create_software_controller()
+        sc.previous_release_apply_order = (
+            PatchController.previous_release_apply_order.__get__(
+                sc))
+        r = MagicMock(id="stx-24.09.1", sw_version="24.09.1",
+                      commit_id="abc", prepatched_iso=False)
+        sc.release_collection.iterate_releases.return_value = [r]
+        sc.get_release_dependency_list.return_value = ["stx-24.09.1"]
+        result = sc.previous_release_apply_order("stx-24.09.2")
+        self.assertIn("stx-24.09.1", result)
 
 
 class TestReleaseRemoveOrder(unittest.TestCase):
