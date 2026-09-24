@@ -50,6 +50,36 @@ class TestDoShow(unittest.TestCase):
         rc = deploy_shell.do_show(cc, args)
         self.assertNotEqual(rc, 0)
 
+    @patch('software_client.common.utils.display_result_list')
+    def test_metapackages_sorted_by_release_then_name(self, mock_display):
+        # metapackage entries are (metapackage, from_release, to_release);
+        # a span deploy yields an unordered mix that must be sorted by
+        # to-release then name for display
+        cc = MagicMock()
+        resp = MagicMock(status_code=200)
+        metapackages = [
+            ("infra", "26.10.0", "27.03.1"),
+            ("k8s-1.32.13-controlplane", "26.10.0", "27.03.0"),
+            ("base", "26.10.0", "27.03.0"),
+            ("k8s-1.32.2-controlplane", "26.10.0", "27.03.0"),
+        ]
+        data = [{"metapackages": metapackages, "product_deploy": False,
+                 "reboot_required": "Y", "pre_upgrade_deploy": False,
+                 "state": "start-done"}]
+        cc.deploy.show.return_value = (resp, data)
+        args = MagicMock(debug=False)
+        rc = deploy_shell.do_show(cc, args)
+        self.assertEqual(rc, 0)
+        # 27.03.0 group first (name-sorted within), then 27.03.1. Names are
+        # compared lexicographically after unifying -_. separators, matching
+        # the ordering of `software metapackage list`
+        self.assertEqual([mp[0] for mp in data[0]["metapackages"]], [
+            "base",
+            "k8s-1.32.13-controlplane",
+            "k8s-1.32.2-controlplane",
+            "infra",
+        ])
+
 
 class TestDoStart(unittest.TestCase):
     def test_success(self):
