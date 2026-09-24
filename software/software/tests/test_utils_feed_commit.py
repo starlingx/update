@@ -59,8 +59,7 @@ class TestGetSoftwareDeployScript(unittest.TestCase):
             rglob=mock.MagicMock(return_value=[
                 Path('/opt/software/rel-24.09/bin/deploy-precheck')]))
         result = get_software_deploy_script('24.09', 'deploy-precheck')
-        self.assertTrue(len(result) > 0)
-        self.assertIn('deploy-precheck', str(result[0]))
+        self.assertIn('deploy-precheck', result)
 
     @mock.patch('software.utils.get_release_path')
     def test_non_precheck_script_path(self, mock_path):
@@ -68,8 +67,25 @@ class TestGetSoftwareDeployScript(unittest.TestCase):
             rglob=mock.MagicMock(return_value=[
                 Path('/opt/software/rel-24.09.1/bin/deploy-start')]))
         result = get_software_deploy_script('24.09.1', 'deploy-start')
-        self.assertTrue(len(result) > 0)
-        self.assertIn('deploy-start', str(result[0]))
+        self.assertIn('deploy-start', result)
+
+    @mock.patch('software.utils.get_release_path')
+    def test_span_returns_highest_release_match(self, mock_path):
+        # In a span the script may exist in several releases; the match under
+        # the highest release must be returned
+        def release_path(sw_version):
+            return mock.MagicMock(rglob=mock.MagicMock(return_value=[
+                Path(f'/opt/software/releases/{sw_version}/bin/deploy-start')]))
+        mock_path.side_effect = release_path
+        result = get_software_deploy_script(['24.09.0', '24.09.1'], 'deploy-start')
+        self.assertEqual(result, '/opt/software/releases/24.09.1/bin/deploy-start')
+
+    @mock.patch('software.utils.get_release_path')
+    def test_no_match_returns_none(self, mock_path):
+        mock_path.return_value = mock.MagicMock(
+            rglob=mock.MagicMock(return_value=[]))
+        result = get_software_deploy_script(['24.09.0', '24.09.1'], 'deploy-start')
+        self.assertIsNone(result)
 
     def test_get_precheck_script(self):
         result = get_precheck_script('24.09')

@@ -2240,19 +2240,19 @@ def remove_major_release_deployment_flags():
     return success
 
 
-def run_remove_temporary_data_script(release):
+def run_remove_temporary_data_script(releases):
     """
-    Runs the remove-temporary-data script for the given release.
+    Runs the remove-temporary-data script for the given release(s).
 
-    :param release: Release to be cleaned.
+    :param releases: a release version, or a list of them (a deploy span).
+                     The script may live under any release in the span.
     """
     cleanup_script_name = constants.REMOVE_TEMPORARY_DATA_SCRIPT
-    cmd_path = utils.get_software_deploy_script(release, cleanup_script_name)
+    cmd_path = utils.get_software_deploy_script(releases, cleanup_script_name)
     if not cmd_path:
         msg = f"No {cleanup_script_name} found"
         LOG.error(msg)
         raise FileNotFoundError(msg)
-    cmd_path = cmd_path[0]  # Pop the script from the list
     if os.path.exists(constants.ROOT_DIR):
         try:
             subprocess.check_output([cmd_path, constants.ROOT_DIR], stderr=subprocess.STDOUT)

@@ -5036,18 +5036,17 @@ class PatchController(PatchService):
     def _deploy_upgrade_start(self, to_release, commit_id, **kwargs):
         LOG.info("Start deploy upgrade from %s to %s" % (SW_VERSION, to_release))
         deploy_script_name = constants.DEPLOY_START_SCRIPT
-        cmd_path = utils.get_software_deploy_script(to_release, deploy_script_name)
+        # A deploy can span multiple releases; the script may live under any of
+        # them, so search every deploying release and take the highest match
+        deploying_versions = [r.sw_release for r in
+                              self.release_collection.iterate_releases_by_state(states.DEPLOYING)]
+        cmd_path = utils.get_software_deploy_script(deploying_versions or to_release,
+                                                    deploy_script_name)
         if not cmd_path:
             msg = (f"The {deploy_script_name} script was not found under "
-                   f"{to_release} release directory")
+                   f"the deploying release directories")
             LOG.error(msg)
             raise SoftwareServiceError(msg)
-        if len(cmd_path) > 1:
-            msg = (f"Found multiple {deploy_script_name} scripts on the release directory: "
-                   f"{', '.join(cmd_path)}")
-            LOG.error(msg)
-            raise SoftwareServiceError(msg)
-        cmd_path = cmd_path[0]  # Pop the script from the list
         major_to_release = utils.get_major_release_version(to_release)
         postgresql_port = str(cfg.alt_postgresql_port)
 
@@ -6182,10 +6181,13 @@ class PatchController(PatchService):
 
             # Capture the commit the feed is on now, before the deploy resets
             # it, to restore on abort/delete-after-start (covers a custom
-            # partial-branch state, which can't be re-derived from a release id)
+            # partial-branch state, which can't be re-derived from a release id).
+            # Read from the running release's feed: on an upgrade the rollback
+            # commit lives in the from-release feed, not the target feed
             try:
+                rollback_sw_version = utils.get_major_release_version(running_release.sw_release)
                 rollback_commit_id = SoftwareInventoryManager(
-                    deploy_sw_version).get_deployed_commit()
+                    rollback_sw_version).get_deployed_commit()
             except Exception:
                 rollback_commit_id = None
             kwargs["rollback_commit_id"] = rollback_commit_id
@@ -6539,7 +6541,12 @@ class PatchController(PatchService):
                 if is_major_release:
                     try:
                         # TODO(bqian) Move below function to a delete action
-                        run_remove_temporary_data_script(to_release)
+                        # A deploy can span multiple releases; search all of
+                        # them for the cleanup script
+                        deploying_versions = [
+                            r.sw_release for r in
+                            self.release_collection.iterate_releases_by_state(states.DEPLOYING)]
+                        run_remove_temporary_data_script(deploying_versions or to_release)
                     except subprocess.CalledProcessError as e:
                         msg_error = "Failed to delete deploy"
                         LOG.error("%s: %s" % (msg_error, e))
@@ -6858,6 +6865,7 @@ class PatchController(PatchService):
         to_release = deploy.get("to_release")
         metapackages = deploy.get("metapackages")
         pre_upgrade_deploy = deploy.get("pre_upgrade_deploy", False)
+        rollback_commit_id = deploy.get("rollback_commit_id")
         from_release_deployment = self.release_collection.get_release_id_by_sw_release(from_release)
         to_release_deployment = self.release_collection.get_release_id_by_sw_release(to_release)
 
@@ -6883,7 +6891,7 @@ class PatchController(PatchService):
                 feed_sw_version = Path(feed_repo).parent.name.replace("rel-", "")
 
                 sim = SoftwareInventoryManager(feed_sw_version)
-                commit_id = deploy.get("rollback_commit_id")
+                commit_id = rollback_commit_id
                 if not commit_id:
                     try:
                         commit_id = sim.get_branch_commit(from_release_deployment)
@@ -6913,29 +6921,40 @@ class PatchController(PatchService):
                 feed_repo = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, major_from_release)
                 commit_id = from_deployment.commit_id
         else:
+            # Rollback deploys the from-release feed commit before the upgrade
             major_from_release = utils.get_major_release_version(from_release)
-            deploy_release = self._release_basic_checks(from_release_deployment)
-            commit_id = deploy_release.commit_id
             feed_repo = "%s/rel-%s/ostree_repo" % (constants.FEED_OSTREE_BASE_DIR, major_from_release)
 
-            # TODO(lbonatti): remove this condition when commit-id is built into GA metadata.
-            if is_major_release and commit_id in [constants.COMMIT_DEFAULT_VALUE, None]:
-                commit_id = ostree_utils.get_feed_latest_commit(deploy_release.sw_version)
+            # Use rollback_commit_id from the deployment data, if available
+            # It won't be available when upgrading from stx.12 or older
+            if rollback_commit_id:
+                commit_id = rollback_commit_id
+            else:
+                # Legacy fallback for records without rollback_commit_id: derive
+                # the target from the from-release, then correct for a
+                # pre-upgrade-deploy commit below. rollback_commit_id already
+                # captures the exact pre-deploy commit (partial/PUD included)
+                deploy_release = self._release_basic_checks(from_release_deployment)
+                commit_id = deploy_release.commit_id
 
-            # If the to-release has pre-upgrade-deploy metapackages deployed on the
-            # from-release feed, the rollback target must be the pre-upgrade-deploy
-            # commit (not the base from-release commit) since that's what hosts are running
-            to_release_product = self.release_collection.get_release_by_id(to_release_deployment)
-            if (to_release_product and to_release_product.pre_upgrade_deploy
-                    and to_release_product.has_pre_upgrade_deploy_deployed):
-                pud_ids = self.release_collection.get_pre_upgrade_deploy_id_by_product_id(
-                    to_release_deployment)
-                if pud_ids:
-                    pud_release = self.release_collection.get_pre_upgrade_deploy_release_by_id(pud_ids[0])
-                    if pud_release and pud_release.commit_id:
-                        LOG.info(f"Using pre-upgrade-deploy commit {pud_release.commit_id} "
-                                 f"as rollback target (from {to_release_deployment})")
-                        commit_id = pud_release.commit_id
+                # TODO(lbonatti): remove this condition when commit-id is built into GA metadata.
+                if is_major_release and commit_id in [constants.COMMIT_DEFAULT_VALUE, None]:
+                    commit_id = ostree_utils.get_feed_latest_commit(deploy_release.sw_version)
+
+                # If the to-release has pre-upgrade-deploy metapackages deployed on the
+                # from-release feed, the rollback target must be the pre-upgrade-deploy
+                # commit (not the base from-release commit) since that's what hosts are running
+                to_release_product = self.release_collection.get_release_by_id(to_release_deployment)
+                if (to_release_product and to_release_product.pre_upgrade_deploy
+                        and to_release_product.has_pre_upgrade_deploy_deployed):
+                    pud_ids = self.release_collection.get_pre_upgrade_deploy_id_by_product_id(
+                        to_release_deployment)
+                    if pud_ids:
+                        pud_release = self.release_collection.get_pre_upgrade_deploy_release_by_id(pud_ids[0])
+                        if pud_release and pud_release.commit_id:
+                            LOG.info(f"Using pre-upgrade-deploy commit {pud_release.commit_id} "
+                                     f"as rollback target (from {to_release_deployment})")
+                            commit_id = pud_release.commit_id
 
         # Clear 900.022 alarm if raised
         self.manage_software_alarm(fm_constants.FM_ALARM_ID_USM_CLEANUP_DEPLOYMENT_DATA,
