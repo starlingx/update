@@ -3627,13 +3627,15 @@ class PatchController(PatchService):
 
         # Only deployed metapackages are removed: a removed release may be
         # deployed-partial, and its available metapackages must not enter the
-        # removal set
+        # removal set. REMOVE_SELECTED is included so this stays idempotent when
+        # deploy start re-resolves a selection made by a prior deploy select
+        removable_states = (states.DEPLOYED, states.REMOVE_SELECTED)
         for dep in deployed_releases:
             if dep.id in keep:
                 continue
             for mp_id in dep.metapackages.keys():
                 mp = self.release_collection.get_metapackage_release_by_id(mp_id)
-                if mp is not None and mp.state == states.DEPLOYED:
+                if mp is not None and mp.state in removable_states:
                     metapackage_releases.append(mp_id)
 
         return metapackage_releases
