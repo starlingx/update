@@ -585,6 +585,7 @@ class ReleaseData(object):
                 sw_version = "unknown"
 
             self.metadata[release_id]["sw_version"] = sw_version
+            self._bulk_parse_metadata_tags(xml_file, ["component"], self.metadata[release_id])
             for metapackage_group in [constants.METAPACKAGES_TAG, constants.PRE_UPGRADE_DEPLOY_TAG]:
                 self.metadata[release_id][metapackage_group] = {}
                 self.contents[release_id][metapackage_group] = {}
