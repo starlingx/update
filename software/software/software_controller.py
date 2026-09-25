@@ -1875,6 +1875,11 @@ class PatchController(PatchService):
                 if require_release_id is None:
                     commit_id = sim.get_deployed_commit()
                     require_release_id = sim.get_release_by_commit(commit_id)
+                else:
+                    # The new branch is built on the required release's branch;
+                    # rebuild it (and its chain) if it was deleted, so upload
+                    # self-heals instead of failing with a misleading error
+                    self._ensure_release_branch(require_release_id, sim)
 
                 if release.kernel_patch:
                     # Legacy kernel-patch model: the ostree commit is shipped
@@ -5442,6 +5447,101 @@ class PatchController(PatchService):
         # Delete metadata and all associated release files
         self.software_release_delete_api(to_delete_releases)
 
+    def _ensure_release_branch(self, product_rel_id, sim):
+        """Recreate a product release branch if it no longer exists.
+
+        The release branch is normally created at upload time. If it was
+        deleted afterwards (by a bug, manual action, or recovery procedure),
+        any operation that builds on it (deploy start, or uploading a release
+        that requires it) would fail. This rebuilds it, mirroring the
+        upload-time build. The rebuilt commit has a new checksum, so the
+        metapackage and product metadata commit-ids are refreshed.
+
+        The <requires> chain is walked bottom-up: a missing required branch is
+        rebuilt first, so a whole chain of deleted branches self-heals. Any
+        condition that prevents a rebuild (missing release record, missing deb
+        packages, missing kernel-patch extra repo) is a hard error, since
+        silently continuing would leave the feed inconsistent.
+
+        :param product_rel_id: the product release id (also the branch name)
+        :param sim: SoftwareInventoryManager for the release's feed
+        """
+        if sim.branch_exists(product_rel_id):
+            return
+
+        LOG.warning("Product release branch %s does not exist, rebuilding it",
+                    product_rel_id)
+
+        release = self.release_collection.get_release_by_id(product_rel_id)
+        if release is None:
+            raise SoftwareServiceError(
+                f"Cannot rebuild branch for {product_rel_id}: the release is not "
+                f"present, upload it before retrying")
+
+        # Resolve the base branch (highest required release, or the currently
+        # deployed commit's release when the product release has no requires)
+        require_release_id = utils.get_highest_required_release(
+            release.requires_release_ids)
+        if require_release_id is None:
+            base_commit = sim.get_deployed_commit()
+            require_release_id = sim.get_release_by_commit(base_commit)
+        else:
+            # Ensure the required branch exists first, rebuilding the chain
+            # bottom-up so the base commit is available for this release
+            self._ensure_release_branch(require_release_id, sim)
+
+        # Collect all metapackages of the product release
+        mp_ids = list(release.metapackages)
+        mp_data = self.release_collection.get_ordered_metapackages(
+            filter_by_ids=mp_ids)
+        packages = [f"meta-{mp.component}" for mp in mp_data]
+
+        # Rebuild the branch, mirroring the upload-time build. Kernel patches
+        # ship a pre-built commit in extra.tar; regular releases assemble the
+        # commit from their debian metapackages
+        try:
+            if release.kernel_patch:
+                extra_repo_path = os.path.join(
+                    constants.COMPONENT_SOFTWARE_STORAGE_DIR, release.sw_release,
+                    "extra", "ostree_repo")
+                if not os.path.isdir(extra_repo_path):
+                    raise SoftwareServiceError(
+                        f"Cannot rebuild kernel patch branch {product_rel_id}: the "
+                        f"shipped ostree repo is not present, re-upload the kernel patch")
+                sim.create_kernel_release_branch(require_release_id, product_rel_id,
+                                                 extra_repo_path)
+            else:
+                sim.create_sw_release_branch(require_release_id, product_rel_id,
+                                             packages, self.pre_bootstrap)
+        except SoftwareServiceError:
+            raise
+        except Exception as e:
+            raise SoftwareServiceError(
+                f"Failed to rebuild branch for {product_rel_id}: {str(e)}. "
+                f"Re-upload the release to restore it")
+
+        # The rebuilt commit has a new checksum; refresh the commit-ids stored
+        # in the metapackage metadata and the product original_commit. Wipe the
+        # existing contents first so stale commits (e.g. leftover commitN from a
+        # prior prestage/custom build) don't survive; then write a fresh commit1
+        commit_id = sim.get_branch_commit(product_rel_id)
+        base_commit_id = sim.get_branch_commit(require_release_id)
+        for mp in mp_data:
+            metadata_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP.get(mp.state)
+            if not metadata_dir:
+                continue
+            md_file = os.path.join(str(metadata_dir), mp.metadata_filename)
+            if not os.path.exists(md_file):
+                continue
+            self.remove_tags_from_metadata(mp, constants.CONTENTS_TAG)
+            self.update_ostree_commit_id(md_file, base_commit_id, commit_id)
+        self._set_original_commit(product_rel_id, commit_id)
+
+        self.software_sync()
+        reload_release_data()
+        LOG.info("Rebuilt product release branch %s at commit %s",
+                 product_rel_id, commit_id)
+
     def check_product_release_deployable_branch(self, mp_deploy_set):
         """Check if the full product release branch matches the deployment set's commit.
 
@@ -5473,6 +5573,7 @@ class PatchController(PatchService):
         sw_ver = utils.get_major_release_version(a_mp.sw_version)
         sim = SoftwareInventoryManager(sw_ver)
         try:
+            self._ensure_release_branch(product_rel_id, sim)
             sim.deploy(product_rel_id)
             LOG.info(f"{product_rel_id} has been set to deploy")
         except BranchNotFound:
@@ -5588,8 +5689,9 @@ class PatchController(PatchService):
 
                         # Check if the total set equals the full product release
                         if total_set_ids == all_product_mps:
-                            # Full product release: use existing product branch
+                            # Full product release: use product branch, rebuild it if it no longer exists
                             LOG.info(f"Total set equals full product release, using branch {product_rel_id}")
+                            self._ensure_release_branch(product_rel_id, sim)
                             sim.deploy(product_rel_id)
                         else:
                             # Partial set: build custom branch from base
@@ -5619,6 +5721,13 @@ class PatchController(PatchService):
                                 product_release_obj = self.release_collection.get_release_by_id(product_rel_id)
                                 require_ids = product_release_obj.requires_release_ids if product_release_obj else []
                                 base_branch = utils.get_highest_required_release(require_ids) or constants.OSTREE_REF
+                                # Rebuild the base (required) branch and its
+                                # chain if missing, so a partial deploy
+                                # self-heals like the full-product path. The
+                                # deploy branch (OSTREE_REF) is not a release
+                                # and always exists, so skip it
+                                if base_branch != constants.OSTREE_REF:
+                                    self._ensure_release_branch(base_branch, sim)
                                 base_commit = sim.get_branch_commit(base_branch)
                                 packages = [f"meta-{comp}" for comp in total_set_components]
 
