@@ -143,12 +143,17 @@ def run_install(repo_dir, sw_version, release_id, packages, pre_bootstrap=False,
     LOG.info("Running apt-ostree install")
     _, sw_release, _, _ = utils.get_component_and_versions(release_id)
 
+    # Use the Debian codename the target release's package feed is actually
+    # configured with
+    pkg_feed_dir = "%s/rel-%s" % (constants.PACKAGE_FEED_DIR, sw_version)
+    codename = utils.get_repo_codename(pkg_feed_dir)
+
     if pre_bootstrap:
         package_feed = "file:///var/www/pages/updates/debian/rel-%s/ %s %s" \
-            % (sw_version, constants.DEBIAN_RELEASE, sw_release)
+            % (sw_version, codename, sw_release)
     else:
         package_feed = "http://controller:8080/updates/debian/rel-%s/ %s %s" \
-            % (sw_version, constants.DEBIAN_RELEASE, sw_release)
+            % (sw_version, codename, sw_release)
 
     packages = " ".join(packages)
 

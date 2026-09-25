@@ -2280,12 +2280,31 @@ class PatchController(PatchService):
         previous_deployed_releases_id = []
         preinstalled_patches = []
 
+        # Cache of SoftwareInventoryManager per major version to avoid
+        # re-opening the ostree repo for every release.
+        sim_by_version = {}
+
         # get all previous releases
         for unavailable_rel in self.release_collection.iterate_releases():
             if utils.compare_release_version(SW_VERSION, unavailable_rel.sw_version):
-                # if the commit ID exists in the metadata, then it is deployed
+                # A release is only "already applied" if its metadata
+                # commit_id is still valid in the feed. A release's commit
+                # lives on its own deployable branch created when the release
+                # is uploaded even before it is deployed.
+                # Check that the branch exists AND the commit_id is present in
+                # the branch history.
                 if unavailable_rel.commit_id:
-                    previous_deployed_releases_id.append(unavailable_rel.id)
+                    sw_version = unavailable_rel.sw_version
+                    if sw_version not in sim_by_version:
+                        sim_by_version[sw_version] = SoftwareInventoryManager(sw_version)
+                    sim = sim_by_version[sw_version]
+                    try:
+                        branch_commits = ostree_utils.get_commits(sim.repo, unavailable_rel.id)
+                    except Exception:
+                        # Branch does not exist in the feed repo.
+                        branch_commits = []
+                    if unavailable_rel.commit_id in branch_commits:
+                        previous_deployed_releases_id.append(unavailable_rel.id)
 
                 if unavailable_rel.prepatched_iso:
                     preinstalled_patches = unavailable_rel.preinstalled_patches
