@@ -6,6 +6,9 @@
 import unittest
 import xml
 
+from software import release_data
+from software import states
+from software.release_data import SWRelease
 from software.release_data import SWReleaseCollection
 from software.software_functions import get_to_release_from_metadata_file
 from software.software_functions import is_deploy_state_in_sync
@@ -341,3 +344,92 @@ class TestSoftwareFunction(unittest.TestCase):
             res = is_deploy_state_in_sync()
 
         assert res is False
+
+
+class _FakeChainRelease:
+    """Minimal release stand-in for requires_chain_deployable tests: only the
+    attributes the walk reads (state and requires_release_ids).
+    """
+
+    def __init__(self, state, requires=None):
+        self.state = state
+        self.requires_release_ids = requires or []
+
+
+class _FakeChainCollection:
+    """Fake collection supporting [rel_id] indexing, as used by the walk."""
+
+    def __init__(self, releases):
+        self._releases = releases
+
+    def __getitem__(self, rel_id):
+        return self._releases.get(rel_id)
+
+
+class TestRequiresChainDeployable(unittest.TestCase):
+    """Tests for SWRelease.requires_chain_deployable, which validates that the
+    <requires> chain below a release can be deployed together in one span.
+    """
+
+    DEPLOYABLE = [states.AVAILABLE, states.DEPLOY_SELECTED, states.DEPLOYED_PARTIAL]
+
+    def _release(self, requires):
+        """A real SWRelease whose only relevant field is requires."""
+        return SWRelease("starlingx-13.0.3", {"requires": requires}, {})
+
+    def _run(self, target_requires, chain):
+        """Patch the collection and evaluate the chain.
+
+        :param target_requires: requires_release_ids of the target release
+        :param chain: dict {rel_id: _FakeChainRelease}
+        """
+        target = self._release(target_requires)
+        collection = _FakeChainCollection(chain)
+        with unittest.mock.patch.object(release_data, 'get_SWReleaseCollection',
+                                        return_value=collection):
+            return target.requires_chain_deployable(self.DEPLOYABLE)
+
+    def test_no_requires_is_deployable(self):
+        self.assertTrue(self._run([], {}))
+
+    def test_required_already_deployed(self):
+        # .3 requires .2, which is deployed -> chain satisfied, stops there.
+        chain = {"starlingx-13.0.2": _FakeChainRelease(states.DEPLOYED)}
+        self.assertTrue(self._run(["starlingx-13.0.2"], chain))
+
+    def test_required_available_then_deployed(self):
+        # .3 -> .2 (available) -> .1 (deployed): whole chain deployable.
+        chain = {
+            "starlingx-13.0.2": _FakeChainRelease(
+                states.AVAILABLE, ["starlingx-13.0.1"]),
+            "starlingx-13.0.1": _FakeChainRelease(states.DEPLOYED),
+        }
+        self.assertTrue(self._run(["starlingx-13.0.2"], chain))
+
+    def test_required_deployed_partial_is_deployable(self):
+        # A deployed-partial required release is accepted (span completes it)
+        # and the walk continues below it.
+        chain = {
+            "starlingx-13.0.2": _FakeChainRelease(
+                states.DEPLOYED_PARTIAL, ["starlingx-13.0.1"]),
+            "starlingx-13.0.1": _FakeChainRelease(states.DEPLOYED),
+        }
+        self.assertTrue(self._run(["starlingx-13.0.2"], chain))
+
+    def test_missing_required_breaks_chain(self):
+        # Required release not in the collection -> not deployable.
+        self.assertFalse(self._run(["starlingx-13.0.2"], {}))
+
+    def test_bad_state_breaks_chain(self):
+        # A required release in a non-deployable state (e.g. removing) fails.
+        chain = {"starlingx-13.0.2": _FakeChainRelease(states.REMOVING)}
+        self.assertFalse(self._run(["starlingx-13.0.2"], chain))
+
+    def test_broken_lower_link_fails(self):
+        # .3 -> .2 (available) -> .1 (unavailable) breaks the chain below .2.
+        chain = {
+            "starlingx-13.0.2": _FakeChainRelease(
+                states.AVAILABLE, ["starlingx-13.0.1"]),
+            "starlingx-13.0.1": _FakeChainRelease(states.UNAVAILABLE),
+        }
+        self.assertFalse(self._run(["starlingx-13.0.2"], chain))

@@ -9,6 +9,8 @@ import socket
 import subprocess
 import unittest
 
+from packaging import version
+
 from software.tests import base  # pylint: disable=unused-import # noqa: F401
 from software.exceptions import HostNotFound
 from software.exceptions import SoftwareServiceError
@@ -943,6 +945,331 @@ class TestCreateSwReleasesIt(unittest.TestCase):
         self.assertEqual(
             created_order,
             ["starlingx-13.0.1", "starlingx-13.0.2", "starlingx-13.0.3"])
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
+    @unittest.mock.patch('software.software_controller.SW_VERSION', '13.0')
+    @unittest.mock.patch('software.software_controller.constants.COMPONENT_SOFTWARE_STORAGE_DIR',
+                         '/opt/software/releases')
+    @unittest.mock.patch('software.software_controller.ReleaseState')
+    @unittest.mock.patch('software.software_controller.MetapackageDeploymentSet')
+    @unittest.mock.patch('software.software_controller.SoftwareInventoryManager')
+    @unittest.mock.patch('software.software_controller.get_SWReleaseCollection')
+    def test_kernel_patch_uses_prebuilt_commit_branch(self,
+                                                      mock_get_swrc,
+                                                      mock_sim_cls,
+                                                      mock_mp_set,   # pylint: disable=unused-argument
+                                                      mock_rel_state,   # pylint: disable=unused-argument
+                                                      mock_init):   # pylint: disable=unused-argument
+        # A kernel patch ships a pre-built ostree commit in extra.tar, so its
+        # branch is created via create_kernel_release_branch (pulling that
+        # commit) rather than create_sw_release_branch (assembling from debs).
+        controller = PatchController()
+        controller.pre_bootstrap = False
+        controller.software_sync = unittest.mock.MagicMock()
+        controller._set_original_commit = unittest.mock.MagicMock()  # pylint: disable=protected-access
+        controller.update_ostree_commit_id = unittest.mock.MagicMock()
+
+        release = self._make_release("starlingx-13.0.1")
+        release.kernel_patch = True
+        swrc = mock_get_swrc.return_value
+        swrc.get_release_by_id.return_value = release
+
+        # No <requires>: the parent is resolved from the deployed commit
+        sim = mock_sim_cls.return_value
+        sim.get_deployed_commit.return_value = "deployed-commit"
+        sim.get_release_by_commit.return_value = "starlingx-13.0.0"
+
+        patch_info = self._patch_info("starlingx-13.0.1")
+        self._run(controller, patch_info)
+
+        # The kernel path is taken; the deb-assembly path is not
+        sim.create_sw_release_branch.assert_not_called()
+        sim.create_kernel_release_branch.assert_called_once_with(
+            "starlingx-13.0.0",
+            "starlingx-13.0.1",
+            "/opt/software/releases/13.0.1/extra/ostree_repo")
+
+
+class _FakeMetapackage:
+    """Minimal metapackage release stand-in for span-logic tests."""
+
+    def __init__(self, component, sw_release, state, product):
+        self.id = f"{component}_{sw_release}"
+        self.component = component
+        self.sw_release = sw_release
+        self.state = state
+        self.product = product
+        self.reboot_required = False
+
+
+class _FakeProductRelease:
+    """Minimal product release stand-in. metapackages is a dict keyed by
+    metapackage id (matching the real ReleaseData shape). deps is the list of
+    lower product releases (its full requires closure), highest-first order not
+    assumed.
+    """
+
+    def __init__(self, rel_id, sw_release, metapackages, deps):
+        self.id = rel_id
+        self.sw_release = sw_release
+        self.metapackages = {mp.id: mp for mp in metapackages}
+        self._deps = deps
+        self.version_obj = version.parse(sw_release)
+
+    @property
+    def state(self):
+        # Product state derived from its metapackages: DEPLOYED only when all
+        # are deployed, DEPLOYED_PARTIAL when some are, else AVAILABLE.
+        mp_states = {mp.state for mp in self.metapackages.values()}
+        if mp_states == {states.DEPLOYED}:
+            return states.DEPLOYED
+        if states.DEPLOYED in mp_states:
+            return states.DEPLOYED_PARTIAL
+        return states.AVAILABLE
+
+    def get_all_dependencies(self):
+        return list(self._deps)
+
+    # sortable by version (used by _get_target_component_versions)
+    def __lt__(self, other):
+        return self.version_obj < other.version_obj
+
+
+class _FakeCollection:
+    """Fake SWReleaseCollection exposing only what the span-logic helpers use."""
+
+    def __init__(self, product_releases, highest_release=None):
+        self._products = {r.id: r for r in product_releases}
+        self._metapackages = {}
+        for r in product_releases:
+            self._metapackages.update(r.metapackages)
+        self.highest_release = highest_release
+
+    def get_product_release_by_id(self, rel_id):
+        return self._products.get(rel_id)
+
+    def get_release_by_id(self, rel_id):
+        return self._products.get(rel_id) or self._metapackages.get(rel_id)
+
+    def get_metapackage_release_by_id(self, mp_id):
+        return self._metapackages.get(mp_id)
+
+    def get_metapackages_id_by_product_id(self, product_id):
+        product = self._products.get(product_id)
+        if product is None:
+            return None
+        return list(product.metapackages)
+
+
+class TestSpanHelpers(unittest.TestCase):
+    """Tests for the deploy-span helper logic in PatchController:
+    _collect_span_metapackage_ids, _get_metapackages_to_remove,
+    _get_target_component_versions and _resolve_target_product_id.
+    """
+
+    COMPONENTS = ("distcloud", "infra", "k8s-common")
+
+    def _build_chain(self, spec):
+        """Build a linear release chain from a spec.
+
+        :param spec: ordered list (lowest-first) of (sw_release, {component:
+            state}) describing each product release and the state of each of
+            its metapackages.
+        :return: (collection, {sw_release: product_release})
+        """
+        products = []
+        by_version = {}
+        deps_so_far = []
+        for sw_release, comp_states in spec:
+            rel_id = f"starlingx-{sw_release}"
+            mps = [_FakeMetapackage(c, sw_release, st, rel_id)
+                   for c, st in comp_states.items()]
+            # deps = every lower release already built (full requires closure)
+            product = _FakeProductRelease(rel_id, sw_release, mps, list(deps_so_far))
+            products.append(product)
+            by_version[sw_release] = product
+            deps_so_far.append(product)
+        return _FakeCollection(products), by_version
+
+    def _controller(self):
+        # release_collection is a property returning get_SWReleaseCollection();
+        # tests patch that property to return the fake collection.
+        return PatchController()
+
+    # ---- _collect_span_metapackage_ids ----------------------------------
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__',
+                         return_value=None)
+    def test_collect_span_all_lower_available(self, _mock_init):
+        # .0 deployed, .1/.2 fully available; target .3 available.
+        # Span should collect all of .1 and .2's metapackages (not .3's own).
+        collection, _ = self._build_chain([
+            ("13.0.0", {c: states.DEPLOYED for c in self.COMPONENTS}),
+            ("13.0.1", {c: states.AVAILABLE for c in self.COMPONENTS}),
+            ("13.0.2", {c: states.AVAILABLE for c in self.COMPONENTS}),
+            ("13.0.3", {c: states.AVAILABLE for c in self.COMPONENTS}),
+        ])
+        controller = self._controller()
+        with unittest.mock.patch.object(
+                type(controller), 'release_collection',
+                new_callable=unittest.mock.PropertyMock,
+                return_value=collection):
+            span = controller._collect_span_metapackage_ids("starlingx-13.0.3")
+        self.assertEqual(
+            sorted(span),
+            sorted([f"{c}_13.0.1" for c in self.COMPONENTS]
+                   + [f"{c}_13.0.2" for c in self.COMPONENTS]))
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__',
+                         return_value=None)
+    def test_collect_span_skips_deployed_of_partial_lower(self, _mock_init):
+        # .1 is deployed-partial: infra deployed, others available.
+        # Only .1's not-deployed metapackages join the span.
+        collection, _ = self._build_chain([
+            ("13.0.0", {c: states.DEPLOYED for c in self.COMPONENTS}),
+            ("13.0.1", {"distcloud": states.AVAILABLE,
+                        "infra": states.DEPLOYED,
+                        "k8s-common": states.AVAILABLE}),
+            ("13.0.2", {c: states.AVAILABLE for c in self.COMPONENTS}),
+            ("13.0.3", {c: states.AVAILABLE for c in self.COMPONENTS}),
+        ])
+        controller = self._controller()
+        with unittest.mock.patch.object(
+                type(controller), 'release_collection',
+                new_callable=unittest.mock.PropertyMock,
+                return_value=collection):
+            span = controller._collect_span_metapackage_ids("starlingx-13.0.3")
+        self.assertNotIn("infra_13.0.1", span)  # already deployed
+        self.assertIn("distcloud_13.0.1", span)
+        self.assertIn("k8s-common_13.0.1", span)
+        for c in self.COMPONENTS:
+            self.assertIn(f"{c}_13.0.2", span)
+
+    # ---- _get_metapackages_to_remove ------------------------------------
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__',
+                         return_value=None)
+    def test_remove_excludes_target_closure(self, _mock_init):
+        # All of .0-.3 deployed, remove back to .1: only .2 and .3 removed,
+        # .0/.1 kept (target + its requires closure).
+        collection, by_ver = self._build_chain([
+            ("13.0.0", {c: states.DEPLOYED for c in self.COMPONENTS}),
+            ("13.0.1", {c: states.DEPLOYED for c in self.COMPONENTS}),
+            ("13.0.2", {c: states.DEPLOYED for c in self.COMPONENTS}),
+            ("13.0.3", {c: states.DEPLOYED for c in self.COMPONENTS}),
+        ])
+        collection.highest_release = by_ver["13.0.3"]
+        controller = self._controller()
+        with unittest.mock.patch.object(
+                type(controller), 'release_collection',
+                new_callable=unittest.mock.PropertyMock,
+                return_value=collection):
+            removed = controller._get_metapackages_to_remove("starlingx-13.0.1")
+        self.assertEqual(
+            sorted(removed),
+            sorted([f"{c}_13.0.2" for c in self.COMPONENTS]
+                   + [f"{c}_13.0.3" for c in self.COMPONENTS]))
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__',
+                         return_value=None)
+    def test_remove_skips_available_of_partial_release(self, _mock_init):
+        # .2 is deployed-partial (infra available); removing back to .1 must
+        # only remove .2's DEPLOYED metapackages, not the available infra.
+        collection, by_ver = self._build_chain([
+            ("13.0.0", {c: states.DEPLOYED for c in self.COMPONENTS}),
+            ("13.0.1", {c: states.DEPLOYED for c in self.COMPONENTS}),
+            ("13.0.2", {"distcloud": states.DEPLOYED,
+                        "infra": states.AVAILABLE,
+                        "k8s-common": states.DEPLOYED}),
+        ])
+        collection.highest_release = by_ver["13.0.2"]
+        controller = self._controller()
+        with unittest.mock.patch.object(
+                type(controller), 'release_collection',
+                new_callable=unittest.mock.PropertyMock,
+                return_value=collection):
+            removed = controller._get_metapackages_to_remove("starlingx-13.0.1")
+        self.assertEqual(
+            sorted(removed),
+            ["distcloud_13.0.2", "k8s-common_13.0.2"])
+        self.assertNotIn("infra_13.0.2", removed)
+
+    # ---- _get_target_component_versions ---------------------------------
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__',
+                         return_value=None)
+    def test_target_component_versions_highest_wins(self, _mock_init):
+        # A component shipped by two lower releases (distcloud in .0 and .1)
+        # must resolve to the highest of them (.1). The target (.2) ships only
+        # infra, so distcloud comes solely from the deps -> the version sort is
+        # what disambiguates.
+        collection, by_ver = self._build_chain([
+            ("13.0.0", {"distcloud": states.DEPLOYED}),
+            ("13.0.1", {"distcloud": states.DEPLOYED}),
+            ("13.0.2", {"infra": states.DEPLOYED}),
+        ])
+        # Present the deps in DESCENDING order: if the code did not sort by
+        # version, a last-wins walk would pick distcloud .0 instead of .1.
+        target = by_ver["13.0.2"]
+        target.get_all_dependencies = lambda filter_states=None: [
+            by_ver["13.0.1"], by_ver["13.0.0"]]
+        controller = self._controller()
+        with unittest.mock.patch.object(
+                type(controller), 'release_collection',
+                new_callable=unittest.mock.PropertyMock,
+                return_value=collection):
+            versions = controller._get_target_component_versions("starlingx-13.0.2")
+        self.assertEqual(versions["distcloud"], "13.0.1")
+        self.assertEqual(versions["infra"], "13.0.2")
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__',
+                         return_value=None)
+    def test_target_component_versions_omits_orphan(self, _mock_init):
+        # A component introduced only above the target is absent from the map.
+        collection, _ = self._build_chain([
+            ("13.0.0", {"base": states.DEPLOYED}),
+            ("13.0.1", {"base": states.DEPLOYED}),
+        ])
+        controller = self._controller()
+        with unittest.mock.patch.object(
+                type(controller), 'release_collection',
+                new_callable=unittest.mock.PropertyMock,
+                return_value=collection):
+            versions = controller._get_target_component_versions("starlingx-13.0.1")
+        self.assertEqual(versions, {"base": "13.0.1"})
+
+    # ---- _resolve_target_product_id -------------------------------------
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__',
+                         return_value=None)
+    def test_resolve_target_product_id_highest(self, _mock_init):
+        collection, _ = self._build_chain([
+            ("13.0.1", {c: states.AVAILABLE for c in self.COMPONENTS}),
+            ("13.0.2", {c: states.AVAILABLE for c in self.COMPONENTS}),
+        ])
+        controller = self._controller()
+        with unittest.mock.patch.object(
+                type(controller), 'release_collection',
+                new_callable=unittest.mock.PropertyMock,
+                return_value=collection):
+            # Higher version listed FIRST: a naive "last id wins" would return
+            # .1; the result must still be the highest (.2).
+            target = controller._resolve_target_product_id(
+                ["distcloud_13.0.2", "infra_13.0.1"])
+        self.assertEqual(target, "starlingx-13.0.2")
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__',
+                         return_value=None)
+    def test_resolve_target_product_id_empty(self, _mock_init):
+        collection, _ = self._build_chain([
+            ("13.0.1", {c: states.AVAILABLE for c in self.COMPONENTS}),
+        ])
+        controller = self._controller()
+        with unittest.mock.patch.object(
+                type(controller), 'release_collection',
+                new_callable=unittest.mock.PropertyMock,
+                return_value=collection):
+            self.assertIsNone(controller._resolve_target_product_id([]))
 
 
 class _FakeScriptRelease:
