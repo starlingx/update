@@ -5,9 +5,12 @@
 #
 
 # This import has to be first
+import os
 import socket
 import subprocess
+import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 from packaging import version
 
@@ -1523,3 +1526,190 @@ class TestValidateInformedReleasesPrecheck(unittest.TestCase):
 
         with self.assertRaises(ReleasePrecheckInvalidRequest):
             controller._validate_informed_releases(["starlingx-26.10.1"])  # pylint: disable=protected-access
+
+
+class TestRemoveCommitFromMetadata(unittest.TestCase):
+    """Tests for PatchController.remove_commit_from_metadata, which removes a
+    single commitN entry and renumbers the remaining commits so the positional
+    commit1..commitN invariant is preserved.
+    """
+
+    def setUp(self):
+        # remove_commit_from_metadata/append_commit_to_metadata only use
+        # add_text_tag_to_xml on self; no heavy controller init needed
+        self.controller = PatchController.__new__(PatchController)
+        fd, self.md_file = tempfile.mkstemp(suffix="-metadata.xml")
+        os.close(fd)
+        root = ET.Element("patch")
+        ET.SubElement(root, "id").text = "starlingx-13.0.1"
+        ET.ElementTree(root).write(self.md_file)
+
+    def tearDown(self):
+        if os.path.exists(self.md_file):
+            os.remove(self.md_file)
+
+    def _commits(self):
+        """Return the ordered list of commit values under contents/ostree, and
+        the number_of_commits value (or None if contents is absent).
+        """
+        root = ET.parse(self.md_file).getroot()
+        ostree = root.find("contents/ostree")
+        if ostree is None:
+            return None, None
+        num = ostree.findtext("number_of_commits")
+        commits = []
+        i = 1
+        while True:
+            el = ostree.find("commit%s" % i)
+            if el is None:
+                break
+            commits.append(el.findtext("commit"))
+            i += 1
+        return commits, num
+
+    def test_remove_middle_commit_renumbers_remaining(self):
+        # Three commits appended; removing the middle one must renumber the
+        # third to commit2 so readers iterating commit1..commitN don't skip it
+        self.controller.append_commit_to_metadata(self.md_file, "c1", base_commit_id="base")
+        self.controller.append_commit_to_metadata(self.md_file, "c2")
+        self.controller.append_commit_to_metadata(self.md_file, "c3")
+
+        self.controller.remove_commit_from_metadata(self.md_file, "c2")
+
+        commits, num = self._commits()
+        self.assertEqual(commits, ["c1", "c3"])
+        self.assertEqual(num, "2")
+
+    def test_remove_last_remaining_commit_drops_contents(self):
+        # Removing the only commit leaves no commits, so the whole contents
+        # block is dropped (matches a release with no commits)
+        self.controller.append_commit_to_metadata(self.md_file, "c1", base_commit_id="base")
+
+        self.controller.remove_commit_from_metadata(self.md_file, "c1")
+
+        root = ET.parse(self.md_file).getroot()
+        self.assertIsNone(root.find("contents"))
+
+    def test_remove_absent_commit_is_noop(self):
+        # Removing a commit that is not present leaves the metadata untouched
+        self.controller.append_commit_to_metadata(self.md_file, "c1", base_commit_id="base")
+        self.controller.append_commit_to_metadata(self.md_file, "c2")
+
+        self.controller.remove_commit_from_metadata(self.md_file, "does-not-exist")
+
+        commits, num = self._commits()
+        self.assertEqual(commits, ["c1", "c2"])
+        self.assertEqual(num, "2")
+
+    def test_repeated_append_remove_does_not_accumulate(self):
+        # Simulates repeated prestage/restore cycles: each cycle appends a
+        # commit then removes it; the metadata must not accumulate stale commits
+        self.controller.append_commit_to_metadata(self.md_file, "base-commit", base_commit_id="base")
+        for i in range(3):
+            prestage_commit = "prestage-%d" % i
+            self.controller.append_commit_to_metadata(self.md_file, prestage_commit)
+            self.controller.remove_commit_from_metadata(self.md_file, prestage_commit)
+
+        commits, num = self._commits()
+        self.assertEqual(commits, ["base-commit"])
+        self.assertEqual(num, "1")
+
+
+class TestPrestageBranchReuse(unittest.TestCase):
+    """Tests for the reuse-vs-rebuild decision in software_deploy_prestage_api:
+    reuse the prestage branch only when it exists and its tip matches the
+    commit recorded for the metapackage set, else rebuild (stripping stale).
+    """
+
+    def _make_controller(self):
+        controller = PatchController.__new__(PatchController)
+        controller.pre_bootstrap = False
+        controller.software_sync = unittest.mock.MagicMock()
+        controller.append_commit_to_metadata = unittest.mock.MagicMock()
+        controller.remove_commit_from_metadata = unittest.mock.MagicMock()
+        return controller
+
+    @staticmethod
+    def _fake_mp():
+        mp = unittest.mock.MagicMock()
+        mp.id = "infra_26.10.3"
+        mp.component = "infra"
+        mp.metadata_filename = "infra_26.10.3-metadata.xml"
+        return mp
+
+    def _run(self, controller, sim, branch_commit, expected_commit):
+        """Drive the metapackage-overrides prestage path with the reuse check
+        resolved by (branch_commit, expected_commit).
+        """
+        mp = self._fake_mp()
+        running_release = unittest.mock.MagicMock()
+        running_release.sw_version = "26.10"
+        target_release = "starlingx-26.10.3"
+
+        deploy_set = unittest.mock.MagicMock()
+        deploy_set.metapackages = [mp]
+        deploy_set.sw_version = "26.10"
+        deploy_set.sw_release = "26.10.3"
+
+        swrc = unittest.mock.MagicMock()
+        swrc.find_commit_for_metapackages.return_value = expected_commit
+
+        sim.branch_exists.return_value = branch_commit is not None
+        sim.get_branch_commit.return_value = branch_commit or "new-commit"
+        sim.get_branch_original_commit.return_value = "base-commit"
+
+        patches = [
+            unittest.mock.patch.object(
+                PatchController, "_validate_parameters_for_prestage",
+                return_value=(running_release, [mp], target_release)),
+            unittest.mock.patch(
+                "software.software_controller.get_SWReleaseCollection", return_value=swrc),
+            unittest.mock.patch(
+                "software.software_controller.SoftwareInventoryManager", return_value=sim),
+            unittest.mock.patch(
+                "software.software_controller.MetapackageDeploymentSet", return_value=deploy_set),
+            unittest.mock.patch("software.software_controller.apt_utils"),
+            unittest.mock.patch("software.software_controller.ostree_utils"),
+            unittest.mock.patch("software.software_controller.reload_release_data"),
+            unittest.mock.patch("software.software_controller.audit_log_info"),
+        ]
+        for p in patches:
+            p.start()
+        self.addCleanup(unittest.mock.patch.stopall)
+
+        return controller.software_deploy_prestage_api(
+            release=target_release, metapackage_overrides=["infra_26.10.3"])
+
+    def test_reuse_when_commit_matches(self):
+        # Branch exists and its tip equals the recorded commit -> reuse, no
+        # branch creation and no reinstall
+        controller = self._make_controller()
+        sim = unittest.mock.MagicMock()
+        self._run(controller, sim, branch_commit="c1", expected_commit="c1")
+
+        sim.create_branch.assert_not_called()
+        sim.delete_ref.assert_not_called()
+        controller.append_commit_to_metadata.assert_not_called()
+
+    def test_rebuild_when_commit_mismatches(self):
+        # Branch exists but tip differs from the recorded commit -> delete,
+        # rebuild, strip the stale commit and append the fresh one
+        controller = self._make_controller()
+        sim = unittest.mock.MagicMock()
+        self._run(controller, sim, branch_commit="old", expected_commit="recorded")
+
+        sim.delete_ref.assert_called_once()
+        sim.create_branch.assert_called_once()
+        controller.remove_commit_from_metadata.assert_called_once_with(
+            unittest.mock.ANY, "recorded")
+        controller.append_commit_to_metadata.assert_called_once()
+
+    def test_create_when_branch_missing(self):
+        # Branch does not exist -> create and install, nothing stale to strip
+        controller = self._make_controller()
+        sim = unittest.mock.MagicMock()
+        self._run(controller, sim, branch_commit=None, expected_commit=None)
+
+        sim.create_branch.assert_called_once()
+        controller.remove_commit_from_metadata.assert_not_called()
+        controller.append_commit_to_metadata.assert_called_once()

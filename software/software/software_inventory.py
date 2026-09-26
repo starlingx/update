@@ -234,9 +234,7 @@ class SoftwareInventoryManager():
                  "--parent", parent_commit, "--tree=ref=%s" % extra_commit, "-s", commit_msg],
                 check=True, capture_output=True, text=True)
             LOG.info(f"Updating feed {self.repo_path} summary")
-            subprocess.run(
-                ["ostree", f"--repo={self.repo_path}", "summary", "-u"],
-                check=True, capture_output=True, text=True)
+            self.update_summary()
         except subprocess.CalledProcessError as e:
             raise RuntimeError("Failed to build kernel release branch '%s': %s"
                                % (new_branch, e.stderr)) from None
@@ -282,8 +280,8 @@ class SoftwareInventoryManager():
             LOG.info("Deleting branch: %s", b)
             subprocess.check_call(["ostree", "refs", "--repo", self.repo_path, "--delete", b])
 
-        subprocess.check_call(["ostree", "prune", "--repo", self.repo_path, "--refs-only"])
-        subprocess.check_call(["ostree", "summary", "--repo", self.repo_path, "-u"])
+        self.prune()
+        self.update_summary()
         LOG.info("Pruned repo and updated summary after deleting %d branch(es)", len(to_delete))
         return to_delete
 
@@ -301,11 +299,31 @@ class SoftwareInventoryManager():
         :param branch_name: branch ref to delete
         """
         try:
-            subprocess.check_call(
-                ["ostree", "refs", "--repo", self.repo_path, "--delete", branch_name])
+            subprocess.run(["ostree", "refs", "--repo", self.repo_path, "--delete", branch_name],
+                           check=True, capture_output=True, text=True)
             LOG.info("Deleted ref: %s", branch_name)
         except subprocess.CalledProcessError as e:
-            LOG.error("Failed to delete ref %s: %s", branch_name, str(e))
+            LOG.error("Failed to delete ref %s: %s", branch_name, e.stderr)
+
+    def prune(self):
+        """Prune commits no longer referenced by any ref."""
+        try:
+            subprocess.run(["ostree", "prune", "--repo", self.repo_path, "--refs-only"],
+                           check=True, capture_output=True, text=True)
+            LOG.info("Pruned repo %s", self.repo_path)
+        except subprocess.CalledProcessError as e:
+            LOG.error("Failed to prune repo %s: %s", self.repo_path, e.stderr)
+            raise
+
+    def update_summary(self):
+        """Update the repo summary."""
+        try:
+            subprocess.run(["ostree", "summary", "--repo", self.repo_path, "-u"],
+                           check=True, capture_output=True, text=True)
+            LOG.info("Updated summary for repo %s", self.repo_path)
+        except subprocess.CalledProcessError as e:
+            LOG.error("Failed to update summary: %s", e.stderr)
+            raise
 
     def validate_deploy(self, deploy_target):
         # validate if deploy_target can be deployed
@@ -336,8 +354,7 @@ class SoftwareInventoryManager():
 
         # Update the summary file so remote clients can pull the updated deploy branch
         try:
-            subprocess.check_call(
-                ["ostree", "summary", "--repo", self.repo_path, "-u"])
+            self.update_summary()
         except subprocess.CalledProcessError as e:
             raise RuntimeError("Failed to update ostree summary: %s" % e)
 

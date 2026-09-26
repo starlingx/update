@@ -702,6 +702,10 @@ def get_partial_branch_name(product_id, components):
     return "%s-%s" % (product_id, "_".join(sorted_components))
 
 
+def get_pud_branch_name(product_id):
+    return "%s-%s" % (product_id, constants.PRE_UPGRADE_DEPLOY)
+
+
 def get_highest_required_release(required_releases):
     """Get the highest version among a list of required release IDs.
 

@@ -4415,7 +4415,7 @@ class PatchController(PatchService):
 
                 # Delete the pre-upgrade-deploy branch
                 product_id = mp_deploy_set.product
-                branch_name = f"{product_id}-{constants.PRE_UPGRADE_DEPLOY}"
+                branch_name = utils.get_pud_branch_name(product_id)
                 if sim.branch_exists(branch_name):
                     sim.delete_ref(branch_name)
                     LOG.info(f"Deleted pre-upgrade-deploy branch: {branch_name}")
@@ -4486,6 +4486,7 @@ class PatchController(PatchService):
         """
         Validate parameters passed for deploy prestage.
         """
+        metapackage_overrides = list(set(metapackage_overrides))  # Avoid repeated metapackages
         LOG.info(f"Validating deploy prestage parameters (release: {release}, "
                  f"metapackage_overrides:{metapackage_overrides}, "
                  f"pre_upgrade_deploy:{pre_upgrade_deploy}, "
@@ -4523,6 +4524,7 @@ class PatchController(PatchService):
 
         running_release = self.release_collection.running_release
         metapackage_data = []
+        mp_product_id = None
         # If restore is true, pass the following validation and return the running_release to
         # continue the restore operation.
         if restore:
@@ -4543,6 +4545,8 @@ class PatchController(PatchService):
 
             if pre_upgrade_deploy:
                 LOG.info("Validating deploy prestage parameters for --pre-upgrade-deploy")
+                # The product being prestaged is the target release itself
+                mp_product_id = release
                 # Release skip is allowed when pre_upgrade_deploy parameter is specified
                 # Use pre-upgrade-deploy metapackages from the product release
                 pud_ids = self.release_collection.get_pre_upgrade_deploy_id_by_product_id(release)
@@ -4558,16 +4562,6 @@ class PatchController(PatchService):
                         msg = f"Pre-upgrade-deploy metapackage {mp_id} not found"
                         raise Exception(msg)
             else:
-                # Validate that the overrides do not match the entire product release's
-                # metapackage list. If so, deploy start should be used instead.
-                product_mp_ids = set(product_release.metapackages)
-                override_mp_ids = set(metapackage_overrides)
-                if override_mp_ids == product_mp_ids:
-                    raise Exception(
-                        "The metapackage overrides match the entire metapackage list of "
-                        "the product release. Use 'software deploy start' instead "
-                        "of prestage with --metapackage-overrides")
-
                 # Resolve each override and validate all belong to the same product release
                 # and are in available state
                 mp_sw_releases = set()
@@ -4594,6 +4588,16 @@ class PatchController(PatchService):
                 mp_product = self.release_collection.get_product_release_by_id(mp_product_id)
                 if not mp_product:
                     raise Exception(f"Product release for version {mp_product_sw_release} not found")
+
+                # Validate that the overrides do not match the entire product release's
+                # metapackage list. If so, deploy start should be used instead.
+                product_mp_ids = set(mp_product.metapackages.keys())
+                override_mp_ids = set(metapackage_overrides)
+                if override_mp_ids == product_mp_ids:
+                    raise Exception(
+                        "The metapackage overrides match the entire metapackage list of "
+                        "the product release. Use 'software deploy start' instead "
+                        "of prestage with --metapackage-overrides")
 
                 mp_ver = version.parse(mp_product.sw_release)
                 if (mp_ver.major != product_ver.major
@@ -4631,32 +4635,89 @@ class PatchController(PatchService):
                 raise Exception("No metapackages resolved for prestage operation")
 
         LOG.info("Validation complete for deploy prestage parameters")
-        return running_release, metapackage_data
+        return running_release, metapackage_data, mp_product_id
 
-    def _prune_prestage_branch(self, sw_version, feed_repo, target_branch):
+    def _prune_prestage_branch(self, sw_version, base_release):
         msg_info = ""
         msg_warning = ""
         msg_error = ""
 
         sw_inventory = SoftwareInventoryManager(sw_ver=sw_version)
-        base_release = target_branch.split(f"-{constants.PRESTAGE_SUFFIX}")[0]
-        if sw_inventory.branch_exists(target_branch):
-            LOG.info("Prestage branch exists")
-            try:
-                LOG.info(f"Deleting prestage branch {target_branch}")
-                deleted_branches = sw_inventory.delete_branch(target_branch, prestage=True)
-                ostree_utils.update_repo_summary_file(feed_repo)
-            except Exception as e:
-                msg = str(e)
-                LOG.error(msg)
-                msg_error += msg
-                return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-            msg = f"The following branches were removed during restore of {base_release}:\n"
-            msg += ", ".join(deleted_branches) + "\n\n"
-        else:
+        # Prestage just builds a custom branch and leaves it for later deploy,
+        # so restore removes every custom branch for the release. Custom
+        # branches carry the "<release>-" prefix, covering both partial sets
+        # (<release>-<components>) and pre-upgrade-deploy
+        # (<release>-pre-upgrade-deploy). The release's own base branch
+        # "<release>" has no trailing dash and is preserved
+        prefix = f"{base_release}-"
+        custom_branches = [b for b in sw_inventory.get_branches() if b.startswith(prefix)]
+
+        if not custom_branches:
             msg = f"No prestage branch created based on the release {base_release} yet.\n\n"
+            msg += "Restore completed successfully."
+            msg_info += msg
+            LOG.info(msg)
+            self.software_sync()
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
+        # Capture each branch tip before deletion so the appended commit can be
+        # stripped from the metapackage metadata, avoiding accumulation across
+        # prestage/restore cycles
+        branch_commits = {}
+        for branch in custom_branches:
+            try:
+                branch_commits[branch] = sw_inventory.get_branch_commit(branch)
+            except BranchNotFound:
+                branch_commits[branch] = None
+
+        deleted_branches = []
+        try:
+            for branch in custom_branches:
+                LOG.info(f"Deleting prestage branch {branch}")
+                sw_inventory.delete_ref(branch)
+                deleted_branches.append(branch)
+            sw_inventory.prune()
+            sw_inventory.update_summary()
+        except Exception as e:
+            msg = str(e)
+            LOG.error(msg)
+            msg_error += msg
+            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+        # Strip each deleted branch's commit from the release's metapackage
+        # metadata. Restore does not know which subset each branch covered, so
+        # every metapackage of the release is checked, including the
+        # pre-upgrade-deploy metapackages (a PUD prestage appends its commit to
+        # those, not to the regular metapackages)
+        product_release = self.release_collection.get_release_by_id(base_release)
+        commits_to_remove = [c for c in branch_commits.values() if c]
+        if product_release and commits_to_remove:
+            mp_releases = []
+            for mp_id in product_release.metapackages:
+                mp = self.release_collection.get_metapackage_release_by_id(mp_id)
+                if mp is not None:
+                    mp_releases.append(mp)
+            for mp_id in (self.release_collection.get_pre_upgrade_deploy_id_by_product_id(
+                    base_release) or []):
+                mp = self.release_collection.get_pre_upgrade_deploy_release_by_id(mp_id)
+                if mp is not None:
+                    mp_releases.append(mp)
+
+            for mp in mp_releases:
+                # Each metapackage's metadata lives in its own state directory
+                metadata_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP.get(mp.state)
+                if not metadata_dir:
+                    continue
+                md_file = "%s/%s" % (metadata_dir, mp.metadata_filename)
+                if not os.path.exists(md_file):
+                    continue
+                for commit in commits_to_remove:
+                    self.remove_commit_from_metadata(md_file, commit)
+            reload_release_data()
+
+        msg = f"The following branches were removed during restore of {base_release}:\n"
+        msg += ", ".join(deleted_branches) + "\n\n"
         msg += "Restore completed successfully."
         msg_info += msg
         LOG.info(msg)
@@ -4693,7 +4754,7 @@ class PatchController(PatchService):
         restore = kwargs.get("restore", False)
 
         try:
-            running_release, metapackage_data = \
+            running_release, metapackage_data, target_release = \
                 self._validate_parameters_for_prestage(
                     release, metapackage_overrides, pre_upgrade_deploy, restore)
         except Exception as e:
@@ -4705,6 +4766,11 @@ class PatchController(PatchService):
         # Derive feed repo from the running release sw_version (same as deploy start)
         deploy_sw_version = running_release.sw_version
         feed_repo = f"{constants.FEED_OSTREE_BASE_DIR}/rel-{deploy_sw_version}/{constants.OSTREE_REPO}"
+
+        # Restore removes every custom branch built for the release; it does not
+        # need the metapackage set or a specific branch name
+        if restore:
+            return self._prune_prestage_branch(deploy_sw_version, release)
 
         # Determine the base release from the appropriate ostree branch
         if pre_upgrade_deploy:
@@ -4726,14 +4792,13 @@ class PatchController(PatchService):
             LOG.info(f"Highest available release: {highest_available_id}")
 
             base_release = highest_available_id
+            target_branch = utils.get_pud_branch_name(release)
         else:
             # For metapackage overrides or restore: parent commit is the top commit of the
             # target product release branch in the feed repo
             base_release = release
-        target_branch = f"{base_release}-{constants.PRESTAGE_SUFFIX}"
-
-        if restore:
-            return self._prune_prestage_branch(deploy_sw_version, feed_repo, target_branch)
+            metapackage_components = [mp.component for mp in metapackage_data]
+            target_branch = utils.get_partial_branch_name(target_release, metapackage_components)
 
         # Build MetapackageDeploymentSet for the install step
         deploy_set = None
@@ -4774,65 +4839,82 @@ class PatchController(PatchService):
         LOG.info(msg)
         audit_log_info(msg)
 
+        # Reuse the branch only if it exists AND its tip matches the commit
+        # recorded for this exact metapackage set. Rebuild otherwise
+        metapackage_ids = [mp.id for mp in deploy_set.metapackages]
+        reuse_branch = False
+        stale_commit = None
         if sw_inventory.branch_exists(target_branch):
-            LOG.info("Prestage branch already exists")
+            branch_commit = sw_inventory.get_branch_commit(target_branch)
+            expected_commit = self.release_collection.find_commit_for_metapackages(
+                metapackage_ids)
+            if expected_commit and expected_commit == branch_commit:
+                reuse_branch = True
+            else:
+                # The recorded commit (if any) is stale; strip it from the
+                # metadata when rebuilding so commits don't accumulate
+                stale_commit = expected_commit
+
+        if reuse_branch:
+            LOG.info(f"Prestage branch '{target_branch}' already exists with matching "
+                     f"commit {branch_commit[:10]}, reusing")
+            latest_feed_commit = branch_commit
+        else:
+            # Rebuild from scratch: drop a stale/mismatched branch first
+            if sw_inventory.branch_exists(target_branch):
+                LOG.info(f"Prestage branch '{target_branch}' commit does not match the "
+                         f"recorded metapackage set, rebuilding")
+                sw_inventory.delete_ref(target_branch)
+
+            # Create target branch
+            LOG.info(f"Creating prestage branch {target_branch}")
+            sw_inventory.create_branch(original_commit, target_branch)
+
+            # New commit is created on top of the target branch
+            packages = [f"meta-{pkg.component}" for pkg in deploy_set.metapackages]
+            LOG.info(f"Installing prestage metapackages: {packages}")
             try:
-                LOG.info(f"Deleting old prestage branch {target_branch}")
-                sw_inventory.delete_branch(target_branch, prestage=True)
-                ostree_utils.update_repo_summary_file(feed_repo)
-            except Exception as e:
+                apt_utils.run_install(
+                    feed_repo,
+                    deploy_set.sw_version,
+                    deploy_set.sw_release,
+                    packages,
+                    self.pre_bootstrap,
+                    branch=target_branch)
+            except APTOSTreeCommandFail as e:
                 msg = str(e)
+                # Delete prestage branch on failure
+                sw_inventory.delete_ref(target_branch)
                 LOG.error(msg)
                 msg_error += msg
                 return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
-        # Create target branch
-        LOG.info(f"Creating prestage branch {target_branch}")
-        sw_inventory.create_branch(original_commit, target_branch)
+            # Update metadata and update summary
+            try:
+                latest_feed_commit = sw_inventory.get_branch_commit(target_branch)
 
-        # New commit is created on top of the target branch
-        packages = [f"meta-{pkg.component}" for pkg in deploy_set.metapackages]
-        LOG.info(f"Installing prestage metapackages: {packages}")
-        try:
-            apt_utils.run_install(
-                feed_repo,
-                deploy_set.sw_version,
-                deploy_set.sw_release,
-                packages,
-                self.pre_bootstrap,
-                branch=target_branch)
-        except APTOSTreeCommandFail as e:
-            msg = str(e)
-            # Delete prestage branch on failure
-            sw_inventory.delete_ref(target_branch)
-            LOG.error(msg)
-            msg_error += msg
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+                # Update metapackage metadata with the new commit-id and base
+                # commit, dropping any stale commit from a rebuilt branch first
+                metadata_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP[states.AVAILABLE]
+                for mp in deploy_set.metapackages:
+                    metadata_file = "%s/%s" % (metadata_dir, mp.metadata_filename)
+                    if stale_commit:
+                        self.remove_commit_from_metadata(metadata_file, stale_commit)
+                    self.append_commit_to_metadata(metadata_file, latest_feed_commit, original_commit)
+                LOG.info(f"Updated metapackage metadata with commit {latest_feed_commit} "
+                         f"(base: {original_commit})")
 
-        # Update metadata and update summary
-        try:
-            latest_feed_commit = sw_inventory.get_branch_commit(target_branch)
+                reload_release_data()
 
-            # Update metapackage metadata with the new commit-id and base commit
-            metadata_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP[states.AVAILABLE]
-            for mp in deploy_set.metapackages:
-                metadata_file = "%s/%s" % (metadata_dir, mp.metadata_filename)
-                self.update_ostree_commit_id(
-                    metadata_file, original_commit, latest_feed_commit)
-            LOG.info(f"Updated metapackage metadata with commit {latest_feed_commit} "
-                     f"(base: {original_commit})")
-
-            reload_release_data()
-
-            # Update the feed ostree summary
-            ostree_utils.update_repo_summary_file(feed_repo)
-        except Exception as e:
-            msg = f"Deploy prestage failed during post-install: {str(e)}"
-            # Delete prestage branch on failure
-            sw_inventory.delete_ref(target_branch)
-            LOG.error(msg)
-            msg_error += msg
-            return dict(info=msg_info, warning=msg_warning, error=msg_error)
+                # Update the feed ostree summary
+                ostree_utils.update_repo_summary_file(feed_repo)
+            except Exception as e:
+                msg = f"Deploy prestage failed during post-install: {str(e)}"
+                # Delete prestage branch on failure
+                sw_inventory.delete_ref(target_branch)
+                LOG.error(msg)
+                msg_error += msg
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         msg_info += f"Prestage completed successfully for product release {release}"
         LOG.info("Prestage completed for %s. commit: %s, parent: %s, branch: %s",
@@ -5296,6 +5378,71 @@ class PatchController(PatchService):
         LOG.info("Appended commit %s to %s (now %d commits)",
                  new_commit_id[:10], metadata_file, n)
 
+    def remove_commit_from_metadata(self, metadata_file, commit_id):
+        """Remove a specific commit entry from a metapackage's metadata XML.
+
+        The commitN entries are positional (readers iterate commit1..commitN up
+        to number_of_commits), so the remaining commits are renumbered
+        sequentially and number_of_commits is decremented. If the last commit
+        is removed, the
+        whole <contents> block is dropped so the metadata matches a release with
+        no commits. No-op if the commit is not present.
+
+        Used on prestage restore, where the prestage branch (and thus its
+        appended commit) is deleted; leaving the stale commit would accumulate
+        invalid entries across repeated prestage/restore cycles.
+        """
+        tree = ET.parse(metadata_file)
+        root = tree.getroot()
+
+        contents = root.find(constants.CONTENTS_TAG)
+        ostree = contents.find(constants.OSTREE_TAG) if contents is not None else None
+        if ostree is None:
+            return
+
+        num_commits_el = ostree.find(constants.NUMBER_OF_COMMITS_TAG)
+        n = int(num_commits_el.text) if num_commits_el is not None and num_commits_el.text else 0
+
+        # Collect the ordered commit elements that remain after removal
+        remaining_commits = []
+        removed = False
+        for i in range(1, n + 1):
+            commit_el = ostree.find("commit%s" % i)
+            if commit_el is None:
+                continue
+            if not removed and commit_el.findtext(constants.COMMIT_TAG) == commit_id:
+                removed = True
+                continue
+            remaining_commits.append((commit_el.findtext(constants.COMMIT_TAG),
+                                      commit_el.findtext(constants.CHECKSUM_TAG)))
+
+        if not removed:
+            LOG.info("Commit %s not found in %s, nothing to remove",
+                     commit_id[:10], metadata_file)
+            return
+
+        # Drop all existing commitN elements, then re-add the remaining commits
+        # with sequential tag names so the positional invariant is preserved
+        for i in range(1, n + 1):
+            commit_el = ostree.find("commit%s" % i)
+            if commit_el is not None:
+                ostree.remove(commit_el)
+
+        if not remaining_commits:
+            # No commits left: remove the whole contents block
+            root.remove(contents)
+        else:
+            for idx, (commit_val, checksum_val) in enumerate(remaining_commits, start=1):
+                commit_el = ET.SubElement(ostree, "commit%s" % idx)
+                self.add_text_tag_to_xml(commit_el, constants.COMMIT_TAG, commit_val)
+                self.add_text_tag_to_xml(commit_el, constants.CHECKSUM_TAG, checksum_val or "")
+            num_commits_el.text = str(len(remaining_commits))
+
+        ET.indent(tree, '  ')
+        atomic_write_xml(tree, metadata_file)
+        LOG.info("Removed commit %s from %s (now %d commits)",
+                 commit_id[:10], metadata_file, len(remaining_commits))
+
     def is_deployment_list_reboot_required(self, deployment_list):
         """Check if any deploy in deployment list is reboot required"""
         for release_id in deployment_list:
@@ -5636,7 +5783,7 @@ class PatchController(PatchService):
                 if mp_deploy_set.is_pre_upgrade_deploy:
                     sim = SoftwareInventoryManager(feed_sw_version)
                     base_commit = sim.get_branch_commit(constants.OSTREE_REF)
-                    branch_name = f"{product_rel_id}-{constants.PRE_UPGRADE_DEPLOY}"
+                    branch_name = utils.get_pud_branch_name(product_rel_id)
 
                     reuse_commit = False
                     if sim.branch_exists(branch_name):
