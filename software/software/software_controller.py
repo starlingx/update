@@ -4899,13 +4899,19 @@ class PatchController(PatchService):
                         "and re-uploading the software for recovery.")
 
                 product_release = self.release_collection.get_product_release_by_id(product)
-                if product_release == self.release_collection.running_release:
+                # Reject only the fully-deployed running release; a
+                # deployed-partial release is a valid target (it can be
+                # continued or removed), so use highest_release and check state
+                highest_release = self.release_collection.highest_release
+                if (product_release == highest_release
+                        and highest_release.state == states.DEPLOYED):
                     raise ReleasePrecheckInvalidRequest(
                         f"Cannot run precheck against current release {rel_id}.")
 
                 valid_releases.append(rel_data)
             elif rel_data.is_product_release:
-                if rel_data == self.release_collection.running_release:
+                highest_release = self.release_collection.highest_release
+                if rel_data == highest_release and highest_release.state == states.DEPLOYED:
                     raise ReleasePrecheckInvalidRequest(
                         f"Cannot run precheck against current release {rel_id}.")
 

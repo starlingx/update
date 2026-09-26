@@ -13,6 +13,7 @@ from packaging import version
 
 from software.tests import base  # pylint: disable=unused-import # noqa: F401
 from software.exceptions import HostNotFound
+from software.exceptions import ReleasePrecheckInvalidRequest
 from software.exceptions import SoftwareServiceError
 from software.exceptions import UpgradeNotSupported
 from software.software_controller import PatchController
@@ -1472,3 +1473,53 @@ class TestEnsureReleaseBranch(unittest.TestCase):
         # Product original_commit refreshed with the rebuilt commit
         controller._set_original_commit.assert_called_once_with(  # pylint: disable=protected-access
             "starlingx-13.0.1", "new-commit")
+
+
+class TestValidateInformedReleasesPrecheck(unittest.TestCase):
+    """Tests for PatchController._validate_informed_releases: a deployed-partial
+    release must be a valid precheck target (it can be continued or removed),
+    while the fully-deployed running release is still rejected.
+    """
+
+    def _make_controller(self, highest_release):
+        controller = PatchController.__new__(PatchController)
+        swrc = unittest.mock.MagicMock()
+        swrc.highest_release = highest_release
+        patcher = unittest.mock.patch(
+            "software.software_controller.get_SWReleaseCollection", return_value=swrc)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return controller, swrc
+
+    @staticmethod
+    def _product(rel_id, state):
+        p = unittest.mock.MagicMock()
+        p.id = rel_id
+        p.state = state
+        p.is_metapackage_release = False
+        p.is_product_release = True
+        return p
+
+    def test_deployed_partial_target_is_allowed(self):
+        # Targeting a deployed-partial product release (e.g. VIM removing back
+        # to it) must not be rejected as the current release
+        target = self._product("starlingx-26.10.1", states.DEPLOYED_PARTIAL)
+        target.metapackages = {"infra_26.10.1": {}}
+        controller, swrc = self._make_controller(highest_release=target)
+        mp = unittest.mock.MagicMock()
+        swrc.get_release_by_id.side_effect = lambda rid: (
+            target if rid == "starlingx-26.10.1" else mp)
+
+        result = controller._validate_informed_releases(["starlingx-26.10.1"])  # pylint: disable=protected-access
+
+        self.assertEqual(result, [mp])
+
+    def test_fully_deployed_running_release_is_rejected(self):
+        # The fully-deployed running release cannot be a precheck target
+        target = self._product("starlingx-26.10.1", states.DEPLOYED)
+        target.metapackages = {"infra_26.10.1": {}}
+        controller, swrc = self._make_controller(highest_release=target)
+        swrc.get_release_by_id.return_value = target
+
+        with self.assertRaises(ReleasePrecheckInvalidRequest):
+            controller._validate_informed_releases(["starlingx-26.10.1"])  # pylint: disable=protected-access
