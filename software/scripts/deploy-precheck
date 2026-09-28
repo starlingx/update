@@ -193,6 +193,12 @@ class HealthCheck(object):
                              "280.003", # subcloud backup failure
                              "280.004", # subcloud peer group in disconnected state
                              "280.005", # subcloud peer group managed with lower priority
+                             "700.001", # VM failed
+                             "700.002", # VM paused
+                             "700.003", # VM suspended
+                             "700.004", # VM stopped
+                             "700.005", # VM rebooting
+                             "700.015", # VM guest heartbeat not established
                              "900.201", # Software upgrade auto apply in progress
                              ]
 
