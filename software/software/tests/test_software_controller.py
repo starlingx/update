@@ -1506,26 +1506,26 @@ class TestValidateInformedReleasesPrecheck(unittest.TestCase):
     def test_deployed_partial_target_is_allowed(self):
         # Targeting a deployed-partial product release (e.g. VIM removing back
         # to it) must not be rejected as the current release
-        target = self._product("starlingx-26.10.1", states.DEPLOYED_PARTIAL)
-        target.metapackages = {"infra_26.10.1": {}}
+        target = self._product("starlingx-13.0.1", states.DEPLOYED_PARTIAL)
+        target.metapackages = {"infra_13.0.1": {}}
         controller, swrc = self._make_controller(highest_release=target)
         mp = unittest.mock.MagicMock()
         swrc.get_release_by_id.side_effect = lambda rid: (
-            target if rid == "starlingx-26.10.1" else mp)
+            target if rid == "starlingx-13.0.1" else mp)
 
-        result = controller._validate_informed_releases(["starlingx-26.10.1"])  # pylint: disable=protected-access
+        result = controller._validate_informed_releases(["starlingx-13.0.1"])  # pylint: disable=protected-access
 
         self.assertEqual(result, [mp])
 
     def test_fully_deployed_running_release_is_rejected(self):
         # The fully-deployed running release cannot be a precheck target
-        target = self._product("starlingx-26.10.1", states.DEPLOYED)
-        target.metapackages = {"infra_26.10.1": {}}
+        target = self._product("starlingx-13.0.1", states.DEPLOYED)
+        target.metapackages = {"infra_13.0.1": {}}
         controller, swrc = self._make_controller(highest_release=target)
         swrc.get_release_by_id.return_value = target
 
         with self.assertRaises(ReleasePrecheckInvalidRequest):
-            controller._validate_informed_releases(["starlingx-26.10.1"])  # pylint: disable=protected-access
+            controller._validate_informed_releases(["starlingx-13.0.1"])  # pylint: disable=protected-access
 
 
 class TestRemoveCommitFromMetadata(unittest.TestCase):
@@ -1632,9 +1632,9 @@ class TestPrestageBranchReuse(unittest.TestCase):
     @staticmethod
     def _fake_mp():
         mp = unittest.mock.MagicMock()
-        mp.id = "infra_26.10.3"
+        mp.id = "infra_13.0.3"
         mp.component = "infra"
-        mp.metadata_filename = "infra_26.10.3-metadata.xml"
+        mp.metadata_filename = "infra_13.0.3-metadata.xml"
         return mp
 
     def _run(self, controller, sim, branch_commit, expected_commit):
@@ -1643,13 +1643,13 @@ class TestPrestageBranchReuse(unittest.TestCase):
         """
         mp = self._fake_mp()
         running_release = unittest.mock.MagicMock()
-        running_release.sw_version = "26.10"
-        target_release = "starlingx-26.10.3"
+        running_release.sw_version = "13.0"
+        target_release = "starlingx-13.0.3"
 
         deploy_set = unittest.mock.MagicMock()
         deploy_set.metapackages = [mp]
-        deploy_set.sw_version = "26.10"
-        deploy_set.sw_release = "26.10.3"
+        deploy_set.sw_version = "13.0"
+        deploy_set.sw_release = "13.0.3"
 
         swrc = unittest.mock.MagicMock()
         swrc.find_commit_for_metapackages.return_value = expected_commit
@@ -1678,7 +1678,7 @@ class TestPrestageBranchReuse(unittest.TestCase):
         self.addCleanup(unittest.mock.patch.stopall)
 
         return controller.software_deploy_prestage_api(
-            release=target_release, metapackage_overrides=["infra_26.10.3"])
+            release=target_release, metapackage_overrides=["infra_13.0.3"])
 
     def test_reuse_when_commit_matches(self):
         # Branch exists and its tip equals the recorded commit -> reuse, no
@@ -1713,3 +1713,38 @@ class TestPrestageBranchReuse(unittest.TestCase):
         sim.create_branch.assert_called_once()
         controller.remove_commit_from_metadata.assert_not_called()
         controller.append_commit_to_metadata.assert_called_once()
+
+
+class TestValidateParametersForPrestage(unittest.TestCase):
+    """Tests for PatchController._validate_parameters_for_prestage. A
+    non-deployable metapackage can only be deployed as part of its full product
+    release, so it must be rejected as an individual prestage override, matching
+    the deploy select behavior.
+    """
+
+    @unittest.mock.patch("software.software_controller.is_subcloud", return_value=True)
+    @unittest.mock.patch("software.software_controller.get_SWReleaseCollection")
+    def test_non_deployable_override_is_rejected(self, mock_swrc, _mock_subcloud):
+        controller = PatchController.__new__(PatchController)
+        swrc = mock_swrc.return_value
+
+        product = unittest.mock.MagicMock()
+        product.state = states.AVAILABLE
+        product.sw_release = "13.0.3"
+        swrc.get_product_release_by_id.return_value = product
+
+        running = unittest.mock.MagicMock()
+        running.sw_release = "13.0.0"
+        swrc.running_release = running
+
+        # Override metapackage is available but not deployable
+        mp = unittest.mock.MagicMock()
+        mp.state = states.AVAILABLE
+        mp.deployable = False
+        swrc.get_metapackage_release_by_id.return_value = mp
+
+        with self.assertRaises(Exception) as ctx:  # noqa: H202
+            controller._validate_parameters_for_prestage(  # pylint: disable=protected-access
+                "starlingx-13.0.3", ["infra_13.0.3"],
+                pre_upgrade_deploy=False, restore=False)
+        self.assertIn("can't be prestaged", str(ctx.exception))

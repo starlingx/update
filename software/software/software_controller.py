@@ -4562,8 +4562,8 @@ class PatchController(PatchService):
                         msg = f"Pre-upgrade-deploy metapackage {mp_id} not found"
                         raise Exception(msg)
             else:
-                # Resolve each override and validate all belong to the same product release
-                # and are in available state
+                # Resolve each override and validate all belong to the same product release,
+                # are in available state and are deployable=True
                 mp_sw_releases = set()
                 for mp_id in metapackage_overrides:
                     mp_release = self.release_collection.get_metapackage_release_by_id(mp_id)
@@ -4571,6 +4571,12 @@ class PatchController(PatchService):
                         raise Exception(f"Metapackage {mp_id} not found")
                     if mp_release.state != states.AVAILABLE:
                         raise Exception(f"Metapackage {mp_id} is not in available state")
+                    # A non-deployable metapackage can only be deployed as part
+                    # of its full product release, so it cannot be prestaged as
+                    # an individual override (a partial operation)
+                    if not mp_release.deployable:
+                        raise Exception(f"Metapackage {mp_id} can't be prestaged, since it "
+                                        "can be deployed only by selecting its product release")
                     metapackage_data.append(mp_release)
                     mp_sw_releases.add(mp_release.sw_release)
 
@@ -4758,7 +4764,7 @@ class PatchController(PatchService):
                 self._validate_parameters_for_prestage(
                     release, metapackage_overrides, pre_upgrade_deploy, restore)
         except Exception as e:
-            msg = "Failed to execute prestage command.\nError: %s" % (str(e))
+            msg = "Failed to execute prestage command: %s" % (str(e))
             LOG.error(msg)
             msg_error += msg
             return dict(info=msg_info, warning=msg_warning, error=msg_error)
