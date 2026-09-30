@@ -3623,6 +3623,19 @@ class PatchController(PatchService):
                     component_versions[mp.component] = mp.sw_release
         return component_versions
 
+    def _removal_reboot_required(self, removed_span):
+        """Whether removing a set of metapackages requires a reboot.
+
+        On removal, reboot_required is driven by the change being undone (the
+        removed span), not the target release we roll back to. The target's RR
+        describes what it took to reach it originally, which is irrelevant to
+        whether backing out the span needs a reboot.
+
+        :param removed_span: metapackage releases being removed.
+        :return: True if any removed metapackage is reboot-required.
+        """
+        return any(mp.reboot_required for mp in removed_span)
+
     def _get_metapackages_to_remove(self, release):
         """Metapackages to remove to roll the system back to the target release:
         the deployed metapackages of every release above the target (running +
@@ -6513,8 +6526,7 @@ class PatchController(PatchService):
             release_state = ReleaseState(release_ids=metapackages)
             release_state.start_remove()
 
-            reboot_required = mp_deploy_set.reboot_required or any(
-                mp.reboot_required for mp in removed_span)
+            reboot_required = self._removal_reboot_required(removed_span)
 
             # Deploy record: "from" = current deployed version, "to" = the
             # rollback target version for the component. A component only

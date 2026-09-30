@@ -1275,6 +1275,37 @@ class TestSpanHelpers(unittest.TestCase):
                 return_value=collection):
             self.assertIsNone(controller._resolve_target_product_id([]))
 
+    # ---- _removal_reboot_required ---------------------------------------
+
+    @staticmethod
+    def _span(*rr_flags):
+        """Build a removed span of metapackages with the given
+        reboot_required flags.
+        """
+        span = []
+        for i, rr in enumerate(rr_flags):
+            mp = _FakeMetapackage(f"comp{i}", "13.0.2", states.DEPLOYED,
+                                  "starlingx-13.0.2")
+            mp.reboot_required = rr
+            span.append(mp)
+        return span
+
+    def test_removal_rr_false_when_no_span_member_is_rr(self):
+        # The bug: a reboot-required TARGET must not make the removal RR when
+        # none of the removed metapackages are themselves reboot-required.
+        controller = PatchController.__new__(PatchController)
+        span = self._span(False, False, False)
+        self.assertFalse(controller._removal_reboot_required(span))  # pylint: disable=protected-access
+
+    def test_removal_rr_true_when_any_span_member_is_rr(self):
+        controller = PatchController.__new__(PatchController)
+        span = self._span(False, True, False)
+        self.assertTrue(controller._removal_reboot_required(span))  # pylint: disable=protected-access
+
+    def test_removal_rr_false_for_empty_span(self):
+        controller = PatchController.__new__(PatchController)
+        self.assertFalse(controller._removal_reboot_required([]))  # pylint: disable=protected-access
+
 
 class _FakeScriptRelease:
     """Minimal metapackage release stand-in for _build_metapackage_scripts:
