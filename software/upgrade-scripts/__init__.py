@@ -66,6 +66,9 @@ RollbackKeystoneFederation = getattr(
 CleanUpDeploymentData = getattr(
     _import_module(".26-clean-up-deployment-data", __name__),
     "CleanUpDeploymentData")
+RollbackLuksPassphraseType = getattr(
+    _import_module(".27-rollback-luks-passphrase-type", __name__),
+    "RollbackLuksPassphraseType")
 SetServiceUserOptions = getattr(
     _import_module(".31-set-service-user-options", __name__),
     "SetServiceUserOptions")
@@ -184,6 +187,7 @@ PLUGINS = {
     ACTION_DELETE: {
         FRAMEWORK_INIT: [
             CleanUpDeploymentData(),
+            RollbackLuksPassphraseType(),
         ],
         FEATURE_PRE_APPS: [],
         K8S_APP_UPDATE: [],
