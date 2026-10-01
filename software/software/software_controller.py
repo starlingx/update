@@ -1620,6 +1620,17 @@ class PatchController(PatchService):
             reload_release_data()
             LOG.info("Updated release metadata for %s", to_release)
 
+            # Pre-build commits for the pre-upgrade-deploy metapackages the
+            # script left in the uploading dir. Runs in a thread: the
+            # metapackages stay in uploading until the build attempt ends, then
+            # go to available even if it failed (rebuilt on deploy/prestage).
+            self._build_uploaded_pud_branches()
+
+            if "pre-upgrade-deploy" in local_info:
+                local_info += ("Pre-upgrade-deploy is now uploading, await for the state "
+                               f"[{states.AVAILABLE}] in "
+                               "'software metapackage list --pre-upgrade-deploy'\n")
+
             release_meta_info = self.get_release_meta_info(iso_mount_dir, upgrade_files)
 
             return local_info, local_warning, local_error, release_meta_info
@@ -1852,6 +1863,7 @@ class PatchController(PatchService):
 
             new_branch = release_id
             rel_state = ReleaseState(release_ids=[release_id])
+            sim = None
             # Guard the whole per-release work so one failure marks only that
             # release upload-failed instead of aborting the batch
             try:
@@ -1904,9 +1916,13 @@ class PatchController(PatchService):
                     f"Branch {require_release_id} not found, please verify if "
                     f"the required release {require_release_id} is uploaded and in "
                     f"available state before retrying the upload of {release_id}")
+                self._discard_partial_branch(sim, new_branch)
                 rel_state.upload_failed()
             except Exception:
                 LOG.exception(f"Failed to create deployable branch for {release_id}")
+                # Don't leave a half-built branch: it would pass for a valid
+                # release branch and block the re-upload of this release
+                self._discard_partial_branch(sim, new_branch)
                 rel_state.upload_failed()
 
         def _sort_key(patch):
@@ -3612,6 +3628,170 @@ class PatchController(PatchService):
         system_deploy = self._get_system_deploy()
         return system_deploy
 
+    def _pud_intermediate_span(self, base_release):
+        """Not-yet-deployed metapackages at or below the pre-upgrade-deploy base.
+
+        The pre-upgrade-deploy branch is built on top of base_release, so its
+        single commit already contains these releases' content. They may be
+        co-deployed as state bookkeeping only: available -> deploying ->
+        deployed, carrying the commit they were already built with.
+
+        Combines the releases below the base (via _collect_span_metapackage_ids)
+        with the base's own not-yet-deployed metapackages (the "and including
+        the base" part, which that helper excludes).
+        """
+        span_ids = list(self._collect_span_metapackage_ids(base_release.id))
+        for mp_id in self.release_collection.get_metapackages_id_by_product_id(
+                base_release.id) or []:
+            mp = self.release_collection.get_metapackage_release_by_id(mp_id)
+            if mp is not None and mp.state != states.DEPLOYED:
+                span_ids.append(mp_id)
+
+        span = []
+        for mp_id in span_ids:
+            mp = self.release_collection.get_metapackage_release_by_id(mp_id)
+            if mp is not None:
+                span.append(mp)
+        return span
+
+    @threaded
+    @no_reentry()
+    def _build_uploaded_pud_branches(self):
+        """Pre-build commits for pre-upgrade-deploy metapackages left in uploading.
+
+        major-release-upload drops pre-upgrade-deploy metadata into the uploading
+        dir without a commit. Build each product's branch on the running major's
+        highest available release; the metapackages stay in uploading until the
+        build attempt ends, then move to available. The branch is left in the
+        feed for a later deploy/prestage to reuse; if the base is no longer
+        current by then, it is rebuilt at deploy time.
+
+        The pre-built branch is an optimization only: on any failure the
+        metapackages still go to available without a commit, and deploy
+        start/prestage builds the branch on the then-highest available release.
+        Unlike a patch, whose commit is the release content, the PUD commit is
+        derived from metapackages already on disk, so a failure (e.g. lack of
+        disk space) is retryable without re-uploading the ISO. Every path must
+        leave uploading: a metapackage stuck there blocks all further uploads.
+        """
+        uploading_pud = [mp for mp in
+                         self.release_collection.iterate_metapackages_by_state(states.UPLOADING)
+                         if mp.is_pre_upgrade_deploy_release]
+        if not uploading_pud:
+            return
+
+        by_product = {}
+        for mp in uploading_pud:
+            by_product.setdefault(mp.product, []).append(mp)
+
+        sim = None
+        try:
+            running_release = self.release_collection.running_release
+            if running_release is None:
+                raise SoftwareError("No running release to build pre-upgrade-deploy on")
+            running_sw_version = running_release.sw_version
+            feed_repo = (f"{constants.FEED_OSTREE_BASE_DIR}/rel-{running_sw_version}/"
+                         f"{constants.OSTREE_REPO}")
+            sim = SoftwareInventoryManager(running_sw_version)
+            base_commit = sim.get_branch_commit(
+                self._highest_available_product_release(running_sw_version).id)
+        except Exception:
+            LOG.exception("Cannot pre-build pre-upgrade-deploy branches; they will be "
+                          "built on deploy start/prestage")
+            sim = None
+
+        for product_rel_id, mp_releases in by_product.items():
+            if sim is not None:
+                try:
+                    self._build_pud_branch(sim, feed_repo, product_rel_id, mp_releases,
+                                           base_commit, states.UPLOADING)
+                    self.software_sync()
+                    LOG.info(f"Pre-built pre-upgrade-deploy branch for {product_rel_id}")
+                except Exception:
+                    LOG.exception(f"Failed to pre-build pre-upgrade-deploy branch for "
+                                  f"{product_rel_id}; it will be built on deploy "
+                                  "start/prestage")
+                    self._discard_partial_branch(
+                        sim, utils.get_pud_branch_name(product_rel_id))
+            # Available either way: a missing or stale branch is rebuilt at deploy time
+            ReleaseState(release_ids=[mp.id for mp in mp_releases],
+                         pre_upgrade_deploy=True).uploaded()
+            LOG.info(f"Pre-upgrade-deploy metapackages for {product_rel_id} are available")
+        reload_release_data()
+
+    def _discard_partial_branch(self, sim, branch_name):
+        """Best-effort removal of a branch left behind by a failed build.
+
+        A failed build can leave the branch created at the bare base commit
+        without its content. Left in place it would be mistaken for a valid
+        branch (branch_exists() is true, so _ensure_release_branch does not
+        rebuild it) and a retry could not recreate it (creating a ref that
+        already exists fails). Only this ref is deleted, nothing is built on it.
+
+        :param sim: SoftwareInventoryManager, or None if it was never created
+        :param branch_name: the branch the failed build was creating
+        """
+        if sim is None:
+            return
+        try:
+            if sim.branch_exists(branch_name):
+                sim.delete_ref(branch_name)
+                LOG.info(f"Removed partial branch {branch_name}")
+        except Exception:
+            LOG.exception(f"Failed to remove partial branch {branch_name}")
+
+    def _build_pud_branch(self, sim, feed_repo, product_rel_id, mp_releases,
+                          base_commit, metadata_state):
+        """Build (or rebuild) a pre-upgrade-deploy branch on top of base_commit.
+
+        Creates the branch in the feed, installs the metapackages onto it, and
+        rewrites each metapackage's metadata so <base> and the single commit
+        track this build. Does not deploy the branch; the caller decides whether
+        to reset the feed to it. Returns the new branch commit.
+        """
+        branch_name = utils.get_pud_branch_name(product_rel_id)
+        packages = [f"meta-{pkg.component}" for pkg in mp_releases]
+        LOG.info(f"Building pre-upgrade-deploy branch {branch_name} "
+                 f"from base {base_commit[:10]}")
+        sim.delete_ref(branch_name)
+        sim.create_branch(base_commit, branch_name)
+        a_mp = mp_releases[0]
+        apt_utils.run_install(feed_repo, a_mp.sw_version, product_rel_id,
+                              packages, self.pre_bootstrap, branch=branch_name)
+
+        new_commit = sim.get_branch_commit(branch_name)
+        metadata_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP[metadata_state]
+        # Overwrite to a single commit on the current base; keeps a rebuilt
+        # branch's metadata correct without accumulating commits.
+        for mp in mp_releases:
+            md_file = Path(metadata_dir) / mp.metadata_filename
+            self.update_ostree_commit_id(str(md_file), base_commit, new_commit)
+        return new_commit
+
+    def _highest_available_product_release(self, sw_version):
+        """Highest available/deployed product release for a major version.
+
+        Falls back to the running release when none is found, so a
+        pre-upgrade-deploy always has a concrete base to build on.
+
+        DEPLOYING and DEPLOYED_PARTIAL are accepted alongside AVAILABLE and
+        DEPLOYED: a pre-upgrade-deploy may co-deploy the available releases
+        below its base, moving them out of AVAILABLE, and this is called again
+        from the install path after that transition. Without them the base would
+        regress to the running release mid-deploy.
+        """
+        candidate_states = [states.AVAILABLE, states.DEPLOYED,
+                            states.DEPLOYING, states.DEPLOYED_PARTIAL]
+        highest = None
+        for rel in self.release_collection.iterate_releases():
+            if rel.sw_version != sw_version:
+                continue
+            if rel.state not in candidate_states:
+                continue
+            if highest is None or rel.version_obj > highest.version_obj:
+                highest = rel
+        return highest or self.release_collection.running_release
+
     def _get_target_component_versions(self, target_product_id):
         """Map each component to the version it runs at after rolling back to
         the target release (target + its requires closure; highest at/below
@@ -4430,24 +4610,19 @@ class PatchController(PatchService):
                     raise SoftwareError("Could not find base commit for pre-upgrade-deploy removal")
 
                 # Reset starlingx to base commit
-                sim = SoftwareInventoryManager(deploy_sw_version)
                 ostree_utils.reset_ostree_repo_head(base_commit, feed_repo)
                 LOG.info(f"Reset ostree feed {feed_repo} to base commit {base_commit}")
 
-                # Delete the pre-upgrade-deploy branch
+                # Keep the branch and its metadata commit so a later re-apply of
+                # the same metapackage set reuses them instead of rebuilding. The
+                # feed reset above is what takes the pre-upgrade-deploy off the
+                # running system.
                 product_id = mp_deploy_set.product
                 branch_name = utils.get_pud_branch_name(product_id)
-                if sim.branch_exists(branch_name):
-                    sim.delete_ref(branch_name)
-                    LOG.info(f"Deleted pre-upgrade-deploy branch: {branch_name}")
+                LOG.info(f"Keeping pre-upgrade-deploy branch {branch_name} for reuse")
 
                 # Update feed summary
                 ostree_utils.update_repo_summary_file(feed_repo)
-
-                # Remove contents from metadata
-                for mp in mp_deploy_set.metapackages:
-                    self.remove_tags_from_metadata(mp, constants.CONTENTS_TAG)
-                    LOG.info(f"Removed commit from metapackage {mp.id} metadata")
 
                 # Move deploy state to start-done
                 latest_feed_commit = ostree_utils.get_feed_latest_commit(deploy_sw_version)
@@ -4477,14 +4652,21 @@ class PatchController(PatchService):
 
             commit_id = mp_deploy_set.commit_id
 
+            # The branch is built on top of the highest available release, so its
+            # commit already contains any available release at or below that
+            # base. Co-deploy those (state bookkeeping only; the ostree commit
+            # and metadata are already in place) alongside the metapackages.
+            base_release = self._highest_available_product_release(deploy_sw_version)
+            span_metapackages = self._pud_intermediate_span(base_release)
+
             # Transition to deploying state
-            for mp in mp_deploy_set.metapackages:
+            for mp in list(mp_deploy_set.metapackages) + span_metapackages:
                 mp.update_state(states.DEPLOYING)
             self.software_sync()
 
             # Get metapackage deploy state for deploy entity
             metapackage_deploy_state = self._get_highest_deployed(
-                mp_deploy_set.metapackages, apply=True)
+                list(mp_deploy_set.metapackages) + span_metapackages, apply=True)
 
             collect_current_load_for_hosts(deploy_sw_version, hostname=hostname)
             create_deploy_hosts(hostname=hostname)
@@ -4820,24 +5002,10 @@ class PatchController(PatchService):
 
         # Determine the base release from the appropriate ostree branch
         if pre_upgrade_deploy:
-            # For pre-upgrade-deploy, the target branch is named after the highest available
-            # release's id.
-            # Find the highest available patch in the same major version (available or deployed)
-            highest_available = None
-            for rel in self.release_collection.iterate_releases():
-                if rel.sw_version != deploy_sw_version:
-                    continue
-                if rel.state not in [states.AVAILABLE, states.DEPLOYED]:
-                    continue
-                if highest_available is None or rel.version_obj > highest_available.version_obj:
-                    highest_available = rel
-            # If nothing found, use the running release
-            if not highest_available:
-                highest_available = running_release
-            highest_available_id = highest_available.id
-            LOG.info(f"Highest available release: {highest_available_id}")
-
-            base_release = highest_available_id
+            # The branch is built on top of the highest available release of the
+            # running major version.
+            base_release = self._highest_available_product_release(deploy_sw_version).id
+            LOG.info(f"Highest available release: {base_release}")
             target_branch = utils.get_pud_branch_name(release)
         else:
             # For metapackage overrides or restore: parent commit is the top commit of the
@@ -5828,43 +5996,31 @@ class PatchController(PatchService):
                 # Pre-upgrade-deploy: installs into the from-release feed
                 if mp_deploy_set.is_pre_upgrade_deploy:
                     sim = SoftwareInventoryManager(feed_sw_version)
-                    base_commit = sim.get_branch_commit(constants.OSTREE_REF)
+                    # Build on the highest available release, not the feed tip:
+                    # the branch must sit on top of every release prestaged so far.
+                    base_release = self._highest_available_product_release(feed_sw_version)
+                    base_commit = sim.get_branch_commit(base_release.id)
                     branch_name = utils.get_pud_branch_name(product_rel_id)
 
-                    reuse_commit = False
-                    if sim.branch_exists(branch_name):
-                        branch_commit = sim.get_branch_commit(branch_name)
-                        if branch_commit == mp_deploy_set.commit_id:
-                            reuse_commit = True
+                    # Reuse the existing branch only when it was built on the
+                    # expected base; a stale base means a newer release appeared
+                    # since, so the branch is rebuilt on top of it.
+                    reuse_commit = (sim.branch_exists(branch_name)
+                                    and base_commit in mp_deploy_set.base_commit_id)
 
                     if reuse_commit:
-                        # Prestaged: branch already exists, just deploy it
-                        LOG.info(f"Pre-upgrade-deploy branch {branch_name} already exists, reusing")
+                        LOG.info(f"Pre-upgrade-deploy branch {branch_name} is on the expected "
+                                 f"base {base_commit[:10]}, reusing")
                         sim.deploy(branch_name)
                     else:
-                        sim.delete_ref(branch_name)
-                        packages = [f"meta-{pkg.component}" for pkg in mp_deploy_set.metapackages]
-                        LOG.info(f"Building pre-upgrade-deploy branch {branch_name} "
-                                 f"from base {base_commit[:10]}")
-                        sim.create_branch(base_commit, branch_name)
-                        apt_utils.run_install(
-                            feed_repo,
-                            mp_deploy_set.sw_version,
-                            product_rel_id,
-                            packages,
-                            self.pre_bootstrap,
-                            branch=branch_name)
-
+                        if sim.branch_exists(branch_name):
+                            LOG.info(f"Rebuilding pre-upgrade-deploy branch {branch_name} on "
+                                     f"base {base_commit[:10]}")
+                        self._build_pud_branch(sim, feed_repo, product_rel_id,
+                                               mp_deploy_set.metapackages, base_commit,
+                                               states.DEPLOYING)
                         # Deploy the branch (resets starlingx in from-release feed)
                         sim.deploy(branch_name)
-
-                        # Append commit to metadata
-                        new_commit = sim.get_branch_commit(branch_name)
-                        deploy_state = states.DEPLOYING
-                        metadata_dir = states.COMPONENT_RELEASE_STATE_TO_DIR_MAP[deploy_state]
-                        for mp in mp_deploy_set:
-                            md_file = Path(metadata_dir) / mp.metadata_filename
-                            self.append_commit_to_metadata(str(md_file), new_commit, base_commit_id=base_commit)
                         reload_release_data()
                 else:
                     # Regular deploy path
@@ -6851,6 +7007,10 @@ class PatchController(PatchService):
         elif DEPLOY_STATES.HOST_ROLLBACK_DONE == deploy_state:
             major_release = utils.get_major_release_version(from_release)
             deploying_release_state.available()
+            # A pre-upgrade-deploy may co-deploy the available releases its branch
+            # was built on (regular metapackages); revert those too on rollback.
+            if pre_upgrade_deploy:
+                ReleaseState(release_state=states.DEPLOYING).available()
 
         elif deploy_state in [DEPLOY_STATES.START_DONE, DEPLOY_STATES.START_FAILED]:
             # TODO(bqian), this check is redundant. there should be no host deployed/deploying
@@ -6916,6 +7076,10 @@ class PatchController(PatchService):
                                 self.remove_tags_from_metadata(release, constants.CONTENTS_TAG)
 
                 deploying_release_state.available()
+                # A pre-upgrade-deploy may co-deploy the available releases its
+                # branch was built on (regular metapackages); revert those too.
+                if pre_upgrade_deploy:
+                    ReleaseState(release_state=states.DEPLOYING).available()
             else:
                 msg_error = "Delete is not supported while removing a release"
                 LOG.error(msg_error)
@@ -6978,12 +7142,12 @@ class PatchController(PatchService):
         Transition the releases/metapackages of the current deploy from the
         DEPLOYING state to DEPLOYED.
 
-        A deploy is either a regular deploy or a pre-upgrade-deploy, never both
-        at once, so exactly one of the two DEPLOYING sets below is populated.
-        The two sets are queried separately only because pre-upgrade-deploy
+        The two sets are queried separately because pre-upgrade-deploy
         metapackages are keyed in a dedicated collection to avoid ID collisions
-        with regular releases; they still go through the same DEPLOYING ->
-        DEPLOYED transition.
+        with regular releases. Both may be populated at once: a
+        pre-upgrade-deploy may co-deploy the available releases its branch was
+        built on (regular metapackages), so each set that has releases is
+        transitioned.
         """
         # Regular deploy: ReleaseState(DEPLOYING) collects both legacy releases
         # and regular metapackages in the DEPLOYING state.
@@ -6994,14 +7158,16 @@ class PatchController(PatchService):
         pre_upgrade_deploying = ReleaseState(release_state=states.DEPLOYING,
                                              pre_upgrade_deploy=True)
 
-        if deploying_release_state.has_release_id():
-            deploying_release_state.deploy_completed()
-        elif pre_upgrade_deploying.has_release_id():
-            pre_upgrade_deploying.deploy_completed()
-        else:
+        if not (deploying_release_state.has_release_id()
+                or pre_upgrade_deploying.has_release_id()):
             raise SoftwareServiceError(
                 error="No releases in the deploying state to transition to "
                       "deployed.")
+
+        if deploying_release_state.has_release_id():
+            deploying_release_state.deploy_completed()
+        if pre_upgrade_deploying.has_release_id():
+            pre_upgrade_deploying.deploy_completed()
 
     def _deploy_complete(self):
         is_all_hosts_in_deployed_state = all(host_state.get("state") == DEPLOY_HOST_STATES.DEPLOYED.value
@@ -7094,12 +7260,24 @@ class PatchController(PatchService):
 
         metapackages = deploy.get("metapackages")
         if metapackages:
+            # (id, resolver) pairs so each id is looked up in its own collection.
+            # A pre-upgrade-deploy also activates the available releases its
+            # branch was built on (regular metapackages), so their activation
+            # scripts run too.
+            resolve_pud = self.release_collection.get_pre_upgrade_deploy_release_by_id
+            resolve_regular = self.release_collection.get_metapackage_release_by_id
+            mp_entries = [(mp_id, resolve_pud if pre_upgrade_deploy else resolve_regular)
+                          for mp_id in deploying_release_state.get_release_ids()]
+            if pre_upgrade_deploy:
+                span_state = ReleaseState(release_state=states.DEPLOYING)
+                if not span_state.has_release_id():
+                    span_state = ReleaseState(release_state=states.REMOVING)
+                mp_entries += [(mp_id, resolve_regular)
+                               for mp_id in span_state.get_release_ids()]
+
             mp_releases = []
-            for mp_id in deploying_release_state.get_release_ids():
-                if pre_upgrade_deploy:
-                    mp_release = self.release_collection.get_pre_upgrade_deploy_release_by_id(mp_id)
-                else:
-                    mp_release = self.release_collection.get_metapackage_release_by_id(mp_id)
+            for mp_id, resolve in mp_entries:
+                mp_release = resolve(mp_id)
                 if not mp_release:
                     raise SoftwareServiceError(error=f"Metapackage {mp_id} not found")
                 mp_releases.append(mp_release)
