@@ -4538,10 +4538,29 @@ class PatchController(PatchService):
         running_release = self.release_collection.running_release
         metapackage_data = []
         mp_product_id = None
-        # If restore is true, pass the following validation and return the running_release to
-        # continue the restore operation.
+        # If restore is true, skip the version/metapackage validation below and
+        # return the running_release to continue the restore operation. Restore
+        # deletes every custom branch for the release, so it must only run while
+        # nothing deployed depends on those branches:
+        #   - The release itself must still be 'available'. A 'deployed' or
+        #     'deployed-partial' product holds its deployed commit on a custom
+        #     branch (the full set, or a partial <release>-<components> set),
+        #     which restore would delete.
+        #   - No pre-upgrade-deploy metapackage may be deployed. A deployed PUD
+        #     leaves the product in 'available' state, so the state check alone
+        #     misses it, yet its commit lives on the <release>-pre-upgrade-deploy
+        #     branch that restore would delete.
         if restore:
-            pass
+            if product_release.state != states.AVAILABLE:
+                raise Exception(
+                    f"Release {release} is in '{product_release.state}' state; "
+                    "deploy prestage --restore is only allowed when the release "
+                    "is in 'available' state")
+            if product_release.has_pre_upgrade_deploy_deployed:
+                raise Exception(
+                    f"Release {release} has deployed pre-upgrade-deploy "
+                    "metapackages; deploy prestage --restore is not allowed while "
+                    "pre-upgrade-deploy is deployed")
         else:
             # Pre-upgrade-deploy and metapackage-overrides
             # Prestage release version must be greater than current running version
