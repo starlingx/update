@@ -1977,9 +1977,13 @@ class PatchController(PatchService):
                     extraction_failed = True
                     raise ReleaseValidationFailure(error=error_msg)
 
-                local_info += f"Uploading {release_id} product release\n"
-                for metapackage in patch_metadata.metadata[patch_id]["metapackages"]:
+                # Sort so the metapackages are listed in a stable, numeric order
+                # (e.g. 1.32.2 before 1.32.13); the parsed metadata dict follows
+                # the <pkg> order in the patch metadata.xml, which is not sorted.
+                for metapackage in sorted(patch_metadata.metadata[patch_id]["metapackages"],
+                                          key=utils.numeric_sort_key):
                     local_info += f"Uploading {metapackage} metapackage release\n"
+                local_info += f"Uploading {release_id} product release\n"
 
                 local_info += f"{release_id} is now uploading, await for the states: " \
                               f"[{states.AVAILABLE} | {states.UPLOAD_FAILED}] in 'software list'\n"
@@ -2539,11 +2543,15 @@ class PatchController(PatchService):
                 try:
                     LOG.info(f"Removing product release {release_id} contents")
                     ComponentPatchFile.delete_patch_product_release(release_id)
-                    for metapackage in release.metapackages:
+                    # Sort for a stable, numeric listing (e.g. 1.32.2 before
+                    # 1.32.13); the metapackage dicts follow metadata order.
+                    for metapackage in sorted(release.metapackages,
+                                              key=utils.numeric_sort_key):
                         msg = f"Deleted {metapackage} metapackage release"
                         LOG.info(msg)
                         msg_info += msg + "\n"
-                    for metapackage in release.pre_upgrade_deploy:
+                    for metapackage in sorted(release.pre_upgrade_deploy,
+                                              key=utils.numeric_sort_key):
                         msg = f"Deleted {metapackage} pre-upgrade-deploy metapackage release"
                         LOG.info(msg)
                         msg_info += msg + "\n"
