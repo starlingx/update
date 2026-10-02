@@ -141,6 +141,21 @@ def get_component_and_versions(release_name):
         return None, None, None, None
 
 
+def numeric_sort_key(value):
+    """Sort key that orders embedded numbers numerically.
+
+    Splits a string into alternating text and integer chunks so that, e.g.,
+    'k8s-1.32.2' sorts before 'k8s-1.32.13' (a plain lexicographic sort would
+    order '13' before '2'). Useful for sorting metapackage/release ids that
+    carry multi-part version numbers.
+
+    :param value: string to build the sort key for.
+    :returns: list of str/int chunks suitable as a sorted() key.
+    """
+    return [int(chunk) if chunk.isdigit() else chunk
+            for chunk in re.split(r'(\d+)', value)]
+
+
 def parse_release_version(release_id):
     """Parse a release ID into a packaging.version.Version object.
 

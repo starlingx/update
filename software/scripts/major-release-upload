@@ -207,6 +207,7 @@ def load_import(from_release, to_release, iso_mount_dir, metapackages):
 
             # Copy metapackages metadata to metadata available directory
             dst_dir = UNAVAILABLE_DIR if from_release in ['None', None] else AVAILABLE_DIR
+            uploaded_mp_ids = []
             for src_md in to_release_dir.glob("*/metadata.xml"):
                 # Replace commit-id and checksum placeholders in metapackage metadata
                 content = src_md.read_text()
@@ -220,7 +221,13 @@ def load_import(from_release, to_release, iso_mount_dir, metapackages):
                 upgrade_utils.copy_xml_file(str(src_md), str(dst_md), {"deployable": "N"})
                 src_md.unlink()
                 LOG.info(f"Copied metadata to {dst_md}")
-                # Print output to be captured and returned by the release upload API
+                uploaded_mp_ids.append(mp_id)
+
+            # Print output to be captured and returned by the release upload
+            # API. Sort numerically (e.g. 1.32.2 before 1.32.13) so the uploaded
+            # metapackages are listed in a stable order (glob returns filesystem
+            # order, which is not deterministic).
+            for mp_id in sorted(uploaded_mp_ids, key=upgrade_utils.numeric_sort_key):
                 print(f"Uploaded {mp_id} metapackage release")
 
             # Process the pre-upgrade-deploy metapackages from the iso
@@ -256,6 +263,7 @@ def load_import(from_release, to_release, iso_mount_dir, metapackages):
                     # Process metapackages
                     pre_upgrade_deploy_to_release_dir = to_release_dir / "pre-upgrade-deploy"
                     # Copy metapackages directories from the metapackages deb packages
+                    uploaded_pud_mp_ids = []
                     for deb in pre_upgrade_deploy_metapkg_list:
                         deb_name = deb.split("/")[-1]
                         with upgrade_utils.extract_deb(deb) as deb_dir:
@@ -275,8 +283,16 @@ def load_import(from_release, to_release, iso_mount_dir, metapackages):
                                                         {"deployable": "N", "pre_upgrade_deploy": "Y"})
                             src_md.unlink()
                             LOG.info(f"Copied metadata to {dst_md}")
-                            # Print output to be captured and returned by the release upload API
-                            print(f"Uploaded {mp_id} pre-upgrade-deploy metapackage release")
+                            uploaded_pud_mp_ids.append(mp_id)
+
+                    # Print output to be captured and returned by the release
+                    # upload API. Sort numerically (e.g. 1.32.2 before 1.32.13)
+                    # so the uploaded pre-upgrade-deploy metapackages are listed
+                    # in a stable order (rglob returns filesystem order, which
+                    # is not deterministic).
+                    for mp_id in sorted(uploaded_pud_mp_ids,
+                                        key=upgrade_utils.numeric_sort_key):
+                        print(f"Uploaded {mp_id} pre-upgrade-deploy metapackage release")
 
         # Setup from release load
         setup_from_release_load(from_release, to_feed_dir)
@@ -299,13 +315,20 @@ def move_metadata_file_to_target_dir(to_release, iso_mount_dir, target_dir):
         # Copy all *-metadata.xml to target_dir
         target_dir = Path(target_dir)
         target_dir.mkdir(parents=True, exist_ok=True)
+        uploaded_release_ids = []
         for metadata_file in Path(iso_mount_dir).glob("patches/*-metadata.xml"):
             metadata_name = metadata_file.name
             upgrade_utils.copy_xml_file(str(metadata_file), str(target_dir / metadata_name))
             LOG.info("Copied %s to %s", metadata_name, target_dir)
-            # # Print output to be captured and returned by the release upload API
             release_id = upgrade_utils.get_xml_tag_value(metadata_file, "id",
                                                          default=metadata_name)
+            uploaded_release_ids.append(release_id)
+
+        # Print output to be captured and returned by the release upload API.
+        # Sort numerically (e.g. 1.32.2 before 1.32.13) so the uploaded product
+        # releases are listed in a stable order (glob returns filesystem order,
+        # which is not deterministic).
+        for release_id in sorted(uploaded_release_ids, key=upgrade_utils.numeric_sort_key):
             print(f"Uploaded {release_id} product release")
     except shutil.Error:
         LOG.exception("Failed to copy the %s metadata files to %s" % (to_release, target_dir))

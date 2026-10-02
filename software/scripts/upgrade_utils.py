@@ -390,6 +390,21 @@ def copy_xml_file(src, dst, additional_data=None):
     tree.write(str(dst))
 
 
+def numeric_sort_key(value):
+    """Sort key that orders embedded numbers numerically.
+
+    Splits a string into alternating text and integer chunks so that, e.g.,
+    'k8s-1.32.2' sorts before 'k8s-1.32.13' (a plain lexicographic sort would
+    order '13' before '2'). Useful for sorting metapackage/release ids that
+    carry multi-part version numbers.
+
+    :param value: string to build the sort key for.
+    :returns: list of str/int chunks suitable as a sorted() key.
+    """
+    return [int(chunk) if chunk.isdigit() else chunk
+            for chunk in re.split(r'(\d+)', value)]
+
+
 @contextlib.contextmanager
 def extract_tar(tar_path, prefix="software-"):
     """Extract a tar file to a temporary directory, yielding the path."""
