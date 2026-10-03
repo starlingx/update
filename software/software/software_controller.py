@@ -4868,7 +4868,7 @@ class PatchController(PatchService):
         try:
             original_commit = sw_inventory.get_branch_original_commit(base_release)
         except BranchNotFound:
-            msg = (f"Ostree branch '{target_branch}' not found in feed repo "
+            msg = (f"Ostree branch '{base_release}' not found in feed repo "
                    f"{feed_repo}. Ensure the release is properly uploaded")
             LOG.error(msg)
             msg_error += msg

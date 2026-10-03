@@ -309,15 +309,15 @@ class SWRelease(object):
 
     @property
     def original_commit_id(self):
-        if self.is_ga_release:
-            # If GA release, return the first commit from the
-            # ostree branch related to this SWRelease. The
-            # branch name is equal to the SWRelease id.
+        ocid = self._get_by_key('original_commit')
+        if not ocid:
+            # If metadata doesn't contain the original
+            # commit-id then attempt to fetch via ostree
             sw_rel = self.sw_release
             repo_path = utils.get_feed_repo_path(sw_rel)
             repo = ostree_utils.get_repo(repo_path)
-            return ostree_utils.get_commits(repo, self.id)[-1]
-        return self._get_by_key('original_commit') or ''
+            return ostree_utils.get_commits(repo, self.id)[0]  # The first commit is the latest
+        return ocid
 
     @property
     def packages(self):
