@@ -3,6 +3,7 @@
 #
 # Copyright (c) 2025-2026 Wind River Systems, Inc.
 #
+import json
 import os
 import shutil
 import tempfile
@@ -15,9 +16,11 @@ from packaging.version import Version
 from software.utils import find_file_by_regex
 from software.utils import get_component_and_versions
 from software.utils import get_major_release_version
+from software.utils import get_partial_branch_name
 from software.utils import get_repo_codename
 from software.utils import get_system_debian_codename
 from software.utils import parse_release_version
+from software.utils import record_custom_branch
 
 
 class TestSoftwareUtils(unittest.TestCase):
@@ -258,3 +261,62 @@ class TestGetRepoCodename(unittest.TestCase):
             f.write("Origin: updates\nComponents: updates\n")
         with self.assertRaises(ValueError):
             get_repo_codename(repo_dir)
+
+
+class TestPartialBranchName(unittest.TestCase):
+    """get_partial_branch_name is a pure name function."""
+
+    PRODUCT = "starlingx-26.10.0"
+
+    @mock.patch('software.utils.save_to_json_file')
+    @mock.patch('software.utils.load_from_json_file')
+    def test_does_not_touch_audit_file(self, mock_load, mock_save):
+        get_partial_branch_name(self.PRODUCT, ["infra_26.10.0"])
+        mock_load.assert_not_called()
+        mock_save.assert_not_called()
+
+    def test_order_independent_and_fixed_width(self):
+        a = get_partial_branch_name(self.PRODUCT, ["infra_26.10.0", "swmgmt_26.10.0"])
+        b = get_partial_branch_name(self.PRODUCT, ["swmgmt_26.10.0", "infra_26.10.0"])
+        self.assertEqual(a, b)
+        self.assertRegex(a, r"^starlingx-26\.10\.0-[0-9a-f]{16}$")
+
+    def test_release_suffix_keeps_sets_distinct(self):
+        self.assertNotEqual(
+            get_partial_branch_name(self.PRODUCT, ["infra_26.10.0"]),
+            get_partial_branch_name(self.PRODUCT, ["infra_26.10.1"]))
+
+
+class TestRecordCustomBranch(unittest.TestCase):
+    """record_custom_branch keeps a decoder map of created branches."""
+
+    def setUp(self):
+        tmp_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
+        self.audit_file = os.path.join(tmp_dir, "custom_branches.json")
+        patcher = mock.patch('software.utils.constants.CUSTOM_BRANCH_AUDIT_FILE',
+                             self.audit_file)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _read(self):
+        with open(self.audit_file) as f:
+            return json.load(f)
+
+    def test_records_sorted_components(self):
+        record_custom_branch("p-abc", "p", ["swmgmt_1.0.0", "infra_1.0.0"])
+        entry = self._read()["p-abc"]
+        self.assertEqual(entry["product_id"], "p")
+        self.assertEqual(entry["components"], ["infra_1.0.0", "swmgmt_1.0.0"])
+        self.assertIn("created_at", entry)
+
+    def test_rerecord_keeps_created_at(self):
+        record_custom_branch("p-abc", "p", ["infra_1.0.0"])
+        first = self._read()["p-abc"]["created_at"]
+        record_custom_branch("p-abc", "p", ["infra_1.0.0"])
+        self.assertEqual(self._read()["p-abc"]["created_at"], first)
+
+    @mock.patch('software.utils.save_to_json_file', side_effect=OSError("disk full"))
+    def test_write_failure_is_not_raised(self, _mock_save):
+        # Best effort: a failed audit write must not break branch creation
+        record_custom_branch("p-abc", "p", ["infra_1.0.0"])

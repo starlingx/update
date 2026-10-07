@@ -69,6 +69,11 @@ COMPONENT_SOFTWARE_STORAGE_DIR = "/opt/software/releases"
 COMPONENT_SOFTWARE_METADATA_STORAGE_DIR = "%s/metadata" % COMPONENT_SOFTWARE_STORAGE_DIR
 COMPONENT_SOFTWARE_JSON_FILE = "%s/software.json" % COMPONENT_SOFTWARE_STORAGE_DIR
 COMPONENT_SYNCED_SOFTWARE_JSON_FILE = "%s/synced/software.json" % COMPONENT_SOFTWARE_STORAGE_DIR
+# Decoder map from each hashed custom branch name to its component set, so a
+# branch hash can be traced back to the metapackages it covers. An auditing
+# aid; the names are deterministic and can always be recomputed from a
+# component set.
+CUSTOM_BRANCH_AUDIT_FILE = "%s/custom_branches.json" % SOFTWARE_STORAGE_DIR
 
 # Deploy precheck return codes
 RC_SUCCESS = 0
@@ -201,6 +206,7 @@ STARLINGX_RELEASE = SW_VERSION
 UNKNOWN_SOFTWARE_VERSION = "0.0.0"
 PRE_UPGRADE_DEPLOY = "pre-upgrade-deploy"
 PRESTAGE_SUFFIX = "prestage"
+PUD_BRANCH_SUFFIX = "pud"
 
 # Precheck constants
 LICENSE_FILE = "/etc/platform/.license"
