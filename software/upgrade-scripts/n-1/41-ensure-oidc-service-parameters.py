@@ -19,6 +19,7 @@ import time
 from cgtsclient import client as cgts_client
 from software.utilities.utils import configure_logging
 import sysinv.common.constants as c
+from sysinv.common.kubernetes import k8s_wait_for_endpoints_health
 
 LOG = logging.getLogger("main_logger")
 
@@ -124,13 +125,18 @@ def configure_k8s_oidc_param(sysinv, oam_network):
 
 
 def wait_kube_apiserver_up(previous_pid, timeout=300, interval=5):
-    """
-    Wait until kube-apiserver is running again with a new PID.
+    """Wait until kube-apiserver restarts and all K8s endpoints are healthy.
 
-    :param previous_pid: PID observed before restart
-    :param timeout: Maximum wait time in seconds
+    This function first waits for the initial PID change (confirming
+    the restart has begun), then calls k8s_wait_for_endpoints_health()
+    to ensure ALL control-plane components (apiserver, controller-
+    manager, scheduler, kubelet) are stable before returning.
+
+    :param previous_pid: PID observed before the apply
+    :param timeout: Maximum wait time in seconds for PID change
     :param interval: Polling interval in seconds
-    :raises TimeoutError: if kube-apiserver does not come back within timeout
+    :raises TimeoutError: if kube-apiserver does not restart in time
+                          or endpoints do not become healthy
     """
     attempts = timeout // interval
     LOG.info(
@@ -140,18 +146,36 @@ def wait_kube_apiserver_up(previous_pid, timeout=300, interval=5):
         attempts,
     )
 
-    for attempt in range(1, attempts + 1):
+    for attempt in range(0, attempts):
         pid = get_pidof("kube-apiserver")
 
         if pid > 0 and pid != previous_pid:
-            LOG.info(f"kube-apiserver is up (new PID: {pid})")
-            return
+            LOG.info("kube-apiserver is up (new PID: %d)", pid)
+            break
 
-        LOG.info(f"Attempt {attempt}/{attempts}: kube-apiserver not ready")
+        LOG.info("Attempt %d/%d: kube-apiserver not ready yet",
+                 attempt + 1, attempts)
         time.sleep(interval)
+    else:
+        LOG.error("Timed out waiting for kube-apiserver after %d attempts",
+                  attempts)
+        raise TimeoutError(
+            "Timed out waiting for kube-apiserver to restart"
+        )
 
-    LOG.error(f"Timed out waiting for kube-apiserver: {attempts} attempts")
-    raise TimeoutError("Timed out waiting for kube-apiserver to come up")
+    # After the first PID change, wait for the entire puppet manifest
+    # to finish. The manifest updates apiserver, controller-manager,
+    # scheduler, and kubelet — triggering a second apiserver restart.
+    # k8s_wait_for_endpoints_health checks all 4 endpoints in parallel
+    # with retries, ensuring the control plane is fully stable.
+    LOG.info("Waiting for all K8s control-plane endpoints to stabilize")
+    if not k8s_wait_for_endpoints_health(tries=30, try_sleep=5):
+        LOG.error("K8s control-plane endpoints not healthy after "
+                  "kube-apiserver restart")
+        raise TimeoutError(
+            "K8s endpoints not healthy after service parameter apply"
+        )
+    LOG.info("All K8s control-plane endpoints are healthy")
 
 
 def main():
