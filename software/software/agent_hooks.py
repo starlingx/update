@@ -457,7 +457,7 @@ class RestorePlatformConfPermissionHook(BaseHook):
 class UpdateKernelParametersHook(BaseHook):
     """
     Update the kernel parameters
-    isolcpus=<cpu_range> ==> isolcpus=nohz,domain,managed_irq,<cpu_range>
+    isolcpus=<cpu_range> ==> isolcpus=nohz,domain,managed_irq_strict,<cpu_range>
     '' ==> rcutree.kthread_prio=21 (default value if not set)
     """
 
@@ -500,7 +500,7 @@ class UpdateKernelParametersHook(BaseHook):
         try:
             _, val = isolcpus.split("=")
             isolcpus_ranges = []  # only numeric values
-            isolcpus_prefix = ['nohz', 'domain', 'managed_irq']
+            isolcpus_prefix = ['nohz', 'domain', 'managed_irq_strict']
 
             for cpu_range in val.split(","):
                 if re.search(r"^\d+-?\d*$", cpu_range):
