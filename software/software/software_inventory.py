@@ -202,6 +202,7 @@ class SoftwareInventoryManager():
         except subprocess.CalledProcessError as e:
             raise RuntimeError("Failed to create branch '%s': %s" % (new_branch, str(e))) from None
 
+        self.update_summary()
         return commit
 
     def create_sw_release_branch(self, base_branch, new_branch, packages, pre_bootstrap):
@@ -302,6 +303,8 @@ class SoftwareInventoryManager():
             subprocess.run(["ostree", "refs", "--repo", self.repo_path, "--delete", branch_name],
                            check=True, capture_output=True, text=True)
             LOG.info("Deleted ref: %s", branch_name)
+
+            self.update_summary()
         except subprocess.CalledProcessError as e:
             LOG.error("Failed to delete ref %s: %s", branch_name, e.stderr)
 
