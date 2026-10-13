@@ -102,6 +102,12 @@ NetappTridentMigration = getattr(
 MoveReleaseMetadataFile = getattr(
     _import_module(".99-move-release-metadata-file", __name__),
     "MoveReleaseMetadataFile")
+SimplexEtcdKeyspaceMigration = getattr(
+    _import_module(".205-simplex-etcd-keyspace-migration", __name__),
+    "SimplexEtcdKeyspaceMigration")
+DuplexEtcdPeerUrlFixup = getattr(
+    _import_module(".206-duplex-etcd-peer-url-fixup", __name__),
+    "DuplexEtcdPeerUrlFixup")
 
 # Shell scripts are wrapped as ScriptPlugin instances
 _SCRIPT_DIR = os.path.dirname(__file__)
@@ -148,6 +154,19 @@ PLUGINS = {
                                  ACTION_ACTIVATE),
             _shell_script_plugin("13-add-cgroup-v2-service-parameter.sh",
                                  ACTION_ACTIVATE),
+            # Simplex only, and a no-op elsewhere. Must run before any plugin
+            # that requires kubernetes, because on simplex the etcd keyspace
+            # must be relocated from the DRBD floating path to the fixed member
+            # before kube-apiserver can serve. Placed in framework_init rather
+            # than feature_pre_apps because the N-1 plugin set prepends its own
+            # feature_pre_apps entries (including netapp-trident-migration which
+            # needs K8s), and those would run before this script if it were in
+            # feature_pre_apps.
+            SimplexEtcdKeyspaceMigration(),
+            # Duplex N-2 upgrade: fix floating peer URL (http://localhost →
+            # https://VIP) and regenerate cert with unit IP SANs. Must run
+            # before the cert script and before etcd-fixed can join.
+            DuplexEtcdPeerUrlFixup(),
         ],
         FEATURE_PRE_APPS: [
             AddTlsParameters(),
@@ -169,6 +188,10 @@ PLUGINS = {
     ACTION_ACTIVATE_ROLLBACK: {
         FRAMEWORK_INIT: [
             UpdateISystemData(),
+            # Rollback: stop etcd-fixed, remove data dir, re-enable floating.
+            # Must run before K8s-dependent rollback scripts.
+            SimplexEtcdKeyspaceMigration(),
+            DuplexEtcdPeerUrlFixup(),
         ],
         FEATURE_PRE_APPS: [
             AddTlsParameters(),
