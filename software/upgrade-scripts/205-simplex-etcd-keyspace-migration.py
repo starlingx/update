@@ -58,11 +58,17 @@ CONTROLLER_0_CLUSTER_HOST = 'controller-0-cluster-host'
 
 ETCD_FIXED_ENV_FILE = '/etc/default/etcd-fixed'
 
-# Shared TLS material. Every member binds the same server certificate, whose
-# SAN set covers each address they may bind.
+# TLS material. A per-member certificate names one member and the one address
+# it binds; the shared server certificate covers each address any member may
+# bind. Which pair a system holds decides which the fixed member is given.
 ETCD_CA_CERT = '/etc/etcd/ca.crt'
 ETCD_SERVER_CERT = '/etc/etcd/etcd-server.crt'
 ETCD_SERVER_KEY = '/etc/etcd/etcd-server.key'
+ETCD_MEMBER_CERT = '/etc/etcd/etcd-%s.crt' % FIXED_MEMBER_NAME
+ETCD_MEMBER_KEY = '/etc/etcd/etcd-%s.key' % FIXED_MEMBER_NAME
+ETCD_CA_KEY = '/etc/etcd/ca.key'
+CERT_DAYS = '365'
+KEY_BITS = '4096'
 ETCD_CLIENT_CERT = '/etc/etcd/etcd-client.crt'
 ETCD_CLIENT_KEY = '/etc/etcd/etcd-client.key'
 ETCD_STAGE_0_SYMLINK = '/var/lib/etcd/stage0'
@@ -121,6 +127,7 @@ KUBE_ADMIN_CONF = '/etc/kubernetes/admin.conf'
 # when they are found to predate the API server they are talking to.
 CONTROL_PLANE_CLIENTS = ('kube-scheduler', 'kube-controller-manager')
 CRICTL_TIMEOUT = 30
+OPENSSL_TIMEOUT = 60
 
 
 def get_system_mode():
@@ -237,6 +244,76 @@ def get_fixed_0_peer_url():
 def get_fixed_0_client_url():
     """Build the fixed-0 client URL from the controller-0 cluster-host address."""
     return "https://%s:%d" % (get_fixed_0_address(), CLIENT_PORT)
+
+
+def get_fixed_0_listen_client_urls():
+    """Build the client URLs fixed-0 listens on.
+
+    Loopback is included, matching what puppet writes on a fresh install, so a
+    client that reaches the member over loopback is served there as well.
+    """
+    return "%s,https://127.0.0.1:%d" % (get_fixed_0_client_url(), CLIENT_PORT)
+
+
+def issue_member_pair(address):
+    """Issue this member's key pair when the host does not hold one.
+
+    A system upgraded from a release that ran one shared certificate has no
+    per-member pair, and nothing else on the upgrade path creates one: the
+    ansible role that issues it runs at bootstrap, and the puppet class that
+    issues it is applied on duplex. The member name is the common name and
+    the address the member binds is the only address in the SAN set.
+
+    Signing is local: /etc/etcd/ca.key is present on the controller. Returns
+    True when the pair is present afterwards.
+    """
+    if os.path.exists(ETCD_MEMBER_CERT) and os.path.exists(ETCD_MEMBER_KEY):
+        return True
+    if not os.path.exists(ETCD_CA_KEY):
+        LOG.warning("%s is absent; cannot issue a certificate for %s",
+                    ETCD_CA_KEY, FIXED_MEMBER_NAME)
+        return False
+
+    work = tempfile.mkdtemp(prefix='etcd-member-cert-')
+    try:
+        csr = os.path.join(work, 'member.csr')
+        ext = os.path.join(work, 'member.ext')
+        with open(ext, 'w') as handle:
+            handle.write("subjectAltName=IP:%s,IP:127.0.0.1,IP:::1\n" % address)
+            handle.write("keyUsage=digitalSignature,keyEncipherment\n")
+            handle.write("extendedKeyUsage=serverAuth,clientAuth\n")
+
+        _execute(['/usr/bin/openssl', 'genrsa', '-out', ETCD_MEMBER_KEY,
+                  KEY_BITS], OPENSSL_TIMEOUT)
+        os.chmod(ETCD_MEMBER_KEY, 0o600)
+        _execute(['/usr/bin/openssl', 'req', '-new', '-key', ETCD_MEMBER_KEY,
+                  '-subj', '/CN=%s' % FIXED_MEMBER_NAME, '-out', csr],
+                 OPENSSL_TIMEOUT)
+        _execute(['/usr/bin/openssl', 'x509', '-req', '-in', csr,
+                  '-CA', ETCD_CA_CERT, '-CAkey', ETCD_CA_KEY,
+                  '-CAcreateserial', '-out', ETCD_MEMBER_CERT,
+                  '-days', CERT_DAYS, '-extfile', ext], OPENSSL_TIMEOUT)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+    LOG.info("Issued %s for %s naming %s", ETCD_MEMBER_CERT,
+             FIXED_MEMBER_NAME, address)
+    return True
+
+
+def get_member_tls_pair():
+    """Return the certificate and key the fixed member presents.
+
+    A system issued per-member certificates holds this member's own pair; one
+    still on the shared model holds only the server pair.
+    """
+    if os.path.exists(ETCD_MEMBER_CERT) and os.path.exists(ETCD_MEMBER_KEY):
+        LOG.info("Using the per-member certificate %s for %s",
+                 ETCD_MEMBER_CERT, FIXED_MEMBER_NAME)
+        return ETCD_MEMBER_CERT, ETCD_MEMBER_KEY
+    LOG.warning("No per-member certificate at %s; using %s for %s",
+                ETCD_MEMBER_CERT, ETCD_SERVER_CERT, FIXED_MEMBER_NAME)
+    return ETCD_SERVER_CERT, ETCD_SERVER_KEY
 
 
 def is_mounted(path):
@@ -455,11 +532,13 @@ def ensure_fixed_env_file():
 
     peer_url = get_fixed_0_peer_url()
     client_url = get_fixed_0_client_url()
+    issue_member_pair(get_fixed_0_address())
+    member_cert, member_key = get_member_tls_pair()
 
     settings = [
         ('ETCD_NAME', FIXED_MEMBER_NAME),
         ('ETCD_DATA_DIR', FIXED_DATA_DIR),
-        ('ETCD_LISTEN_CLIENT_URLS', client_url),
+        ('ETCD_LISTEN_CLIENT_URLS', get_fixed_0_listen_client_urls()),
         ('ETCD_ADVERTISE_CLIENT_URLS', client_url),
         ('ETCD_LISTEN_PEER_URLS', peer_url),
         ('ETCD_INITIAL_ADVERTISE_PEER_URLS', peer_url),
@@ -467,11 +546,11 @@ def ensure_fixed_env_file():
         ('ETCD_INITIAL_CLUSTER', '%s=%s' % (FIXED_MEMBER_NAME, peer_url)),
         ('ETCD_INITIAL_CLUSTER_STATE', 'new'),
         ('ETCD_INITIAL_CLUSTER_TOKEN', CLUSTER_TOKEN),
-        ('ETCD_CERT_FILE', ETCD_SERVER_CERT),
-        ('ETCD_KEY_FILE', ETCD_SERVER_KEY),
+        ('ETCD_CERT_FILE', member_cert),
+        ('ETCD_KEY_FILE', member_key),
         ('ETCD_TRUSTED_CA_FILE', ETCD_CA_CERT),
-        ('ETCD_PEER_CERT_FILE', ETCD_SERVER_CERT),
-        ('ETCD_PEER_KEY_FILE', ETCD_SERVER_KEY),
+        ('ETCD_PEER_CERT_FILE', member_cert),
+        ('ETCD_PEER_KEY_FILE', member_key),
         ('ETCD_PEER_TRUSTED_CA_FILE', ETCD_CA_CERT),
         ('ETCD_CLIENT_CERT_AUTH', 'true'),
         ('ETCD_PEER_CLIENT_CERT_AUTH', 'true'),
