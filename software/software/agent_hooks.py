@@ -450,6 +450,40 @@ class RestorePlatformConfPermissionHook(BaseHook):
             LOG.exception("Failed to restore platform.conf file permission: %s" % e)
             raise
 
+
+class RemoveMetapackageInitialSetupFlagHook(BaseHook):
+    """
+    Remove the metapackage initial-setup flag on rollback to 25.09.
+
+    The flag does not exist in 25.09, which has no concept of metapackages.
+    It is removed from the to-release ostree deployment (/ostree/1), not the
+    live filesystem, because the hook runs pre-reboot while the from-release
+    is still the running rootfs; the change must take effect after rebooting
+    into the to-release.
+    """
+
+    METAPACKAGE_INITIAL_SETUP_FLAG = os.path.join(
+        BaseHook.PLATFORM_CONF_PATH, ".metapackage_initial_setup")
+
+    def run(self):
+        if self._to_release != "25.09":
+            LOG.info("to_release is %s, not 25.09; nothing to do"
+                     % self._to_release)
+            return
+
+        target = self.get_new_deploy_path(self.METAPACKAGE_INITIAL_SETUP_FLAG)
+        try:
+            os.remove(target)
+            LOG.info("Removed metapackage initial-setup flag at %s" % target)
+        except FileNotFoundError:
+            LOG.info("Metapackage initial-setup flag %s not present; nothing "
+                     "to remove" % target)
+        except Exception as e:
+            # A stale flag is low-consequence; do not fail the rollback over it.
+            LOG.exception("Failed to remove metapackage initial-setup flag "
+                          "%s: %s" % (target, e))
+
+
 # TODO(bqian) split the framework based kernel parameters backup and restore
 # from feature based kernel parameter pre-populate code.
 
@@ -2261,6 +2295,7 @@ class HookManager(object):
             CgroupBootParamsHook,
             SSSDCacheCleanupRollBackHook,
             RestorePlatformConfPermissionHook,
+            RemoveMetapackageInitialSetupFlagHook,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
