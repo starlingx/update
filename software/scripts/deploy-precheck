@@ -368,26 +368,34 @@ class UpgradeHealthCheck(HealthCheck):
         return None
 
     def _check_sysroot_size(self):
-        """Check that the root host-fs on controller-0 meets the minimum size.
+        """Check that the root host-fs on all hosts meets the minimum size.
 
-        Queries the sysinv API for the 'root' filesystem size on controller-0,
-        consistent with 'system host-fs-show controller-0 root'.
+        Queries the sysinv API for the 'root' filesystem size on every host,
+        consistent with 'system host-fs-show <hostname> root'. Every host has a
+        'root' filesystem, so a host that does not report one is treated as a
+        failure rather than skipped.
         """
-        root_fs_size = self._get_host_fs_size("controller-0", "root")
+        hosts = self._sysinv_client.ihost.list()
 
-        if root_fs_size is None:
-            return False, "Unable to determine root filesystem size from system inventory."
-
-        if root_fs_size < SYSROOT_MINIMUM_REQUIRED_SIZE_GIB:
-            msg = (("The root filesystem on controller-0 is %d GiB but "
-                    "a minimum of %d GiB is required for upgrade.\n"
-                    "   Use 'system host-fs-modify controller-0 root=%d' "
-                    "to increase the root filesystem size.")
-                   % (root_fs_size,
-                      SYSROOT_MINIMUM_REQUIRED_SIZE_GIB,
-                      SYSROOT_MINIMUM_REQUIRED_SIZE_GIB))
-            return False, msg
-        return True, None
+        success = True
+        output = ""
+        for host in hosts:
+            root_fs_size = self._get_host_fs_size(host.hostname, "root")
+            if root_fs_size is None:
+                success = False
+                output += ("-> Unable to determine root filesystem size for %s\n"
+                           % host.hostname)
+            elif root_fs_size < SYSROOT_MINIMUM_REQUIRED_SIZE_GIB:
+                success = False
+                output += (("-> The root filesystem on %s is %d GiB but "
+                            "a minimum of %d GiB is required for upgrade.\n"
+                            "   Use 'system host-fs-modify %s root=%d' "
+                            "to increase the root filesystem size.\n")
+                           % (host.hostname, root_fs_size,
+                              SYSROOT_MINIMUM_REQUIRED_SIZE_GIB,
+                              host.hostname,
+                              SYSROOT_MINIMUM_REQUIRED_SIZE_GIB))
+        return success, output
 
     def _check_snapshot_option(self):
         options = json.loads(self._config.get("options", {}))
@@ -475,20 +483,20 @@ class UpgradeHealthCheck(HealthCheck):
 
         # check if docker filesystem satisfies the minimum required size
         success, docker_output = self._check_docker_fs_size()
-        output += 'Docker filesystem in controllers satisfies the required size of %d GiB: [%s]\n' \
+        output += 'Docker filesystem on controllers satisfies the required size of %d GiB: [%s]\n' \
                   % (DOCKER_FS_MINIMUM_REQUIRED_SIZE_GIB,
                      HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
         if not success:
             output += docker_output
         health_ok = health_ok and success
 
-        # check if /sysroot filesystem meets the minimum size requirement
-        success, sysroot_msg = self._check_sysroot_size()
-        output += 'Sysroot filesystem meets minimum size of %d GiB: [%s]\n' \
+        # check if root filesystem meets the minimum size requirement
+        success, sysroot_output = self._check_sysroot_size()
+        output += 'Root filesystem on all hosts satisfies the required size of %d GiB: [%s]\n' \
                   % (SYSROOT_MINIMUM_REQUIRED_SIZE_GIB,
                      HealthCheck.SUCCESS_MSG if success else HealthCheck.FAIL_MSG)
         if not success:
-            output += '-> %s\n' % sysroot_msg
+            output += sysroot_output
         health_ok = health_ok and success
 
         # check for LVM snapshot health checks
@@ -557,11 +565,14 @@ class UpgradeHealthCheck(HealthCheck):
                 continue
             if docker_size < DOCKER_FS_MINIMUM_REQUIRED_SIZE_GIB:
                 success = False
-                output += ("-> %s: docker=%d GiB\n"
-                           "   Use 'system host-fs-modify %s docker=%d' "
-                           "to increase.\n"
+                output += (("-> The docker filesystem on %s is %d GiB but "
+                            "a minimum of %d GiB is required for upgrade.\n"
+                            "   Use 'system host-fs-modify %s docker=%d' "
+                            "to increase the docker filesystem size.\n")
                            % (controller, docker_size,
-                              controller, DOCKER_FS_MINIMUM_REQUIRED_SIZE_GIB))
+                              DOCKER_FS_MINIMUM_REQUIRED_SIZE_GIB,
+                              controller,
+                              DOCKER_FS_MINIMUM_REQUIRED_SIZE_GIB))
         return success, output
 
 
