@@ -69,6 +69,9 @@ CleanUpDeploymentData = getattr(
 RollbackLuksPassphraseType = getattr(
     _import_module(".27-rollback-luks-passphrase-type", __name__),
     "RollbackLuksPassphraseType")
+OpenbaoActivate = getattr(
+    _import_module(".30-openbao-activate", __name__),
+    "OpenbaoActivate")
 SetServiceUserOptions = getattr(
     _import_module(".31-set-service-user-options", __name__),
     "SetServiceUserOptions")
@@ -148,6 +151,7 @@ PLUGINS = {
     },
     ACTION_ACTIVATE: {
         FRAMEWORK_INIT: [
+            OpenbaoActivate(),
             SetServiceUserOptions(),
             ActivateKeystone(),
             _shell_script_plugin("23-resize-systemcontroller-filesystems.py",
