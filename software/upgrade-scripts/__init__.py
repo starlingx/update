@@ -18,7 +18,7 @@ SOFTWARE_LOG_FILE = "/var/log/software.log"
 DEPLOY_SCRIPTS_FAILURES_LOG = logging.getLogger('deploy_scripts_failures')
 DEPLOY_SCRIPTS_FAILURES_LOG_FILE = "/var/log/deploy_scripts_failures.log"
 
-# 26.09 release supports migrate, activate, activate-rollback and delete
+# 27.03 release supports migrate, activate, activate-rollback and delete
 # plugin actions
 ACTION_MIGRATE = "migrate"
 ACTION_ACTIVATE = "activate"
@@ -42,12 +42,6 @@ PopulateIHostSWVersion = getattr(
 ActivateKeystone = getattr(
     _import_module(".08-activate-keystone", __name__),
     "ActivateKeystone")
-UpdateStaticHieradata = getattr(
-    _import_module(".11-update-static-hieradata", __name__),
-    "UpdateStaticHieradata")
-SaveEtcdVersion = getattr(
-    _import_module(".12-save-etcd-version", __name__),
-    "SaveEtcdVersion")
 DisablePortierisWebhook = getattr(
     _import_module(".18-disable-portieris-webhook", __name__),
     "DisablePortierisWebhook")
@@ -63,24 +57,15 @@ AppsLvmSnapshotRestoreLifecycle = getattr(
 RollbackFluxcdControllers = getattr(
     _import_module(".22-rollback-fluxcd-controllers", __name__),
     "RollbackFluxcdControllers")
-RollbackKeystoneFederation = getattr(
-    _import_module(".25-rollback-keystone-federation", __name__),
-    "RollbackKeystoneFederation")
 CleanUpDeploymentData = getattr(
     _import_module(".26-clean-up-deployment-data", __name__),
     "CleanUpDeploymentData")
-RollbackLuksPassphraseType = getattr(
-    _import_module(".27-rollback-luks-passphrase-type", __name__),
-    "RollbackLuksPassphraseType")
 OpenbaoActivate = getattr(
     _import_module(".30-openbao-activate", __name__),
     "OpenbaoActivate")
 SetServiceUserOptions = getattr(
     _import_module(".31-set-service-user-options", __name__),
     "SetServiceUserOptions")
-RenameDeprecatedPtpParameters = getattr(
-    _import_module(".77-ptp-parameter-rename", __name__),
-    "RenameDeprecatedPtpParameters")
 ResetConfigTarget = getattr(
     _import_module(".197-reset-config-target", __name__),
     "ResetConfigTarget")
@@ -90,24 +75,6 @@ UpdateISystemData = getattr(
 RemoveLvmSnapshots = getattr(
     _import_module(".202-remove-lvm-snapshots", __name__),
     "RemoveLvmSnapshots")
-AddTlsParameters = getattr(
-    _import_module(".42-add-tls-parameters", __name__),
-    "AddTlsParameters")
-AddMissingServiceParameters = getattr(
-    _import_module(".43-add-missing-service-parameters", __name__),
-    "AddMissingServiceParameters")
-AddCgroupV2ServiceParameters = getattr(
-    _import_module(".44-add-cgroup-v2-service-parameters", __name__),
-    "AddCgroupV2ServiceParameters")
-ApplyKubernetesServiceParameters = getattr(
-    _import_module(".45-apply-kubernetes-service-parameters", __name__),
-    "ApplyKubernetesServiceParameters")
-NetappTridentMigration = getattr(
-    _import_module(".203-netapp-trident-migration", __name__),
-    "NetappTridentMigration")
-MoveReleaseMetadataFile = getattr(
-    _import_module(".99-move-release-metadata-file", __name__),
-    "MoveReleaseMetadataFile")
 SimplexEtcdKeyspaceMigration = getattr(
     _import_module(".205-simplex-etcd-keyspace-migration", __name__),
     "SimplexEtcdKeyspaceMigration")
@@ -138,14 +105,7 @@ PLUGINS = {
         FRAMEWORK_INIT: [
             PopulateIHostSWVersion(),
         ],
-        FEATURE_PRE_APPS: [
-            UpdateStaticHieradata(),
-            SaveEtcdVersion(),
-            RenameDeprecatedPtpParameters(),
-            AddMissingServiceParameters(),
-            AddCgroupV2ServiceParameters(),
-            AddTlsParameters(),
-        ],
+        FEATURE_PRE_APPS: [],
         K8S_APP_UPDATE: [],
         FEATURE_POST_APPS: [],
         FRAMEWORK_FINALIZE: [
@@ -176,18 +136,14 @@ PLUGINS = {
             DuplexEtcdPeerUrlFixup(),
         ],
         FEATURE_PRE_APPS: [
-            AddTlsParameters(),
             DisablePortierisWebhook(),
-            NetappTridentMigration(),
         ],
         K8S_APP_UPDATE: [
             _shell_script_plugin("19-assert-docker-health.py", ACTION_ACTIVATE),
             EnableFluxcdControllers(),
             K8sAppUpgrade(),
         ],
-        FEATURE_POST_APPS: [
-            ApplyKubernetesServiceParameters(),
-        ],
+        FEATURE_POST_APPS: [],
         FRAMEWORK_FINALIZE: [
             UpdateISystemData(),
         ],
@@ -200,32 +156,25 @@ PLUGINS = {
             SimplexEtcdKeyspaceMigration(),
             DuplexEtcdPeerUrlFixup(),
         ],
-        FEATURE_PRE_APPS: [
-            AddTlsParameters(),
-        ],
+        FEATURE_PRE_APPS: [],
         K8S_APP_UPDATE: [
             AppsLvmSnapshotRestoreLifecycle(),
             RollbackFluxcdControllers(),
             K8sAppUpgrade(),
             DisablePortierisWebhook(),
         ],
-        FEATURE_POST_APPS: [
-            NetappTridentMigration(),
-            RollbackKeystoneFederation(),
-        ],
+        FEATURE_POST_APPS: [],
         FRAMEWORK_FINALIZE: [],
     },
     ACTION_DELETE: {
         FRAMEWORK_INIT: [
             CleanUpDeploymentData(),
-            RollbackLuksPassphraseType(),
         ],
         FEATURE_PRE_APPS: [],
         K8S_APP_UPDATE: [],
         FEATURE_POST_APPS: [],
         FRAMEWORK_FINALIZE: [
-            RemoveLvmSnapshots(),
-            MoveReleaseMetadataFile(),
+            RemoveLvmSnapshots()
         ],
     },
 }

@@ -13,9 +13,15 @@ import sys
 import tempfile
 import yaml
 
-from sysinv.common.kube_utils import KubeUtils
-from sysinv.common.kube_utils import KubeResourceType
-from software.utilities.plugin_runner import CPlugin
+# TODO(lbonatti) remove this try except block once stx13 become N release.
+try:
+    from sysinv.common.kube_utils import KubeUtils
+    from sysinv.common.kube_utils import KubeResourceType
+except ImportError:
+    KubeUtils = None
+    KubeResourceType = None
+
+from _loader import CPlugin
 from software.utilities.utils import configure_logging
 
 LOG = logging.getLogger('main_logger')
@@ -39,25 +45,30 @@ OVERRIDES_FILENAME = "netapp-overrides.yaml"
 BACKUP_SUBDIR = "netapp-legacy-backup"
 
 # Resources to backup and remove during migration (Netapp Trident Plugin - Legacy)
-NAMESPACED_RESOURCES = [
-    (KubeResourceType.deployment, "trident-controller"),
-    (KubeResourceType.daemon_set, "trident-node-linux"),
-    (KubeResourceType.daemon_set, "stx-multipath-config-enforcer"),
-    (KubeResourceType.service, "trident-csi"),
-    (KubeResourceType.service_account, "trident-controller"),
-    (KubeResourceType.service_account, "trident-node-linux"),
-    (KubeResourceType.resource_quota, "trident-csi"),
-]
+# TODO(lbonatti) remove this condition once stx13 become N release.
+if KubeResourceType is not None:
+    NAMESPACED_RESOURCES = [
+        (KubeResourceType.deployment, "trident-controller"),
+        (KubeResourceType.daemon_set, "trident-node-linux"),
+        (KubeResourceType.daemon_set, "stx-multipath-config-enforcer"),
+        (KubeResourceType.service, "trident-csi"),
+        (KubeResourceType.service_account, "trident-controller"),
+        (KubeResourceType.service_account, "trident-node-linux"),
+        (KubeResourceType.resource_quota, "trident-csi"),
+    ]
 
-CLUSTER_RESOURCES = [
-    (KubeResourceType.cluster_role, "trident-controller"),
-    (KubeResourceType.cluster_role_binding, "trident-controller"),
-]
-
+    CLUSTER_RESOURCES = [
+        (KubeResourceType.cluster_role, "trident-controller"),
+        (KubeResourceType.cluster_role_binding, "trident-controller"),
+    ]
+else:
+    NAMESPACED_RESOURCES = []
+    CLUSTER_RESOURCES = []
 
 # ---------------------------------------------------------------------------
 # Detection
 # ---------------------------------------------------------------------------
+
 
 def is_migration_needed():
     """Check if legacy Trident is installed by looking for TridentBackendConfigs."""
@@ -555,6 +566,10 @@ if __name__ == "__main__":
             print("Invalid option %s." % sys.argv[arg])
             sys.exit(1)
         arg += 1
+
+    # TODO(lbonatti) remove this condition once stx13 become N release.
+    if action not in ("activate", "activate-rollback"):
+        sys.exit(0)
 
     plugin = NetappTridentMigration()
     result = plugin.run(from_release, to_release, action, port)

@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # Copyright (c) 2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
@@ -7,10 +6,15 @@
 import logging
 import os
 
-from software.utilities.plugin_runner import ScriptPlugin
-
+from _loader import ScriptPlugin
 
 LOG = logging.getLogger('main_logger')
+
+
+SOFTWARE_LOG_FILE = "/var/log/software.log"
+
+DEPLOY_SCRIPTS_FAILURES_LOG = logging.getLogger('deploy_scripts_failures')
+DEPLOY_SCRIPTS_FAILURES_LOG_FILE = "/var/log/deploy_scripts_failures.log"
 
 # 26.09 release supports migrate, activate, activate-rollback and delete
 # plugin actions
@@ -19,7 +23,6 @@ ACTION_ACTIVATE = "activate"
 ACTION_ACTIVATE_ROLLBACK = "activate-rollback"
 ACTION_DELETE = "delete"
 PLUGIN_ACTIONS = [ACTION_MIGRATE, ACTION_ACTIVATE, ACTION_ACTIVATE_ROLLBACK, ACTION_DELETE]
-
 FRAMEWORK_INIT = "framework_init"
 FEATURE_PRE_APPS = "feature_pre_apps"
 K8S_APP_UPDATE = "k8s_apps_update"
@@ -28,82 +31,197 @@ FRAMEWORK_FINALIZE = "framework_finalize"
 PLUGIN_STAGES = [FRAMEWORK_INIT, FEATURE_PRE_APPS, K8S_APP_UPDATE,
                  FEATURE_POST_APPS, FRAMEWORK_FINALIZE]
 
+# Import all plugin classes
+from importlib import import_module as _import_module
+
+PopulateIHostSWVersion = getattr(
+    _import_module(".07-populate-ihost-sw-version-field", __name__),
+    "PopulateIHostSWVersion")
+ActivateKeystone = getattr(
+    _import_module(".08-activate-keystone", __name__),
+    "ActivateKeystone")
+UpdateStaticHieradata = getattr(
+    _import_module(".11-update-static-hieradata", __name__),
+    "UpdateStaticHieradata")
+SaveEtcdVersion = getattr(
+    _import_module(".12-save-etcd-version", __name__),
+    "SaveEtcdVersion")
+DisablePortierisWebhook = getattr(
+    _import_module(".18-disable-portieris-webhook", __name__),
+    "DisablePortierisWebhook")
+EnableFluxcdControllers = getattr(
+    _import_module(".20-enable-fluxcd-controllers", __name__),
+    "EnableFluxcdControllers")
+K8sAppUpgrade = getattr(
+    _import_module(".21-k8s-app-upgrade", __name__),
+    "K8sAppUpgrade")
+RollbackFluxcdControllers = getattr(
+    _import_module(".22-rollback-fluxcd-controllers", __name__),
+    "RollbackFluxcdControllers")
+RollbackKeystoneFederation = getattr(
+    _import_module(".25-rollback-keystone-federation", __name__),
+    "RollbackKeystoneFederation")
+CleanUpDeploymentData = getattr(
+    _import_module(".26-clean-up-deployment-data", __name__),
+    "CleanUpDeploymentData")
+RollbackLuksPassphraseType = getattr(
+    _import_module(".27-rollback-luks-passphrase-type", __name__),
+    "RollbackLuksPassphraseType")
+OpenbaoActivate = getattr(
+    _import_module(".30-openbao-activate", __name__),
+    "OpenbaoActivate")
+
+SetServiceUserOptions = getattr(
+    _import_module(".31-set-service-user-options", __name__),
+    "SetServiceUserOptions")
+RenameDeprecatedPtpParameters = getattr(
+    _import_module(".77-ptp-parameter-rename", __name__),
+    "RenameDeprecatedPtpParameters")
+ResetConfigTarget = getattr(
+    _import_module(".197-reset-config-target", __name__),
+    "ResetConfigTarget")
+UpdateISystemData = getattr(
+    _import_module(".198-update-isystem-data", __name__),
+    "UpdateISystemData")
+RemoveLvmSnapshots = getattr(
+    _import_module(".202-remove-lvm-snapshots", __name__),
+    "RemoveLvmSnapshots")
+AddTlsParameters = getattr(
+    _import_module(".42-add-tls-parameters", __name__),
+    "AddTlsParameters")
+AddMissingServiceParameters = getattr(
+    _import_module(".43-add-missing-service-parameters", __name__),
+    "AddMissingServiceParameters")
+AddCgroupV2ServiceParameters = getattr(
+    _import_module(".44-add-cgroup-v2-service-parameters", __name__),
+    "AddCgroupV2ServiceParameters")
+ApplyKubernetesServiceParameters = getattr(
+    _import_module(".45-apply-kubernetes-service-parameters", __name__),
+    "ApplyKubernetesServiceParameters")
+NetappTridentMigration = getattr(
+    _import_module(".203-netapp-trident-migration", __name__),
+    "NetappTridentMigration")
+MoveReleaseMetadataFile = getattr(
+    _import_module(".99-move-release-metadata-file", __name__),
+    "MoveReleaseMetadataFile")
+SimplexEtcdKeyspaceMigration = getattr(
+    _import_module(".205-simplex-etcd-keyspace-migration", __name__),
+    "SimplexEtcdKeyspaceMigration")
+DuplexEtcdPeerUrlFixup = getattr(
+    _import_module(".206-duplex-etcd-peer-url-fixup", __name__),
+    "DuplexEtcdPeerUrlFixup")
+
+# Shell scripts are wrapped as ScriptPlugin instances
 _SCRIPT_DIR = os.path.dirname(__file__)
 
 
-def _sp(script, action):
-    """Create a ScriptPlugin for a script in this directory."""
+def _shell_script_plugin(script, action, required_state=None, completed_state=None):
     path = os.path.join(_SCRIPT_DIR, script)
-    completed_state = script.rsplit('.', 1)[0] + '-completed'
-    return ScriptPlugin(action, None, path, completed_state)
+    if completed_state is None:
+        completed_state = script.rsplit('.', 1)[0] + '-completed'
+    return ScriptPlugin(action, required_state, path, completed_state)
 
 
+# Plugins for each action are organized as 3 parts,
+# framework initialize, feature, and framework finalize
+# however in activate and activate-rollback, feature plugins are divided
+# into 2 groups, pre k8s apps update and post k8s apps update, therefore
+# feature plugins are grouped into 2 groups
+# in total, all plugins are grouped as:
+# frame_init, feature_pre_apps, k8s_apps_update, feature_post_apps, framework_finalize
 PLUGINS = {
     ACTION_MIGRATE: {
         FRAMEWORK_INIT: [
-            _sp("07-populate-ihost-sw-version-field.py", ACTION_MIGRATE),
+            PopulateIHostSWVersion(),
         ],
         FEATURE_PRE_APPS: [
-            _sp("11-update-static-hieradata.py", ACTION_MIGRATE),
-            _sp("04-remove-out-of-tree-service-parameter.py", ACTION_MIGRATE),
-            _sp("05-add-autoreapply-service-parameter.py", ACTION_MIGRATE),
-            _sp("13-registry-central-as-local-scope.py", ACTION_MIGRATE),
+            UpdateStaticHieradata(),
+            SaveEtcdVersion(),
+            RenameDeprecatedPtpParameters(),
+            AddMissingServiceParameters(),
+            AddCgroupV2ServiceParameters(),
+            AddTlsParameters(),
         ],
         K8S_APP_UPDATE: [],
         FEATURE_POST_APPS: [],
         FRAMEWORK_FINALIZE: [
-            _sp("197-reset-config-target.py", ACTION_MIGRATE),
+            ResetConfigTarget(),
         ],
     },
     ACTION_ACTIVATE: {
         FRAMEWORK_INIT: [
-            _sp("31-set-ignore-lockout-failure-attempts.py", ACTION_ACTIVATE),
-            _sp("08-activate-keystone.py", ACTION_ACTIVATE),
-            _sp("23-resize-systemcontroller-filesystems.sh", ACTION_ACTIVATE),
+            OpenbaoActivate(),
+            SetServiceUserOptions(),
+            ActivateKeystone(),
+            _shell_script_plugin("23-resize-systemcontroller-filesystems.py",
+                                 ACTION_ACTIVATE),
+            _shell_script_plugin("13-add-cgroup-v2-service-parameter.sh",
+                                 ACTION_ACTIVATE),
+            # Simplex only, and a no-op elsewhere. Must run before any plugin
+            # that requires kubernetes, because on simplex the etcd keyspace
+            # must be relocated from the DRBD floating path to the fixed member
+            # before kube-apiserver can serve. Placed in framework_init rather
+            # than feature_pre_apps because the N-1 plugin set prepends its own
+            # feature_pre_apps entries (including netapp-trident-migration which
+            # needs K8s), and those would run before this script if it were in
+            # feature_pre_apps.
+            SimplexEtcdKeyspaceMigration(),
+            # Duplex N-2 upgrade: fix floating peer URL (http://localhost →
+            # https://VIP) and regenerate cert with unit IP SANs. Must run
+            # before the cert script and before etcd-fixed can join.
+            DuplexEtcdPeerUrlFixup(),
         ],
         FEATURE_PRE_APPS: [
-            _sp("10-add-cluster-host-ip-to-kube-apiserver-cert.py", ACTION_ACTIVATE),
-            _sp("203-netapp-trident-migration.py", ACTION_ACTIVATE),
+            AddTlsParameters(),
+            DisablePortierisWebhook(),
+            NetappTridentMigration(),
         ],
         K8S_APP_UPDATE: [
-            _sp("18-disable-portieris-webhook.py", ACTION_ACTIVATE),
-            _sp("19-assert-docker-health.sh", ACTION_ACTIVATE),
-            _sp("20-enable-fluxcd-controllers.py", ACTION_ACTIVATE),
-            _sp("21-k8s-app-upgrade.py", ACTION_ACTIVATE),
+            _shell_script_plugin("19-assert-docker-health.py", ACTION_ACTIVATE),
+            EnableFluxcdControllers(),
+            K8sAppUpgrade(),
         ],
         FEATURE_POST_APPS: [
-            _sp("41-ensure-oidc-service-parameters.py", ACTION_ACTIVATE),
+            ApplyKubernetesServiceParameters(),
         ],
         FRAMEWORK_FINALIZE: [
-            _sp("198-update-isystem-data.py", ACTION_ACTIVATE),
+            UpdateISystemData(),
         ],
     },
     ACTION_ACTIVATE_ROLLBACK: {
         FRAMEWORK_INIT: [
-            _sp("198-update-isystem-data.py", ACTION_ACTIVATE_ROLLBACK),
+            UpdateISystemData(),
+            # Rollback: stop etcd-fixed, remove data dir, re-enable floating.
+            # Must run before K8s-dependent rollback scripts.
+            SimplexEtcdKeyspaceMigration(),
+            DuplexEtcdPeerUrlFixup(),
         ],
-        FEATURE_PRE_APPS: [],
+        FEATURE_PRE_APPS: [
+            AddTlsParameters(),
+        ],
         K8S_APP_UPDATE: [
-            _sp("22-rollback-fluxcd-controllers.py", ACTION_ACTIVATE_ROLLBACK),
-            _sp("21-k8s-app-upgrade.py", ACTION_ACTIVATE_ROLLBACK),
-            _sp("18-disable-portieris-webhook.py", ACTION_ACTIVATE_ROLLBACK),
+            RollbackFluxcdControllers(),
+            K8sAppUpgrade(),
+            DisablePortierisWebhook(),
         ],
         FEATURE_POST_APPS: [
-            _sp("203-netapp-trident-migration.py", ACTION_ACTIVATE_ROLLBACK),
+            NetappTridentMigration(),
+            RollbackKeystoneFederation(),
         ],
         FRAMEWORK_FINALIZE: [],
     },
     ACTION_DELETE: {
         FRAMEWORK_INIT: [
-            _sp("26-clean-up-deployment-data.py", ACTION_DELETE),
+            CleanUpDeploymentData(),
         ],
         FEATURE_PRE_APPS: [
-            _sp("40-clean-apiserver-certsan-parameter.py", ACTION_DELETE),
+            RollbackLuksPassphraseType(),
         ],
         K8S_APP_UPDATE: [],
         FEATURE_POST_APPS: [],
         FRAMEWORK_FINALIZE: [
-            _sp("202-remove-lvm-snapshots.py", ACTION_DELETE),
+            RemoveLvmSnapshots(),
+            MoveReleaseMetadataFile(),
         ],
     },
 }
@@ -132,21 +250,25 @@ def join_plugins(prev_release_plugins, plugins):
 
 def get_migrate_plugins(from_release):
     prev_release_plugins = {stage: [] for stage in PLUGIN_STAGES}
+
     return join_plugins(prev_release_plugins, MIGRATE_PLUGINS)
 
 
 def get_activate_plugins(from_release):
     prev_release_plugins = {stage: [] for stage in PLUGIN_STAGES}
+
     return join_plugins(prev_release_plugins, ACTIVATE_PLUGINS)
 
 
 def get_activate_rollback_plugins(from_release):
     prev_release_plugins = {stage: [] for stage in PLUGIN_STAGES}
+
     return join_plugins(prev_release_plugins, ACTIVATE_ROLLBACK_PLUGINS)
 
 
 def get_delete_plugins(from_release):
     prev_release_plugins = {stage: [] for stage in PLUGIN_STAGES}
+
     return join_plugins(prev_release_plugins, DELETE_PLUGINS)
 
 

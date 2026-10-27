@@ -516,14 +516,14 @@ class AddTlsParameters(CPlugin):
         supported_from_releases = ["25.09", "26.03"]
         if action in ("migrate", "activate"):
             if from_release not in supported_from_releases or \
-                    to_release != "26.10":
+                    to_release < "26.10":
                 LOG.info("Only applicable when upgrading from %s "
                          "to 26.10. Current: %s -> %s. Skipping.",
                          supported_from_releases, from_release, to_release)
                 return
         elif action == "activate-rollback":
             if to_release not in supported_from_releases or \
-                    from_release != "26.10":
+                    from_release < "26.10":
                 LOG.info("Only applicable when rolling back from 26.10 "
                          "to %s. Current: %s -> %s. Skipping.",
                          supported_from_releases, from_release, to_release)
