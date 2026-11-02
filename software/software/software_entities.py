@@ -362,6 +362,12 @@ class DeployHandler(Deploy):
             "pre_upgrade_deploy": kwargs.get("pre_upgrade_deploy", False),
             "options": kwargs.get("options", {}),
             "initial_kube_version": kwargs.get("initial_kube_version", ""),
+            # Internal flag (not exposed to the API caller) recording that the
+            # LVM snapshot restore already succeeded during activate-rollback.
+            # Once True it stays True so that activate-rollback reattempts keep
+            # running the plugins filtered for the post-snapshot-restore
+            # scenario instead of the full (normal) plugin set.
+            "snapshot_restored": kwargs.get("snapshot_restored", False),
             # Rollback feed commit, to restore on abort/delete-after-start
             "rollback_commit_id": kwargs.get("rollback_commit_id", None)
         }
@@ -407,7 +413,8 @@ class DeployHandler(Deploy):
         return data.get("deploy", [])
 
     def update(self, from_release=None, to_release=None, feed_repo=None, commit_id=None,
-               reboot_required: bool = None, new_state: DEPLOY_STATES = None, metapackages: list = None):
+               reboot_required: bool = None, new_state: DEPLOY_STATES = None, metapackages: list = None,
+               snapshot_restored: bool = None):
         """
         Update deployment state and the given params.
 
@@ -418,6 +425,8 @@ class DeployHandler(Deploy):
         :param reboot_required: If is required to do host reboot.
         :param new_state: The new state.
         :param metapackages: metapackage list to deploy.
+        :param snapshot_restored: Internal flag marking that the LVM snapshot
+            restore already succeeded during activate-rollback.
         """
         super().update(from_release, to_release, feed_repo, commit_id, reboot_required, new_state, metapackages)
         deploy = self.query_all()
@@ -435,7 +444,8 @@ class DeployHandler(Deploy):
                 "feed_repo": feed_repo,
                 "commit_id": commit_id,
                 "reboot_required": reboot_required,
-                "metapackages": metapackages
+                "metapackages": metapackages,
+                "snapshot_restored": snapshot_restored
             }
 
             for key, value in updates.items():

@@ -76,11 +76,13 @@ class SoftwareAPI:
             self.end_update()
 
     def update_deploy(self, from_release=None, to_release=None, feed_repo=None, commit_id=None,
-                      reboot_required: bool = None, state: DEPLOY_STATES = None):
+                      reboot_required: bool = None, state: DEPLOY_STATES = None,
+                      snapshot_restored: bool = None):
         self.begin_update()
         try:
             self.deploy_handler.update(
-                from_release, to_release, feed_repo, commit_id, reboot_required, state)
+                from_release, to_release, feed_repo, commit_id, reboot_required, state,
+                snapshot_restored=snapshot_restored)
         finally:
             self.end_update()
 
