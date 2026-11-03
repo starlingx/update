@@ -93,6 +93,8 @@ override_dh_install:
 		${SCRIPTDIR}/remove-temporary-data
 	install -m 755 software/lvm_snapshot.py \
 		${SCRIPTDIR}/manage-lvm-snapshots
+	install -m 755 tools/usm-dpkg-show \
+		$(ROOT)/usr/bin/usm-dpkg-show
 	install -d -m 755 $(ROOT)/etc/update.d
 
 	# TODO(heitormatsui): following lines are for backward compatibility and can be removed in stx-12
