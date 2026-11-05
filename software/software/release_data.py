@@ -566,12 +566,13 @@ class SWRelease(object):
                 "preinstalled_patches": self.preinstalled_patches[:],
                 "requires": self.requires_release_ids[:],
                 "activation_scripts": self.activation_scripts[:],
+                "deployable": self.deployable,
                 "metapackages": {},
                 "pre_upgrade_deploy": {},
                 "packages": []}
         if self.is_product_release:
             # For product releases, the pkg section is present only in
-            # the metapackage metadata.
+            # the metapackage metadata
             data["metapackages"] = {mp: {} for mp in self.metapackages}
             for metapackage in self.metapackages or []:
                 metapackage_data = self.metapackages[metapackage]
@@ -579,6 +580,8 @@ class SWRelease(object):
                     data["packages"].extend(metapackage_data["packages"])
                 if "state" in metapackage_data:
                     data["metapackages"][metapackage]["state"] = metapackage_data["state"]
+                if "deployable" in metapackage_data:
+                    data["metapackages"][metapackage]["deployable"] = metapackage_data["deployable"]
             data["pre_upgrade_deploy"] = {mp: {} for mp in self.pre_upgrade_deploy}
             for metapackage in self.pre_upgrade_deploy or []:
                 metapackage_data = self.pre_upgrade_deploy[metapackage]
@@ -586,6 +589,8 @@ class SWRelease(object):
                     data["packages"].extend(metapackage_data["packages"])
                 if "state" in metapackage_data:
                     data["pre_upgrade_deploy"][metapackage]["state"] = metapackage_data["state"]
+                if "deployable" in metapackage_data:
+                    data["pre_upgrade_deploy"][metapackage]["deployable"] = metapackage_data["deployable"]
             data["packages"].sort()
         elif self.packages:
             # Legacy releases have a pkg section in their metadata
