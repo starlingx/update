@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+#
+# Copyright (c) 2026 Wind River Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# usm-dpkg-show - pretty-print "dpkg -I" with the Depends field split one
+# dependency per line and the control fields colorized for readability.
+#
+set -euo pipefail
+
+if [ $# -lt 1 ]; then
+    echo "usage: ${0##*/} <package.deb>" >&2
+    exit 1
+fi
+
+# Enable color only on a terminal, unless NO_COLOR is set or FORCE_COLOR requests it.
+color=0
+if [ -z "${NO_COLOR:-}" ] && { [ -t 1 ] || [ -n "${FORCE_COLOR:-}" ]; }; then
+    color=1
+fi
+
+dpkg -I "$1" | awk -v color="$color" '
+    BEGIN {
+        in_field = 0            # set once we are inside the control-field block
+        if (color) {
+            key   = "\033[1;36m"    # bold cyan - field labels
+            dep   = "\033[0;32m"    # green - values / dependency names
+            ver   = "\033[0;33m"    # yellow - version constraints
+            hdr   = "\033[2;94m"    # dim bright blue - archive header block
+            reset = "\033[0m"
+        }
+    }
+
+    # Comma-list relationship fields: split one per line.
+    /^ (Pre-Depends|Depends|Recommends|Suggests|Conflicts|Breaks|Replaces|Provides|Enhances):/ {
+        in_field = 1
+        label = $1
+        sub(/^ [A-Za-z-]+: /, "")
+        n = split($0, items, ", ")
+        print " " key label reset
+        for (i = 1; i <= n; i++) {
+            line = items[i]
+            if (match(line, / \(/)) {
+                name = substr(line, 1, RSTART - 1)
+                cons = substr(line, RSTART)
+                print "   " dep name reset ver cons reset
+            } else {
+                print "   " dep line reset
+            }
+        }
+        next
+    }
+
+    # Any other "Key: value" control field - color the label and the value.
+    /^ [A-Z][A-Za-z-]*:/ {
+        if (match($0, /:/)) {
+            in_field = 1
+            label = substr($0, 1, RSTART)      # " Package:"
+            rest  = substr($0, RSTART + 1)     # " value"
+            print key label reset dep rest reset
+            next
+        }
+    }
+
+    # Continuation line of a multi-line field (e.g. Description body) - green.
+    in_field {
+        print dep $0 reset
+        next
+    }
+
+    # Header block before any field (sizes, archive info) - dim bright blue.
+    { print hdr $0 reset }
+'
