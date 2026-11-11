@@ -7056,7 +7056,7 @@ class PatchController(PatchService):
                 mp_release.activation_scripts
         return scripts
 
-    def _activate(self, action="activate"):
+    def _activate(self, action="activate", snapshot_restored=False):
         # TODO(heitormatsui) join activate, activate_rollback
         # and deploy_delete under the same function/structure
         deploy = self.db_api_instance.get_deploy_all()
@@ -7117,6 +7117,11 @@ class PatchController(PatchService):
             env["SYSTEM_URL"] = re.sub('/v[1,9]$', '', endpoint)  # remove ending /v1
 
         env["IGNORE_ERRORS"] = self.ignore_errors
+        # When the activate-rollback is driven by a successful LVM snapshot
+        # restore, signal the plugin framework so it filters the plugins down
+        # to the ones relevant to the post-snapshot-restore scenario and lets
+        # them recognize the situation.
+        env["LVM_SNAPSHOT_RESTORED"] = "TRUE" if snapshot_restored else "FALSE"
         try:
             LOG.info("Starting subprocess %s" % ' '.join(activate_cmd))
             subprocess.Popen(' '.join(activate_cmd), start_new_session=True, shell=True, env=env)
@@ -7377,28 +7382,43 @@ class PatchController(PatchService):
             msg = "Deployment is missing unexpectedly"
             raise InvalidOperation(msg)
 
+        # The snapshot_restored indicator is persisted as an internal deploy
+        # value. Once a snapshot restore has succeeded it stays True across
+        # activate-rollback reattempts, so a reattempt after a plugin failure
+        # keeps running the plugins filtered for the post-snapshot-restore
+        # scenario rather than falling back to the full (normal) plugin set.
+        snapshot_restored = to_bool(deploy.get("snapshot_restored"))
+
         # Check if LVM snapshots are enabled and try to restore them
         # TODO(heitormatsui): we don't really need to verify the system mode
         #  as LVM snapshots will only be allowed if the system is AIO-SX
-        system_mode = utils.get_platform_conf("system_mode")
-        if system_mode == constants.SYSTEM_MODE_SIMPLEX:
-            options = deploy.get("options", {})
-            enabled_lvm_snapshots = to_bool(options.get("snapshot"))
-            if enabled_lvm_snapshots:
-                LOG.info("LVM snapshots are enabled")
-                manager = lvm_snapshot.LVMSnapshotManager()
-                success = manager.restore_snapshots()
-                if success:
-                    LOG.info("LVM snapshots were restored, upgrade scripts with "
-                             "action=activate-rollback will be skipped")
-                    deploy_state = DeployState.get_instance()
-                    deploy_state.activate_rollback_done()
-                    return
-                else:
-                    LOG.warning("Failure restoring LVM snapshots, falling back "
-                                "to standard activate-rollback procedure")
+        if not snapshot_restored:
+            system_mode = utils.get_platform_conf("system_mode")
+            if system_mode == constants.SYSTEM_MODE_SIMPLEX:
+                options = deploy.get("options", {})
+                enabled_lvm_snapshots = to_bool(options.get("snapshot"))
+                if enabled_lvm_snapshots:
+                    LOG.info("LVM snapshots are enabled")
+                    manager = lvm_snapshot.LVMSnapshotManager()
+                    success = manager.restore_snapshots()
+                    if success:
+                        # The LVM snapshot restore brings the filesystem back
+                        # to the pre-upgrade state, but it does not fully
+                        # restore all k8s applications (e.g. rook-ceph).
+                        # Persist the indicator and run the activate-rollback
+                        # plugins in the same execution order, letting the
+                        # plugin framework filter out the plugins made redundant
+                        # by the snapshot restore and keep only the ones that
+                        # opt in to the post-snapshot-restore scenario.
+                        LOG.info("LVM snapshots were restored, running activate-rollback "
+                                 "plugins filtered for the post-snapshot-restore scenario")
+                        snapshot_restored = True
+                        self.db_api_instance.update_deploy(snapshot_restored=True)
+                    else:
+                        LOG.warning("Failure restoring LVM snapshots, falling back "
+                                    "to standard activate-rollback procedure")
 
-        self._activate(action="activate-rollback")
+        self._activate(action="activate-rollback", snapshot_restored=snapshot_restored)
 
     @require_deploy_state([DEPLOY_STATES.ACTIVATE_ROLLBACK_PENDING, DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED],
                           "Activate-rollback deployment only when current deployment state is {require_states}")

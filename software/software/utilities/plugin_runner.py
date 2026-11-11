@@ -30,6 +30,16 @@ HOST_SCRIPTS_DIR = "host-scripts"
 AGENT_HOOKS_SCRIPT = "agent_hooks.py"
 BUILD_INFO_FILE = "/etc/build.info"
 
+# Environment variable the controller sets on an activate-rollback run when
+# the LVM snapshot restore already succeeded. When it is "TRUE" the plugin
+# runner switches to the post-snapshot-restore scenario: it filters out the
+# plugins that are made redundant by the snapshot restore and keeps only the
+# ones that explicitly opt in (e.g. applications, such as rook-ceph, that need
+# to run their pre_downgrade lifecycle hook after the snapshot is restored).
+# The same indicator is exported to ScriptPlugin subprocesses so shell/python
+# scripts can recognize the situation and run the correct logic.
+SNAPSHOT_RESTORED_ENV = "LVM_SNAPSHOT_RESTORED"
+
 
 # This file is currently categorized as independent from framework,
 # which is runnable w/ N+1 code on a N runtime environment. The exception class
@@ -52,13 +62,55 @@ class APlugin(ABC):
         self._matching_action = matching_action if isinstance(matching_action, list) else [matching_action]
         self._plugin_name = plugin_name
         self._completed_state = completed_state
+        self._context = {}
 
     @property
     def name(self):
         return self._plugin_name
 
-    def should_run(self, action):
-        return action in self._matching_action
+    def run_after_snapshot_restore(self):
+        """Whether this plugin must still run once the LVM snapshot restore
+        already brought the filesystem back to the pre-upgrade state.
+
+        Defaults to False so that, in the post-snapshot-restore scenario, the
+        framework filters this plugin out. A subclass overrides this to return
+        True when it needs to run after the snapshot has been restored (e.g.
+        an application, such as rook-ceph, that must run its pre_downgrade
+        lifecycle hook).
+        """
+        return False
+
+    @property
+    def context(self):
+        """Execution context dict a plugin can read inside _run to branch its
+        logic. Set by run() before _run() is invoked. Keys currently used:
+
+          snapshot_restored (bool): True when executing after a successful LVM
+              snapshot restore.
+        """
+        return self._context
+
+    @property
+    def snapshot_restored(self):
+        """Convenience accessor for context["snapshot_restored"]."""
+        return bool(self.context.get("snapshot_restored", False))
+
+    def should_run(self, action, context=None):
+        """Return whether this plugin should run for the given action.
+
+        :param action: the deploy action being executed
+        :param context: execution context dict. When
+            context["snapshot_restored"] is True the run is an
+            activate-rollback whose LVM snapshot restore already succeeded, and
+            only the plugins whose run_after_snapshot_restore() returns True
+            are kept.
+        """
+        context = context or {}
+        if action not in self._matching_action:
+            return False
+        if context.get("snapshot_restored", False):
+            return self.run_after_snapshot_restore()
+        return True
 
     def required_state(self):
         return self._required_state
@@ -73,7 +125,12 @@ class APlugin(ABC):
     def __repr__(self):
         return self.name
 
-    def run(self, from_release, to_release, action, port=None):
+    def run(self, from_release, to_release, action, port=None, context=None):
+        # Expose the execution context to _run via self so that existing
+        # plugins keep their _run(self, from_release, to_release, action, port)
+        # signature unchanged. Plugins that need to branch can read
+        # self.context (or the self.snapshot_restored convenience accessor).
+        self._context = context or {}
         try:
             self._run(from_release, to_release, action, port)
             return self._completed_state
@@ -105,11 +162,18 @@ class ScriptPlugin(APlugin):
                     cmdline.append(str(port))
                 cmdline.extend(self._extra_args)
 
+                # Propagate the post-snapshot-restore indicator so that
+                # shell/python scripts can recognize the situation and run
+                # the correct logic.
+                script_env = os.environ.copy()
+                script_env[SNAPSHOT_RESTORED_ENV] = "TRUE" if self.snapshot_restored else "FALSE"
+
                 # Let subprocess.run handle non-zero exit codes via check=True
                 result = subprocess.run(cmdline,
                                         stdout=subprocess.PIPE,
                                         stderr=subprocess.STDOUT,
                                         text=True,
+                                        env=script_env,
                                         check=True)
                 if result.stdout:
                     LOG.info(f"Script {script} output:\n{result.stdout}")
@@ -142,9 +206,22 @@ class PluginRunner:
         self._states = set()
         self._lock = threading.Lock()
         self._ignore_errors = os.environ.get("IGNORE_ERRORS", 'False').upper() == 'TRUE'
+        # Execution context passed to every plugin. Populated from the
+        # environment the controller sets. Currently carries the
+        # post-snapshot-restore indicator, set on an activate-rollback run
+        # whose LVM snapshot restore already succeeded.
+        self._context = {
+            "snapshot_restored": os.environ.get(SNAPSHOT_RESTORED_ENV, 'False').upper() == 'TRUE',
+        }
 
     def run(self, from_release, to_release, action, port=None):
-        pending = [t for t in self._tasks if t.should_run(action)]
+        pending = [t for t in self._tasks
+                   if t.should_run(action, context=self._context)]
+
+        if self._context.get("snapshot_restored"):
+            LOG.info("LVM snapshot restore already succeeded; running only the "
+                     "plugins that opt in to the post-snapshot-restore scenario: "
+                     f"{[p.name for p in pending]}")
 
         while pending:
             ready = []
@@ -168,7 +245,8 @@ class PluginRunner:
                 break  # no progress possible, avoid infinite loop
 
             with ThreadPoolExecutor(max_workers=self._max_parallel) as executor:
-                futures = {executor.submit(t.run, from_release, to_release, action, port): t for t in ready}
+                futures = {executor.submit(t.run, from_release, to_release, action, port,
+                                           self._context): t for t in ready}
                 for future in as_completed(futures):
                     result = future.result()
                     if result:
