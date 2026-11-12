@@ -238,6 +238,7 @@ class TestReleaseState(unittest.TestCase):
         mock_rel.is_product_release = False
         mock_rel.is_ga_release = False
         mock_rel.prepatched_iso = False
+        mock_rel.is_metapackage_release = False
         mock_coll.get_release_by_id.return_value = mock_rel
         mock_get_coll.return_value = mock_coll
         rs = ReleaseState.__new__(ReleaseState)

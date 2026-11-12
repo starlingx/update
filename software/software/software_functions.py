@@ -600,6 +600,10 @@ class ReleaseData(object):
                                            self.metadata[release_id])
             # Parse optional product-level flags
             self._parse_metadata_tag(xml_file, "kernel_patch", self.metadata[release_id])
+            # A prepatched ISO is described at the product level; without it
+            # a prepatched N.x.y (y > 0) product release is not recognised as
+            # a major release deployment.
+            self._parse_metadata_tag(xml_file, "prepatched_iso", self.metadata[release_id])
 
             # Parse original_commit if present (set during upload)
             original_commit = xml_file.findtext(constants.ORIGINAL_COMMIT_TAG)

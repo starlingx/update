@@ -210,6 +210,7 @@ class TestReleaseStateMajorReleaseDetection(unittest.TestCase):
         target = mock.MagicMock()
         target.is_ga_release = True
         target.prepatched_iso = False
+        target.is_metapackage_release = False
         mock_coll.return_value.get_release_by_id.return_value = target
 
         rs = ReleaseState(release_ids=["starlingx-25.03"])
@@ -225,6 +226,7 @@ class TestReleaseStateMajorReleaseDetection(unittest.TestCase):
         target = mock.MagicMock()
         target.is_ga_release = False
         target.prepatched_iso = True
+        target.is_metapackage_release = False
         mock_coll.return_value.get_release_by_id.return_value = target
 
         rs = ReleaseState(release_ids=["starlingx-25.03"])
@@ -241,6 +243,7 @@ class TestReleaseStateMajorReleaseDetection(unittest.TestCase):
         target = mock.MagicMock()
         target.is_ga_release = False
         target.prepatched_iso = False
+        target.is_metapackage_release = False
         mock_coll.return_value.get_release_by_id.return_value = target
 
         rs = ReleaseState(release_ids=["PATCH_001"])
@@ -252,6 +255,77 @@ class TestReleaseStateMajorReleaseDetection(unittest.TestCase):
         rs = ReleaseState()
         with mock.patch('software.release_state.get_SWReleaseCollection'):
             self.assertFalse(rs.is_major_release_deployment())
+
+    @staticmethod
+    def _release(ga=False, prepatched=False, metapackage=False):
+        rel = mock.MagicMock()
+        rel.is_ga_release = ga
+        rel.prepatched_iso = prepatched
+        rel.is_metapackage_release = metapackage
+        return rel
+
+    def _metapackage_state(self, mock_coll, metapackage, product):
+        """ReleaseState holding one metapackage id, as built for DEPLOYING."""
+        coll = mock_coll.return_value
+        coll.get_release_by_id.return_value = metapackage
+        coll.get_product_release_by_metapackage_id.return_value = product
+        rs = ReleaseState()
+        rs._release_ids = ['base_26.10.100']
+        return rs, coll
+
+    @mock.patch('software.release_state.get_SWReleaseCollection')
+    def test_prepatched_product_metapackage_is_major(self, mock_coll):
+        """Metapackage of a prepatched N.x.y (y > 0) product.
+
+        The metapackage is not GA (patch level 100) and does not carry the
+        product-level prepatched_iso tag; the parent product release does.
+        """
+        rs, coll = self._metapackage_state(
+            mock_coll,
+            self._release(ga=False, prepatched=False, metapackage=True),
+            self._release(ga=False, prepatched=True))
+        self.assertTrue(rs.is_major_release_deployment())
+        self.assertTrue(rs.is_patched_major_release_deployment())
+        coll.get_product_release_by_metapackage_id.assert_called_with(
+            'base_26.10.100')
+
+    @mock.patch('software.release_state.get_SWReleaseCollection')
+    def test_ga_metapackage_is_major_without_product_lookup(self, mock_coll):
+        """Metapackage of a GA product (e.g. base_26.10.0) is major as-is."""
+        rs, coll = self._metapackage_state(
+            mock_coll,
+            self._release(ga=True, metapackage=True),
+            self._release(ga=True))
+        self.assertTrue(rs.is_major_release_deployment())
+        self.assertFalse(rs.is_patched_major_release_deployment())
+        coll.get_product_release_by_metapackage_id.assert_not_called()
+
+    @mock.patch('software.release_state.get_SWReleaseCollection')
+    def test_patch_metapackage_is_not_major(self, mock_coll):
+        """Metapackage of a regular patch product is not major."""
+        rs, _ = self._metapackage_state(
+            mock_coll,
+            self._release(ga=False, prepatched=False, metapackage=True),
+            self._release(ga=False, prepatched=False))
+        self.assertFalse(rs.is_major_release_deployment())
+        self.assertFalse(rs.is_patched_major_release_deployment())
+
+    @mock.patch('software.release_state.get_SWReleaseCollection')
+    def test_metapackage_without_product_is_not_major(self, mock_coll):
+        """A metapackage whose product is not loaded falls back to itself."""
+        rs, _ = self._metapackage_state(
+            mock_coll,
+            self._release(ga=False, prepatched=False, metapackage=True),
+            None)
+        self.assertFalse(rs.is_major_release_deployment())
+
+    @mock.patch('software.release_state.get_SWReleaseCollection')
+    def test_unknown_release_id_is_skipped(self, mock_coll):
+        """An id missing from the collection does not raise."""
+        mock_coll.return_value.get_release_by_id.return_value = None
+        rs = ReleaseState()
+        rs._release_ids = ['missing_26.10.100']
+        self.assertFalse(rs.is_major_release_deployment())
 
 
 class TestReleaseStateTransformCallbacks(unittest.TestCase):

@@ -134,21 +134,40 @@ class ReleaseState(object):
             LOG.debug("Calling event listener %s", callback.__qualname__)
             callback(target_state)
 
+    def _major_release_flags(self, release_collection, rel_id):
+        """Return (is_ga, is_prepatched) for a release id.
+
+        Since product releases are deployed as their metapackages, the ids
+        held here are metapackage ids. A metapackage carries its product's
+        version but not the product-level <prepatched_iso> tag, so for a
+        prepatched N.x.y (y > 0) product neither flag is set on the
+        metapackage itself. Use the parent product release in that case.
+        """
+        release = release_collection.get_release_by_id(rel_id)
+        if release is None:
+            return False, False
+        is_ga = release.is_ga_release
+        is_prepatched = release.prepatched_iso
+        if not (is_ga or is_prepatched) and release.is_metapackage_release:
+            product = release_collection.get_product_release_by_metapackage_id(rel_id)
+            if product is not None:
+                is_ga = product.is_ga_release
+                is_prepatched = product.prepatched_iso
+        return is_ga, is_prepatched
+
     def is_major_release_deployment(self):
         release_collection = get_SWReleaseCollection()
         for rel_id in self._release_ids:
-            release = release_collection.get_release_by_id(rel_id)
-            if release.is_ga_release:
-                return True
-            elif release.prepatched_iso:
+            is_ga, is_prepatched = self._major_release_flags(release_collection, rel_id)
+            if is_ga or is_prepatched:
                 return True
         return False
 
     def is_patched_major_release_deployment(self):
         release_collection = get_SWReleaseCollection()
         for rel_id in self._release_ids:
-            release = release_collection.get_release_by_id(rel_id)
-            if release.prepatched_iso:
+            _, is_prepatched = self._major_release_flags(release_collection, rel_id)
+            if is_prepatched:
                 return True
         return False
 

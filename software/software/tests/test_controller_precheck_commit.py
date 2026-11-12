@@ -7,6 +7,7 @@
 deploy/upload API methods.
 """
 
+import json
 from software import states
 import threading
 import unittest
@@ -88,6 +89,43 @@ class TestDeployPrecheck(unittest.TestCase):
             returncode=constants.RC_SUCCESS, stdout="All checks passed")
         result = PatchController._deploy_precheck(sc, "24.09.1")
         self.assertTrue(result["system_healthy"])
+
+    @patch('subprocess.run')
+    @patch('configparser.ConfigParser.read')
+    @patch('configparser.ConfigParser.has_section', return_value=True)
+    @patch('configparser.ConfigParser.__getitem__', return_value={
+        "auth_url": "http://localhost:5000",
+        "username": "admin", "password": "pass",
+        "project_name": "admin",
+        "user_domain_name": "Default",
+        "project_domain_name": "Default"
+    })
+    @patch('os.path.isfile', return_value=True)
+    def test_precheck_product_release_keeps_preinstalled_patches(
+            self, _mock_isfile, _mock_cp_item, _mock_has, _mock_read,
+            mock_run):
+        # A prepatched product release listed before the legacy prepatched
+        # release has no preinstalled_patches and must not hide its list.
+        sc = _create_controller()
+        sc._get_software_upgrade.return_value = None
+        empty = {"packages": [], "summary": "", "description": "",
+                 "install_instructions": "", "warnings": "", "component": ""}
+        sc.software_release_query_cached.return_value = [
+            dict(empty, release_id="stx-24.09.100", prepatched_iso=True,
+                 preinstalled_patches=[], requires=[]),
+            dict(empty, release_id="stx-24.09.0", prepatched_iso=True,
+                 preinstalled_patches=["stx-24.09.1"], requires=[]),
+            dict(empty, release_id="stx-24.09.2", prepatched_iso=False,
+                 requires=["stx-24.09.1"]),
+        ]
+        mock_run.return_value = MagicMock(
+            returncode=constants.RC_SUCCESS, stdout="All checks passed")
+        PatchController._deploy_precheck(sc, "24.09.2", patch=True)
+        cmd = mock_run.call_args[0][0]
+        releases_arg = [a for a in cmd if a.startswith("--releases=")][0]
+        releases = json.loads(releases_arg.split("=", 1)[1])
+        target = [r for r in releases if r["release_id"] == "stx-24.09.2"][0]
+        self.assertEqual(target["requires"], [])
 
     @patch('configparser.ConfigParser.read',
            side_effect=Exception("bad config"))

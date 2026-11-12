@@ -64,6 +64,34 @@ class TestReleaseApplyOrder(unittest.TestCase):
         result = sc.release_apply_order("stx-24.09.1", "24.09")
         self.assertEqual(result, [])
 
+    def test_product_release_keeps_legacy_preinstalled_patches(self):
+        # A prepatched product release has no preinstalled_patches and
+        # must not reset the list taken from a legacy prepatched release.
+        sc = create_software_controller()
+        sc.release_apply_order = PatchController.release_apply_order.__get__(
+            sc)
+        legacy = MagicMock(
+            id="stx-24.09.0",
+            state=states.DEPLOYED,
+            prepatched_iso=True,
+            preinstalled_patches=["stx-24.09.1"])
+        product = MagicMock(
+            id="stx-24.09.100",
+            state=states.AVAILABLE,
+            prepatched_iso=True,
+            preinstalled_patches=[])
+        target = MagicMock(
+            id="stx-24.09.2",
+            state=states.AVAILABLE,
+            prepatched_iso=False)
+        sc.release_collection.iterate_releases.return_value = [
+            legacy, product, target]
+        dep_list = MagicMock(return_value=["stx-24.09.1"])
+        sc.get_release_dependency_list = dep_list
+        result = sc.release_apply_order("stx-24.09.2", "24.09")
+        self.assertEqual(result, ["stx-24.09.2"])
+        dep_list.assert_called_once_with("stx-24.09.2", ["stx-24.09.1"])
+
 
 class TestPreviousReleaseApplyOrder(unittest.TestCase):
     """Tests for previous_release_apply_order."""
@@ -166,6 +194,32 @@ class TestPreviousReleaseApplyOrder(unittest.TestCase):
         sc.get_release_dependency_list.return_value = ["stx-24.09.1"]
         result = sc.previous_release_apply_order("stx-24.09.2")
         self.assertIn("stx-24.09.1", result)
+
+    @patch('software.software_controller.SW_VERSION', '25.03')
+    @patch('software.software_controller.SoftwareInventoryManager')
+    @patch('software.software_controller.ostree_utils.get_commits',
+           return_value=[])
+    def test_product_release_keeps_legacy_preinstalled_patches(
+            self, _mock_get_commits, _mock_sim_cls):
+        # A prepatched product release has no preinstalled_patches and
+        # must not reset the list taken from a legacy prepatched release.
+        sc = create_software_controller()
+        sc.previous_release_apply_order = (
+            PatchController.previous_release_apply_order.__get__(
+                sc))
+        legacy = MagicMock(id="stx-24.09.0", sw_version="24.09.0",
+                           commit_id=None, prepatched_iso=True,
+                           preinstalled_patches=["stx-24.09.1"])
+        product = MagicMock(id="stx-24.09.100", sw_version="24.09.100",
+                            commit_id=None, prepatched_iso=True,
+                            preinstalled_patches=[])
+        sc.release_collection.iterate_releases.return_value = [
+            legacy, product]
+        dep_list = MagicMock(return_value=["stx-24.09.1"])
+        sc.get_release_dependency_list = dep_list
+        result = sc.previous_release_apply_order("stx-24.09.2")
+        self.assertEqual(result, ["stx-24.09.2"])
+        dep_list.assert_called_once_with("stx-24.09.2", ["stx-24.09.1"])
 
 
 class TestReleaseRemoveOrder(unittest.TestCase):

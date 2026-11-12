@@ -141,6 +141,7 @@ class TestReleaseStateMajorRelease(unittest.TestCase):
         mock_rel.is_product_release = False
         mock_rel.is_ga_release = False
         mock_rel.prepatched_iso = False
+        mock_rel.is_metapackage_release = False
         mock_coll.return_value.get_release_by_id.return_value = mock_rel
         self.assertFalse(rs.is_major_release_deployment())
 
