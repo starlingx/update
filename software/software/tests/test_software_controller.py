@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 from packaging import version
 
 from software.tests import base  # pylint: disable=unused-import # noqa: F401
+from software.exceptions import BranchNotFound
 from software.exceptions import HostNotFound
 from software.exceptions import ReleasePrecheckInvalidRequest
 from software.exceptions import SoftwareServiceError
@@ -209,6 +210,7 @@ class TestSoftwareController(unittest.TestCase):
         )
 
     @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
+    @unittest.mock.patch('software.software_controller.PatchController._build_uploaded_pud_branches')
     @unittest.mock.patch('os.path.isfile', return_value=True)
     @unittest.mock.patch('software.software_controller.PatchController.get_release_meta_info')
     @unittest.mock.patch('software.software_controller.reload_release_data')
@@ -228,10 +230,15 @@ class TestSoftwareController(unittest.TestCase):
                                                      mock_reload_release_data,      # pylint: disable=unused-argument
                                                      mock_get_release_meta_info,
                                                      mock_isfile,   # pylint: disable=unused-argument
+                                                     mock_build_pud,
                                                      mock_init):    # pylint: disable=unused-argument
         # Setup
         mock_path_exists.return_value = True
-        mock_subprocess_run.return_value = unittest.mock.MagicMock(returncode=0, stdout="Load import successful")
+        mock_subprocess_run.return_value = unittest.mock.MagicMock(
+            returncode=0,
+            stdout=("Uploaded swmgmt-13.0.0 metapackage release\n"
+                    "Uploading k8s-common-14.0.0 pre-upgrade-deploy metapackage release\n")
+        )
         mock_get_release_meta_info.return_value = {"test.iso": {"id": "123", "sw_version": "2.0.0"}}
 
         controller = PatchController()
@@ -251,7 +258,11 @@ class TestSoftwareController(unittest.TestCase):
             upgrade_files)
 
         # Assertions
-        self.assertEqual(local_info, "Load import successful")
+        self.assertIn("Pre-upgrade-deploy is now uploading, await for the state "
+                      "[available] in "
+                      "'software metapackage list --pre-upgrade-deploy'", local_info)
+        self.assertNotIn("upload-failed", local_info)
+        mock_build_pud.assert_called_once_with()
         self.assertEqual(local_warning, "")
         self.assertEqual(local_error, "")
         self.assertEqual(release_meta_info, {"test.iso": {"id": "123", "sw_version": "2.0.0"}})
@@ -992,6 +1003,259 @@ class TestCreateSwReleasesIt(unittest.TestCase):
             "starlingx-13.0.0",
             "starlingx-13.0.1",
             "/opt/software/releases/13.0.1/extra/ostree_repo")
+
+    def _setup_failing_build(self, mock_get_swrc, mock_sim_cls, side_effect):
+        """Controller + sim where the branch build for starlingx-13.0.1 fails
+        with side_effect after the ref was already created.
+        """
+        controller = PatchController()
+        controller.pre_bootstrap = False
+        controller.software_sync = unittest.mock.MagicMock()
+        controller._set_original_commit = unittest.mock.MagicMock()  # pylint: disable=protected-access
+        controller.update_ostree_commit_id = unittest.mock.MagicMock()
+
+        mock_get_swrc.return_value.get_release_by_id.return_value = \
+            self._make_release("starlingx-13.0.1")
+
+        sim = mock_sim_cls.return_value
+        sim.get_deployed_commit.return_value = "deployed-commit"
+        sim.get_release_by_commit.return_value = "starlingx-13.0.0"
+        sim.create_sw_release_branch.side_effect = side_effect
+        return controller, sim
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
+    @unittest.mock.patch('software.software_controller.SW_VERSION', '13.0')
+    @unittest.mock.patch('software.software_controller.ReleaseState')
+    @unittest.mock.patch('software.software_controller.MetapackageDeploymentSet')
+    @unittest.mock.patch('software.software_controller.SoftwareInventoryManager')
+    @unittest.mock.patch('software.software_controller.get_SWReleaseCollection')
+    def test_failed_build_discards_partial_branch(self,
+                                                  mock_get_swrc,
+                                                  mock_sim_cls,
+                                                  mock_mp_set,   # pylint: disable=unused-argument
+                                                  mock_rel_state,
+                                                  mock_init):   # pylint: disable=unused-argument
+        # create_sw_release_branch creates the ref before installing the
+        # packages. If the install fails the bare ref must not be left behind:
+        # it would pass for a valid release branch and a re-upload could not
+        # recreate it.
+        controller, sim = self._setup_failing_build(
+            mock_get_swrc, mock_sim_cls, RuntimeError("No space left on device"))
+        sim.branch_exists.return_value = True
+
+        self._run(controller, self._patch_info("starlingx-13.0.1"))
+
+        sim.delete_ref.assert_called_once_with("starlingx-13.0.1")
+        mock_rel_state.return_value.upload_failed.assert_called_once_with()
+        mock_rel_state.return_value.uploaded.assert_not_called()
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
+    @unittest.mock.patch('software.software_controller.SW_VERSION', '13.0')
+    @unittest.mock.patch('software.software_controller.ReleaseState')
+    @unittest.mock.patch('software.software_controller.MetapackageDeploymentSet')
+    @unittest.mock.patch('software.software_controller.SoftwareInventoryManager')
+    @unittest.mock.patch('software.software_controller.get_SWReleaseCollection')
+    def test_failed_build_without_branch_deletes_nothing(self,
+                                                         mock_get_swrc,
+                                                         mock_sim_cls,
+                                                         mock_mp_set,   # pylint: disable=unused-argument
+                                                         mock_rel_state,
+                                                         mock_init):   # pylint: disable=unused-argument
+        # The failure happened before the ref was created: nothing to delete
+        controller, sim = self._setup_failing_build(
+            mock_get_swrc, mock_sim_cls, RuntimeError("base commit not resolved"))
+        sim.branch_exists.return_value = False
+
+        self._run(controller, self._patch_info("starlingx-13.0.1"))
+
+        sim.delete_ref.assert_not_called()
+        mock_rel_state.return_value.upload_failed.assert_called_once_with()
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
+    @unittest.mock.patch('software.software_controller.SW_VERSION', '13.0')
+    @unittest.mock.patch('software.software_controller.ReleaseState')
+    @unittest.mock.patch('software.software_controller.MetapackageDeploymentSet')
+    @unittest.mock.patch('software.software_controller.SoftwareInventoryManager')
+    @unittest.mock.patch('software.software_controller.get_SWReleaseCollection')
+    def test_branch_not_found_discards_partial_branch(self,
+                                                      mock_get_swrc,
+                                                      mock_sim_cls,
+                                                      mock_mp_set,   # pylint: disable=unused-argument
+                                                      mock_rel_state,
+                                                      mock_init):   # pylint: disable=unused-argument
+        controller, sim = self._setup_failing_build(
+            mock_get_swrc, mock_sim_cls, BranchNotFound("starlingx-13.0.0"))
+        sim.branch_exists.return_value = True
+
+        self._run(controller, self._patch_info("starlingx-13.0.1"))
+
+        sim.delete_ref.assert_called_once_with("starlingx-13.0.1")
+        mock_rel_state.return_value.upload_failed.assert_called_once_with()
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
+    @unittest.mock.patch('software.software_controller.SW_VERSION', '13.0')
+    @unittest.mock.patch('software.software_controller.ReleaseState')
+    @unittest.mock.patch('software.software_controller.MetapackageDeploymentSet')
+    @unittest.mock.patch('software.software_controller.SoftwareInventoryManager')
+    @unittest.mock.patch('software.software_controller.get_SWReleaseCollection')
+    def test_discard_failure_still_marks_upload_failed(self,
+                                                       mock_get_swrc,
+                                                       mock_sim_cls,
+                                                       mock_mp_set,   # pylint: disable=unused-argument
+                                                       mock_rel_state,
+                                                       mock_init):   # pylint: disable=unused-argument
+        controller, sim = self._setup_failing_build(
+            mock_get_swrc, mock_sim_cls, RuntimeError("build failed"))
+        sim.branch_exists.return_value = True
+        sim.delete_ref.side_effect = Exception("delete failed")
+
+        self._run(controller, self._patch_info("starlingx-13.0.1"))
+
+        mock_rel_state.return_value.upload_failed.assert_called_once_with()
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
+    @unittest.mock.patch('software.software_controller.SW_VERSION', '13.0')
+    @unittest.mock.patch('software.software_controller.ReleaseState')
+    @unittest.mock.patch('software.software_controller.MetapackageDeploymentSet')
+    @unittest.mock.patch('software.software_controller.SoftwareInventoryManager')
+    @unittest.mock.patch('software.software_controller.get_SWReleaseCollection')
+    def test_successful_build_keeps_branch(self,
+                                           mock_get_swrc,
+                                           mock_sim_cls,
+                                           mock_mp_set,   # pylint: disable=unused-argument
+                                           mock_rel_state,
+                                           mock_init):   # pylint: disable=unused-argument
+        controller, sim = self._setup_failing_build(
+            mock_get_swrc, mock_sim_cls, None)
+        sim.branch_exists.return_value = True
+
+        self._run(controller, self._patch_info("starlingx-13.0.1"))
+
+        sim.delete_ref.assert_not_called()
+        mock_rel_state.return_value.uploaded.assert_called_once_with()
+        mock_rel_state.return_value.upload_failed.assert_not_called()
+
+
+class TestBuildUploadedPudBranches(unittest.TestCase):
+    """Tests for PatchController._build_uploaded_pud_branches.
+
+    The pre-built pre-upgrade-deploy branch is an optimization: whatever
+    happens during the build attempt, the metapackages must leave uploading
+    for available (never upload-failed), so the ISO need not be re-uploaded
+    and further uploads are not blocked by a metapackage stuck in uploading.
+    """
+
+    PRODUCT = "starlingx-14.0.0"
+
+    def setUp(self):
+        patches = {
+            "init": unittest.mock.patch(
+                'software.software_controller.PatchController.__init__', return_value=None),
+            "swrc": unittest.mock.patch(
+                'software.software_controller.get_SWReleaseCollection'),
+            "sim_cls": unittest.mock.patch(
+                'software.software_controller.SoftwareInventoryManager'),
+            "rel_state": unittest.mock.patch(
+                'software.software_controller.ReleaseState'),
+            "reload": unittest.mock.patch(
+                'software.software_controller.reload_release_data'),
+        }
+        self.mocks = {name: p.start() for name, p in patches.items()}
+        for p in patches.values():
+            self.addCleanup(p.stop)
+
+        self.mps = [self._make_pud_mp("k8s-common"), self._make_pud_mp("infra")]
+        regular_mp = unittest.mock.MagicMock(is_pre_upgrade_deploy_release=False)
+        swrc = self.mocks["swrc"].return_value
+        swrc.iterate_metapackages_by_state.return_value = self.mps + [regular_mp]
+        swrc.running_release.sw_version = "13.0"
+
+        self.sim = self.mocks["sim_cls"].return_value
+        self.sim.get_branch_commit.return_value = "base-commit"
+
+        self.controller = PatchController()
+        self.controller.pre_bootstrap = False
+        self.controller.software_sync = unittest.mock.MagicMock()
+        self.controller._build_pud_branch = unittest.mock.MagicMock()  # pylint: disable=protected-access
+        self.controller._highest_available_product_release = unittest.mock.MagicMock(  # pylint: disable=protected-access
+            return_value=unittest.mock.MagicMock(id="starlingx-13.0.2"))
+
+    def _make_pud_mp(self, component):
+        mp = unittest.mock.MagicMock()
+        mp.id = f"{component}_14.0.0"
+        mp.product = self.PRODUCT
+        mp.is_pre_upgrade_deploy_release = True
+        return mp
+
+    def _run(self):
+        # @threaded returns the Thread; join it so the body completes first
+        thread = self.controller._build_uploaded_pud_branches()  # pylint: disable=protected-access
+        if thread is not None:
+            thread.join()
+
+    def _assert_moved_to_available(self):
+        rel_state_cls = self.mocks["rel_state"]
+        rel_state_cls.assert_called_once_with(
+            release_ids=[mp.id for mp in self.mps], pre_upgrade_deploy=True)
+        rel_state_cls.return_value.uploaded.assert_called_once_with()
+        rel_state_cls.return_value.upload_failed.assert_not_called()
+
+    def test_build_success_moves_to_available(self):
+        self._run()
+
+        self.controller._build_pud_branch.assert_called_once_with(  # pylint: disable=protected-access
+            self.sim, "/var/www/pages/feed/rel-13.0/ostree_repo", self.PRODUCT,
+            self.mps, "base-commit", states.UPLOADING)
+        self.controller.software_sync.assert_called_once_with()
+        self.sim.delete_ref.assert_not_called()
+        self._assert_moved_to_available()
+
+    def test_build_failure_moves_to_available_and_discards_branch(self):
+        # e.g. lack of disk space: retryable at deploy time, no ISO re-upload
+        self.controller._build_pud_branch.side_effect = Exception("No space left")  # pylint: disable=protected-access
+        self.sim.branch_exists.return_value = True
+
+        self._run()
+
+        self.sim.delete_ref.assert_called_once_with(f"{self.PRODUCT}-pre-upgrade-deploy")
+        self.controller.software_sync.assert_not_called()
+        self._assert_moved_to_available()
+
+    def test_discard_failure_does_not_block_available(self):
+        self.controller._build_pud_branch.side_effect = Exception("build failed")  # pylint: disable=protected-access
+        self.sim.branch_exists.return_value = True
+        self.sim.delete_ref.side_effect = Exception("delete failed")
+
+        self._run()
+
+        self._assert_moved_to_available()
+
+    def test_base_commit_lookup_failure_moves_to_available(self):
+        # Previously outside the try: the thread died leaving them in uploading
+        self.sim.get_branch_commit.side_effect = Exception("branch not found")
+
+        self._run()
+
+        self.controller._build_pud_branch.assert_not_called()  # pylint: disable=protected-access
+        self._assert_moved_to_available()
+
+    def test_no_running_release_moves_to_available(self):
+        # Previously returned early, leaving them in uploading
+        self.mocks["swrc"].return_value.running_release = None
+
+        self._run()
+
+        self.mocks["sim_cls"].assert_not_called()
+        self.controller._build_pud_branch.assert_not_called()  # pylint: disable=protected-access
+        self._assert_moved_to_available()
+
+    def test_no_uploading_pud_is_noop(self):
+        self.mocks["swrc"].return_value.iterate_metapackages_by_state.return_value = []
+
+        self._run()
+
+        self.mocks["rel_state"].assert_not_called()
+        self.controller._build_pud_branch.assert_not_called()  # pylint: disable=protected-access
 
 
 class _FakeMetapackage:

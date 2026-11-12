@@ -37,6 +37,7 @@ SOFTWARE_RELEASES_STORAGE_DIR = Path("/opt/software/releases")
 SOFTWARE_RELEASES_METADATA_STORAGE_DIR = SOFTWARE_RELEASES_STORAGE_DIR / "metadata"
 AVAILABLE_DIR = SOFTWARE_RELEASES_METADATA_STORAGE_DIR / "available"
 UNAVAILABLE_DIR = SOFTWARE_RELEASES_METADATA_STORAGE_DIR / "unavailable"
+UPLOADING_DIR = SOFTWARE_RELEASES_METADATA_STORAGE_DIR / "uploading"
 FEED_OSTREE_BASE_DIR = Path("/var/www/pages/feed")
 RELEASE_GA_NAME = "starlingx-%s"
 SOFTWARE_STORAGE_DIR = Path("/opt/software")
@@ -49,7 +50,8 @@ PACKAGE_FEED_DIR = Path("/var/www/pages/updates/debian")
 
 # Ensure the metapackage base directories exist
 # This will create the parents and metapackage state directories
-for state_dir in [LEGACY_AVAILABLE_DIR, LEGACY_UNAVAILABLE_DIR, AVAILABLE_DIR, UNAVAILABLE_DIR, ]:
+for state_dir in [LEGACY_AVAILABLE_DIR, LEGACY_UNAVAILABLE_DIR, AVAILABLE_DIR,
+                  UNAVAILABLE_DIR, UPLOADING_DIR, ]:
     state_dir.mkdir(parents=True, exist_ok=True)
 
 
@@ -272,12 +274,14 @@ def load_import(from_release, to_release, iso_mount_dir, metapackages):
                                             dirs_exist_ok=True)
                             LOG.info(f"Copied pre-upgrade-deploy {deb_name} metapackage "
                                      f"content to {pre_upgrade_deploy_to_release_dir}")
-                        # Copy the pre-upgrade-deploy metapackage metadata with prefix 'pre-'
-                        # to differentiate from the actual product release metapackage
+                        # Pre-upgrade-deploy metadata goes to the uploading dir
+                        # (prefixed 'pre-'); the controller builds its commit on
+                        # the running major's highest available release and then
+                        # promotes it to available.
                         for src_md in pre_upgrade_deploy_to_release_dir.rglob("*/metadata.xml"):
                             mp_name = src_md.parent.name
                             mp_id = f"{mp_name}_{to_release}"
-                            dst_md = dst_dir / f"pre-{mp_id}-metadata.xml"
+                            dst_md = UPLOADING_DIR / f"pre-{mp_id}-metadata.xml"
                             upgrade_utils.remove_xml_tag(src_md, "contents")  # remove placeholders
                             upgrade_utils.copy_xml_file(src_md, dst_md,
                                                         {"deployable": "N", "pre_upgrade_deploy": "Y"})
@@ -292,7 +296,7 @@ def load_import(from_release, to_release, iso_mount_dir, metapackages):
                     # is not deterministic).
                     for mp_id in sorted(uploaded_pud_mp_ids,
                                         key=upgrade_utils.numeric_sort_key):
-                        print(f"Uploaded {mp_id} pre-upgrade-deploy metapackage release")
+                        print(f"Uploading {mp_id} pre-upgrade-deploy metapackage release")
 
         # Setup from release load
         setup_from_release_load(from_release, to_feed_dir)
