@@ -27,42 +27,50 @@ NEW_METADATA_DIR = Path("/opt/software/releases/metadata")
 PLUGIN_NAME = "move-release-metadata-file"
 
 
+def get_release_metadata_files(to_release):
+    """Return the to-release product metadata files in the legacy dir.
+
+    The deploy delete action passes the major release (MM.mm), while the
+    product metadata file is named after the full release version. That
+    is MM.mm.0 for a GA release, but MM.mm.pp (pp > 0) for a prepatched
+    release, so match any patch level of the to-release major version.
+
+    :param to_release: to-release version ("MM.mm" or "MM.mm.pp")
+    :returns: list of matching metadata file paths
+    """
+    major_release = get_major_release_version(to_release)
+    pattern = re.compile(r"^.+-%s\.\d+-metadata\.xml$" % re.escape(major_release))
+    return [f for f in OLD_METADATA_DIR.rglob("*-metadata.xml")
+            if pattern.match(f.name)]
+
+
 def do_delete(to_release):
     NEW_METADATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    versioned_to_release = get_patch_level_version(to_release)
-    path_glob = f"*{versioned_to_release}-metadata.xml"
-    files = list(OLD_METADATA_DIR.rglob(path_glob))
+    files = get_release_metadata_files(to_release)
     if not files:
-        raise FileNotFoundError("No metadata file found in %s matches pattern '%s'"
-                                % (OLD_METADATA_DIR, path_glob))
+        raise FileNotFoundError("No %s release metadata file found in %s"
+                                % (to_release, OLD_METADATA_DIR))
 
+    # Move every file even if one of them fails, then report the failures
+    failed = []
     for file in files:
         target_path = NEW_METADATA_DIR / file.name
-        shutil.move(str(file), str(target_path))
+        try:
+            shutil.move(str(file), str(target_path))
+        except Exception as e:
+            LOG.error("Failed to move %s to %s: %s" % (str(file), str(target_path), e))
+            failed.append(str(file))
+            continue
 
         if target_path.exists():
             LOG.info("Moved %s to %s" % (str(file), str(target_path)))
         else:
-            raise FileNotFoundError("File not created in target directory: %s"
-                                    % (str(target_path)))
+            LOG.error("File not created in target directory: %s" % str(target_path))
+            failed.append(str(file))
 
-
-def get_patch_level_version(sw_release_version):
-    """Ensures the version string has the full MM.mm.pp format.
-
-    If the version is in major release format (MM.mm), appends '.0'.
-    Otherwise returns the string unchanged.
-
-    :param sw_release_version: version string (e.g. "MM.mm" or "MM.mm.pp")
-    :returns: version string in MM.mm.pp format
-    """
-    if not sw_release_version:
-        return sw_release_version
-
-    if re.match(r'^\d+\.\d+$', sw_release_version):
-        return sw_release_version + ".0"
-    return sw_release_version
+    if failed:
+        raise RuntimeError("Failed to move release metadata files: %s" % ", ".join(failed))
 
 
 class MoveReleaseMetadataFile(CPlugin):
