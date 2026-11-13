@@ -57,6 +57,9 @@ EnableFluxcdControllers = getattr(
 K8sAppUpgrade = getattr(
     _import_module(".21-k8s-app-upgrade", __name__),
     "K8sAppUpgrade")
+AppsLvmSnapshotRestoreLifecycle = getattr(
+    _import_module(".21-apps-lvm-snapshot-restore-lifecycle", __name__),
+    "AppsLvmSnapshotRestoreLifecycle")
 RollbackFluxcdControllers = getattr(
     _import_module(".22-rollback-fluxcd-controllers", __name__),
     "RollbackFluxcdControllers")
@@ -201,6 +204,7 @@ PLUGINS = {
             AddTlsParameters(),
         ],
         K8S_APP_UPDATE: [
+            AppsLvmSnapshotRestoreLifecycle(),
             RollbackFluxcdControllers(),
             K8sAppUpgrade(),
             DisablePortierisWebhook(),
@@ -233,7 +237,7 @@ ACTIVATE_ROLLBACK_PLUGINS = PLUGINS[ACTION_ACTIVATE_ROLLBACK]
 DELETE_PLUGINS = PLUGINS[ACTION_DELETE]
 
 # supported n-2 from release version. None if unsupported.
-PREV_RELEASE = "25.09"
+PREV_RELEASE = "26.03"
 
 
 def get_plugin_mgr():
