@@ -2277,7 +2277,9 @@ class PatchController(PatchService):
             if rel.state == states.DEPLOYED or rel.state == states.UNAVAILABLE:
                 deployed_or_unavailable_releases_id.append(rel.id)
 
-            if rel.prepatched_iso:
+            # Product releases of a prepatched ISO are flagged prepatched but
+            # carry no preinstalled_patches; only take a non-empty list.
+            if rel.prepatched_iso and rel.preinstalled_patches:
                 preinstalled_patches = rel.preinstalled_patches
 
         release_dependencies = self.get_release_dependency_list(release_id, preinstalled_patches)
@@ -2331,7 +2333,10 @@ class PatchController(PatchService):
                     if unavailable_rel.commit_id in branch_commits:
                         previous_deployed_releases_id.append(unavailable_rel.id)
 
-                if unavailable_rel.prepatched_iso:
+                # Product releases of a prepatched ISO are flagged prepatched
+                # but carry no preinstalled_patches; only take a non-empty list.
+                if (unavailable_rel.prepatched_iso and
+                        unavailable_rel.preinstalled_patches):
                     preinstalled_patches = unavailable_rel.preinstalled_patches
 
         release_dependencies = self.get_release_dependency_list(release_id, preinstalled_patches)
@@ -3296,8 +3301,10 @@ class PatchController(PatchService):
 
         preinstalled_patches = []
         for release in releases:
-            if release['prepatched_iso']:
-                preinstalled_patches = release.get('preinstalled_patches', [])
+            # Product releases of a prepatched ISO are flagged prepatched but
+            # carry no preinstalled_patches; skip them.
+            if release['prepatched_iso'] and release.get('preinstalled_patches'):
+                preinstalled_patches = release['preinstalled_patches']
                 break
 
         for release in releases:

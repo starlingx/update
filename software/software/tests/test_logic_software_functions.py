@@ -170,6 +170,29 @@ class TestParseMetadataStringProduct(unittest.TestCase):
         self.assertEqual(release_id, "starlingx-24.09")
         self.assertEqual(rd.metadata["starlingx-24.09"]["sw_version"], "unknown")
 
+    def test_product_prepatched_iso_is_parsed(self):
+        """Product-level prepatched_iso must be kept.
+
+        The metapackages of a prepatched N.x.y (y > 0) product do not carry
+        the tag, so the product is the only place it can be read from.
+        """
+        xml = """<product>
+          <id>starlingx-26.10.100</id>
+          <sw_version>26.10.100</sw_version>
+          <prepatched_iso>Y</prepatched_iso>
+          <metapackages><pkg>base</pkg></metapackages>
+        </product>
+            """
+        rd = ReleaseData()
+        release_id = rd.parse_metadata_string(xml)
+        self.assertEqual(rd.metadata[release_id]["prepatched_iso"], "Y")
+
+    def test_product_prepatched_iso_defaults_to_n(self):
+        """A product without the tag is not a prepatched ISO."""
+        rd = ReleaseData()
+        release_id = rd.parse_metadata_string(PRODUCT_XML)
+        self.assertEqual(rd.metadata[release_id]["prepatched_iso"], "N")
+
 
 class TestParseMetadataStringLegacy(unittest.TestCase):
     """Tests for ReleaseData.parse_metadata_string — legacy release."""
