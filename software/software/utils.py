@@ -6,6 +6,8 @@ SPDX-License-Identifier: Apache-2.0
 """
 
 import configparser
+from datetime import datetime
+from datetime import timezone
 import hashlib
 import json
 import logging
@@ -706,19 +708,59 @@ def interval_task(interval_sec=10, no_run_return=False):
     return wrap
 
 
+def record_custom_branch(branch_name, product_id, components):
+    """Append a hashed custom branch to the audit file, for decoding later.
+
+    Call only once the branch has actually been created. Keyed by branch name
+    so re-recording the same branch is idempotent. Entries are never pruned, so
+    the audit file is a durable history of every custom branch ever created;
+    "created_at" records when each was first seen. Best effort: a failure to
+    write the audit file must not break branch creation.
+    """
+    try:
+        audit = load_from_json_file(constants.CUSTOM_BRANCH_AUDIT_FILE) or {}
+    except Exception:
+        audit = {}
+    # Preserve the original creation timestamp across idempotent re-records.
+    created_at = audit.get(branch_name, {}).get(
+        "created_at", datetime.now(timezone.utc).isoformat())
+    audit[branch_name] = {"product_id": product_id,
+                          "components": sorted(components),
+                          "created_at": created_at}
+    try:
+        save_to_json_file(constants.CUSTOM_BRANCH_AUDIT_FILE, audit)
+        LOG.info("Recorded custom branch %s covering components %s",
+                 branch_name, ",".join(sorted(components)))
+    except Exception as e:
+        LOG.warning("Could not record custom branch %s in audit file: %s",
+                    branch_name, e)
+
+
 def get_partial_branch_name(product_id, components):
     """Generate a deterministic branch name for a partial metapackage set.
 
+    The component set is hashed to keep the branch name fixed-width as the
+    number of metapackages grows. Deterministic: the same set always yields the
+    same name. The name is one-way; callers needing the component set must read
+    it from metadata (or the custom-branch audit file), not parse it from the
+    name. Side-effect free: callers that create the branch record it with
+    record_custom_branch().
+
     :param product_id: product release ID (e.g., 'starlingx-26.10.0')
-    :param components: list of component names (e.g., ['infra', 'swmgmt'])
-    :return: branch name (e.g., 'starlingx-26.10.0-infra_swmgmt')
+    :param components: list of component identifiers, each a
+        "<name>_<sw_release>" string (e.g., ['infra_26.10.0', 'swmgmt_26.10.0'])
+    :return: branch name (e.g., 'starlingx-26.10.0-<hash>')
     """
-    sorted_components = sorted(components)
-    return "%s-%s" % (product_id, "_".join(sorted_components))
+    # Comma joins the sorted set into a canonical string before hashing. A
+    # comma cannot appear in a component name, so two different sets cannot
+    # collide on the pre-hash string.
+    canonical = ",".join(sorted(components))
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+    return "%s-%s" % (product_id, digest)
 
 
 def get_pud_branch_name(product_id):
-    return "%s-%s" % (product_id, constants.PRE_UPGRADE_DEPLOY)
+    return "%s-%s" % (product_id, constants.PUD_BRANCH_SUFFIX)
 
 
 def get_highest_required_release(required_releases):

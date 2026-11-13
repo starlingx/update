@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 from packaging import version
 
 from software.tests import base  # pylint: disable=unused-import # noqa: F401
+from software.exceptions import APTOSTreeCommandFail
 from software.exceptions import BranchNotFound
 from software.exceptions import HostNotFound
 from software.exceptions import ReleasePrecheckInvalidRequest
@@ -23,6 +24,7 @@ from software.exceptions import UpgradeNotSupported
 from software.software_controller import PatchController
 from software.software_controller import AgentNeighbour
 from software import constants
+from software import release_data
 from software import states
 from software.states import DEPLOY_STATES
 
@@ -1217,7 +1219,7 @@ class TestBuildUploadedPudBranches(unittest.TestCase):
 
         self._run()
 
-        self.sim.delete_ref.assert_called_once_with(f"{self.PRODUCT}-pre-upgrade-deploy")
+        self.sim.delete_ref.assert_called_once_with(f"{self.PRODUCT}-{constants.PUD_BRANCH_SUFFIX}")
         self.controller.software_sync.assert_not_called()
         self._assert_moved_to_available()
 
@@ -1283,6 +1285,7 @@ class _FakeProductRelease:
         self.metapackages = {mp.id: mp for mp in metapackages}
         self._deps = deps
         self.version_obj = version.parse(sw_release)
+        self.requires_release_ids = []
 
     @property
     def state(self):
@@ -1929,12 +1932,14 @@ class TestPrestageBranchReuse(unittest.TestCase):
         mp = unittest.mock.MagicMock()
         mp.id = "infra_13.0.3"
         mp.component = "infra"
+        mp.sw_release = "13.0.3"
         mp.metadata_filename = "infra_13.0.3-metadata.xml"
         return mp
 
-    def _run(self, controller, sim, branch_commit, expected_commit):
+    def _run(self, controller, sim, branch_commit, expected_commit, install_error=None):
         """Drive the metapackage-overrides prestage path with the reuse check
-        resolved by (branch_commit, expected_commit).
+        resolved by (branch_commit, expected_commit). install_error, if set, is
+        raised by the package install.
         """
         mp = self._fake_mp()
         running_release = unittest.mock.MagicMock()
@@ -1967,24 +1972,27 @@ class TestPrestageBranchReuse(unittest.TestCase):
             unittest.mock.patch("software.software_controller.ostree_utils"),
             unittest.mock.patch("software.software_controller.reload_release_data"),
             unittest.mock.patch("software.software_controller.audit_log_info"),
+            unittest.mock.patch("software.software_controller.utils.record_custom_branch"),
         ]
-        for p in patches:
-            p.start()
+        started = [p.start() for p in patches]
         self.addCleanup(unittest.mock.patch.stopall)
-
-        return controller.software_deploy_prestage_api(
+        started[4].run_install.side_effect = install_error
+        result = controller.software_deploy_prestage_api(
             release=target_release, metapackage_overrides=["infra_13.0.3"])
+        return result, started[8]
 
     def test_reuse_when_commit_matches(self):
         # Branch exists and its tip equals the recorded commit -> reuse, no
         # branch creation and no reinstall
         controller = self._make_controller()
         sim = unittest.mock.MagicMock()
-        self._run(controller, sim, branch_commit="c1", expected_commit="c1")
+        _, mock_record = self._run(controller, sim, branch_commit="c1", expected_commit="c1")
 
         sim.create_branch.assert_not_called()
         sim.delete_ref.assert_not_called()
         controller.append_commit_to_metadata.assert_not_called()
+        # Nothing was built, so nothing new to record
+        mock_record.assert_not_called()
 
     def test_rebuild_when_commit_mismatches(self):
         # Branch exists but tip differs from the recorded commit -> delete,
@@ -2003,11 +2011,27 @@ class TestPrestageBranchReuse(unittest.TestCase):
         # Branch does not exist -> create and install, nothing stale to strip
         controller = self._make_controller()
         sim = unittest.mock.MagicMock()
-        self._run(controller, sim, branch_commit=None, expected_commit=None)
+        _, mock_record = self._run(controller, sim, branch_commit=None, expected_commit=None)
 
         sim.create_branch.assert_called_once()
         controller.remove_commit_from_metadata.assert_not_called()
         controller.append_commit_to_metadata.assert_called_once()
+        # The built branch is recorded under the name it was created with
+        branch_name = sim.create_branch.call_args.args[1]
+        mock_record.assert_called_once_with(
+            branch_name, "starlingx-13.0.3", ["infra_13.0.3"])
+
+    def test_failed_build_is_not_recorded(self):
+        # The install fails and the branch is deleted -> no audit entry
+        controller = self._make_controller()
+        sim = unittest.mock.MagicMock()
+        result, mock_record = self._run(
+            controller, sim, branch_commit=None, expected_commit=None,
+            install_error=APTOSTreeCommandFail("install failed"))
+
+        self.assertIn("install failed", result["error"])
+        sim.delete_ref.assert_called_once()
+        mock_record.assert_not_called()
 
 
 class TestValidateParametersForPrestage(unittest.TestCase):
@@ -2043,3 +2067,118 @@ class TestValidateParametersForPrestage(unittest.TestCase):
                 "starlingx-13.0.3", ["infra_13.0.3"],
                 pre_upgrade_deploy=False, restore=False)
         self.assertIn("can't be prestaged", str(ctx.exception))
+
+
+class _FakeInstallMp:
+    """Metapackage stand-in rich enough to build a real
+    MetapackageDeploymentSet and drive install_releases. The component name is
+    deliberately bare (no '_<sw_release>' suffix); install_releases must build
+    apt package names 'meta-<component>' from the bare name, not from the
+    '<component>_<sw_release>' strings used to hash the custom branch name.
+    """
+
+    def __init__(self, component, sw_release, sw_version, product, state):
+        self.id = f"{component}_{sw_release}"
+        self.component = component
+        self.sw_release = sw_release
+        self.sw_version = sw_version
+        self.product = product
+        self.state = state
+        self.reboot_required = False
+        self.base_commit_id = None
+        self.is_pre_upgrade_deploy_release = False
+        self.pre_start = None
+        self.post_start = None
+        self.metadata_filename = f"{self.id}-metadata.xml"
+        self.metapackage_dir = f"/tmp/{self.id}"
+
+
+class TestInstallReleasesPartialPackageNames(unittest.TestCase):
+    """Regression test for the custom-branch naming change: a partial
+    metapackage deploy must install bare 'meta-<component>' packages. The
+    '<component>_<sw_release>' strings exist only to keep the branch-name hash
+    unique across releases and must never leak into the apt package names
+    (which would make apt-ostree report 'No valid packages found').
+    """
+
+    def _make_controller(self):
+        controller = PatchController.__new__(PatchController)
+        controller.pre_bootstrap = False
+        controller.append_commit_to_metadata = unittest.mock.MagicMock()
+        controller._ensure_release_branch = unittest.mock.MagicMock()  # pylint: disable=protected-access
+        return controller
+
+    def _run_partial_deploy(self, sw_release, sw_version, product_id):
+        """Drive install_releases down the partial custom-branch path.
+
+        :return: (mock_apt_utils, mock_record_custom_branch)
+        """
+
+        # Deploy set covers 'infra'; 'swmgmt' is already deployed, so the total
+        # set is {infra, swmgmt}. The product also contains a third metapackage
+        # ('k8s') that is neither, so the total set is a strict subset of the
+        # product -> the partial custom-branch path is taken.
+        infra = _FakeInstallMp("infra", sw_release, sw_version, product_id, states.AVAILABLE)
+        swmgmt = _FakeInstallMp("swmgmt", sw_release, sw_version, product_id, states.DEPLOYED)
+        k8s = _FakeInstallMp("k8s", sw_release, sw_version, product_id, states.AVAILABLE)
+        deploy_set = release_data.MetapackageDeploymentSet([infra])
+
+        product = _FakeProductRelease(product_id, sw_release, [infra, swmgmt, k8s], deps=[])
+
+        collection = unittest.mock.MagicMock()
+        collection.get_release_by_id.side_effect = {
+            product_id: product, infra.id: infra, swmgmt.id: swmgmt, k8s.id: k8s}.get
+        # 'swmgmt' already deployed -> included in the total set alongside 'infra'
+        collection.get_ordered_metapackages.return_value = [swmgmt]
+
+        sim = unittest.mock.MagicMock()
+        sim.get_branch_commit.return_value = "base-commit"
+
+        patches = [
+            unittest.mock.patch.object(
+                PatchController, "release_collection", collection),
+            unittest.mock.patch.object(
+                PatchController, "check_product_release_deployable_branch",
+                return_value=False),
+            unittest.mock.patch(
+                "software.software_controller.SoftwareInventoryManager", return_value=sim),
+            unittest.mock.patch(
+                "software.software_controller.get_SWReleaseCollection", return_value=collection),
+            unittest.mock.patch(
+                "software.software_controller.utils.get_highest_required_release",
+                return_value=None),
+            unittest.mock.patch("software.software_controller.apt_utils"),
+            unittest.mock.patch("software.software_controller.ostree_utils"),
+            unittest.mock.patch("software.software_controller.plugin_runner"),
+            unittest.mock.patch("software.software_controller.reload_release_data"),
+            unittest.mock.patch("software.software_controller.audit_log_info"),
+            unittest.mock.patch("software.software_controller.utils.record_custom_branch"),
+        ]
+        started = [p.start() for p in patches]
+        self.addCleanup(unittest.mock.patch.stopall)
+
+        controller = self._make_controller()
+        controller.install_releases(deploy_set, f"/var/www/pages/feed/rel-{sw_version}/ostree_repo")
+        return started[5], started[10]
+
+    def test_partial_deploy_installs_bare_component_names(self):
+        sw_release = "26.10.2"
+        mock_apt_utils, _ = self._run_partial_deploy(
+            sw_release, "26.10", "starlingx-26.10.2")
+
+        mock_apt_utils.run_install.assert_called_once()
+        packages = mock_apt_utils.run_install.call_args.args[3]
+        self.assertCountEqual(packages, ["meta-infra", "meta-swmgmt"])
+        for pkg in packages:
+            self.assertNotIn(sw_release, pkg)
+
+    def test_partial_deploy_records_built_branch(self):
+        # The custom branch is recorded once it has been built, under the same
+        # name the build used and with the suffixed component set
+        product_id = "starlingx-26.10.2"
+        mock_apt_utils, mock_record = self._run_partial_deploy(
+            "26.10.2", "26.10", product_id)
+
+        branch_name = mock_apt_utils.run_install.call_args.kwargs["branch"]
+        mock_record.assert_called_once_with(
+            branch_name, product_id, ["infra_26.10.2", "swmgmt_26.10.2"])

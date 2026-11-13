@@ -4741,12 +4741,12 @@ class PatchController(PatchService):
         # nothing deployed depends on those branches:
         #   - The release itself must still be 'available'. A 'deployed' or
         #     'deployed-partial' product holds its deployed commit on a custom
-        #     branch (the full set, or a partial <release>-<components> set),
-        #     which restore would delete.
+        #     branch (the full set, or a partial <release>-<hash> set), which
+        #     restore would delete.
         #   - No pre-upgrade-deploy metapackage may be deployed. A deployed PUD
         #     leaves the product in 'available' state, so the state check alone
-        #     misses it, yet its commit lives on the <release>-pre-upgrade-deploy
-        #     branch that restore would delete.
+        #     misses it, yet its commit lives on the <release>-pud branch that
+        #     restore would delete.
         if restore:
             if product_release.state != states.AVAILABLE:
                 raise Exception(
@@ -4882,9 +4882,9 @@ class PatchController(PatchService):
         # Prestage just builds a custom branch and leaves it for later deploy,
         # so restore removes every custom branch for the release. Custom
         # branches carry the "<release>-" prefix, covering both partial sets
-        # (<release>-<components>) and pre-upgrade-deploy
-        # (<release>-pre-upgrade-deploy). The release's own base branch
-        # "<release>" has no trailing dash and is preserved
+        # (<release>-<hash>) and pre-upgrade-deploy (<release>-pud). The
+        # release's own base branch "<release>" has no trailing dash and is
+        # preserved
         prefix = f"{base_release}-"
         custom_branches = [b for b in sw_inventory.get_branches() if b.startswith(prefix)]
 
@@ -5018,7 +5018,8 @@ class PatchController(PatchService):
             # For metapackage overrides or restore: parent commit is the top commit of the
             # target product release branch in the feed repo
             base_release = release
-            metapackage_components = [mp.component for mp in metapackage_data]
+            # "<name>_<sw_release>" keeps multi-release sets distinct; mp names have no underscore
+            metapackage_components = [f"{mp.component}_{mp.sw_release}" for mp in metapackage_data]
             target_branch = utils.get_partial_branch_name(target_release, metapackage_components)
 
         # Build MetapackageDeploymentSet for the install step
@@ -5136,6 +5137,12 @@ class PatchController(PatchService):
                 LOG.error(msg)
                 msg_error += msg
                 return dict(info=msg_info, warning=msg_warning, error=msg_error)
+
+            # Record the hashed partial branch now that it exists. The PUD
+            # branch has a fixed, readable name and needs no decoding
+            if not pre_upgrade_deploy:
+                utils.record_custom_branch(target_branch, target_release,
+                                           metapackage_components)
 
         msg_info += f"Prestage completed successfully for product release {release}"
         LOG.info("Prestage completed for %s. commit: %s, parent: %s, branch: %s",
@@ -6056,11 +6063,16 @@ class PatchController(PatchService):
                             self._ensure_release_branch(product_rel_id, sim)
                             sim.deploy(product_rel_id)
                         else:
-                            # Partial set: build custom branch from base
-                            total_set_components = sorted([
-                                self.release_collection.get_release_by_id(mp_id).component
+                            # Partial set: build custom branch from base.
+                            # "<name>_<sw_release>" keeps multi-release sets distinct; mp names have no underscore
+                            total_set_releases = [
+                                self.release_collection.get_release_by_id(mp_id)
                                 for mp_id in total_set_ids
-                                if self.release_collection.get_release_by_id(mp_id)
+                            ]
+                            total_set_components = sorted([
+                                f"{rel.component}_{rel.sw_release}"
+                                for rel in total_set_releases
+                                if rel
                             ])
                             branch_name = utils.get_partial_branch_name(product_rel_id, total_set_components)
 
@@ -6091,7 +6103,12 @@ class PatchController(PatchService):
                                 if base_branch != constants.OSTREE_REF:
                                     self._ensure_release_branch(base_branch, sim)
                                 base_commit = sim.get_branch_commit(base_branch)
-                                packages = [f"meta-{comp}" for comp in total_set_components]
+                                # Package names use the bare component only.
+                                # total_set_components carries a "_<sw_release>"
+                                # suffix solely to keep the branch-name hash
+                                # unique across releases; the actual metapackage
+                                # is "meta-<component>" with no suffix.
+                                packages = [f"meta-{rel.component}" for rel in total_set_releases if rel]
 
                                 LOG.info(f"Building custom branch {branch_name} from base {base_commit[:10]}")
                                 sim.delete_ref(branch_name)  # Clean old branch, if existing
@@ -6106,6 +6123,8 @@ class PatchController(PatchService):
 
                                 # Get the new commit created by run_install
                                 new_commit = sim.get_branch_commit(branch_name)
+                                utils.record_custom_branch(branch_name, product_rel_id,
+                                                           total_set_components)
 
                                 # Do not delete other custom branches here: a
                                 # previous custom branch may be the rollback
