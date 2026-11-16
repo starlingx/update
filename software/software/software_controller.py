@@ -7624,6 +7624,27 @@ class PatchController(PatchService):
 
         self._activate(action="activate-rollback", snapshot_restored=snapshot_restored)
 
+    def _activate_rollback_after_snapshot_restore(self):
+        """Run the activate-rollback plugins after a system-deploy snapshot restore.
+
+        The restore brings the filesystem back but does not fully restore every
+        k8s application, so the plugins must still run, filtered for the
+        post-snapshot-restore scenario (snapshot_restored=True). The scripts
+        report activate-rollback-done or activate-rollback-failed when they
+        finish, so the deploy state is not moved to done here.
+
+        The indicator is persisted on the deploy record first, so a reattempt
+        after a plugin failure never falls back to the full plugin set.
+
+        :raises SoftwareServiceError: if the plugins could not be started
+        """
+        self.db_api_instance.update_deploy(snapshot_restored=True)
+        LOG.info("System deploy snapshots were restored, running activate-rollback "
+                 "plugins filtered for the post-snapshot-restore scenario")
+        if not self._activate(action="activate-rollback", snapshot_restored=True):
+            raise SoftwareServiceError(
+                "Failed to start the activate-rollback scripts after the snapshot restore")
+
     @require_deploy_state([DEPLOY_STATES.ACTIVATE_ROLLBACK_PENDING, DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED],
                           "Activate-rollback deployment only when current deployment state is {require_states}")
     def software_deploy_activate_rollback_api(self) -> dict:
@@ -7641,22 +7662,44 @@ class PatchController(PatchService):
         system_deploy = self._get_system_deploy()
         if system_deploy:
             system_deploy_id = system_deploy.get("id")
-            LOG.info("system-deploy entity found (ID: %s), trying to restore through snapshots",
-                     system_deploy_id)
-            try:
-                self._restore_system_deploy_snapshots(system_deploy_id)
+            deploy = self.db_api_instance.get_current_deploy()
+            # Set once a restore has succeeded, and kept across reattempts, so a
+            # retry after a plugin failure does not restore again and can never
+            # fall back to the full plugin set on an already restored system
+            restored = bool(deploy) and to_bool(deploy.get("snapshot_restored"))
+            if restored:
+                LOG.info("system-deploy snapshots were already restored, skipping the restore")
+            else:
+                LOG.info("system-deploy entity found (ID: %s), trying to restore through snapshots",
+                         system_deploy_id)
+                try:
+                    self._restore_system_deploy_snapshots(system_deploy_id)
+                    restored = True
+                except Exception as e:
+                    msg = "Failed to restore system deploy: %s" % str(e)
+                    if system_deploy.get("to_k8s_version"):
+                        deploy_state.activate_rollback_failed()
+                        LOG.exception(msg)
+                        msg_error += msg + "\n"
+                        return dict(info=msg_info, warning=msg_warning, error=msg_error)
+                    LOG.warning(msg)
+                    LOG.info("Falling-back to normal activate-rollback procedure, since there is no K8s upgrade")
+
+            if restored:
                 msg_info += "System deploy snapshots and backups restored\n"
-                deploy_state.activate_rollback_done()
-                return dict(info=msg_info, warning=msg_warning, error=msg_error)
-            except Exception as e:
-                msg = "Failed to restore system deploy: %s" % str(e)
-                if system_deploy.get("to_k8s_version"):
+                # Kept outside the restore try block: a failure to start the
+                # plugins must fail the rollback, not fall back to the normal
+                # (unfiltered) procedure below
+                try:
+                    self._activate_rollback_after_snapshot_restore()
+                except Exception:
                     deploy_state.activate_rollback_failed()
-                    LOG.exception(msg)
-                    msg_error += msg + "\n"
-                    return dict(info=msg_info, warning=msg_warning, error=msg_error)
-                LOG.warning(msg)
-                LOG.info("Falling-back to normal activate-rollback procedure, since there is no K8s upgrade")
+                    raise
+                msg_info += ("Deploy activate-rollback has started, await for the states "
+                             f"[{DEPLOY_STATES.ACTIVATE_ROLLBACK_DONE.value} | "
+                             f"{DEPLOY_STATES.ACTIVATE_ROLLBACK_FAILED.value}] "
+                             "in 'software deploy show'\n")
+                return dict(info=msg_info, warning=msg_warning, error=msg_error)
 
         try:
             self._activate_rollback()
