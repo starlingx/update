@@ -48,7 +48,8 @@ class AppsLvmSnapshotRestoreLifecycle(CPlugin):
             LOG.info("Triggering the LVM snapshot restore lifecycle hook for applied apps")
             try:
                 client = get_sysinv_client()
-                client.kube_app.post_trigger_lvm_snapshot_restore_lifecycle()
+                client.kube_app.post_trigger_lvm_snapshot_restore_lifecycle(
+                    from_release, to_release)
             except Exception as e:
                 LOG.error("Failed to trigger the LVM snapshot restore lifecycle "
                           "hook for applied apps, check sysinv.log for details: %s", e)
