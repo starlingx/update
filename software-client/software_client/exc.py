@@ -255,3 +255,7 @@ class InvalidAttribute(ClientException):
 
 class InvalidAttributeValue(ClientException):
     pass
+
+
+class ReleaseFileError(BaseException):
+    """Release info cannot be read from an ISO or patch file"""

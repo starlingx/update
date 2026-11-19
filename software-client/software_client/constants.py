@@ -43,6 +43,10 @@ ISO_EXTENSION = ".iso"
 SIG_EXTENSION = ".sig"
 PATCH_EXTENSION = ".patch"
 SUPPORTED_UPLOAD_FILE_EXT = [ISO_EXTENSION, SIG_EXTENSION, PATCH_EXTENSION]
+
+# Release metadata
+PREPATCHED_ISO_TAG = "prepatched_iso"
+RELEASE_GA_NAME = "starlingx-%s"
 SCRATCH_DIR = "/scratch"
 
 # Authorization modes of software cli

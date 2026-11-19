@@ -19,6 +19,7 @@ Package: software-client
 Architecture: all
 Depends: ${python3:Depends},
  ${misc:Depends},
+ genisoimage,
  python3-argcomplete
 Description: StarlingX unified software deployment and management client
  StarlingX unified software deployment and management client.
