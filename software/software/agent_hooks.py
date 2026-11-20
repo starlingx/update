@@ -27,6 +27,7 @@ import logging as LOG
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -2246,6 +2247,137 @@ class EtcdUpgradeRollbackHook(BaseHook):
             self._rollback()
 
 
+class EtcdFloatingPeerUrlHook(BaseHook):
+    """Correct the floating etcd member's registered peer URL on 'deploy host'.
+
+    Releases before this one register the floating etcd member with the
+    peer URL http://localhost:2380. The member listens on the cluster-host
+    floating address, so the registration does not describe where the
+    member can be reached.
+
+    The fixed member reads the registered peer URLs to build its own
+    ETCD_INITIAL_CLUSTER, so while the registration names a loopback the
+    fixed member cannot start. Correcting the registration here, before
+    the host is unlocked, means the fixed member reads a reachable
+    address whenever it is started.
+
+    The correction is a single member update against the running cluster
+    and is idempotent: a registration that already names the cluster-host
+    floating address is left alone.
+
+    This hook does not read hieradata. /opt/platform is a DRBD mount and
+    is not available to a locked controller during 'deploy host', so the
+    floating address is resolved by name instead.
+    """
+
+    ETCD_FLOATING_MEMBER_NAME = "controller"
+    ETCD_FLOATING_HOST_NAME = "controller-cluster-host"
+    ETCD_CLIENT_PORT = 2379
+    ETCD_PEER_PORT = 2380
+    ETCD_CA = "/etc/etcd/ca.crt"
+    ETCD_CERT = "/etc/etcd/etcd-client.crt"
+    ETCD_KEY = "/etc/etcd/etcd-client.key"
+    ETCDCTL_TIMEOUT = 30
+
+    @staticmethod
+    def _bracket(address):
+        """Wrap an IPv6 address in brackets for use in a URL."""
+        return "[%s]" % address if ":" in address else address
+
+    def _resolve_floating_address(self):
+        """Return the cluster-host floating address, or None."""
+        try:
+            info = socket.getaddrinfo(self.ETCD_FLOATING_HOST_NAME, None)
+        except socket.gaierror as e:
+            LOG.error("Could not resolve %s: %s" %
+                      (self.ETCD_FLOATING_HOST_NAME, str(e)))
+            return None
+        return info[0][4][0] if info else None
+
+    def _etcdctl(self, args, endpoint):
+        """Run etcdctl against one endpoint and return stdout."""
+        cmd = ["etcdctl",
+               "--cacert", self.ETCD_CA,
+               "--cert", self.ETCD_CERT,
+               "--key", self.ETCD_KEY,
+               "--endpoints", endpoint,
+               "--command-timeout", "%ds" % self.ETCDCTL_TIMEOUT]
+        cmd.extend(args)
+        return subprocess.run(cmd, check=True, capture_output=True,
+                              timeout=self.ETCDCTL_TIMEOUT + 5).stdout.decode()
+
+    def _floating_member(self, endpoint):
+        """Return (id, peer_url) of the floating member, or (None, None)."""
+        for line in self._etcdctl(["member", "list"], endpoint).splitlines():
+            fields = [f.strip() for f in line.split(",")]
+            if len(fields) < 4:
+                continue
+            if fields[2] == self.ETCD_FLOATING_MEMBER_NAME:
+                return fields[0], fields[3]
+        return None, None
+
+    def _warn_fixed_member_will_fail(self, reason):
+        """Log that the fixed member will not start, and why."""
+        LOG.warning("%s. The fixed etcd member will fail to start at the "
+                    "controller unlock until the floating etcd member is "
+                    "registered with the cluster-host floating address."
+                    % reason)
+
+    def _correct_peer_url(self):
+        """Update the floating member's peer URL if it is not reachable."""
+        if self.get_platform_conf("nodetype") != self.CONTROLLER:
+            return
+        if self.get_platform_conf("system_mode") == self.SIMPLEX:
+            LOG.info("Simplex has no floating etcd member, nothing to correct")
+            return
+
+        address = self._resolve_floating_address()
+        if address is None:
+            self._warn_fixed_member_will_fail(
+                "The cluster-host floating address is unknown")
+            return
+
+        host = self._bracket(address)
+        endpoint = "https://%s:%d" % (host, self.ETCD_CLIENT_PORT)
+        peer_url = "https://%s:%d" % (host, self.ETCD_PEER_PORT)
+
+        try:
+            member_id, registered = self._floating_member(endpoint)
+            if member_id is None:
+                LOG.info("Floating etcd member %s is not registered, "
+                         "nothing to correct" % self.ETCD_FLOATING_MEMBER_NAME)
+                return
+            if registered == peer_url:
+                LOG.info("Floating etcd member %s already registered as %s" %
+                         (member_id, registered))
+                return
+
+            LOG.info("Floating etcd member %s is registered as %s, "
+                     "updating it to %s" % (member_id, registered, peer_url))
+            self._etcdctl(["member", "update", member_id,
+                           "--peer-urls=%s" % peer_url], endpoint)
+            LOG.info("Updated floating etcd member %s peer URL to %s" %
+                     (member_id, peer_url))
+        except subprocess.TimeoutExpired:
+            self._warn_fixed_member_will_fail(
+                "Timed out correcting the floating etcd member peer URL "
+                "against %s" % endpoint)
+        except subprocess.CalledProcessError as e:
+            self._warn_fixed_member_will_fail(
+                "Could not correct the floating etcd member peer URL "
+                "against %s: %s" % (endpoint, e.stderr.decode().strip()))
+
+    def run(self):
+        """Execute the hook"""
+        try:
+            self._correct_peer_url()
+        except Exception as e:
+            LOG.exception("Error correcting the floating etcd member peer "
+                          "URL: %s" % e)
+            self._warn_fixed_member_will_fail(
+                "The floating etcd member peer URL was not corrected")
+
+
 class HookManager(object):
     """
     Object to manage the execution of agent hooks
@@ -2271,6 +2403,7 @@ class HookManager(object):
             FixedEtcMergeHook,
             KubeletUpgradeHook,
             EtcdUpgradeRollbackHook,
+            EtcdFloatingPeerUrlHook,
             LdapConfigHook,
             OpenstackConfHook,
             PuppetHieradataUpdate,
