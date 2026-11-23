@@ -485,6 +485,89 @@ class RemoveMetapackageInitialSetupFlagHook(BaseHook):
                           "%s: %s" % (target, e))
 
 
+class RemoveDpllMgrRollbackHook(BaseHook):
+    """
+    Remove the dpll-mgr service files left in /etc when rolling back to a
+    release that does not ship dpll-mgr.
+
+    On the from-release, puppet writes the dpll-mgr@.service template on
+    every host, plus the per-instance JSON, options file and enable link on
+    hosts with a dpll-mgr PTP instance. None of them is owned by a package,
+    so the ostree /etc merge carries them into the to-release deployment.
+    There, /usr/bin/dpll-mgr does not exist. systemd queues the instance
+    from the multi-user.target.wants link while it builds the boot
+    transaction, and usm-initialize removes the link too late to cancel the
+    job. The unit then fails with 203/EXEC and Restart=on-failure retries it
+    every 5 seconds.
+
+    The files are removed from the to-release ostree deployment (/ostree/1),
+    not the live filesystem, so the enable link is already gone when systemd
+    builds the first boot transaction on the to-release.
+
+    The hook runs only when the to-release has no dpll-mgr binary, so it
+    needs no release check and is a no-op when rolling back to a release
+    that ships dpll-mgr.
+
+    TODO(cwalker): Remove when stx.14 is no longer supported as a from
+    release. Rollback is supported to n-2, and stx.12 and earlier do not
+    ship dpll-mgr. From stx.15 on, every rollback target (stx.13 and later)
+    ships it.
+    """
+
+    DPLL_MGR_BINARY = "/usr/bin/dpll-mgr"
+
+    # Paths relative to the to-release deployment root. Globs are expanded
+    # by glob.glob(), which also matches broken symlinks.
+    DPLL_MGR_FILES = [
+        "etc/systemd/system/dpll-mgr@.service",
+        "etc/systemd/system/multi-user.target.wants/dpll-mgr@*.service",
+        "etc/linuxptp/ptpinstance/dpll-mgr-*.json",
+        # ptp_options_dir on Debian; read by the unit via EnvironmentFile=-
+        "etc/default/ptpinstance/dpll-mgr-instance-*",
+    ]
+
+    def run(self):
+        binary = self.get_new_deploy_path(self.DPLL_MGR_BINARY)
+        if os.path.exists(binary):
+            LOG.info("%s exists in the to-release; nothing to clean up for "
+                     "dpll-mgr" % binary)
+            return
+
+        LOG.info("Running RemoveDpllMgrRollbackHook: %s not found in the "
+                 "to-release" % binary)
+        for pattern in self.DPLL_MGR_FILES:
+            for path in glob.glob(self.get_new_deploy_path(pattern)):
+                try:
+                    os.remove(path)
+                    LOG.info("Removed %s" % path)
+                except FileNotFoundError:
+                    LOG.info("%s already removed" % path)
+                except Exception as e:
+                    # A stale file is low-consequence once the enable link
+                    # is gone; do not fail the rollback over it.
+                    LOG.exception("Failed to remove %s: %s" % (path, e))
+        self._sync_etc_dirs()
+        LOG.info("RemoveDpllMgrRollbackHook completed")
+
+    def _sync_etc_dirs(self):
+        """Flush the changed directories so removals persist across reboot."""
+        for rel_dir in ("etc/systemd/system",
+                        "etc/systemd/system/multi-user.target.wants",
+                        "etc/linuxptp/ptpinstance",
+                        "etc/default/ptpinstance"):
+            path = self.get_new_deploy_path(rel_dir)
+            if not os.path.isdir(path):
+                continue
+            try:
+                dirfd = os.open(path, os.O_RDONLY)
+                try:
+                    os.fsync(dirfd)
+                finally:
+                    os.close(dirfd)
+            except OSError as e:
+                LOG.warning("Failed to sync %s: %s" % (path, e))
+
+
 # TODO(bqian) split the framework based kernel parameters backup and restore
 # from feature based kernel parameter pre-populate code.
 
@@ -2429,6 +2512,7 @@ class HookManager(object):
             SSSDCacheCleanupRollBackHook,
             RestorePlatformConfPermissionHook,
             RemoveMetapackageInitialSetupFlagHook,
+            RemoveDpllMgrRollbackHook,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
