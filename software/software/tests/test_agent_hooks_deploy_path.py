@@ -4,7 +4,10 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+import os
+import shutil
 import subprocess
+import tempfile
 import unittest
 from unittest import mock
 
@@ -19,6 +22,7 @@ from software.agent_hooks import FixedEtcMergeHook
 from software.agent_hooks import FixedEtcMergeRollBackHook
 from software.agent_hooks import HookManager
 from software.agent_hooks import ReconfigureKernelHook
+from software.agent_hooks import RemoveDpllMgrRollbackHook
 from software.agent_hooks import UpdateKernelParametersHook
 from software.agent_hooks import UsmInitHook
 
@@ -380,6 +384,104 @@ class TestFixedEtcMergeRollBackHook(unittest.TestCase):
         hook.run()
         self.assertEqual(mock_rm.call_count,
                          len(FixedEtcMergeRollBackHook.DELETE_FILES))
+
+
+class TestRemoveDpllMgrRollbackHook(unittest.TestCase):
+    """The hook edits the to-release deployment (/ostree/1), faked here."""
+
+    FILES = [
+        "etc/systemd/system/dpll-mgr@.service",
+        "etc/linuxptp/ptpinstance/dpll-mgr-dpll-mgr1.json",
+        "etc/default/ptpinstance/dpll-mgr-instance-dpll-mgr1",
+    ]
+    LINK = "etc/systemd/system/multi-user.target.wants/dpll-mgr@dpll-mgr1.service"
+    KEEP = [
+        "etc/systemd/system/ptp4l@.service",
+        "etc/systemd/system/multi-user.target.wants/ptp4l@ptp1.service",
+        "etc/linuxptp/ptpinstance/ptp4l-ptp1.conf",
+        "etc/linuxptp/ptpinstance/ts2phc-ts1.conf",
+        "etc/default/ptpinstance/ptp4l-instance-ptp1",
+    ]
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root)
+        patcher = mock.patch.object(BaseHook, "TO_RELEASE_OSTREE_DIR", self.root)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.attrs = dict(ATTRS, hook_action=HookManager.MAJOR_RELEASE_ROLLBACK)
+
+    def _touch(self, rel):
+        path = os.path.join(self.root, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write("x")
+        return path
+
+    def _populate(self):
+        for rel in self.FILES + self.KEEP:
+            self._touch(rel)
+        # the enable link points at a unit that exists only on the from-release
+        link = os.path.join(self.root, self.LINK)
+        os.makedirs(os.path.dirname(link), exist_ok=True)
+        os.symlink("/lib/systemd/system/dpll-mgr@.service", link)
+
+    def _exists(self, rel):
+        return os.path.lexists(os.path.join(self.root, rel))
+
+    def test_removes_dpll_mgr_files_when_binary_absent(self):
+        self._populate()
+        RemoveDpllMgrRollbackHook(self.attrs).run()
+        for rel in self.FILES + [self.LINK]:
+            self.assertFalse(self._exists(rel), rel)
+
+    def test_keeps_unrelated_ptp_files(self):
+        self._populate()
+        RemoveDpllMgrRollbackHook(self.attrs).run()
+        for rel in self.KEEP:
+            self.assertTrue(self._exists(rel), rel)
+
+    def test_removes_enable_link_for_multiple_instances(self):
+        self._populate()
+        link2 = os.path.join(
+            self.root, "etc/systemd/system/multi-user.target.wants/dpll-mgr@dpll-mgr2.service")
+        os.symlink("/lib/systemd/system/dpll-mgr@.service", link2)
+        self._touch("etc/linuxptp/ptpinstance/dpll-mgr-dpll-mgr2.json")
+        RemoveDpllMgrRollbackHook(self.attrs).run()
+        self.assertFalse(os.path.lexists(link2))
+        self.assertFalse(self._exists("etc/linuxptp/ptpinstance/dpll-mgr-dpll-mgr2.json"))
+
+    def test_noop_when_to_release_ships_dpll_mgr(self):
+        self._populate()
+        self._touch("usr/bin/dpll-mgr")
+        RemoveDpllMgrRollbackHook(self.attrs).run()
+        for rel in self.FILES + [self.LINK]:
+            self.assertTrue(self._exists(rel), rel)
+
+    def test_noop_when_nothing_to_remove(self):
+        # host that never had an instance, empty to-release etc
+        RemoveDpllMgrRollbackHook(self.attrs).run()
+
+    def test_idempotent(self):
+        self._populate()
+        RemoveDpllMgrRollbackHook(self.attrs).run()
+        RemoveDpllMgrRollbackHook(self.attrs).run()
+        self.assertFalse(self._exists(self.FILES[0]))
+
+    @mock.patch("os.remove", side_effect=PermissionError("denied"))
+    def test_remove_failure_does_not_fail_rollback(self, _rm):
+        self._populate()
+        RemoveDpllMgrRollbackHook(self.attrs).run()
+
+    def test_registered_in_rollback_before_usm_init(self):
+        hooks = HookManager.AGENT_HOOKS[HookManager.MAJOR_RELEASE_ROLLBACK]
+        self.assertIn(RemoveDpllMgrRollbackHook, hooks)
+        self.assertLess(hooks.index(RemoveDpllMgrRollbackHook),
+                        hooks.index(UsmInitHook))
+
+    def test_not_registered_for_upgrade(self):
+        hooks = HookManager.AGENT_HOOKS[HookManager.MAJOR_RELEASE_UPGRADE]
+        self.assertNotIn(RemoveDpllMgrRollbackHook, hooks)
 
 
 class TestHookManager(unittest.TestCase):
