@@ -137,9 +137,6 @@ if __name__ == "__main__":
             sys.exit(1)
         arg += 1
 
-    if action != "activate":
-        sys.exit(0)
-
     plugin = OpenbaoActivate()
     result = plugin.run(from_release, to_release, action, port)
     if result and 'failed' in result:

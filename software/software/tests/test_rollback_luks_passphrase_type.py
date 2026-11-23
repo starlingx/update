@@ -40,19 +40,18 @@ if UPGRADE_SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, UPGRADE_SCRIPTS_DIR)
 
 
-def _load_script(filename):
+def _load_script(filename, subdir=""):
     """Load a numbered upgrade script by filename via importlib."""
     mod_name = filename[:-3].replace("-", "_")
-    spec = importlib.util.spec_from_file_location(
-        mod_name, os.path.join(UPGRADE_SCRIPTS_DIR, filename)
-    )
+    script_path = os.path.join(UPGRADE_SCRIPTS_DIR, subdir, filename)
+    spec = importlib.util.spec_from_file_location(mod_name, script_path)
     mod = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
     return mod
 
 
-_plugin_mod = _load_script("27-rollback-luks-passphrase-type.py")
+_plugin_mod = _load_script("27-rollback-luks-passphrase-type.py", subdir="n-1")
 
 
 class TestRollbackLuksPassphraseType(unittest.TestCase):

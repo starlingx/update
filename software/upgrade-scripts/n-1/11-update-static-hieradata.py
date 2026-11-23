@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2023-2025 Wind River Systems, Inc.
+# Copyright (c) 2023-2026 Wind River Systems, Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -12,76 +12,39 @@ import sys
 import tempfile
 import yaml
 
+from _loader import CPlugin
 from software.utilities.utils import configure_logging
 
 LOG = logging.getLogger('main_logger')
 
+SYSTEM_STATIC_FILE = "static.yaml"
+SECURE_STATIC_FILE = "secure_static.yaml"
+HIERADATA_PATH = "/opt/platform/puppet/%s/hieradata"
+
 
 def get_list_of_keys(from_release, to_release):
-    keys = {"static": [], "secure_static": []}
-
-    if from_release == "25.09":
-        keys["static"] = ["platform::etcd::params::etcd_version"]
-
-    return keys
+    return {"static": [], "secure_static": []}
 
 
 def get_key_renames(from_release, to_release):
-    """Return hieradata keys that need to be renamed during rollback.
+    """Return hieradata keys that need to be renamed between releases.
 
-    During rollback from Trixie (26.10+) to Bullseye (26.03 or earlier),
-    the keystone hieradata key must be reverted from the Trixie format
-    (keystone::db::database_connection) back to the Bullseye format
-    (keystone::database_connection).
+    During cross-distro migration from Bullseye to Trixie, the upstream
+    puppet-keystone module moved database_connection from the keystone
+    class to the keystone::db subclass. This function provides the
+    old_key -> new_key mapping to migrate persisted hieradata.
 
     26.03 is the last Bullseye release; 26.10+ is Trixie.
     """
     renames = {"static": {}, "secure_static": {}}
 
-    if from_release > "26.03" and to_release <= "26.03":
+    if from_release <= "26.03":
         renames["secure_static"] = {
-            "keystone::db::database_connection":
-                "keystone::database_connection"
+            "keystone::database_connection":
+                "keystone::db::database_connection"
         }
 
     return renames
-
-
-def main():
-    action = None
-    from_release = None
-    to_release = None
-    arg = 1
-
-    while arg < len(sys.argv):
-        if arg == 1:
-            from_release = sys.argv[arg]
-        elif arg == 2:
-            to_release = sys.argv[arg]
-        elif arg == 3:
-            action = sys.argv[arg]
-        elif arg == 4:
-            # optional port parameter for USM upgrade
-            # port = sys.argv[arg]
-            pass
-        else:
-            print("Invalid option %s." % sys.argv[arg])
-            return 1
-        arg += 1
-
-    configure_logging()
-
-    LOG.info("%s invoked from_release = %s to_release = %s action = %s"
-             % (sys.argv[0], from_release, to_release, action))
-    res = 0
-    if action == "migrate":
-        try:
-            res = do_update(from_release, to_release)
-        except Exception:
-            LOG.exception("Updating static hieradata action failed")
-            res = 1
-
-    return res
 
 
 def do_update(from_release, to_release):
@@ -90,36 +53,23 @@ def do_update(from_release, to_release):
 
 
 def _do_update_under_temp(from_release, to_release, tempdir):
-    SYSTEM_STATIC_FILE = "static.yaml"
-    SECURE_STATIC_FILE = "secure_static.yaml"
-    HIERADATA_PATH = "/opt/platform/puppet/%s/hieradata"
-
-    # copy static hieradata yaml files to tempdir
-    system_static_file = \
-        os.path.join(HIERADATA_PATH % to_release, SYSTEM_STATIC_FILE)
-    secure_static_file = \
-        os.path.join(HIERADATA_PATH % to_release, SECURE_STATIC_FILE)
+    system_static_file = os.path.join(HIERADATA_PATH % to_release, SYSTEM_STATIC_FILE)
+    secure_static_file = os.path.join(HIERADATA_PATH % to_release, SECURE_STATIC_FILE)
     tmp_system_static_file = os.path.join(tempdir, SYSTEM_STATIC_FILE)
     tmp_secure_static_file = os.path.join(tempdir, SECURE_STATIC_FILE)
     files_to_copy = {system_static_file: tmp_system_static_file,
                      secure_static_file: tmp_secure_static_file}
 
-    for src in files_to_copy:
-        dest = files_to_copy[src]
+    for src, dest in files_to_copy.items():
         try:
             shutil.copyfile(src, dest)
         except IOError as e:
             LOG.error("Failed copying file %s to %s. Error %s", src, dest, e)
             raise
 
-    # generate static config to /opt/platform/puppet/<ver>/hieradata
     cmd = ["sysinv-puppet", "create-static-config"]
-    process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        universal_newlines=True)
-
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, universal_newlines=True)
     out, err = process.communicate()
     if process.returncode != 0:
         msg = "Failed to generate static config. Command output: \n%s" % err
@@ -128,7 +78,6 @@ def _do_update_under_temp(from_release, to_release, tempdir):
 
     src_file_mapping = {"static": system_static_file,
                         "secure_static": secure_static_file}
-
     tmp_file_mapping = {"static": tmp_system_static_file,
                         "secure_static": tmp_secure_static_file}
 
@@ -141,11 +90,7 @@ def _do_update_under_temp(from_release, to_release, tempdir):
             tmp_file = tmp_file_mapping[tag]
 
             with open(tmp_file, "r") as f:
-                try:
-                    data = yaml.load(f, Loader=yaml.Loader)
-                except Exception as e:
-                    LOG.error("Failed to load %s. Error %s" % (tmp_file, e))
-                    raise
+                data = yaml.load(f, Loader=yaml.Loader)
 
             for old_key, new_key in renames.items():
                 if old_key in data:
@@ -157,39 +102,22 @@ def _do_update_under_temp(from_release, to_release, tempdir):
                              (old_key, tmp_file))
 
             with open(tmp_file, "w") as f:
-                try:
-                    yaml.dump(data, f, default_flow_style=False)
-                except Exception as e:
-                    LOG.error("Failed to update %s. Error %s" %
-                              (tmp_file, e))
-                    raise
+                yaml.dump(data, f, default_flow_style=False)
 
+    # Copy new keys from regenerated static config into hieradata.
     list_of_keys = get_list_of_keys(from_release, to_release)
 
-    # find the new generated static data and update the static hieradata
-    # from previous release
     for tag in list_of_keys:
         keys = list_of_keys[tag]
         if len(keys) > 0:
             tmp_file = tmp_file_mapping[tag]
             src_file = src_file_mapping[tag]
-            # read the key/value from src_file
-            # (generated by sysinv-puppet create-static-config)
-            # at /opt/platform/puppet/hieradata/<to_release>
-            # write the key/value to tmp_file at temp directory
+
             with open(src_file, "r") as src:
-                try:
-                    src_data = yaml.load(src, Loader=yaml.Loader)
-                except Exception as e:
-                    LOG.error("Failed to load %s. Error %s" % (src_file, e))
-                    raise
+                src_data = yaml.load(src, Loader=yaml.Loader)
 
             with open(tmp_file, "r") as dest:
-                try:
-                    dest_data = yaml.load(dest, Loader=yaml.Loader)
-                except Exception as e:
-                    LOG.error("Failed to load %s. Error %s" % (tmp_file, e))
-                    raise
+                dest_data = yaml.load(dest, Loader=yaml.Loader)
 
             for key in keys:
                 if key in src_data:
@@ -199,19 +127,10 @@ def _do_update_under_temp(from_release, to_release, tempdir):
                              (key, src_file))
 
                 with open(tmp_file, "w") as dest:
-                    try:
-                        yaml.dump(dest_data, dest, default_flow_style=False)
-                    except Exception as e:
-                        LOG.error("Failed to update %s. Error %s" %
-                                  (tmp_file, e))
-                        raise
+                    yaml.dump(dest_data, dest, default_flow_style=False)
 
-    # copy the updated static hieradata yaml files to hieradata directory
-    # of to release
-    dest_system_static_file = \
-        os.path.join(HIERADATA_PATH % to_release, SYSTEM_STATIC_FILE)
-    dest_secure_static_file = \
-        os.path.join(HIERADATA_PATH % to_release, SECURE_STATIC_FILE)
+    dest_system_static_file = os.path.join(HIERADATA_PATH % to_release, SYSTEM_STATIC_FILE)
+    dest_secure_static_file = os.path.join(HIERADATA_PATH % to_release, SECURE_STATIC_FILE)
     dest_file_mapping = {"static": dest_system_static_file,
                          "secure_static": dest_secure_static_file}
     for tag in ["static", "secure_static"]:
@@ -219,12 +138,53 @@ def _do_update_under_temp(from_release, to_release, tempdir):
             shutil.copyfile(tmp_file_mapping[tag], dest_file_mapping[tag])
         except Exception as e:
             msg = "Failed to copy file %s to %s. Error %s" % (
-                  tmp_file_mapping[tag],
-                  dest_file_mapping[tag],
-                  e)
+                  tmp_file_mapping[tag], dest_file_mapping[tag], e)
             LOG.error(msg)
             raise Exception(msg)
 
 
+class UpdateStaticHieradata(CPlugin):
+    def __init__(self):
+        super().__init__(
+            matching_action='migrate',
+            required_state=None,
+            plugin_name='update-static-hieradata',
+            completed_state='update-static-hieradata-completed'
+        )
+
+    def _run(self, from_release, to_release, action, port):
+        configure_logging()
+        LOG.info("%s invoked from_release = %s to_release = %s action = %s"
+                 % (self.name, from_release, to_release, action))
+        do_update(from_release, to_release)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    from_release = None
+    to_release = None
+    action = None
+    port = None
+    arg = 1
+
+    while arg < len(sys.argv):
+        if arg == 1:
+            from_release = sys.argv[arg]
+        elif arg == 2:
+            to_release = sys.argv[arg]
+        elif arg == 3:
+            action = sys.argv[arg]
+        elif arg == 4:
+            port = sys.argv[arg]
+        else:
+            print("Invalid option %s." % sys.argv[arg])
+            sys.exit(1)
+        arg += 1
+
+    # TODO(lbonatti) remove this condition once stx13 become N release.
+    if action != "migrate":
+        sys.exit(0)
+
+    plugin = UpdateStaticHieradata()
+    result = plugin.run(from_release, to_release, action, port)
+    if result and 'failed' in result:
+        sys.exit(1)

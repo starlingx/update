@@ -217,10 +217,6 @@ if __name__ == "__main__":
             sys.exit(1)
         arg += 1
 
-    # TODO(lbonatti) remove this condition once stx13 become N release.
-    if action not in ("activate", "activate-rollback"):
-        sys.exit(0)
-
     plugin = K8sAppUpgrade()
     result = plugin.run(from_release, to_release, action, port)
     if result and 'failed' in result:

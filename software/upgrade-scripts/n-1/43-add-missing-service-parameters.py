@@ -146,7 +146,7 @@ class AddMissingServiceParameters(CPlugin):
 
         supported_from_releases = ["25.09", "26.03"]
         if from_release not in supported_from_releases or \
-                to_release != "26.10":
+                to_release < "26.10":
             LOG.info("Only applicable when upgrading from %s "
                      "to 26.10. Current: %s -> %s. Skipping.",
                      supported_from_releases, from_release, to_release)

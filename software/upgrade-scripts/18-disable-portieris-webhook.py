@@ -6,7 +6,7 @@
 # This script backups the portieris webhook and changes the failurePolicy
 # to ignore failures. This is required to upgrade portieris during platform
 # upgrades, since by default portieris will fail to create the new pods
-# when the webhook is down.
+# when the webhook is down. Should be kept As long as we upgrade portieris
 
 import logging
 import os
@@ -162,10 +162,6 @@ if __name__ == "__main__":
             print("Invalid option %s." % sys.argv[arg])
             sys.exit(1)
         arg += 1
-
-    # TODO(lbonatti) remove this condition once stx13 become N release.
-    if action not in ("activate", "activate-rollback"):
-        sys.exit(0)
 
     plugin = DisablePortierisWebhook()
     result = plugin.run(from_release, to_release, action, port)
