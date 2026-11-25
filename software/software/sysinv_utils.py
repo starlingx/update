@@ -151,8 +151,15 @@ def get_sw_version_from_host(hostname):
     return None
 
 
-def update_host_sw_version(hostname, sw_version):
-    token, endpoint = utils.get_endpoints_token()
+def update_host_sw_version(hostname, sw_version, config=None):
+    """Set the sysinv sw_version of a host.
+
+    :param hostname: host to update
+    :param sw_version: new sw_version, e.g. '26.03'
+    :param config: optional keystone_authtoken dict, for callers that run
+                   outside the USM services where CONF is not loaded
+    """
+    token, endpoint = utils.get_endpoints_token(config=config)
     sysinv_client = get_sysinv_client(token=token, endpoint=endpoint)
 
     patch = [{'op': 'replace', 'path': '/sw_version', 'value': sw_version}]

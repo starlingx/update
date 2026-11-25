@@ -7,6 +7,7 @@
 import unittest
 
 from software.sysinv_utils import trigger_vim_host_audit
+from software.sysinv_utils import update_host_sw_version
 
 
 class TestSysinvUtils(unittest.TestCase):
@@ -59,3 +60,32 @@ class TestSysinvUtils(unittest.TestCase):
         msg = "Failed to trigger VIM host audit: VIM audit failed"
         with self.assertRaises(Exception, msg=msg):  # noqa: H202
             trigger_vim_host_audit(self.HOSTNAME)
+
+    @unittest.mock.patch("software.sysinv_utils.utils.get_endpoints_token")
+    @unittest.mock.patch("software.sysinv_utils.get_sysinv_client")
+    def test_update_host_sw_version_default_config(
+        self, mock_get_sysinv_client, mock_get_endpoints_token
+    ):
+        mock_sysinv_client = unittest.mock.MagicMock()
+        mock_get_sysinv_client.return_value = mock_sysinv_client
+        mock_get_endpoints_token.return_value = ("fake_token", "fake_endpoint")
+
+        update_host_sw_version(self.HOSTNAME, "26.03")
+
+        mock_get_endpoints_token.assert_called_once_with(config=None)
+        mock_sysinv_client.ihost.update.assert_called_once_with(
+            self.HOSTNAME,
+            [{"op": "replace", "path": "/sw_version", "value": "26.03"}])
+
+    @unittest.mock.patch("software.sysinv_utils.utils.get_endpoints_token")
+    @unittest.mock.patch("software.sysinv_utils.get_sysinv_client")
+    def test_update_host_sw_version_with_config(
+        self, mock_get_sysinv_client, mock_get_endpoints_token
+    ):
+        mock_get_sysinv_client.return_value = unittest.mock.MagicMock()
+        mock_get_endpoints_token.return_value = ("fake_token", "fake_endpoint")
+        config = {"auth_url": "http://keystone:5000"}
+
+        update_host_sw_version(self.HOSTNAME, "26.03", config=config)
+
+        mock_get_endpoints_token.assert_called_once_with(config=config)

@@ -568,6 +568,72 @@ class RemoveDpllMgrRollbackHook(BaseHook):
                 LOG.warning("Failed to sync %s: %s" % (path, e))
 
 
+class UpdateSysinvHostSwVersionRollbackHook(BaseHook):
+    """
+    Set the controller's sysinv sw_version to the rollback target release.
+
+    """
+
+    SOFTWARE_CONFIG_FILE = "/etc/software/software.conf"
+    KEYSTONE_SECTION = "keystone_authtoken"
+    KEYSTONE_KEYS = ("auth_url", "username", "password", "project_name",
+                     "user_domain_name", "project_domain_name", "region_name")
+
+    def _get_keystone_config(self):
+        cp = configparser.ConfigParser(interpolation=None)
+        if not cp.read(self.SOFTWARE_CONFIG_FILE):
+            raise RuntimeError("Software config file %s not found"
+                               % self.SOFTWARE_CONFIG_FILE)
+        if not cp.has_section(self.KEYSTONE_SECTION):
+            raise RuntimeError("Section [%s] missing in %s"
+                               % (self.KEYSTONE_SECTION,
+                                  self.SOFTWARE_CONFIG_FILE))
+        config = dict(cp.items(self.KEYSTONE_SECTION))
+        missing = [k for k in self.KEYSTONE_KEYS if not config.get(k)]
+        if missing:
+            raise RuntimeError("Keystone option(s) %s missing in %s"
+                               % (", ".join(missing),
+                                  self.SOFTWARE_CONFIG_FILE))
+        return config
+
+    def run(self):
+        nodetype = self.get_platform_conf("nodetype")
+        if nodetype != self.CONTROLLER:
+            LOG.info("nodetype is %s, not updating sysinv sw_version"
+                     % nodetype)
+            return
+
+        hostname = socket.gethostname()
+        LOG.info("Updating sysinv sw_version of %s to %s"
+                 % (hostname, self._to_release))
+
+        # imported here to keep module import independent of these modules
+        from software import sysinv_utils
+        from software import utils
+
+        config = self._get_keystone_config()
+        # get_endpoints_token() logs and returns (None, None) on failure
+        token, endpoint = utils.get_endpoints_token(config=config)
+        if not token or not endpoint:
+            raise RuntimeError("Failed to get sysinv token/endpoint using "
+                               "credentials from %s" % self.SOFTWARE_CONFIG_FILE)
+
+        client = sysinv_utils.get_sysinv_client(token=token, endpoint=endpoint)
+
+        current = client.ihost.get(hostname).sw_version
+        if current == self._to_release:
+            LOG.info("sysinv sw_version of %s is already %s, nothing to do"
+                     % (hostname, current))
+            return
+
+        LOG.info("sysinv sw_version of %s is %s, updating to %s"
+                 % (hostname, current, self._to_release))
+        sysinv_utils.update_host_sw_version(hostname, self._to_release,
+                                            config=config)
+        LOG.info("Updated sysinv sw_version of %s to %s"
+                 % (hostname, self._to_release))
+
+
 # TODO(bqian) split the framework based kernel parameters backup and restore
 # from feature based kernel parameter pre-populate code.
 
@@ -2513,6 +2579,10 @@ class HookManager(object):
             RestorePlatformConfPermissionHook,
             RemoveMetapackageInitialSetupFlagHook,
             RemoveDpllMgrRollbackHook,
+            # keep last before UsmInitHook so that a failure here
+            # fails deploy host after all other rollback steps ran
+            # TODO(jli14) Remove this when from-release is 26.10 or later
+            UpdateSysinvHostSwVersionRollbackHook,
             # enable usm-initialize service for next
             # reboot only if everything else is done
             UsmInitHook,
