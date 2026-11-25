@@ -97,6 +97,26 @@ def setup_from_release_load(from_release, to_feed_dir):
         raise
 
 
+def print_metapackage_output(common_ids, pud_ids):
+    """
+    Log every uploaded metapackage and print one summary line per category
+    :param common_ids: ids of the uploaded metapackages
+    :param pud_ids: ids of the uploaded pre-upgrade-deploy metapackages
+    """
+    # Sort numerically (e.g. 1.32.2 before 1.32.13) for a stable log order,
+    # since glob/rglob return filesystem order
+    for mp_id in sorted(common_ids, key=upgrade_utils.numeric_sort_key):
+        LOG.info(f"Uploaded {mp_id} metapackage release")
+    for mp_id in sorted(pud_ids, key=upgrade_utils.numeric_sort_key):
+        LOG.info(f"Uploading {mp_id} pre-upgrade-deploy metapackage release")
+
+    # Printed output is captured and returned by the release upload API
+    if common_ids:
+        print(f"Uploaded {len(common_ids)} metapackage releases")
+    if pud_ids:
+        print(f"Uploaded {len(pud_ids)} pre-upgrade-deploy metapackage releases")
+
+
 def load_import(from_release, to_release, iso_mount_dir, metapackages):
     """
     Import the iso files to the feed and pxeboot directories
@@ -210,6 +230,7 @@ def load_import(from_release, to_release, iso_mount_dir, metapackages):
             # Copy metapackages metadata to metadata available directory
             dst_dir = UNAVAILABLE_DIR if from_release in ['None', None] else AVAILABLE_DIR
             uploaded_mp_ids = []
+            uploaded_pud_mp_ids = []
             for src_md in to_release_dir.glob("*/metadata.xml"):
                 # Replace commit-id and checksum placeholders in metapackage metadata
                 content = src_md.read_text()
@@ -224,13 +245,6 @@ def load_import(from_release, to_release, iso_mount_dir, metapackages):
                 src_md.unlink()
                 LOG.info(f"Copied metadata to {dst_md}")
                 uploaded_mp_ids.append(mp_id)
-
-            # Print output to be captured and returned by the release upload
-            # API. Sort numerically (e.g. 1.32.2 before 1.32.13) so the uploaded
-            # metapackages are listed in a stable order (glob returns filesystem
-            # order, which is not deterministic).
-            for mp_id in sorted(uploaded_mp_ids, key=upgrade_utils.numeric_sort_key):
-                print(f"Uploaded {mp_id} metapackage release")
 
             # Process the pre-upgrade-deploy metapackages from the iso
             pre_upgrade_deploy_tar = iso_mount_dir / "pre-upgrade-deploy" / "software.tar"
@@ -265,7 +279,6 @@ def load_import(from_release, to_release, iso_mount_dir, metapackages):
                     # Process metapackages
                     pre_upgrade_deploy_to_release_dir = to_release_dir / "pre-upgrade-deploy"
                     # Copy metapackages directories from the metapackages deb packages
-                    uploaded_pud_mp_ids = []
                     for deb in pre_upgrade_deploy_metapkg_list:
                         deb_name = deb.split("/")[-1]
                         with upgrade_utils.extract_deb(deb) as deb_dir:
@@ -289,14 +302,9 @@ def load_import(from_release, to_release, iso_mount_dir, metapackages):
                             LOG.info(f"Copied metadata to {dst_md}")
                             uploaded_pud_mp_ids.append(mp_id)
 
-                    # Print output to be captured and returned by the release
-                    # upload API. Sort numerically (e.g. 1.32.2 before 1.32.13)
-                    # so the uploaded pre-upgrade-deploy metapackages are listed
-                    # in a stable order (rglob returns filesystem order, which
-                    # is not deterministic).
-                    for mp_id in sorted(uploaded_pud_mp_ids,
-                                        key=upgrade_utils.numeric_sort_key):
-                        print(f"Uploading {mp_id} pre-upgrade-deploy metapackage release")
+            # Log each metapackage and print the summary lines once, after
+            # both the common and pre-upgrade-deploy metapackages were collected
+            print_metapackage_output(uploaded_mp_ids, uploaded_pud_mp_ids)
 
         # Setup from release load
         setup_from_release_load(from_release, to_feed_dir)

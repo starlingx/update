@@ -1996,9 +1996,13 @@ class PatchController(PatchService):
                 # Sort so the metapackages are listed in a stable, numeric order
                 # (e.g. 1.32.2 before 1.32.13); the parsed metadata dict follows
                 # the <pkg> order in the patch metadata.xml, which is not sorted.
-                for metapackage in sorted(patch_metadata.metadata[patch_id]["metapackages"],
-                                          key=utils.numeric_sort_key):
-                    local_info += f"Uploading {metapackage} metapackage release\n"
+                # Every metapackage goes to the log; the user output only gets a count
+                metapackages = sorted(patch_metadata.metadata[patch_id]["metapackages"],
+                                      key=utils.numeric_sort_key)
+                for metapackage in metapackages:
+                    LOG.info(f"Uploading {metapackage} metapackage release")
+                if metapackages:
+                    local_info += f"Uploaded {len(metapackages)} metapackage releases\n"
                 local_info += f"Uploading {release_id} product release\n"
 
                 local_info += f"{release_id} is now uploading, await for the states: " \

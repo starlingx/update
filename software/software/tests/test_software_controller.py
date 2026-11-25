@@ -238,8 +238,8 @@ class TestSoftwareController(unittest.TestCase):
         mock_path_exists.return_value = True
         mock_subprocess_run.return_value = unittest.mock.MagicMock(
             returncode=0,
-            stdout=("Uploaded swmgmt-13.0.0 metapackage release\n"
-                    "Uploading k8s-common-14.0.0 pre-upgrade-deploy metapackage release\n")
+            stdout=("Uploaded 3 metapackage releases\n"
+                    "Uploaded 9 pre-upgrade-deploy metapackage releases\n")
         )
         mock_get_release_meta_info.return_value = {"test.iso": {"id": "123", "sw_version": "2.0.0"}}
 
@@ -260,6 +260,8 @@ class TestSoftwareController(unittest.TestCase):
             upgrade_files)
 
         # Assertions
+        self.assertIn("Uploaded 3 metapackage releases", local_info)
+        self.assertIn("Uploaded 9 pre-upgrade-deploy metapackage releases", local_info)
         self.assertIn("Pre-upgrade-deploy is now uploading, await for the state "
                       "[available] in "
                       "'software metapackage list --pre-upgrade-deploy'", local_info)
@@ -271,6 +273,105 @@ class TestSoftwareController(unittest.TestCase):
         mock_rmtree.assert_called_once_with("/opt/software/rel-2.0.0/bin")
         mock_copytree.assert_called_once_with(
             "/mnt/iso/upgrades/software-deploy", "/opt/software/rel-2.0.0/bin", symlinks=True)
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
+    @unittest.mock.patch('software.software_controller.PatchController._build_uploaded_pud_branches')
+    @unittest.mock.patch('os.path.isfile', return_value=True)
+    @unittest.mock.patch('software.software_controller.PatchController.get_release_meta_info')
+    @unittest.mock.patch('software.software_controller.reload_release_data')
+    @unittest.mock.patch('shutil.copyfile')
+    @unittest.mock.patch('subprocess.run')
+    @unittest.mock.patch('shutil.copytree')
+    @unittest.mock.patch('shutil.rmtree')
+    @unittest.mock.patch('software.software_controller.ostree_utils.add_gpg_verify_false')
+    @unittest.mock.patch('os.path.exists')
+    def test_run_load_import_pud_only_summary_line(self,
+                                                   mock_path_exists,
+                                                   mock_add_gpg_verify_false,   # pylint: disable=unused-argument
+                                                   mock_rmtree,     # pylint: disable=unused-argument
+                                                   mock_copytree,   # pylint: disable=unused-argument
+                                                   mock_subprocess_run,
+                                                   mock_copyfile,   # pylint: disable=unused-argument
+                                                   mock_reload_release_data,    # pylint: disable=unused-argument
+                                                   mock_get_release_meta_info,
+                                                   mock_isfile,     # pylint: disable=unused-argument
+                                                   mock_build_pud,
+                                                   mock_init):      # pylint: disable=unused-argument
+        # Output with only the PUD summary line must still trigger the
+        # pre-upgrade-deploy upload message
+        mock_path_exists.return_value = True
+        mock_subprocess_run.return_value = unittest.mock.MagicMock(
+            returncode=0,
+            stdout="Uploaded 9 pre-upgrade-deploy metapackage releases\n"
+        )
+        mock_get_release_meta_info.return_value = {"test.iso": {"id": "123", "sw_version": "2.0.0"}}
+
+        controller = PatchController()
+        upgrade_files = {
+            constants.ISO_EXTENSION: "test.iso",
+            constants.SIG_EXTENSION: "test.sig"
+        }
+
+        local_info, local_warning, local_error, _ = controller._run_load_import(    # pylint: disable=protected-access
+            "1.0.0", "2.0.0", "/mnt/iso", upgrade_files)
+
+        self.assertIn("Uploaded 9 pre-upgrade-deploy metapackage releases", local_info)
+        self.assertIn("Pre-upgrade-deploy is now uploading, await for the state "
+                      "[available] in "
+                      "'software metapackage list --pre-upgrade-deploy'", local_info)
+        self.assertNotIn("upload-failed", local_info)
+        mock_build_pud.assert_called_once_with()
+        self.assertEqual(local_warning, "")
+        self.assertEqual(local_error, "")
+
+    @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
+    @unittest.mock.patch('software.software_controller.PatchController._build_uploaded_pud_branches')
+    @unittest.mock.patch('os.path.isfile', return_value=True)
+    @unittest.mock.patch('software.software_controller.PatchController.get_release_meta_info')
+    @unittest.mock.patch('software.software_controller.reload_release_data')
+    @unittest.mock.patch('shutil.copyfile')
+    @unittest.mock.patch('subprocess.run')
+    @unittest.mock.patch('shutil.copytree')
+    @unittest.mock.patch('shutil.rmtree')
+    @unittest.mock.patch('software.software_controller.ostree_utils.add_gpg_verify_false')
+    @unittest.mock.patch('os.path.exists')
+    def test_run_load_import_no_pud_summary_line(self,
+                                                 mock_path_exists,
+                                                 mock_add_gpg_verify_false,   # pylint: disable=unused-argument
+                                                 mock_rmtree,     # pylint: disable=unused-argument
+                                                 mock_copytree,   # pylint: disable=unused-argument
+                                                 mock_subprocess_run,
+                                                 mock_copyfile,   # pylint: disable=unused-argument
+                                                 mock_reload_release_data,    # pylint: disable=unused-argument
+                                                 mock_get_release_meta_info,
+                                                 mock_isfile,     # pylint: disable=unused-argument
+                                                 mock_build_pud,
+                                                 mock_init):      # pylint: disable=unused-argument
+        # Output without the PUD summary line must not append the
+        # pre-upgrade-deploy upload message
+        mock_path_exists.return_value = True
+        mock_subprocess_run.return_value = unittest.mock.MagicMock(
+            returncode=0,
+            stdout="Uploaded 3 metapackage releases\n"
+        )
+        mock_get_release_meta_info.return_value = {"test.iso": {"id": "123", "sw_version": "2.0.0"}}
+
+        controller = PatchController()
+        upgrade_files = {
+            constants.ISO_EXTENSION: "test.iso",
+            constants.SIG_EXTENSION: "test.sig"
+        }
+
+        local_info, local_warning, local_error, _ = controller._run_load_import(    # pylint: disable=protected-access
+            "1.0.0", "2.0.0", "/mnt/iso", upgrade_files)
+
+        self.assertIn("Uploaded 3 metapackage releases", local_info)
+        self.assertNotIn("pre-upgrade-deploy", local_info)
+        self.assertNotIn("Pre-upgrade-deploy is now uploading", local_info)
+        self.assertNotIn("upload-failed", local_info)
+        mock_build_pud.assert_called_once_with()
+        self.assertEqual(local_warning, "")
+        self.assertEqual(local_error, "")
 
     @unittest.mock.patch('software.software_controller.PatchController.__init__', return_value=None)
     @unittest.mock.patch('os.path.isfile', return_value=True)
@@ -2182,3 +2283,92 @@ class TestInstallReleasesPartialPackageNames(unittest.TestCase):
         branch_name = mock_apt_utils.run_install.call_args.kwargs["branch"]
         mock_record.assert_called_once_with(
             branch_name, product_id, ["infra_26.10.2", "swmgmt_26.10.2"])
+
+
+class TestUploadPatchMetapackageOutput(unittest.TestCase):
+    """Tests for the metapackage branch of
+    PatchController._process_upload_patch_files: the output returned to the
+    user is a single summary line, but every metapackage is logged.
+    """
+
+    RELEASE_ID = "starlingx-26.10.1"
+    PATCH_FILE = "/tmp/starlingx-26.10.1.patch"
+
+    def _upload(self, metapackages):
+        patches = {
+            "init": unittest.mock.patch(
+                'software.software_controller.PatchController.__init__', return_value=None),
+            "get_release": unittest.mock.patch(
+                'software.software_controller.get_release_from_patch',
+                side_effect=lambda _file, key: self.RELEASE_ID if key == 'id' else True),
+            "component_cls": unittest.mock.patch(
+                'software.software_controller.ComponentPatchFile'),
+            "reload": unittest.mock.patch(
+                'software.software_controller.reload_release_data'),
+            "log": unittest.mock.patch('software.software_controller.LOG'),
+            "swrc": unittest.mock.patch(
+                'software.software_controller.get_SWReleaseCollection'),
+        }
+        mocks = {name: p.start() for name, p in patches.items()}
+        self.addCleanup(unittest.mock.patch.stopall)
+        # not uploaded before, and not found after (skips the precheck steps)
+        mocks["swrc"].return_value.get_release_by_id.return_value = None
+
+        patch_metadata = unittest.mock.MagicMock()
+        patch_metadata.metadata = {self.RELEASE_ID: {"metapackages": metapackages}}
+        mocks["component_cls"].return_value.extract_patch.return_value = (
+            self.RELEASE_ID, patch_metadata, None)
+
+        controller = PatchController()
+        controller.base_pkgdata = unittest.mock.MagicMock()
+
+        controller._apply_upload_script_overrides = unittest.mock.MagicMock()  # pylint: disable=protected-access
+        controller.create_sw_releases_it = unittest.mock.MagicMock()
+
+        info, warning, error, _ = controller._process_upload_patch_files(  # pylint: disable=protected-access
+            [self.PATCH_FILE])
+        self.assertEqual("", warning)
+        self.assertEqual("", error)
+        return info.splitlines(), mocks["log"]
+
+    def _logged_metapackages(self, log):
+        return [call.args[0] for call in log.info.call_args_list
+                if call.args[0].endswith(" metapackage release")]
+
+    def test_upload_prints_summary_line_and_logs_all(self):
+        # unsorted ids, so the numeric sort order is exercised as well
+        ids = [f"mp{i}_26.10.1" for i in range(25, 0, -1)]
+        sorted_ids = sorted(ids, key=lambda mp: int(mp.split("_")[0][2:]))
+
+        lines, log = self._upload(dict.fromkeys(ids))
+
+        self.assertEqual(
+            1, lines.count("Uploaded 25 metapackage releases"))
+        # no per-metapackage line and no pre-upgrade-deploy line
+        self.assertFalse([line for line in lines if line.endswith(" metapackage release")])
+        self.assertFalse([line for line in lines if "pre-upgrade-deploy" in line])
+        # summary comes right before the unchanged product release line
+        self.assertEqual(
+            lines.index("Uploaded 25 metapackage releases") + 1,
+            lines.index(f"Uploading {self.RELEASE_ID} product release"))
+        self.assertEqual("Uploaded 25 metapackage releases", lines[0])
+        # every metapackage is logged once, in numeric order
+        self.assertEqual(
+            [f"Uploading {mp} metapackage release" for mp in sorted_ids],
+            self._logged_metapackages(log))
+
+    def test_upload_with_single_metapackage(self):
+        lines, log = self._upload({"mp1_26.10.1": None})
+
+        self.assertIn("Uploaded 1 metapackage releases", lines)
+        self.assertFalse([line for line in lines if line.endswith(" metapackage release")])
+        self.assertEqual(
+            ["Uploading mp1_26.10.1 metapackage release"],
+            self._logged_metapackages(log))
+
+    def test_upload_without_metapackages_has_no_summary_line(self):
+        lines, log = self._upload({})
+
+        self.assertFalse([line for line in lines if "metapackage" in line])
+        self.assertIn(f"Uploading {self.RELEASE_ID} product release", lines)
+        self.assertEqual([], self._logged_metapackages(log))
