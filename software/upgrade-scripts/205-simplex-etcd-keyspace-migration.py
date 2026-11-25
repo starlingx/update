@@ -384,8 +384,8 @@ def floating_snapshot_source():
     """Return the stopped floating member's backing store.
 
     The relocation runs while no etcd is up: this release deliberately does not
-    start a fixed member during an upgrade, and SM has already taken the
-    floating member away. So the source cannot be produced with 'etcdctl
+    start a fixed member during an upgrade, and the floating member is stopped
+    first. So the source cannot be produced with 'etcdctl
     snapshot save' against a live endpoint -- the member database on disk is
     used directly instead.
     """
@@ -453,9 +453,7 @@ def disable_floating_etcd():
     floating path. On current release, simplex runs only the fixed instance,
     so the floating instance must be unmanaged by SM and disabled in systemd.
 
-    Failures here are logged rather than raised: the keyspace has already been
-    relocated by the time this runs, and a stale service definition is
-    recoverable by hand whereas failing the activate is not.
+    Failures here are logged rather than raised.
     """
     result = subprocess.run(["sm-unmanage", "service", ETCD_FLOATING_SERVICE],
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -787,6 +785,8 @@ def migrate_keyspace():
         LOG.info("Migrating etcd keyspace from %s to %s (etcd version %s)",
                  FLOATING_DATA_DIR, FIXED_DATA_DIR, etcd_version or "unknown")
 
+        disable_floating_etcd()
+
         # Copied out before the restore so the source is never touched.
         snapshot_file = os.path.join(temp_dir, 'etcd-snapshot.db')
         shutil.copyfile(floating_snapshot_source(), snapshot_file)
@@ -804,8 +804,6 @@ def migrate_keyspace():
         restore_to_fixed_0(snapshot_file, etcd_version)
 
         ensure_fixed_env_file()
-
-        disable_floating_etcd()
 
         start_etcd_fixed()
 
