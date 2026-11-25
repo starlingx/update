@@ -950,3 +950,47 @@ class TestAddTombstoneCommitIfPrepatched(unittest.TestCase):
         with self.assertRaises(OSTreeCommandFail):
             ostree_utils.add_tombstone_commit_if_prepatched(
                 "starlingx", self.tmpdir)
+
+
+class TestGetCommits(unittest.TestCase):
+    """get_commits — history walk, tolerant of tombstoned parents."""
+
+    def setUp(self):
+        # c3 -> c2 -> c1 -> missing (no parent after c1 in the repo)
+        self.parents = {"c3": "c2", "c2": "c1", "c1": "missing"}
+        self.present = {"c3", "c2", "c1"}
+
+        patcher = mock.patch('software.ostree_utils.OSTree')
+        self.mock_ostree = patcher.start()
+        self.addCleanup(patcher.stop)
+        self.mock_ostree.commit_get_parent.side_effect = self.parents.get
+
+    def _repo(self, tip="c3"):
+        repo = mock.MagicMock()
+        repo.resolve_rev.return_value = (True, tip)
+
+        def load_variant(_obj_type, rev):
+            if rev not in self.present:
+                raise Exception("No such metadata object %s.commit" % rev)
+            return True, rev
+
+        repo.load_variant.side_effect = load_variant
+        return repo
+
+    def _tombstone(self, repo, checksum):
+        repo.has_object.side_effect = (
+            lambda _type, rev, _cancel: (True, rev == checksum))
+
+    def test_missing_tombstoned_parent_ends_history(self):
+        """A missing parent with a tombstone is the end of history."""
+        repo = self._repo()
+        self._tombstone(repo, "missing")
+        self.assertEqual(["c3", "c2", "c1"],
+                         ostree_utils.get_commits(repo, "branch"))
+
+    def test_missing_parent_without_tombstone_raises(self):
+        """A missing parent without a tombstone is a real error."""
+        repo = self._repo()
+        repo.has_object.return_value = (True, False)
+        with self.assertRaises(RuntimeError):
+            ostree_utils.get_commits(repo, "branch")
