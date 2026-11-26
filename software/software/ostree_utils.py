@@ -41,6 +41,17 @@ def get_repo(repo_path):
     return repo
 
 
+def _is_tombstoned_commit(repo, checksum):
+    """Check if a commit was intentionally removed from the repo.
+
+    :return: True if a tombstone file exists for the commit
+    """
+    # has_object returns (success, have_object)
+    _, have_object = repo.has_object(OSTree.ObjectType.TOMBSTONE_COMMIT,
+                                     checksum, None)
+    return have_object
+
+
 def get_commits(repo, branch_name):
     """Get all commits in a branch's history.
 
@@ -60,7 +71,13 @@ def get_commits(repo, branch_name):
         try:
             _, commit = repo.load_variant(OSTree.ObjectType.COMMIT, rev)
         except Exception as e:
+            # Prepatched ISO: oldest parent is missing and tombstoned
+            if commits and _is_tombstoned_commit(repo, rev):
+                LOG.info("History of branch %s ends at commit %s: parent %s is tombstoned",
+                         branch_name, commits[-1], rev)
+                break
             raise RuntimeError("Failed to load commit '%s': %s" % (rev, e))
+
         commits.append(rev)
         rev = OSTree.commit_get_parent(commit)
     return commits
