@@ -261,6 +261,7 @@ class UpgradeHealthCheck(HealthCheck):
     def __init__(self, config):
         super().__init__(config)
         self._ostree_feed_path = f"/var/www/pages/feed/rel-{self._major_release}"
+        self._host_fs_sizes = None
 
     def _check_valid_upgrade_path(self):
         """Checks if active release to specified release is a valid upgrade path"""
@@ -346,26 +347,23 @@ class UpgradeHealthCheck(HealthCheck):
             return success, msg
         return success, None
 
-    def _get_host_fs_size(self, hostname, fs_name):
-        """Get the size of a named host-fs for a given host.
+    def _get_host_fs_sizes(self):
+        """Get the host-fs sizes of all hosts, querying sysinv only once.
 
         Queries the sysinv API, consistent with
-        'system host-fs-show <hostname> <fs_name>'.
+        'system host-fs-list <hostname>'. The result is cached so that
+        several checks can share it without repeating the API calls.
 
-        :param hostname: host to query (e.g. 'controller-0')
-        :param fs_name: filesystem name (e.g. 'root', 'docker')
-        :returns: size in GiB (int) or None if not found
+        :returns: dict of {hostname: {fs_name: size in GiB}}
         """
-        hosts = self._sysinv_client.ihost.list()
-        host = next((h for h in hosts if h.hostname == hostname), None)
-        if host is None:
-            return None
-
-        host_filesystems = self._sysinv_client.host_fs.list(host.uuid)
-        for fs in host_filesystems:
-            if fs.name == fs_name:
-                return fs.size
-        return None
+        if self._host_fs_sizes is None:
+            sizes = {}
+            for host in self._sysinv_client.ihost.list():
+                sizes[host.hostname] = {
+                    fs.name: fs.size
+                    for fs in self._sysinv_client.host_fs.list(host.uuid)}
+            self._host_fs_sizes = sizes
+        return self._host_fs_sizes
 
     def _check_sysroot_size(self):
         """Check that the root host-fs on all hosts meets the minimum size.
@@ -375,25 +373,25 @@ class UpgradeHealthCheck(HealthCheck):
         'root' filesystem, so a host that does not report one is treated as a
         failure rather than skipped.
         """
-        hosts = self._sysinv_client.ihost.list()
+        host_fs_sizes = self._get_host_fs_sizes()
 
         success = True
         output = ""
-        for host in hosts:
-            root_fs_size = self._get_host_fs_size(host.hostname, "root")
+        for hostname, fs_sizes in host_fs_sizes.items():
+            root_fs_size = fs_sizes.get("root")
             if root_fs_size is None:
                 success = False
                 output += ("-> Unable to determine root filesystem size for %s\n"
-                           % host.hostname)
+                           % hostname)
             elif root_fs_size < SYSROOT_MINIMUM_REQUIRED_SIZE_GIB:
                 success = False
                 output += (("-> The root filesystem on %s is %d GiB but "
                             "a minimum of %d GiB is required for upgrade.\n"
                             "   Use 'system host-fs-modify %s root=%d' "
                             "to increase the root filesystem size.\n")
-                           % (host.hostname, root_fs_size,
+                           % (hostname, root_fs_size,
                               SYSROOT_MINIMUM_REQUIRED_SIZE_GIB,
-                              host.hostname,
+                              hostname,
                               SYSROOT_MINIMUM_REQUIRED_SIZE_GIB))
         return success, output
 
@@ -554,13 +552,13 @@ class UpgradeHealthCheck(HealthCheck):
 
     def _check_docker_fs_size(self):
         """Check that docker filesystem on all controllers meets minimum size."""
-        hosts = self._sysinv_client.ihost.list()
-        controllers = [h.hostname for h in hosts if "controller" in h.hostname]
+        host_fs_sizes = self._get_host_fs_sizes()
+        controllers = [h for h in host_fs_sizes if "controller" in h]
 
         success = True
         output = ""
         for controller in controllers:
-            docker_size = self._get_host_fs_size(controller, "docker")
+            docker_size = host_fs_sizes[controller].get("docker")
             if docker_size is None:
                 continue
             if docker_size < DOCKER_FS_MINIMUM_REQUIRED_SIZE_GIB:
