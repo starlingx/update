@@ -187,6 +187,35 @@ class TestParseMetadataStringProduct(unittest.TestCase):
         release_id = rd.parse_metadata_string(xml)
         self.assertEqual(rd.metadata[release_id]["prepatched_iso"], "Y")
 
+    def test_product_descriptive_tags_are_parsed(self):
+        """Descriptive tags present in the product XML must be kept."""
+        xml = """<product>
+          <id>starlingx-26.10.100</id>
+          <sw_version>26.10.100</sw_version>
+          <status>REL</status>
+          <summary>Product summary</summary>
+          <description>Product description</description>
+          <install_instructions>Install it</install_instructions>
+          <warnings>Careful</warnings>
+          <metapackages><pkg>base</pkg></metapackages>
+        </product>
+            """
+        rd = ReleaseData()
+        release_id = rd.parse_metadata_string(xml)
+        metadata = rd.metadata[release_id]
+        self.assertEqual(metadata["status"], "REL")
+        self.assertEqual(metadata["summary"], "Product summary")
+        self.assertEqual(metadata["description"], "Product description")
+        self.assertEqual(metadata["install_instructions"], "Install it")
+        self.assertEqual(metadata["warnings"], "Careful")
+
+    def test_product_without_descriptive_tags(self):
+        """Absent descriptive tags are not added to the product metadata."""
+        rd = ReleaseData()
+        release_id = rd.parse_metadata_string(PRODUCT_XML)
+        self.assertNotIn("summary", rd.metadata[release_id])
+        self.assertNotIn("description", rd.metadata[release_id])
+
     def test_product_prepatched_iso_defaults_to_n(self):
         """A product without the tag is not a prepatched ISO."""
         rd = ReleaseData()
